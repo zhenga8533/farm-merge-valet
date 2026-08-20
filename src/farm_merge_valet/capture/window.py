@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import time
 from ctypes import wintypes
 from dataclasses import dataclass
 
 import pygetwindow as gw
 
 logger = logging.getLogger(__name__)
+
+_user32 = ctypes.windll.user32
+_kernel32 = ctypes.windll.kernel32
 
 # DWMWA_EXTENDED_FRAME_BOUNDS: the visible window rect, excluding the
 # invisible resize-border padding that GetWindowRect (used internally by
@@ -31,6 +35,52 @@ class _Rect(ctypes.Structure):
         ("right", wintypes.LONG),
         ("bottom", wintypes.LONG),
     ]
+
+
+class WindowActivationError(RuntimeError):
+    """Raised when the target window could not be confirmed as foreground.
+
+    Screen-region capture and mouse/keyboard actions are both purely
+    coordinate-based: they operate on whatever is visually on top at a
+    given screen position, not on a specific window handle. Acting while
+    a different window is actually in front would silently perform clicks
+    on the wrong application, so this is treated as fatal rather than a
+    warning.
+    """
+
+
+def _bring_to_foreground(window: gw.Win32Window) -> None:
+    """Force `window` to become the frontmost, unoccluded window on screen.
+
+    `SetForegroundWindow` is blocked by Windows when called from a process
+    that doesn't already own the foreground (which a background automation
+    script almost never does), so a plain `window.activate()` call can fail
+    silently. Attaching our input thread to the current foreground window's
+    input queue first lifts that restriction.
+    """
+    target_hwnd = window._hWnd  # noqa: SLF001
+    current_hwnd = _user32.GetForegroundWindow()
+
+    if current_hwnd != target_hwnd:
+        current_thread = _kernel32.GetCurrentThreadId()
+        foreground_thread = _user32.GetWindowThreadProcessId(current_hwnd, None)
+        _user32.AttachThreadInput(foreground_thread, current_thread, True)
+        try:
+            if _user32.IsIconic(target_hwnd):
+                # SW_RESTORE un-minimizes, but also un-maximizes an already
+                # maximized window back to its normal size — only call it
+                # when the window is actually minimized.
+                _user32.ShowWindow(target_hwnd, 9)
+            _user32.SetForegroundWindow(target_hwnd)
+        finally:
+            _user32.AttachThreadInput(foreground_thread, current_thread, False)
+        time.sleep(0.1)  # let the window manager finish redrawing/z-ordering
+
+    if _user32.GetForegroundWindow() != target_hwnd:
+        raise WindowActivationError(
+            f"Could not bring {window.title!r} to the foreground; refusing to capture or act "
+            "on whatever window is actually in front."
+        )
 
 
 def _visible_bounds(hwnd: int) -> tuple[int, int, int, int] | None:
@@ -87,6 +137,7 @@ def find_window(title_substring: str) -> WindowRegion:
             titles,
         )
     window = matches[0]
+    _bring_to_foreground(window)
     bounds = _visible_bounds(window._hWnd)  # noqa: SLF001
     if bounds is not None:
         left, top, right, bottom = bounds

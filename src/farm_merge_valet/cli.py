@@ -10,7 +10,7 @@ import typer
 from rich import print as rprint
 
 from farm_merge_valet.capture.screen import capture_region
-from farm_merge_valet.capture.window import find_window, list_window_titles
+from farm_merge_valet.capture.window import WindowActivationError, find_window, list_window_titles
 from farm_merge_valet.config import settings
 from farm_merge_valet.core.bot import Bot
 from farm_merge_valet.logging_setup import configure_logging
@@ -41,7 +41,7 @@ def calibrate() -> None:
     """Locate the configured target window and report its region."""
     try:
         region = find_window(settings.window_title)
-    except LookupError as exc:
+    except (LookupError, WindowActivationError) as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
     rprint(f"[green]Found window[/green]: {region}")
@@ -56,7 +56,7 @@ def capture(
     """Save a screenshot of the configured target window, e.g. for building templates."""
     try:
         region = find_window(settings.window_title)
-    except LookupError as exc:
+    except (LookupError, WindowActivationError) as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
 
