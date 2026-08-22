@@ -23,8 +23,22 @@ class Settings(BaseSettings):
     # Window targeting: substring match against open window titles.
     window_title: str = "Discord"
 
+    # Port Chrome's remote debugging endpoint is expected on -- see
+    # cdp/client.py for why the bot needs this rather than just working
+    # against a normal, already-open browser window.
+    cdp_port: int = 9222
+
     # Where template images used for vision matching live.
     templates_dir: Path = PROJECT_ROOT / "assets" / "templates"
+
+    # Where the static board layout (extracted once from the game's own
+    # level data -- see tools/template_extraction.py's extract_board_map
+    # -- since the map is the same for every player) lives, and which map
+    # file to use -- "map_facebook" is the default starter map (the one a
+    # fresh account actually plays on; "map_island" etc. are event/DLC
+    # variants).
+    board_map_dir: Path = PROJECT_ROOT / "assets" / "board_map"
+    board_map_name: str = "map_facebook"
 
     # Where downloaded game atlas PNGs/manifests are cached between
     # `extract-templates` runs, so re-running without --force doesn't
@@ -34,18 +48,46 @@ class Settings(BaseSettings):
     # Minimum confidence (0-1) for template matches to be accepted.
     match_confidence: float = 0.85
 
-    # Board scanning is two-pass (see core/board_scan.py): a cheap
-    # downscaled sweep (`board_scan_scale`, matched against
-    # `board_scan_coarse_confidence`) locates candidate cells, then each
-    # candidate is classified for real against `match_confidence` using a
-    # full-resolution crop sized from its own apparent size -- so
-    # downscaling for speed no longer risks misclassifying visually-similar
-    # items the way a single downscaled pass did (confirmed live: a
-    # never-unlocked item was "detected" this way). Parallelized across
-    # `board_scan_workers` threads (cv2.matchTemplate releases the GIL).
-    board_scan_scale: float = 0.35
-    board_scan_coarse_confidence: float = 0.85
+    # The "Need more empty space!" banner (core/bot.py's board-full check)
+    # gets its own, more lenient threshold: confirmed live, a real,
+    # unmistakably-on-screen instance of it only scored 0.838 against
+    # `error_need_space.png` -- just under `match_confidence` -- while an
+    # unrelated frame with no banner at all scored 0.75 at its best
+    # (coincidental) match elsewhere. 0.8 sits safely between the two.
+    # Missing this check has real cost (the bot keeps hammering supply
+    # crate clicks with nowhere for them to go -- confirmed live), so
+    # erring toward catching a real banner matters more here than for
+    # item/background matching generally.
+    need_space_confidence: float = 0.8
+
+    # Board scanning checks "is this cell occupied?" (matched against a
+    # handful of background tile templates, see
+    # assets/templates/backgrounds/ and core/board_scan.py) before ever
+    # trying to classify *which* item is there -- much cheaper than
+    # sweeping all ~100+ item templates over the whole frame just to find
+    # candidates. `occupancy_threshold` is how confidently a cell's crop
+    # must match a known background to be treated as empty; real items
+    # measured well under this live (0.13-0.35), genuine background tiles
+    # measured well over it (0.63-1.0), so 0.6 has margin on both sides.
+    # Parallelized across `board_scan_workers` threads (cv2.matchTemplate
+    # releases the GIL).
+    occupancy_threshold: float = 0.6
     board_scan_workers: int = 8
+
+    # Fixed UI chrome bounding box, in captured-frame pixels: above
+    # `board_min_pixel_y` is the browser tabs/address bar; left of
+    # `board_min_pixel_x`/right of `board_max_pixel_x` are the level
+    # badge/quest-list column and the settings/currency icon column.
+    # Confirmed live, none of that content matches any background
+    # template (correctly -- it isn't board content) but isn't a real
+    # item either, and it isn't something the static board map
+    # (core/board_map.py) can ever account for -- see
+    # core/board_scan.py's `visible_grid_coords`. There's no real
+    # board-boundary detector yet; these are pragmatic stand-ins tuned to
+    # this specific window layout.
+    board_min_pixel_x: float = 200.0
+    board_max_pixel_x: float = 1700.0
+    board_min_pixel_y: float = 170.0
 
     # Default merge-5 preference (merging exactly 5 identical items yields
     # 2 of the next tier instead of 1 from a merge-3 -- see

@@ -15,7 +15,7 @@ from farm_merge_valet.capture.window import WindowActivationError, find_window, 
 from farm_merge_valet.config import settings
 from farm_merge_valet.core.bot import Bot
 from farm_merge_valet.logging_setup import configure_logging
-from farm_merge_valet.tools.template_extraction import extract_templates
+from farm_merge_valet.tools.template_extraction import extract_board_map, extract_templates
 
 app = typer.Typer(help="Automation tool for Farm Merge Valley.")
 
@@ -98,6 +98,26 @@ def extract_templates_cmd(
     """
     try:
         extract_templates(har, force=force)
+    except RuntimeError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("extract-map")
+def extract_map_cmd(
+    har: Path = typer.Argument(  # noqa: B008
+        ...,
+        help="Path to a HAR capture including the game's JSON traffic (DevTools -> Network -> "
+        "All filter, not just Img -> 'Save all as HAR').",
+    ),
+    force: bool = typer.Option(False, "--force", help="Re-download map JSON even if cached."),
+) -> None:
+    """Rebuild the static board layout (locked/premium/decorated tiles) from
+    the game's own level data. The map is the same for every player, so this
+    only needs to be run once (or again if the game updates its map).
+    """
+    try:
+        extract_board_map(har, force=force)
     except RuntimeError as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc

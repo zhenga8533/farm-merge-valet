@@ -21,6 +21,11 @@ class CellKind(Enum):
     ITEM = auto()
     CLOUD = auto()  # level-locked land; can never hold an item
     PURCHASABLE = auto()  # gem-purchasable plot; can sit inside open land
+    # A harvested product (e.g. an egg dropped by a chicken) sitting on the
+    # board waiting to be collected -- confirmed live via the game's own
+    # board state (see cdp/board_store.py): distinct from ITEM since
+    # products have no tier/merge identity of their own.
+    PRODUCT = auto()
 
 
 @dataclass(frozen=True)

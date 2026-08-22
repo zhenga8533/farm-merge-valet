@@ -6,7 +6,12 @@ import cv2
 import numpy as np
 
 from farm_merge_valet.core.board import BoardGrid, CellKind, ItemRef
-from farm_merge_valet.core.board_scan import discover_item_templates, scan_frame
+from farm_merge_valet.core.board_scan import (
+    discover_blueprint_items,
+    discover_board_coords,
+    discover_item_templates,
+    scan_frame,
+)
 from farm_merge_valet.vision.grid import GridCalibration
 
 
@@ -39,6 +44,19 @@ def test_discover_item_templates_reads_uniform_category_name_tier_layout(tmp_pat
     }
 
 
+def test_discover_blueprint_items_maps_game_naming_convention(tmp_path: Path) -> None:
+    _write_template(tmp_path / "crops" / "wheat" / "tier_1.png", _marker((0, 200, 0)))
+    _write_template(tmp_path / "animals" / "chicken" / "tier_3.png", _marker((0, 0, 200)))
+    templates = discover_item_templates(tmp_path)
+
+    blueprints = discover_blueprint_items(templates)
+
+    assert blueprints == {
+        "wheat_1": ItemRef(category="crops", name="wheat", tier=1),
+        "chicken_3": ItemRef(category="animals", name="chicken", tier=3),
+    }
+
+
 def test_scan_frame_records_matches_at_correct_grid_coordinates(tmp_path: Path) -> None:
     wheat = _marker((0, 200, 0))
     _write_template(tmp_path / "crops" / "wheat" / "tier_1.png", wheat)
@@ -53,8 +71,11 @@ def test_scan_frame_records_matches_at_correct_grid_coordinates(tmp_path: Path) 
     origin_pixel = (100.0, 20.0)
     origin_coord = (0, 0)
 
-    # Place the marker at grid (0, 0) [origin] and (2, -1).
+    # Flat background fill, distinct from the wheat marker's colors --
+    # every cell that isn't explicitly pasted with wheat should match this
+    # as background and get skipped before classification.
     frame = np.full((150, 200, 3), 128, dtype=np.uint8)
+    background_templates = {"flat": np.full((10, 10, 3), 128, dtype=np.uint8)}
 
     def paste(coord: tuple[int, int]) -> None:
         dx = col_step[0] * coord[0] + row_step[0] * coord[1]
@@ -70,22 +91,42 @@ def test_scan_frame_records_matches_at_correct_grid_coordinates(tmp_path: Path) 
     paste((2, -1))
 
     grid = BoardGrid()
-    updated = scan_frame(
+    board_coords = discover_board_coords(
         grid,
         frame,
         templates,
-        templates,
+        background_templates,
         calibration,
         origin_pixel,
         origin_coord,
         min_confidence=0.9,
-        coarse_confidence=0.9,
+        occupancy_threshold=0.9,
     )
+    assert (0, 0) in board_coords
+    assert (2, -1) in board_coords
 
-    assert updated == 2
     cell0 = grid.get_cell((0, 0))
     cell1 = grid.get_cell((2, -1))
     assert cell0 is not None and cell0.kind is CellKind.ITEM and cell0.item == wheat_ref
     assert cell1 is not None and cell1.kind is CellKind.ITEM and cell1.item == wheat_ref
-    # nothing else should have been touched
+    # nothing else should have been recorded as an item
     assert len(grid.known_coords()) == 2
+
+    # A second scan against the cached whitelist should reproduce the same
+    # result without re-deriving which coordinates are real board tiles.
+    grid2 = BoardGrid()
+    updated = scan_frame(
+        grid2,
+        frame,
+        templates,
+        background_templates,
+        calibration,
+        origin_pixel,
+        origin_coord,
+        board_coords,
+        min_confidence=0.9,
+        occupancy_threshold=0.9,
+    )
+    assert updated == 2
+    assert grid2.get_cell((0, 0)) == cell0
+    assert grid2.get_cell((2, -1)) == cell1

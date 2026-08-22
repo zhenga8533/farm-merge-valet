@@ -10,23 +10,78 @@ clicks (and re-triggering the "need more space" banner) every iteration.
 from __future__ import annotations
 
 import logging
+import time
 from enum import Enum, auto
 
+import cv2
 import keyboard
 import numpy as np
 
 from farm_merge_valet.actions.input import click, drag
 from farm_merge_valet.capture.screen import capture_region
 from farm_merge_valet.capture.window import WindowActivationError, WindowRegion, find_window
+from farm_merge_valet.cdp.board_store import arm_board_store, read_board_state
+from farm_merge_valet.cdp.client import CdpConnectionError, read_camera_data
 from farm_merge_valet.config import settings
-from farm_merge_valet.core.board import BoardGrid, GridCoord, ItemRef, adjacent_pair
-from farm_merge_valet.core.board_scan import discover_item_templates, scale_templates, scan_frame
+from farm_merge_valet.core.board import BoardGrid, Cell, CellKind, GridCoord, ItemRef, adjacent_pair
+from farm_merge_valet.core.board_map import BoardMap, load_board_map
+from farm_merge_valet.core.board_scan import (
+    discover_background_templates,
+    discover_blueprint_items,
+    discover_item_templates,
+    discover_locked_templates,
+    scale_templates,
+    scan_frame,
+    visible_grid_coords,
+)
 from farm_merge_valet.core.environment import initialize_environment
 from farm_merge_valet.core.stats import RunStats
-from farm_merge_valet.vision.grid import GridCalibration, calibrate_grid
+from farm_merge_valet.vision.camera_calibration import CameraCalibration, calibrate_from_camera
+from farm_merge_valet.vision.grid import calibrate_grid
 from farm_merge_valet.vision.matcher import find_best_match, load_template
 
 logger = logging.getLogger(__name__)
+
+# Non-item `blueprintID` values from the game's live board state (see
+# cdp/board_store.py) that map to a known CellKind rather than an ItemRef.
+_LIVE_STATE_CELL_KIND = {
+    "empty": CellKind.EMPTY,
+    "area_cloud": CellKind.CLOUD,
+    "premium_cloud": CellKind.CLOUD,
+}
+
+# Fixed buildings/decoration blueprint IDs observed live -- necessarily
+# incomplete (there's no live signal that distinguishes "permanent
+# building" from "harvested product" the way there is for the markers
+# above: the static map (core/board_map.py) can't be used for this since
+# it only reflects the *pristine* layout, and a building a player has
+# actually built can sit on a tile the static data still calls LOCKED,
+# not DECORATION -- confirmed live with a real bakery). Anything not in
+# this set and not otherwise recognized is assumed to be a transient
+# product (e.g. "egg") rather than a building -- low-consequence if
+# wrong, since PRODUCT cells aren't acted on yet either way; extend this
+# set as new building types are observed.
+_KNOWN_STRUCTURE_BLUEPRINTS = {
+    "bakery",
+    "market",
+    "trainstation",
+    "traintrack_stop",
+    "delivery_truck",
+    "delivery_cargo",
+    "likes_billboard",
+}
+
+
+def _scale_template(template: np.ndarray, scale: float) -> np.ndarray:
+    """Resize a single BGRA template by `scale`, preserving its alpha
+    channel -- same idea as `board_scan.scale_templates`, just for the
+    one-off UI templates (`supply_crate`, `error_need_space`) rather than
+    the item-template dict."""
+    if scale == 1.0:
+        return template
+    h, w = template.shape[:2]
+    new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+    return cv2.resize(template, new_size, interpolation=cv2.INTER_AREA)
 
 
 class Phase(Enum):
@@ -53,44 +108,62 @@ class Bot:
         self.paused = False
         self._quit_requested = False
         self.phase = Phase.CLAIM_CRATES
+        # UI templates render at the board's on-screen scale too, same as
+        # items (see `_ensure_item_scale`) -- confirmed live, matching the
+        # need-space banner at native scale scored 0.838, just under
+        # `match_confidence`. Rescaled once `_item_scale` is known; until
+        # then, matching falls back to the native, unscaled template.
         self._supply_crate_template = load_template(
             settings.templates_dir / "ui" / "supply_crate.png"
         )
+        self._supply_crate_template_scaled = self._supply_crate_template
         self._need_space_template = load_template(
             settings.templates_dir / "ui" / "error_need_space.png"
         )
-        # Wheat tier 1 as the calibration anchor: it's the very first crop
-        # unlocked and one of the most common early spawns, so it's likely
-        # to appear more than once on screen. See vision/grid.py.
-        self._grid_calibration_template = load_template(
-            settings.templates_dir / "items" / "crops" / "wheat" / "tier_1.png"
-        )
-        self.grid_calibration: GridCalibration | None = None
-        # Anchors the pixel<->grid-coordinate conversion: one real match
-        # found during calibration, arbitrarily assigned grid coordinate
-        # (0, 0) the moment calibration first succeeds. "Grid coordinates"
-        # are therefore only meaningful relative to this session's own
-        # arbitrary origin, not tied to any absolute board position.
-        self._grid_origin: tuple[tuple[float, float], GridCoord] | None = None
+        self._need_space_template_scaled = self._need_space_template
 
-        # Scanning is two-pass (see core/board_scan.py): a cheap downscaled
-        # sweep locates candidate cells using `_item_templates_scaled`,
-        # then each candidate is classified for real using
-        # `_item_templates_classify`. Both need the board's true on-screen
-        # render scale (`calibration.scale`) folded in, not just
-        # `board_scan_scale` -- the captured frame always shows items at
-        # their true render scale, so a template scaled only by
-        # `board_scan_scale` (implicitly assuming a 1.0 render scale) is
-        # the wrong size to match against it. Confirmed live: pass 2
-        # classification silently undershot confidence almost everywhere
-        # once render scale drifted from 1.0, and pass 1 localization had
-        # the same mismatch for the same reason, just less severe. Neither
-        # can be built until calibration succeeds (see
-        # `_ensure_grid_calibration`), since `calibration.scale` isn't
-        # known before that.
+        # Scanning checks occupancy against `_background_templates` before
+        # ever classifying identity against `_item_templates_classify` --
+        # see core/board_scan.py. `_item_templates_classify` is built once
+        # `_ensure_item_scale` succeeds, not here.
         self._item_templates_full = discover_item_templates(settings.templates_dir / "items")
-        self._item_templates_scaled: dict[ItemRef, np.ndarray] = {}
         self._item_templates_classify: dict[ItemRef, np.ndarray] = {}
+        # blueprintID (e.g. "wheat_1") -> ItemRef, for interpreting the
+        # game's own live board state (see cdp/board_store.py) -- the
+        # primary, vision-free board-content source; `_item_templates_*`
+        # above remain as the fallback for whenever that isn't armed yet.
+        self._blueprint_items = discover_blueprint_items(self._item_templates_full)
+        self._board_store_armed = False
+        self._last_board_store_status: str | None = None
+        self._background_templates = discover_background_templates(
+            settings.templates_dir / "backgrounds"
+        )
+        # Level-gated tiles show a fixed padlock+required-level badge --
+        # real board content the static map has no way to know about
+        # (level-gating is a player-progress mechanic, not part of the
+        # map's fixed layout), so without this they fell through to full
+        # item classification and produced false positives (confirmed
+        # live: the badge was misidentified as several different crops).
+        # See core/board_scan.py's discover_locked_templates.
+        self._locked_templates = discover_locked_templates(settings.templates_dir / "locked")
+        self._item_scale: float | None = None
+
+        # The game's own extracted level data (see
+        # tools/template_extraction.py's extract_board_map) -- every
+        # locked/premium/decorated coordinate on this map, known up front
+        # without any vision call at all. `core/board_scan.py`'s scan only
+        # ever runs against the remaining, unclassified coordinates (plain
+        # farmable ground). See core/board_map.py.
+        self._board_map: BoardMap = load_board_map(
+            settings.board_map_dir / f"{settings.board_map_name}.json"
+        )
+
+        # Recomputed fresh every step() from a live camera read (see
+        # `vision/camera_calibration.py`) -- unlike the old vision-based
+        # anchor match, this is cheap enough that there's no reason to
+        # cache it across steps; caching it was what made stale board
+        # knowledge after a scroll/zoom a real bug before.
+        self._calibration: CameraCalibration | None = None
         self.board = BoardGrid()
 
     def _set_phase(self, phase: Phase) -> None:
@@ -98,83 +171,157 @@ class Bot:
             logger.info("Phase %s -> %s", self.phase.name, phase.name)
             self.phase = phase
 
-    def invalidate_grid_calibration(self) -> None:
-        """Drop the cached grid calibration and any board knowledge tied to
-        it, so the next step re-derives everything from scratch. Called by
-        `initialize` after re-establishing the known environment state
-        (see `core/environment.py`) -- stale cell positions from before a
-        pause/resize wouldn't necessarily correspond to the same physical
-        tiles anymore, since the origin anchor can land on a different
-        real match after the board's contents have changed.
-        """
-        self.grid_calibration = None
-        self._grid_origin = None
-        self.board = BoardGrid()
-
     def initialize(self) -> None:
-        """Force the game into the known environment state (fully zoomed
-        out, panned to the bottom -- see `core/environment.py`) and
-        calibrate against it. Blocking; takes a few seconds. Called once
-        before `run_forever`'s loop starts, and again on resume from pause,
-        since that's an explicit opportunity for the user to have
-        scrolled/zoomed the game themselves.
+        """Zoom the game out to maximize visible board area, and reset any
+        board knowledge from a previous session/pause. Blocking; takes a
+        few seconds. Called once before `run_forever`'s loop starts, and
+        again on resume from pause, since that's an explicit opportunity
+        for the user to have scrolled/zoomed the game themselves.
+
+        Unlike the old wheat-anchor calibration, grid alignment itself no
+        longer depends on this known state -- it's derived fresh from a
+        live camera read every step (see `_read_calibration`) and works at
+        any scroll position or zoom level. This only still exists to
+        maximize the visible board area and to drop stale board state.
         """
         region = find_window(settings.window_title)
         initialize_environment(region)
-        self.invalidate_grid_calibration()
-        frame = capture_region(region)
-        self._ensure_grid_calibration(frame)
+        self.board = BoardGrid()
 
-    def _ensure_grid_calibration(self, frame: np.ndarray) -> None:
-        """Best-effort, non-blocking: try to confirm the board's grid
-        geometry against whatever's on screen this step. Calibration
-        doesn't gate anything else in step() -- it just isn't available
-        for phases that need it (e.g. merge planning) until it succeeds,
-        which requires the anchor template to be confidently visible.
+    def _ensure_item_scale(self, frame: np.ndarray) -> None:
+        """Best-effort, non-blocking: measure the board's actual on-screen
+        item render scale by matching the cloud background template (an
+        always-present, robust anchor, unlike any one item) against
+        `frame`, at a range of candidate scales. Not derivable from camera
+        zoom alone -- that proportionality was never independently
+        confirmed, see `vision/camera_calibration.py` -- so this measures
+        it directly instead.
+
+        Cheap enough to run every step until it first succeeds, then never
+        again -- `_item_templates_classify` doesn't need rebuilding once
+        the render scale is known, and re-running gains nothing.
         """
-        if self.grid_calibration is not None:
+        if self._item_scale is not None:
             return
-        calibration = calibrate_grid(frame, self._grid_calibration_template)
+        cloud_bgr = self._background_templates.get("cloud")
+        if cloud_bgr is None:
+            logger.warning("No 'cloud' background template found; can't measure item scale.")
+            return
+        cloud_bgra = cv2.cvtColor(cloud_bgr, cv2.COLOR_BGR2BGRA)
+        calibration = calibrate_grid(frame, cloud_bgra)
         if calibration is None:
             return
-        logger.info(
-            "Grid calibrated: col_step=%s row_step=%s scale=%.2f",
-            calibration.col_step,
-            calibration.row_step,
-            calibration.scale,
+        logger.info("Item render scale measured: %.3f", calibration.scale)
+        self._item_scale = calibration.scale
+        self._item_templates_classify = scale_templates(self._item_templates_full, self._item_scale)
+        self._supply_crate_template_scaled = _scale_template(
+            self._supply_crate_template, self._item_scale
         )
-        self.grid_calibration = calibration
-        self._item_templates_classify = scale_templates(
-            self._item_templates_full, calibration.scale
+        self._need_space_template_scaled = _scale_template(
+            self._need_space_template, self._item_scale
         )
-        # See __init__: the coarse pass matches against a downscaled
-        # *frame*, which already shows items at their true render scale --
-        # so the coarse templates need both factors, not just
-        # `board_scan_scale` alone.
-        self._item_templates_scaled = scale_templates(
-            self._item_templates_full, settings.board_scan_scale * calibration.scale
-        )
-        # (0, 0) is an arbitrary label for wherever the anchor match landed
-        # -- `calibrate_grid` already found this position (at the correct
-        # render scale) while confirming the template is visible, so no
-        # second search is needed here.
-        self._grid_origin = (calibration.anchor, (0, 0))
 
-    def _scan_board(self, frame: np.ndarray) -> None:
-        if self.grid_calibration is None or self._grid_origin is None:
+    def _read_calibration(self) -> CameraCalibration | None:
+        """Read the live camera state via CDP and turn it into exact
+        board-to-screen geometry. Returns None (rather than raising) if
+        Chrome's remote debugging endpoint isn't reachable or the camera
+        state hasn't been persisted yet -- both are expected, recoverable
+        conditions (e.g. the game just loaded), not something that should
+        crash the loop; see `cdp/client.py`.
+        """
+        if self._item_scale is None:
+            return None
+        try:
+            camera_data = read_camera_data(settings.cdp_port)
+        except CdpConnectionError as exc:
+            logger.warning("Could not read camera data: %s", exc)
+            return None
+        if camera_data is None:
+            return None
+        return calibrate_from_camera(camera_data, item_scale=self._item_scale)
+
+    def _ensure_board_store_armed(self) -> None:
+        """Best-effort, idempotent: try to patch the game's board-store
+        class so a real content change (its own or a merge/crate-claim)
+        stashes a live reference -- see `cdp/board_store.py`. Cheap enough
+        to call every step until armed; a no-op after."""
+        if self._board_store_armed:
             return
-        origin_pixel, origin_coord = self._grid_origin
+        try:
+            result = arm_board_store(settings.cdp_port)
+        except CdpConnectionError as exc:
+            logger.debug("Could not arm live board-state capture: %s", exc)
+            return
+        if result != self._last_board_store_status:
+            logger.info("Live board-state capture: %s", result)
+            self._last_board_store_status = result
+        if result in ("patched", "already-captured", "already-patched"):
+            self._board_store_armed = True
+
+    def _sync_board_from_live_state(self) -> bool:
+        """Replace `self.board` outright with the game's own live cell
+        data (see `cdp/board_store.py`) -- exact, per-player-current, and
+        free of vision's classification uncertainty, unlike
+        `_scan_board`. Returns False (no board knowledge touched) if a
+        live reference hasn't been captured yet, so callers know to fall
+        back to vision instead.
+        """
+        try:
+            raw = read_board_state(settings.cdp_port)
+        except CdpConnectionError as exc:
+            logger.debug("Could not read live board state: %s", exc)
+            return False
+        if raw is None:
+            return False
+        board = BoardGrid()
+        for coord, blueprint_id in raw.items():
+            item = self._blueprint_items.get(blueprint_id)
+            if item is not None:
+                board.set_cell(coord, Cell(kind=CellKind.ITEM, item=item))
+                continue
+            kind = _LIVE_STATE_CELL_KIND.get(blueprint_id)
+            if kind is not None:
+                board.set_cell(coord, Cell(kind=kind))
+                continue
+            # Not a known item or marker -- a fixed building
+            # (`_KNOWN_STRUCTURE_BLUEPRINTS`, left unrecorded: not real
+            # mergeable content) or, assumed otherwise, a harvested
+            # product (e.g. "egg") waiting to be collected.
+            if blueprint_id not in _KNOWN_STRUCTURE_BLUEPRINTS:
+                board.set_cell(coord, Cell(kind=CellKind.PRODUCT))
+        self.board = board
+        logger.debug("Synced %d cell(s) from live game state.", len(board.known_coords()))
+        return True
+
+    def _scan_board(self, frame: np.ndarray, calibration: CameraCalibration) -> None:
+        coords = visible_grid_coords(
+            frame.shape,
+            calibration.origin_pixel,
+            calibration.origin_coord,
+            calibration.grid,
+            min_pixel_x=settings.board_min_pixel_x,
+            max_pixel_x=settings.board_max_pixel_x,
+            min_pixel_y=settings.board_min_pixel_y,
+        )
+        # Locked/premium/decorated coordinates (and cells right next to
+        # decoration -- see BoardMap.is_scan_candidate) are known for free
+        # from the static map -- only cells it says nothing about need the
+        # vision-based occupancy/classify pass at all.
+        farmable = {coord for coord in coords if self._board_map.is_scan_candidate(coord)}
+        if not farmable:
+            return
         updated = scan_frame(
             self.board,
             frame,
-            self._item_templates_scaled,
             self._item_templates_classify,
-            self.grid_calibration,
-            origin_pixel,
-            origin_coord,
+            self._background_templates,
+            calibration.grid,
+            calibration.origin_pixel,
+            calibration.origin_coord,
+            farmable,
+            locked_templates=self._locked_templates,
             min_confidence=settings.match_confidence,
-            coarse_confidence=settings.board_scan_coarse_confidence,
-            scale=settings.board_scan_scale,
+            occupancy_threshold=settings.occupancy_threshold,
             max_workers=settings.board_scan_workers,
         )
         logger.debug("Board scan recorded %d cell(s)", updated)
@@ -183,10 +330,9 @@ class Bot:
         return self._merge_five_overrides.get(item, settings.prefer_merge_five)
 
     def _grid_to_pixel(self, coord: GridCoord) -> tuple[int, int]:
-        assert self.grid_calibration is not None
-        assert self._grid_origin is not None
-        origin_pixel, origin_coord = self._grid_origin
-        dx, dy = self.grid_calibration.grid_to_pixel_delta(
+        assert self._calibration is not None
+        origin_pixel, origin_coord = self._calibration.origin_pixel, self._calibration.origin_coord
+        dx, dy = self._calibration.grid.grid_to_pixel_delta(
             coord[0] - origin_coord[0], coord[1] - origin_coord[1]
         )
         return (int(origin_pixel[0] + dx), int(origin_pixel[1] + dy))
@@ -246,11 +392,34 @@ class Bot:
         frame = capture_region(region)
         logger.debug("Captured frame: %sx%s", frame.shape[1], frame.shape[0])
 
-        self._ensure_grid_calibration(frame)
-        self._scan_board(frame)
+        # Cheap (a no-op once it's succeeded once) and needed regardless
+        # of phase -- both the crate/need-space UI templates and item
+        # templates need the board's actual render scale folded in, see
+        # `_ensure_item_scale`. Likewise arming/reading the live board
+        # state (see `cdp/board_store.py`) is just a couple of CDP round
+        # trips, not a vision scan, so it's cheap enough to keep current
+        # every step regardless of phase too.
+        self._ensure_item_scale(frame)
+        self._ensure_board_store_armed()
+        live_synced = self._sync_board_from_live_state()
+
+        # Calibration and vision-based board scanning are only ever
+        # consumed by the merge phase (`_grid_to_pixel`, cluster-finding).
+        # Calibration is still needed even when live state supplies board
+        # *content*, since it's what maps a (col, row) to the screen
+        # pixel a merge drag actually targets; the vision scan is only a
+        # fallback for whenever live state hasn't been captured yet.
+        # Running either unconditionally, every phase, was confirmed live
+        # to stretch a crate-claiming step to several seconds against a
+        # 1s `loop_interval` -- not worth it when claiming crates needs
+        # neither.
+        if self.phase is Phase.MERGE:
+            self._calibration = self._read_calibration()
+            if self._calibration is not None and not live_synced:
+                self._scan_board(frame, self._calibration)
 
         board_full = (
-            find_best_match(frame, self._need_space_template, settings.match_confidence)
+            find_best_match(frame, self._need_space_template_scaled, settings.need_space_confidence)
             is not None
         )
 
@@ -261,24 +430,62 @@ class Bot:
 
         self.stats.iterations += 1
 
+    # Between crate clicks, just long enough for the game to register the
+    # click and update the crate/space state before the next capture --
+    # much shorter than `loop_interval`, since there's no board scanning
+    # to justify a full second here (see `step`).
+    _CRATE_CLICK_SETTLE = 0.4
+    # Circuit breaker on the burst-click loop below: there's no reliable
+    # "out of crates" signal (the crate icon can stay on screen regardless
+    # of held count -- see automation-methodology.md), so if `board_full`
+    # never trips either, the crate template matching every single time
+    # would otherwise spin here forever. Comfortably above any realistic
+    # single-session crate count; hitting it just means falling back to
+    # the normal step cadence and trying again next iteration.
+    _MAX_CRATE_CLICKS_PER_STEP = 50
+
     def _step_claim_crates(
         self, region: WindowRegion, frame: np.ndarray, *, board_full: bool
     ) -> None:
+        """Claim crates back-to-back until the crate icon stops matching or
+        the board fills up, instead of one click per (much longer,
+        board-scan-throttled) outer step -- see `step`."""
         if board_full:
             logger.warning("Board is full; switching to merge phase.")
             self._set_phase(Phase.MERGE)
             return
 
-        match = find_best_match(frame, self._supply_crate_template, settings.match_confidence)
-        if match is not None:
+        for _ in range(self._MAX_CRATE_CLICKS_PER_STEP):
+            match = find_best_match(
+                frame, self._supply_crate_template_scaled, settings.match_confidence
+            )
+            if match is None:
+                return
             logger.info("Clicking supply crate (confidence=%.2f)", match.confidence)
             click(region, *match.center)
             self.stats.actions_taken += 1
-        # NOTE: no reliable way yet to detect "out of crates" (as opposed
-        # to "board full") -- the crate icon appears to remain on screen
-        # regardless of the held count. See automation-methodology.md.
+            time.sleep(self._CRATE_CLICK_SETTLE)
+
+            frame = capture_region(region)
+            need_space = find_best_match(
+                frame, self._need_space_template_scaled, settings.need_space_confidence
+            )
+            if need_space is not None:
+                logger.warning("Board is full; switching to merge phase.")
+                self._set_phase(Phase.MERGE)
+                return
+        logger.warning(
+            "Hit the %d-click burst cap without running out of crates or filling the "
+            "board; pausing until the next step.",
+            self._MAX_CRATE_CLICKS_PER_STEP,
+        )
 
     def _step_merge(self, region: WindowRegion, *, board_full: bool) -> None:
+        if self._calibration is None:
+            # No grid geometry to act against this step (e.g. Chrome's CDP
+            # endpoint or the camera state wasn't readable) -- nothing safe
+            # to do but wait for the next step.
+            return
         merged = self._try_merge(region)
         if not merged and not board_full:
             logger.info("Board has space again; switching back to claim-crates phase.")
@@ -291,12 +498,13 @@ class Bot:
 
     def _toggle_pause(self) -> None:
         if self.paused:
-            # Resuming: re-initialize *before* clearing `paused`, so the
-            # main loop doesn't start stepping against a possibly-changed
-            # environment (the user pausing is exactly the moment they
-            # might have scrolled/zoomed the game themselves) until it's
-            # back in the known state. Runs on the hotkey callback thread;
-            # blocking here is fine since the main loop is parked.
+            # Resuming: re-initialize *before* clearing `paused`, so stale
+            # board knowledge from before the pause (the user pausing is
+            # exactly the moment they might have scrolled/zoomed, or
+            # otherwise changed, the board themselves) is dropped before
+            # the main loop starts stepping again. Runs on the hotkey
+            # callback thread; blocking here is fine since the main loop
+            # is parked.
             logger.warning("Resuming (hotkey) -- re-initializing environment.")
             self.initialize()
             self.paused = False
@@ -310,8 +518,6 @@ class Bot:
         self._quit_requested = True
 
     def run_forever(self) -> None:
-        import time
-
         # Global hotkeys work even when the terminal isn't focused, since
         # the bot spends most of its time driving mouse input into a
         # different window -- Ctrl+C alone wouldn't be reachable then.

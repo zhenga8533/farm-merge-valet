@@ -28,38 +28,58 @@ logger = logging.getLogger(__name__)
 
 _SETTLE_DELAY = 0.3
 
-# One `scroll()` call has no gesture-distance limit, so a single
-# sufficiently large scroll reaches the game's own minimum-zoom clamp in
-# one action -- confirmed empirically negative clicks zoom out (see
-# `zoom_out_fully`). A `drag()`, in contrast, is limited to one screen's
-# worth of on-screen mouse travel per call, so reaching the bottom of a
-# board taller than one screen needs several drags in a row; a fixed
-# repeat count comfortably larger than any realistic board height is used
-# instead of polling for convergence -- once the view is already at the
-# bottom, extra drags are harmless no-ops.
+# A single `scroll()` call has no gesture-distance limit, so in principle
+# one sufficiently large scroll should reach the game's own minimum-zoom
+# clamp outright -- but a lone burst isn't reliably registered in full
+# (confirmed live: one -300 call sometimes left the view well short of
+# minimum zoom, apparently OS/app-side wheel-event coalescing under a
+# single rapid burst rather than an actual smaller zoom range). Repeating
+# the burst, like `scroll_to_bottom`'s repeated drags below, fixes that:
+# once already at minimum zoom, an extra burst is a harmless no-op, so a
+# fixed repeat count is safe without needing to poll for convergence.
 _ZOOM_OUT_CLICKS = -300
-_SCROLL_TO_BOTTOM_REPEATS = 15
+_ZOOM_OUT_REPEATS = 5
+_SCROLL_TO_BOTTOM_REPEATS = 5
+
+# Fixed screen-space column reserved for panning drags -- never board
+# content, and never a clickable UI button either. Between the board's
+# confirmed right extent (`Settings.board_max_pixel_x`, tuned this session
+# via live testing of the board-scan cutoffs) and the fixed settings/
+# shovel/currency icon column further right (~1855px+ in a 1920px-wide
+# capture): dragging from the middle of the screen instead risks the
+# start or end point landing on a real tile, which in this game can
+# itself be misread as a merge-drag between two board items -- the exact
+# gesture `Bot._merge_cluster` uses for real merges.
+_DRAG_ANCHOR_X = 1780
 
 
 def zoom_out_fully(region: WindowRegion) -> None:
-    """Zoom out to the game's own minimum zoom in one action."""
+    """Zoom out to the game's own minimum zoom via repeated mouse-wheel
+    scrolls down -- `scroll()`'s pyautogui convention is that negative
+    `clicks` is a downward scroll, confirmed empirically to zoom out
+    (rather than in) in this game. See `_ZOOM_OUT_REPEATS` for why this is
+    more than one call."""
     cx, cy = region.width // 2, region.height // 2
-    scroll(region, cx, cy, _ZOOM_OUT_CLICKS)
-    time.sleep(_SETTLE_DELAY)
+    for _ in range(_ZOOM_OUT_REPEATS):
+        scroll(region, cx, cy, _ZOOM_OUT_CLICKS)
+        time.sleep(_SETTLE_DELAY)
 
 
 def scroll_to_bottom(region: WindowRegion) -> None:
     """Pan the view down to the bottom of the board -- its fixed starting
-    area (see module docstring) -- via repeated drags.
+    area (see module docstring) -- via repeated drags, anchored at
+    `_DRAG_ANCHOR_X` rather than screen-center so the drag can never land
+    on (and accidentally interact with) a real tile.
 
     Confirmed empirically against the live game: dragging from lower to
     higher on screen panned the view toward the *top* of the board (the
     opposite of what's wanted here), so this drags from higher to lower on
     screen instead.
     """
-    cx, cy = region.width // 2, region.height // 2
+    x = min(_DRAG_ANCHOR_X, region.width - 1)
+    cy = region.height // 2
     for _ in range(_SCROLL_TO_BOTTOM_REPEATS):
-        drag(region, (cx, cy + 300), (cx, cy - 300), duration=0.15)
+        drag(region, (x, cy + 300), (x, cy - 300), duration=0.15)
     time.sleep(_SETTLE_DELAY)
 
 

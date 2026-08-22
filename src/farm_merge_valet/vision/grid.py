@@ -37,11 +37,25 @@ Vector = tuple[float, float]
 # Measured once, directly, against a 1920x1020 capture of the game fully
 # zoomed out (see `core/environment.zoom_out_fully`): the pixel offset for
 # one step along each isometric grid axis. Assumes the window stays this
-# size -- if that ever changes, this needs to be remeasured the same way
-# (overlay candidate grid lines on the tile-boundary pattern in a fresh
-# capture and adjust until they align with the actual tile corners).
-REFERENCE_COL_STEP: Vector = (80.0, 50.0)
-REFERENCE_ROW_STEP: Vector = (-80.0, 50.0)
+# size -- if that ever changes, this needs to be remeasured the same way.
+#
+# Went through two corrections to get here, both confirmed against the
+# game's own extracted map data (assets/board_map/ -- see
+# tools/template_extraction.py) rather than by eye:
+#   1. An initial by-eye ruler measurement gave (80, 50) -- its 1.6:1 x:y
+#      ratio didn't match the game's tile art (320x160 = exactly 2:1 for
+#      a standard isometric projection), corrected to 2:1 while keeping
+#      the same magnitude (~94.3px/step).
+#   2. That magnitude itself was still off by ~3.2%: fitting a
+#      least-squares regression against 76 real, precisely
+#      template-matched cloud-tile positions (matching a background
+#      template gives sub-pixel accuracy no by-eye measurement can) gave
+#      a magnitude of ~97.3px/step instead. This is the version that
+#      finally lines up with the map's own (column, row) coordinates
+#      cleanly (integer-valued relative offsets between matched tiles,
+#      confirmed live).
+REFERENCE_COL_STEP: Vector = (87.045, 43.755)
+REFERENCE_ROW_STEP: Vector = (-87.045, 43.755)
 
 
 @dataclass(frozen=True)

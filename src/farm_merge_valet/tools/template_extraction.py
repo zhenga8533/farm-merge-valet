@@ -36,6 +36,15 @@ from farm_merge_valet.config import settings
 # picks up plenty of other images (avatars, favicons, etc.) that aren't atlases.
 ATLAS_PATH_SEGMENTS = ("/atlases/", "/spines/")
 
+# The board layout is static and shared by every player (same level design)
+# -- see chat history -- so it's extracted once as a static asset rather
+# than re-derived by scanning the screen every session. "facebook" is the
+# game's own internal codename for the default starter map (distinct from
+# the tropicalisland/jungleisland event map variants); it's what a fresh
+# account actually plays on.
+MAP_PATH_SEGMENT = "/json/maps/"
+DEFAULT_MAP_NAME = "map_facebook"
+
 # in-game internal name -> our folder name
 CROPS = {
     "wheat": "wheat",
@@ -282,3 +291,93 @@ def extract_templates(har_path: Path, *, force: bool = False) -> None:
         ui_dir.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(ui_dir / "supply_crate.png"), crate_button)
         print("ui/supply_crate.png <- btn_cratespawn_idle + icon_btn_crate_spawn (composited)")
+
+
+def _discover_map_urls(har_path: Path) -> list[str]:
+    with open(har_path, encoding="utf-8") as f:
+        har = json.load(f)
+    urls = set()
+    for entry in har["log"]["entries"]:
+        url = entry["request"]["url"]
+        path = urlparse(url).path
+        if path.lower().endswith(".json") and MAP_PATH_SEGMENT in path:
+            urls.add(url.split("?")[0])
+    return sorted(urls)
+
+
+def fetch_maps(har_path: Path, cache_dir: Path, *, force: bool = False) -> dict[str, dict]:
+    """Download every map JSON referenced in the HAR, keyed by filename
+    stem (e.g. "map_facebook", "map_island")."""
+    maps: dict[str, dict] = {}
+    for url in _discover_map_urls(har_path):
+        dst = _cache_path_for(cache_dir, url, ".json")
+        if not _download(url, dst, force=force):
+            continue
+        with open(dst, encoding="utf-8") as f:
+            maps[Path(urlparse(url).path).stem] = json.load(f)
+    return maps
+
+
+def _area_tile_coords(areas: dict) -> list[list[int]]:
+    """`lockedAreas`/`premiumAreas` are dicts of named zones, each holding
+    a list of {"column", "row"} tiles -- flatten to a plain coordinate
+    list."""
+    coords = []
+    for group in areas.values():
+        for tile in group["tiles"]:
+            coords.append([tile["column"], tile["row"]])
+    return coords
+
+
+def _simplify_board_map(raw: dict) -> dict:
+    """Reduce the game's full Tiled-format map export to just what the
+    bot needs: dimensions, and which (column, row) tiles are locked,
+    premium (gem-purchasable), or permanently decorated (trees/rocks/
+    buildings -- never a mergeable tile, regardless of unlock state).
+
+    The `areas` and `premium` layers turn out to be redundant encodings
+    of `lockedAreas`/`premiumAreas` (confirmed: identical coordinate
+    sets), so only the `main` layer -- fixed object placement, the one
+    layer with genuinely new information -- is used here, alongside the
+    two area dicts directly.
+    """
+    width, height = raw["width"], raw["height"]
+    main_data = raw["layers"]["main"]["data"]
+    decoration_tiles = [[idx % width, idx // width] for idx, v in enumerate(main_data) if v != 0]
+    return {
+        "width": width,
+        "height": height,
+        "tilewidth": raw["tilewidth"],
+        "tileheight": raw["tileheight"],
+        "locked_tiles": _area_tile_coords(raw["lockedAreas"]),
+        "premium_tiles": _area_tile_coords(raw["premiumAreas"]),
+        "decoration_tiles": decoration_tiles,
+    }
+
+
+def extract_board_map(har_path: Path, *, force: bool = False) -> None:
+    """Download the map JSON(s) referenced in `har_path` and save a
+    simplified board layout (see `_simplify_board_map`) under
+    `settings.board_map_dir`, one file per map found."""
+    cache_dir = settings.atlas_cache_dir
+    out_dir = settings.board_map_dir
+
+    print(f"Discovering map URLs in {har_path}...")
+    maps = fetch_maps(har_path, cache_dir, force=force)
+    if not maps:
+        raise RuntimeError(
+            "No map JSON found in that HAR. Capture with DevTools Network -> All filter "
+            "(not just Img) while the game is loaded, then 'Save all as HAR'."
+        )
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name, raw in maps.items():
+        board = _simplify_board_map(raw)
+        dst = out_dir / f"{name}.json"
+        with open(dst, "w", encoding="utf-8") as f:
+            json.dump(board, f)
+        print(
+            f"{name}: {board['width']}x{board['height']}, "
+            f"{len(board['locked_tiles'])} locked, {len(board['premium_tiles'])} premium, "
+            f"{len(board['decoration_tiles'])} decorated -> {dst}"
+        )
