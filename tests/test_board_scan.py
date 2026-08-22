@@ -47,7 +47,9 @@ def test_scan_frame_records_matches_at_correct_grid_coordinates(tmp_path: Path) 
 
     col_step = (20.0, 10.0)
     row_step = (-20.0, 10.0)
-    calibration = GridCalibration(col_step=col_step, row_step=row_step, scale=1.0)
+    calibration = GridCalibration(
+        col_step=col_step, row_step=row_step, scale=1.0, anchor=(0.0, 0.0)
+    )
     origin_pixel = (100.0, 20.0)
     origin_coord = (0, 0)
 
@@ -69,7 +71,15 @@ def test_scan_frame_records_matches_at_correct_grid_coordinates(tmp_path: Path) 
 
     grid = BoardGrid()
     updated = scan_frame(
-        grid, frame, templates, calibration, origin_pixel, origin_coord, min_confidence=0.9
+        grid,
+        frame,
+        templates,
+        templates,
+        calibration,
+        origin_pixel,
+        origin_coord,
+        min_confidence=0.9,
+        coarse_confidence=0.9,
     )
 
     assert updated == 2

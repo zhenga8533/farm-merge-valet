@@ -35,5 +35,13 @@ def drag(
     pyautogui.dragTo(region.left + end[0], region.top + end[1], duration=duration, button="left")
 
 
+def scroll(region: WindowRegion, x: int, y: int, clicks: int) -> None:
+    """Scroll the mouse wheel at coordinates relative to `region`'s top-left
+    corner. Negative `clicks` scrolls down/zooms out (pyautogui convention).
+    """
+    pyautogui.moveTo(region.left + x, region.top + y)
+    pyautogui.scroll(clicks)
+
+
 def sleep(seconds: float) -> None:
     time.sleep(seconds)

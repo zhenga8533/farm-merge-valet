@@ -78,6 +78,18 @@ def find_best_match(frame: np.ndarray, template: np.ndarray, min_confidence: flo
     return Match(x=x, y=y, width=width, height=height, confidence=confidence)
 
 
+# Small/weakly-discriminative templates (e.g. a template that's mostly
+# transparent, with only a few opaque pixels) can clear `min_confidence` at
+# thousands of unrelated positions in a busy frame -- confirmed live,
+# where one 16x19 template alone produced 2000+ raw candidates and took
+# ~27s just for its own non-max suppression, an O(candidates x matches)
+# Python loop. Genuine matches score far higher confidence than incidental
+# ones, so capping to the top-scoring candidates before suppression bounds
+# the worst case without dropping real matches (no real board realistically
+# has anywhere near this many instances of one item visible at once).
+_MAX_RAW_CANDIDATES = 800
+
+
 def find_all_matches(frame: np.ndarray, template: np.ndarray, min_confidence: float) -> list[Match]:
     """Like `find_best_match`, but returns every non-overlapping match above
     `min_confidence` instead of just the single best one -- e.g. finding
@@ -96,6 +108,11 @@ def find_all_matches(frame: np.ndarray, template: np.ndarray, min_confidence: fl
         confidence_map = cv2.matchTemplate(frame, template, cv2.TM_CCOEFF_NORMED)
 
     ys, xs = np.where(confidence_map >= min_confidence)
+    if len(xs) > _MAX_RAW_CANDIDATES:
+        scores = confidence_map[ys, xs]
+        top = np.argpartition(-scores, _MAX_RAW_CANDIDATES)[:_MAX_RAW_CANDIDATES]
+        xs, ys = xs[top], ys[top]
+
     candidates = sorted(
         zip(xs.tolist(), ys.tolist(), strict=True),
         key=lambda p: -confidence_map[p[1], p[0]],
