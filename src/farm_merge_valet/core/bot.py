@@ -39,9 +39,11 @@ class Bot:
     def __init__(self) -> None:
         self.stats = RunStats()
         self.phase = Phase.CLAIM_CRATES
-        self._supply_crate_template = load_template(settings.templates_dir / "supply_crate.png")
+        self._supply_crate_template = load_template(
+            settings.templates_dir / "ui" / "supply_crate.png"
+        )
         self._need_space_template = load_template(
-            settings.templates_dir / "error_need_space.png"
+            settings.templates_dir / "ui" / "error_need_space.png"
         )
 
     def _set_phase(self, phase: Phase) -> None:

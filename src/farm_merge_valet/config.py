@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # Where template images used for vision matching live.
     templates_dir: Path = PROJECT_ROOT / "assets" / "templates"
 
+    # Where downloaded game atlas PNGs/manifests are cached between
+    # `extract-templates` runs, so re-running without --force doesn't
+    # re-fetch everything.
+    atlas_cache_dir: Path = PROJECT_ROOT / ".atlas_cache"
+
     # Minimum confidence (0-1) for template matches to be accepted.
     match_confidence: float = 0.85
 

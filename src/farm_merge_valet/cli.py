@@ -14,6 +14,7 @@ from farm_merge_valet.capture.window import WindowActivationError, find_window, 
 from farm_merge_valet.config import settings
 from farm_merge_valet.core.bot import Bot
 from farm_merge_valet.logging_setup import configure_logging
+from farm_merge_valet.tools.template_extraction import extract_templates
 
 app = typer.Typer(help="Automation tool for Farm Merge Valley.")
 
@@ -68,6 +69,29 @@ def capture(
     frame = capture_region(region)
     cv2.imwrite(str(output), frame)
     rprint(f"[green]Saved[/green] {frame.shape[1]}x{frame.shape[0]} capture to {output}")
+
+
+@app.command("extract-templates")
+def extract_templates_cmd(
+    har: Path = typer.Argument(  # noqa: B008
+        ..., help="Path to a HAR capture of the game's network traffic (DevTools -> Network -> "
+        "Img filter -> 'Save all as HAR')."
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Re-download atlases even if already cached."
+    ),
+) -> None:
+    """Rebuild vision templates from the game's own sprite atlases.
+
+    Re-run whenever the game updates and templates need refreshing; capture
+    a fresh HAR first since the CDN URLs are tied to the current game
+    instance/session and won't stay valid indefinitely.
+    """
+    try:
+        extract_templates(har, force=force)
+    except RuntimeError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
 
 
 @app.command()
