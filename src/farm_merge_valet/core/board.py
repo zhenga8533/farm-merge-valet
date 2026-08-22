@@ -46,7 +46,7 @@ class Cell:
 # rendering is just a visual rotation of a square grid, so logical
 # adjacency is still orthogonal. Revisit if the game turns out to also
 # treat diagonal neighbors as touching for merge purposes.
-_NEIGHBOR_OFFSETS = ((1, 0), (-1, 0), (0, 1), (0, -1))
+NEIGHBOR_OFFSETS = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
 
 class BoardGrid:
@@ -63,6 +63,16 @@ class BoardGrid:
         just when it's empty."""
         return self._cells.get(coord)
 
+    def clear_cell(self, coord: GridCoord) -> None:
+        """Forget a cell, returning it to UNKNOWN rather than any specific
+        kind. Used after taking an action that changes a cell (e.g. a
+        merge) instead of guessing the new state ourselves -- the next
+        board scan observes the real outcome (including any "Lucky Merge"
+        randomness, see docs/automation-methodology.md) rather than us
+        symbolically predicting it and risking drift from what actually
+        happened."""
+        self._cells.pop(coord, None)
+
     def is_known(self, coord: GridCoord) -> bool:
         return coord in self._cells
 
@@ -71,6 +81,12 @@ class BoardGrid:
 
     def find_empty(self) -> list[GridCoord]:
         return [c for c, cell in self._cells.items() if cell.kind is CellKind.EMPTY]
+
+    def items_present(self) -> set[ItemRef]:
+        """Every distinct item type/tier currently known to be on the
+        board -- a starting point for "what could I merge right now"
+        without having to guess which items to even look for."""
+        return {cell.item for cell in self._cells.values() if cell.item is not None}
 
     def find_clusters(self, item: ItemRef) -> list[set[GridCoord]]:
         """All connected clusters of cells holding exactly `item`.
@@ -93,13 +109,27 @@ class BoardGrid:
                     continue
                 cluster.add(coord)
                 x, y = coord
-                for dx, dy in _NEIGHBOR_OFFSETS:
+                for dx, dy in NEIGHBOR_OFFSETS:
                     neighbor = (x + dx, y + dy)
                     if neighbor in targets and neighbor not in cluster:
                         stack.append(neighbor)
             seen |= cluster
             clusters.append(cluster)
         return clusters
+
+
+def adjacent_pair(cluster: set[GridCoord]) -> tuple[GridCoord, GridCoord] | None:
+    """Any one pair of coordinates within `cluster` that are grid-adjacent
+    to each other -- e.g. to know which two tiles to actually drag between
+    to trigger a merge action. Returns None only if `cluster` has fewer
+    than 2 members."""
+    for coord in cluster:
+        x, y = coord
+        for dx, dy in NEIGHBOR_OFFSETS:
+            neighbor = (x + dx, y + dy)
+            if neighbor in cluster:
+                return coord, neighbor
+    return None
 
 
 def plan_merge_groups(cluster: set[GridCoord], *, prefer_five: bool) -> list[set[GridCoord]]:

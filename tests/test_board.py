@@ -5,6 +5,7 @@ from farm_merge_valet.core.board import (
     Cell,
     CellKind,
     ItemRef,
+    adjacent_pair,
     plan_merge_groups,
 )
 
@@ -110,3 +111,42 @@ def test_plan_merge_groups_prefer_five_exact_multiple() -> None:
     groups = plan_merge_groups(cluster, prefer_five=True)
     assert sorted(len(g) for g in groups) == [5, 5]
     assert set().union(*groups) == cluster
+
+
+def test_clear_cell_returns_coord_to_unknown() -> None:
+    grid = BoardGrid()
+    grid.set_cell((0, 0), Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    assert grid.is_known((0, 0))
+
+    grid.clear_cell((0, 0))
+
+    assert grid.get_cell((0, 0)) is None
+    assert not grid.is_known((0, 0))
+
+
+def test_clear_cell_on_already_unknown_coord_is_a_no_op() -> None:
+    grid = BoardGrid()
+    grid.clear_cell((5, 5))  # must not raise
+    assert grid.get_cell((5, 5)) is None
+
+
+def test_items_present_lists_distinct_items_only() -> None:
+    grid = BoardGrid()
+    grid.set_cell((0, 0), Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    grid.set_cell((1, 0), Cell(kind=CellKind.ITEM, item=WHEAT_1))  # same item again
+    grid.set_cell((2, 0), Cell(kind=CellKind.ITEM, item=WHEAT_2))
+    grid.set_cell((3, 0), Cell(kind=CellKind.EMPTY))
+
+    assert grid.items_present() == {WHEAT_1, WHEAT_2}
+
+
+def test_adjacent_pair_finds_two_touching_coords() -> None:
+    cluster = {(0, 0), (1, 0), (5, 5)}  # (5,5) is isolated, not adjacent to anything
+    pair = adjacent_pair(cluster)
+    assert pair is not None
+    assert set(pair) == {(0, 0), (1, 0)}
+
+
+def test_adjacent_pair_returns_none_when_nothing_touches() -> None:
+    cluster = {(0, 0), (5, 5), (10, 10)}
+    assert adjacent_pair(cluster) is None

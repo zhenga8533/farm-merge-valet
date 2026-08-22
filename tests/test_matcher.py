@@ -1,6 +1,6 @@
 import numpy as np
 
-from farm_merge_valet.vision.matcher import find_best_match
+from farm_merge_valet.vision.matcher import find_all_matches, find_best_match
 
 
 def _checkerboard(height: int, width: int) -> np.ndarray:
@@ -77,3 +77,22 @@ def test_find_best_match_bgra_returns_none_below_confidence() -> None:
     match = find_best_match(frame, template, min_confidence=0.9)
 
     assert match is None
+
+
+def test_find_all_matches_locates_every_non_overlapping_instance() -> None:
+    frame = np.zeros((100, 200, 3), dtype=np.uint8)
+    template = _checkerboard_bgra(20, 40)
+    frame[10:30, 10:50] = template[:, :, :3]
+    frame[60:80, 120:160] = template[:, :, :3]
+
+    matches = find_all_matches(frame, template, min_confidence=0.9)
+
+    positions = sorted((m.x, m.y) for m in matches)
+    assert positions == [(10, 10), (120, 60)]
+
+
+def test_find_all_matches_empty_when_nothing_matches() -> None:
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    template = _checkerboard_bgra(20, 40)
+
+    assert find_all_matches(frame, template, min_confidence=0.9) == []

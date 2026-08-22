@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # Minimum confidence (0-1) for template matches to be accepted.
     match_confidence: float = 0.85
 
+    # Default merge-5 preference (merging exactly 5 identical items yields
+    # 2 of the next tier instead of 1 from a merge-3 -- see
+    # docs/game-mechanics.md). Per-item/tier overrides aren't env-var
+    # configurable yet; pass `merge_five_overrides` to `Bot` directly.
+    prefer_merge_five: bool = False
+
     # Seconds between bot loop iterations.
     loop_interval: float = 1.0
 
