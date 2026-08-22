@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -21,6 +22,14 @@ app = typer.Typer(help="Automation tool for Farm Merge Valley.")
 
 @app.callback()
 def main() -> None:
+    # Window titles (and other OS-provided strings we echo back, e.g. in
+    # error messages) can contain characters the Windows console's legacy
+    # codepage can't encode, which otherwise crashes the CLI on a plain
+    # print. Replacing unencodable characters keeps the message readable
+    # instead of losing it to a traceback.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     configure_logging(settings.log_level)
 
 

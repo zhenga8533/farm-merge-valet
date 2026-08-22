@@ -19,6 +19,7 @@ from farm_merge_valet.capture.screen import capture_region
 from farm_merge_valet.capture.window import WindowActivationError, WindowRegion, find_window
 from farm_merge_valet.config import settings
 from farm_merge_valet.core.stats import RunStats
+from farm_merge_valet.vision.grid import GridCalibration, calibrate_grid
 from farm_merge_valet.vision.matcher import find_best_match, load_template
 
 logger = logging.getLogger(__name__)
@@ -45,11 +46,47 @@ class Bot:
         self._need_space_template = load_template(
             settings.templates_dir / "ui" / "error_need_space.png"
         )
+        # Wheat tier 1 as the calibration anchor: it's the very first crop
+        # unlocked and one of the most common early spawns, so it's likely
+        # to appear more than once on screen. See vision/grid.py.
+        self._grid_calibration_template = load_template(
+            settings.templates_dir / "items" / "crops" / "wheat" / "tier_1.png"
+        )
+        self.grid_calibration: GridCalibration | None = None
 
     def _set_phase(self, phase: Phase) -> None:
         if phase != self.phase:
             logger.info("Phase %s -> %s", self.phase.name, phase.name)
             self.phase = phase
+
+    def invalidate_grid_calibration(self) -> None:
+        """Drop the cached grid calibration so the next step re-derives it.
+
+        Nothing calls this yet -- it's here for when merge logic can detect
+        that an action landed somewhere the calibration didn't predict
+        (e.g. after a window resize mid-session), rather than continuing to
+        act on stale geometry until the bot is restarted.
+        """
+        self.grid_calibration = None
+
+    def _ensure_grid_calibration(self, frame: np.ndarray) -> None:
+        """Best-effort, non-blocking: try to derive the board's grid
+        geometry from whatever's on screen this step. Calibration doesn't
+        gate anything else in step() -- it just isn't available for phases
+        that need it (e.g. merge planning) until it succeeds, which
+        requires at least two visible wheat-tier-1 tiles.
+        """
+        if self.grid_calibration is not None:
+            return
+        calibration = calibrate_grid(frame, self._grid_calibration_template)
+        if calibration is not None:
+            logger.info(
+                "Grid calibrated: col_step=%s row_step=%s scale=%.2f",
+                calibration.col_step,
+                calibration.row_step,
+                calibration.scale,
+            )
+            self.grid_calibration = calibration
 
     def step(self) -> None:
         """Run a single perceive-decide-act iteration for the current phase.
@@ -63,6 +100,8 @@ class Bot:
         region = find_window(settings.window_title)
         frame = capture_region(region)
         logger.debug("Captured frame: %sx%s", frame.shape[1], frame.shape[0])
+
+        self._ensure_grid_calibration(frame)
 
         board_full = (
             find_best_match(frame, self._need_space_template, settings.match_confidence)
