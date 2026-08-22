@@ -5,8 +5,10 @@ from farm_merge_valet.core.board import (
     Cell,
     CellKind,
     ItemRef,
+    MergeActionKind,
     adjacent_pair,
-    plan_merge_groups,
+    find_removable_member,
+    plan_merge_action,
 )
 
 WHEAT_1 = ItemRef(category="crops", name="wheat", tier=1)
@@ -72,45 +74,80 @@ def test_find_clusters_never_spans_unknown_cells() -> None:
     assert sorted(len(c) for c in clusters) == [1, 1]
 
 
-def test_plan_merge_groups_without_prefer_five_returns_whole_cluster() -> None:
-    cluster = {(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0)}
-    groups = plan_merge_groups(cluster, prefer_five=False)
-    assert groups == [cluster]
+def test_find_removable_member_keeps_remainder_connected() -> None:
+    cluster = {(0, 0), (1, 0), (2, 0)}  # a straight line
+    donor = find_removable_member(cluster)
+    assert donor is not None
+    # Removing an end of the line keeps the rest connected; removing the
+    # middle would not, so the middle must never be chosen.
+    assert donor != (1, 0)
 
 
-def test_plan_merge_groups_below_three_is_not_mergeable() -> None:
-    assert plan_merge_groups({(0, 0), (1, 0)}, prefer_five=False) == []
-    assert plan_merge_groups({(0, 0), (1, 0)}, prefer_five=True) == []
+def test_find_removable_member_of_tiny_cluster_is_none() -> None:
+    assert find_removable_member(set()) is None
+    assert find_removable_member({(0, 0)}) is None
 
 
-def test_plan_merge_groups_prefer_five_never_leaves_six_plus_ungrouped() -> None:
-    cluster = {(x, 0) for x in range(6)}  # 6 connected items
-    groups = plan_merge_groups(cluster, prefer_five=True)
-    sizes = sorted(len(g) for g in groups)
-    # one group of 5, one leftover singleton that isn't returned (not mergeable yet)
-    assert sizes == [5]
-    assert sum(sizes) == 5
-    leftover = cluster - set().union(*groups)
-    assert len(leftover) == 1
+def test_plan_merge_action_triggers_an_exactly_sized_cluster() -> None:
+    grid = BoardGrid()
+    for coord in [(0, 0), (1, 0), (2, 0)]:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+
+    action = plan_merge_action(grid, WHEAT_1, prefer_five=False)
+
+    assert action is not None
+    assert action.kind is MergeActionKind.TRIGGER
+    assert action.cluster == {(0, 0), (1, 0), (2, 0)}
+    assert action.start in action.cluster and action.end in action.cluster
 
 
-def test_plan_merge_groups_prefer_five_uses_leftover_group_of_three_or_four() -> None:
-    cluster = {(x, 0) for x in range(8)}  # 8 connected items -> one 5, one 3
-    groups = plan_merge_groups(cluster, prefer_five=True)
-    sizes = sorted(len(g) for g in groups)
-    assert sizes == [3, 5]
+def test_plan_merge_action_below_target_with_nothing_else_is_none() -> None:
+    grid = BoardGrid()
+    grid.set_cell((0, 0), Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    grid.set_cell((1, 0), Cell(kind=CellKind.ITEM, item=WHEAT_1))
 
-    cluster9 = {(x, 0) for x in range(9)}  # 9 -> one 5, one 4
-    groups9 = plan_merge_groups(cluster9, prefer_five=True)
-    sizes9 = sorted(len(g) for g in groups9)
-    assert sizes9 == [4, 5]
+    assert plan_merge_action(grid, WHEAT_1, prefer_five=False) is None
 
 
-def test_plan_merge_groups_prefer_five_exact_multiple() -> None:
-    cluster = {(x, 0) for x in range(10)}  # exactly two groups of 5
-    groups = plan_merge_groups(cluster, prefer_five=True)
-    assert sorted(len(g) for g in groups) == [5, 5]
-    assert set().union(*groups) == cluster
+def test_plan_merge_action_gathers_scattered_items_toward_the_target() -> None:
+    grid = BoardGrid()
+    # A pair at (0,0)-(1,0), a lone item far away at (10,10), and an empty
+    # cell adjacent to the pair for the donor to relocate into.
+    grid.set_cell((0, 0), Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    grid.set_cell((1, 0), Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    grid.set_cell((2, 0), Cell(kind=CellKind.EMPTY))
+    grid.set_cell((10, 10), Cell(kind=CellKind.ITEM, item=WHEAT_1))
+
+    action = plan_merge_action(grid, WHEAT_1, prefer_five=False)
+
+    assert action is not None
+    assert action.kind is MergeActionKind.GATHER
+    assert action.start == (10, 10)
+    assert action.end == (2, 0)
+
+
+def test_plan_merge_action_degroups_a_cluster_over_the_prefer_five_target() -> None:
+    grid = BoardGrid()
+    for coord in [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0)]:  # 6 in a row
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    grid.set_cell((10, 10), Cell(kind=CellKind.EMPTY))  # far away, safe to relocate to
+
+    action = plan_merge_action(grid, WHEAT_1, prefer_five=True)
+
+    assert action is not None
+    assert action.kind is MergeActionKind.DEGROUP
+    assert action.start in {(0, 0), (5, 0)}  # an end of the line, not the middle
+    assert action.end == (10, 10)
+
+
+def test_plan_merge_action_prefer_five_never_settles_for_three_or_four() -> None:
+    grid = BoardGrid()
+    for coord in [(0, 0), (1, 0), (2, 0), (3, 0)]:  # a connected group of 4
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+
+    # No room to gather a 5th and no over-sized cluster to degroup --
+    # nothing to do but wait for a 5th to land somewhere.
+    assert plan_merge_action(grid, WHEAT_1, prefer_five=True) is None
 
 
 def test_clear_cell_returns_coord_to_unknown() -> None:

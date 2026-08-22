@@ -137,39 +137,141 @@ def adjacent_pair(cluster: set[GridCoord]) -> tuple[GridCoord, GridCoord] | None
     return None
 
 
-def plan_merge_groups(cluster: set[GridCoord], *, prefer_five: bool) -> list[set[GridCoord]]:
-    """Split a same-item cluster into the groups that should actually be
-    merged together in one action.
+def _is_connected(coords: set[GridCoord]) -> bool:
+    """Whether every coordinate in `coords` is reachable from any other via
+    a chain of 4-adjacent steps that stay within `coords`."""
+    if not coords:
+        return True
+    start = next(iter(coords))
+    seen = {start}
+    stack = [start]
+    while stack:
+        x, y = stack.pop()
+        for dx, dy in NEIGHBOR_OFFSETS:
+            neighbor = (x + dx, y + dy)
+            if neighbor in coords and neighbor not in seen:
+                seen.add(neighbor)
+                stack.append(neighbor)
+    return seen == coords
 
-    With `prefer_five`, greedily carve off groups of exactly 5 (yields 2 of
-    the next tier instead of 1 -- see game-mechanics.md), then merge
-    whatever's left over as a single group if it's 3+ (still a valid
-    merge), or leave it ungrouped (returned groups never include it) if
-    it's only 1-2 -- not enough to merge yet, wait for more to land there.
-    This never leaves an unmerged run of 6+: a cluster of 6 becomes one
-    group of 5 plus a leftover singleton, not one wasteful group of 6.
 
-    Without `prefer_five`, the whole cluster is returned as a single group
-    (standard merge-3+ behavior) as long as it has at least 3 members.
-
-    NOTE: this assumes the bot can choose exactly which subset of a
-    connected cluster to merge in one action. If merging instead
-    auto-cascades the *entire* connected cluster the moment two items
-    touch, this planning has to happen proactively (merge the moment a
-    cluster hits 5) rather than as a selective split after the fact --
-    unconfirmed, see docs/automation-methodology.md.
+def find_removable_member(cluster: set[GridCoord]) -> GridCoord | None:
+    """One coordinate in `cluster` whose removal leaves the rest still a
+    single connected component -- i.e. safe to relocate away from an
+    over-sized cluster without splitting what remains. Every connected
+    cluster of 2+ members has at least one such coordinate (a leaf of any
+    spanning tree), so this only returns None for a cluster of 0 or 1
+    members, where there's nothing meaningful to remove anyway.
     """
-    if len(cluster) < 3:
-        return []
+    if len(cluster) <= 1:
+        return None
+    for candidate in cluster:
+        if _is_connected(cluster - {candidate}):
+            return candidate
+    return None  # unreachable for a genuinely connected cluster
 
-    if not prefer_five:
-        return [set(cluster)]
 
-    remaining = list(cluster)
-    groups: list[set[GridCoord]] = []
-    while len(remaining) >= 5:
-        groups.append(set(remaining[:5]))
-        remaining = remaining[5:]
-    if len(remaining) >= 3:
-        groups.append(set(remaining))
-    return groups
+def _empty_neighbor(board: BoardGrid, cluster: set[GridCoord]) -> GridCoord | None:
+    """A confirmed-EMPTY cell adjacent to some member of `cluster` -- where
+    a same-item cell could be relocated to join the cluster."""
+    for x, y in cluster:
+        for dx, dy in NEIGHBOR_OFFSETS:
+            neighbor = (x + dx, y + dy)
+            if neighbor in cluster:
+                continue
+            cell = board.get_cell(neighbor)
+            if cell is not None and cell.kind is CellKind.EMPTY:
+                return neighbor
+    return None
+
+
+def _isolated_empty_cell(board: BoardGrid, avoid_adjacent_to: set[GridCoord]) -> GridCoord | None:
+    """A confirmed-EMPTY cell not adjacent to any coordinate in
+    `avoid_adjacent_to` -- where an item can be relocated to *without*
+    immediately re-joining that group."""
+    for coord in board.find_empty():
+        x, y = coord
+        neighbors = {(x + dx, y + dy) for dx, dy in NEIGHBOR_OFFSETS}
+        if neighbors.isdisjoint(avoid_adjacent_to):
+            return coord
+    return None
+
+
+class MergeActionKind(Enum):
+    # An exactly-target-sized cluster is ready -- drag one member onto an
+    # adjacent one to collapse the whole thing into the next tier.
+    TRIGGER = auto()
+    # A cluster is bigger than the target size (only possible with
+    # `prefer_five`, since merging *auto-consumes every connected same-tier
+    # cell*, not just however many were intended -- confirmed live: a
+    # 6-cluster merge only credits 5-worth of upgrade, wasting the 6th).
+    # Relocate one member away to shrink it back to exactly the target
+    # before triggering.
+    DEGROUP = auto()
+    # Not enough of this item are touching yet to reach the target size,
+    # but enough exist somewhere on the board -- relocate one same-item
+    # cell to grow the largest existing cluster by one.
+    GATHER = auto()
+
+
+@dataclass(frozen=True)
+class MergeAction:
+    kind: MergeActionKind
+    item: ItemRef
+    start: GridCoord  # cell to drag from
+    end: GridCoord  # cell to drag to
+    # Cells that merge away entirely -- only populated for TRIGGER, where
+    # every member of the cluster is consumed by the merge.
+    cluster: frozenset[GridCoord] = frozenset()
+
+
+def plan_merge_action(
+    board: BoardGrid, item: ItemRef, *, prefer_five: bool
+) -> MergeAction | None:
+    """The single next best action toward merging `item`, or None if
+    there's nothing productive to do for it right now (not enough on the
+    board yet, or no room to relocate anything). Re-derived fresh from
+    `board` every call -- there's no persistent multi-step plan, since a
+    drag can relocate an item to any cell in one action regardless of
+    distance, so the number of actions needed to complete a merge doesn't
+    depend on *which* available item is chosen at each step.
+
+    With `prefer_five`, only ever targets clusters of exactly 5 -- never
+    settles for 3/4, same as before (waiting for a 5th is what avoids ever
+    needing to split a cluster after the fact).
+    """
+    target = 5 if prefer_five else 3
+    clusters = board.find_clusters(item)
+    if not clusters:
+        return None
+
+    for cluster in clusters:
+        if len(cluster) == target:
+            pair = adjacent_pair(cluster)
+            if pair is not None:
+                start, end = pair
+                return MergeAction(MergeActionKind.TRIGGER, item, start, end, frozenset(cluster))
+
+    for cluster in clusters:
+        if len(cluster) > target:
+            donor = find_removable_member(cluster)
+            if donor is None:
+                continue
+            destination = _isolated_empty_cell(board, cluster - {donor})
+            if destination is not None:
+                return MergeAction(MergeActionKind.DEGROUP, item, donor, destination)
+
+    if sum(len(c) for c in clusters) < target:
+        return None
+    for seed in sorted(clusters, key=len, reverse=True):
+        if len(seed) >= target:
+            continue
+        destination = _empty_neighbor(board, seed)
+        if destination is None:
+            continue
+        donor_cluster = next((c for c in clusters if c is not seed), None)
+        if donor_cluster is None:
+            continue
+        donor = next(iter(donor_cluster))
+        return MergeAction(MergeActionKind.GATHER, item, donor, destination)
+    return None

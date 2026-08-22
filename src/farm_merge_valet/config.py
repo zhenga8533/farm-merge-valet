@@ -57,8 +57,24 @@ class Settings(BaseSettings):
     # Missing this check has real cost (the bot keeps hammering supply
     # crate clicks with nowhere for them to go -- confirmed live), so
     # erring toward catching a real banner matters more here than for
-    # item/background matching generally.
+    # item/background matching generally. Only actually used as a
+    # fallback now -- see `crate_click_batch_size` below -- since the
+    # banner turned out unreliable (confirmed live: it didn't appear even
+    # once across dozens of crate clicks against a genuinely full board)
+    # once a much better signal was available: `BoardGrid.find_empty()`
+    # on the live-synced board (see `cdp/board_store.py`) directly
+    # answers "is there anywhere left to spawn an item" from the game's
+    # own data, no vision involved.
     need_space_confidence: float = 0.8
+
+    # How many supply-crate clicks `Bot._step_claim_crates` fires off
+    # before re-syncing the live board state to check whether it's full.
+    # Each click is already a real action with its own settle delay: the
+    # live-state check itself is cheap (a couple of CDP round trips, not
+    # a vision scan), so this exists purely to spend fewer of those round
+    # trips during a long burst of genuinely productive clicks, not
+    # because checking every time is expensive.
+    crate_click_batch_size: int = 10
 
     # Board scanning checks "is this cell occupied?" (matched against a
     # handful of background tile templates, see

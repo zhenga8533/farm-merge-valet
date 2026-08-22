@@ -23,7 +23,16 @@ from farm_merge_valet.capture.window import WindowActivationError, WindowRegion,
 from farm_merge_valet.cdp.board_store import arm_board_store, read_board_state
 from farm_merge_valet.cdp.client import CdpConnectionError, read_camera_data
 from farm_merge_valet.config import settings
-from farm_merge_valet.core.board import BoardGrid, Cell, CellKind, GridCoord, ItemRef, adjacent_pair
+from farm_merge_valet.core.board import (
+    BoardGrid,
+    Cell,
+    CellKind,
+    GridCoord,
+    ItemRef,
+    MergeAction,
+    MergeActionKind,
+    plan_merge_action,
+)
 from farm_merge_valet.core.board_map import BoardMap, load_board_map
 from farm_merge_valet.core.board_scan import (
     discover_background_templates,
@@ -337,45 +346,68 @@ class Bot:
         )
         return (int(origin_pixel[0] + dx), int(origin_pixel[1] + dy))
 
+    # Actions are chosen in this order across every item type present:
+    # complete a ready merge before fixing an over-sized cluster, and fix
+    # that before spending a step just gathering toward a future merge --
+    # see `core/board.plan_merge_action`.
+    _MERGE_ACTION_PRIORITY = {
+        MergeActionKind.TRIGGER: 0,
+        MergeActionKind.DEGROUP: 1,
+        MergeActionKind.GATHER: 2,
+    }
+
     def _try_merge(self, region: WindowRegion) -> bool:
-        """Find one actionable cluster and merge it. Returns whether an
-        action was taken.
-
-        NOTE: assumes merging cascades -- dragging one cluster member onto
-        an adjacent same-item member merges the *entire* connected cluster
-        at once, not just the two dragged tiles. This is unconfirmed (see
-        docs/automation-methodology.md); if merging turns out to be
-        selective instead, a cluster bigger than the target size needs to
-        be worked down via repeated smaller merges rather than one drag
-        consuming everything connected.
-        """
-        for item in self.board.items_present():
-            prefer_five = self._prefers_five(item)
-            for cluster in self.board.find_clusters(item):
-                if len(cluster) < 3:
-                    continue
-                # Merging fewer than 5 wastes the merge-5 bonus, and
-                # waiting here (rather than merging the 3-4 now) is what
-                # keeps the cluster from ever needing to be split -- it
-                # either reaches 5 and gets merged then, or stays smaller
-                # and just sits there until it does.
-                if prefer_five and len(cluster) < 5:
-                    continue
-                if self._merge_cluster(region, item, cluster):
-                    return True
-        return False
-
-    def _merge_cluster(self, region: WindowRegion, item: ItemRef, cluster: set[GridCoord]) -> bool:
-        pair = adjacent_pair(cluster)
-        if pair is None:
+        """Plan the best next action for every item type present, and
+        execute the single highest-priority one. Returns whether an
+        action was taken."""
+        actions = [
+            action
+            for item in self.board.items_present()
+            if (
+                action := plan_merge_action(
+                    self.board, item, prefer_five=self._prefers_five(item)
+                )
+            )
+            is not None
+        ]
+        if not actions:
             return False
-        start, end = pair
-        logger.info(
-            "Merging %d x %s (%s tier %d)", len(cluster), item.name, item.category, item.tier
-        )
-        drag(region, self._grid_to_pixel(start), self._grid_to_pixel(end))
-        for coord in cluster:
-            self.board.clear_cell(coord)
+        best = min(actions, key=lambda a: self._MERGE_ACTION_PRIORITY[a.kind])
+        return self._execute_merge_action(region, best)
+
+    def _execute_merge_action(self, region: WindowRegion, action: MergeAction) -> bool:
+        item = action.item
+        if action.kind is MergeActionKind.TRIGGER:
+            logger.info(
+                "Merging %d x %s (%s tier %d)",
+                len(action.cluster),
+                item.name,
+                item.category,
+                item.tier,
+            )
+        elif action.kind is MergeActionKind.DEGROUP:
+            logger.info(
+                "Degrouping 1 x %s (%s tier %d) to avoid an over-sized merge",
+                item.name,
+                item.category,
+                item.tier,
+            )
+        else:
+            logger.info(
+                "Gathering 1 x %s (%s tier %d) toward a merge", item.name, item.category, item.tier
+            )
+        drag(region, self._grid_to_pixel(action.start), self._grid_to_pixel(action.end))
+        if action.kind is MergeActionKind.TRIGGER:
+            for coord in action.cluster:
+                self.board.clear_cell(coord)
+        else:
+            # A relocation, not a merge -- both the vacated source and the
+            # (now possibly wrong) destination need re-observing rather
+            # than assumed; live-state sync (see `step`) does that fresh
+            # next step regardless, this only matters for the vision
+            # fallback's own persistent board.
+            self.board.clear_cell(action.start)
+            self.board.clear_cell(action.end)
         self.stats.actions_taken += 1
         return True
 
@@ -418,10 +450,7 @@ class Bot:
             if self._calibration is not None and not live_synced:
                 self._scan_board(frame, self._calibration)
 
-        board_full = (
-            find_best_match(frame, self._need_space_template_scaled, settings.need_space_confidence)
-            is not None
-        )
+        board_full = self._is_board_full(frame, live_synced=live_synced)
 
         if self.phase is Phase.CLAIM_CRATES:
             self._step_claim_crates(region, frame, board_full=board_full)
@@ -429,6 +458,25 @@ class Bot:
             self._step_merge(region, board_full=board_full)
 
         self.stats.iterations += 1
+
+    def _is_board_full(self, frame: np.ndarray, *, live_synced: bool) -> bool:
+        """Whether there's anywhere left for a crate to spawn something.
+
+        With live state synced, this is the game's own truth --
+        `self.board` was just replaced wholesale from it, so "no EMPTY
+        cell anywhere known" really does mean full. Falls back to the
+        on-screen "Need more empty space!" banner otherwise -- confirmed
+        live to be unreliable on its own (it never appeared even once
+        across dozens of crate clicks against a genuinely full board),
+        which is exactly why the live-state check is preferred whenever
+        it's available.
+        """
+        if live_synced:
+            return not self.board.find_empty()
+        return (
+            find_best_match(frame, self._need_space_template_scaled, settings.need_space_confidence)
+            is not None
+        )
 
     # Between crate clicks, just long enough for the game to register the
     # click and update the crate/space state before the next capture --
@@ -455,6 +503,7 @@ class Bot:
             self._set_phase(Phase.MERGE)
             return
 
+        clicks_since_check = 0
         for _ in range(self._MAX_CRATE_CLICKS_PER_STEP):
             match = find_best_match(
                 frame, self._supply_crate_template_scaled, settings.match_confidence
@@ -465,12 +514,14 @@ class Bot:
             click(region, *match.center)
             self.stats.actions_taken += 1
             time.sleep(self._CRATE_CLICK_SETTLE)
+            clicks_since_check += 1
 
             frame = capture_region(region)
-            need_space = find_best_match(
-                frame, self._need_space_template_scaled, settings.need_space_confidence
-            )
-            if need_space is not None:
+            if clicks_since_check < settings.crate_click_batch_size:
+                continue
+            clicks_since_check = 0
+            live_synced = self._sync_board_from_live_state()
+            if self._is_board_full(frame, live_synced=live_synced):
                 logger.warning("Board is full; switching to merge phase.")
                 self._set_phase(Phase.MERGE)
                 return
