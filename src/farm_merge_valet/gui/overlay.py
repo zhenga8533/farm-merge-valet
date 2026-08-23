@@ -27,9 +27,10 @@ import ctypes
 import logging
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QApplication, QMainWindow, QPlainTextEdit, QTabWidget
 
 from farm_merge_valet.config import settings
@@ -43,6 +44,48 @@ _MAX_LOG_LINES = 2000
 _GWL_EXSTYLE = -20
 _WS_EX_LAYERED = 0x00080000
 _WS_EX_TRANSPARENT = 0x00000020
+
+
+@dataclass(frozen=True)
+class _LogLevelStyle:
+    foreground: str
+    bold: bool = False
+    background: str | None = None
+
+
+_DEFAULT_LOG_STYLE = _LogLevelStyle("#e0e0e0")
+_LOG_LEVEL_STYLES = {
+    logging.NOTSET: _LogLevelStyle("gray"),
+    logging.DEBUG: _LogLevelStyle("green"),
+    logging.INFO: _LogLevelStyle("blue"),
+    logging.WARNING: _LogLevelStyle("yellow"),
+    logging.ERROR: _LogLevelStyle("red", bold=True),
+    logging.CRITICAL: _LogLevelStyle("#e0e0e0", bold=True, background="red"),
+}
+
+
+def _log_level_style(levelno: int) -> _LogLevelStyle:
+    if levelno >= logging.CRITICAL:
+        return _LOG_LEVEL_STYLES[logging.CRITICAL]
+    if levelno >= logging.ERROR:
+        return _LOG_LEVEL_STYLES[logging.ERROR]
+    if levelno >= logging.WARNING:
+        return _LOG_LEVEL_STYLES[logging.WARNING]
+    if levelno >= logging.INFO:
+        return _LOG_LEVEL_STYLES[logging.INFO]
+    if levelno >= logging.DEBUG:
+        return _LOG_LEVEL_STYLES[logging.DEBUG]
+    return _LOG_LEVEL_STYLES[logging.NOTSET]
+
+
+def _text_format(style: _LogLevelStyle) -> QTextCharFormat:
+    text_format = QTextCharFormat()
+    text_format.setForeground(QColor(style.foreground))
+    if style.bold:
+        text_format.setFontWeight(QFont.Weight.Bold)
+    if style.background is not None:
+        text_format.setBackground(QColor(style.background))
+    return text_format
 
 
 def _set_click_through(hwnd: int, enabled: bool) -> None:
@@ -61,7 +104,7 @@ class _LogBridge(QObject):
     them, but a cross-thread signal emission queues onto that thread
     safely."""
 
-    new_line = Signal(str)
+    new_record = Signal(str, str, str, int)
 
 
 class _AppBridge(QObject):
@@ -69,8 +112,7 @@ class _AppBridge(QObject):
 
 
 class QtLogHandler(logging.Handler):
-    """A `logging.Handler` that forwards formatted records to the overlay
-    window's log tab, via `_LogBridge` for thread safety."""
+    """Forward structured log records to the overlay's Qt thread."""
 
     def __init__(self, bridge: _LogBridge) -> None:
         super().__init__()
@@ -79,9 +121,12 @@ class QtLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             message = self.format(record)
+            formatter = self.formatter or logging.Formatter()
+            timestamp = formatter.formatTime(record, "%H:%M:%S")
         except Exception:
             message = record.getMessage()
-        self._bridge.new_line.emit(message)
+            timestamp = "--:--:--"
+        self._bridge.new_record.emit(timestamp, record.levelname, message, record.levelno)
 
 
 class OverlayWindow(QMainWindow):
@@ -148,8 +193,19 @@ class OverlayWindow(QMainWindow):
         if event.type() == QEvent.Type.ActivationChange:
             self._update_click_through()
 
-    def append_log(self, message: str) -> None:
-        self.log_view.appendPlainText(message)
+    def append_log(self, timestamp: str, level_name: str, message: str, levelno: int) -> None:
+        cursor = self.log_view.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        if not self.log_view.document().isEmpty():
+            cursor.insertBlock()
+
+        timestamp_format = QTextCharFormat()
+        timestamp_format.setForeground(QColor("darkCyan"))
+        cursor.insertText(f"[{timestamp}] ", timestamp_format)
+        cursor.insertText(f"{level_name:<8}", _text_format(_log_level_style(levelno)))
+        cursor.insertText(f" {message}", _text_format(_DEFAULT_LOG_STYLE))
+        self.log_view.setTextCursor(cursor)
+        self.log_view.ensureCursorVisible()
 
 
 def run_overlay(run_bot: Callable[[], None], stop_bot: Callable[[], None]) -> int:
@@ -162,9 +218,9 @@ def run_overlay(run_bot: Callable[[], None], stop_bot: Callable[[], None]) -> in
     window = OverlayWindow()
 
     log_bridge = _LogBridge()
-    log_bridge.new_line.connect(window.append_log)
+    log_bridge.new_record.connect(window.append_log)
     handler = QtLogHandler(log_bridge)
-    handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", "%H:%M:%S"))
+    handler.setFormatter(logging.Formatter("%(message)s"))
     root_logger = logging.getLogger()
     root_logger.addHandler(handler)
 

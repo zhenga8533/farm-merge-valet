@@ -13,7 +13,7 @@ Early, usable automation for the crate-and-merge loop:
 - reads board contents and render geometry from the live game iframe via CDP;
 - claims supply crates while preserving space for merge rearrangements;
 - plans and performs merge-3 or merge-5 actions, including regrouping items;
-- exposes global pause/quit hotkeys and an optional log overlay.
+- exposes global pause/quit hotkeys and an optional color-coded log overlay.
 
 Order fulfillment, product collection, obstacle clearing, visits, and other
 gameplay phases are not implemented yet. See

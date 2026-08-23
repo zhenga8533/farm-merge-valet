@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from farm_merge_valet.gui import overlay
 
 
@@ -37,7 +39,9 @@ def test_run_overlay_keeps_qt_in_caller_and_bot_in_worker(monkeypatch) -> None:
             return app
 
     class FakeWindow:
-        def append_log(self, _message: str) -> None:
+        def append_log(
+            self, _timestamp: str, _level_name: str, _message: str, _levelno: int
+        ) -> None:
             pass
 
         def show(self) -> None:
@@ -48,7 +52,7 @@ def test_run_overlay_keeps_qt_in_caller_and_bot_in_worker(monkeypatch) -> None:
 
     class FakeLogBridge:
         def __init__(self) -> None:
-            self.new_line = _Signal()
+            self.new_record = _Signal()
 
     class FakeAppBridge:
         def __init__(self) -> None:
@@ -91,3 +95,33 @@ def test_run_overlay_keeps_qt_in_caller_and_bot_in_worker(monkeypatch) -> None:
     assert events.index("worker-start") < events.index("qt-exec")
     assert "bot-run" in events
     assert events[-2:] == ["bot-stop", "worker-join"]
+
+
+def test_log_handler_forwards_structured_level_information() -> None:
+    class Bridge:
+        def __init__(self) -> None:
+            self.new_record = _Signal()
+
+    bridge = Bridge()
+    received = []
+    bridge.new_record.connect(lambda *parts: received.append(parts))
+    handler = overlay.QtLogHandler(bridge)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    record = logging.LogRecord("test", logging.WARNING, "", 0, "Watch out", (), None)
+    record.created = 0
+
+    handler.emit(record)
+
+    assert len(received) == 1
+    assert received[0][1:] == ("WARNING", "Watch out", logging.WARNING)
+
+
+def test_gui_log_level_styles_match_rich_level_semantics() -> None:
+    assert overlay._log_level_style(logging.NOTSET).foreground == "gray"
+    assert overlay._log_level_style(logging.DEBUG).foreground == "green"
+    assert overlay._log_level_style(logging.INFO).foreground == "blue"
+    assert overlay._log_level_style(logging.WARNING).foreground == "yellow"
+    assert overlay._log_level_style(logging.ERROR) == overlay._LogLevelStyle("red", bold=True)
+    assert overlay._log_level_style(logging.CRITICAL) == overlay._LogLevelStyle(
+        "#e0e0e0", bold=True, background="red"
+    )
