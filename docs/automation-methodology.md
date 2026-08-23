@@ -93,8 +93,8 @@ These phases are not implemented yet:
   require template extraction or adapter changes. The game iframe is paired
   with its owning Reddit tab through CDP; ambiguous matching tabs are rejected.
 - **Safety:** the bot reactivates the target window before each screen-based
-  action, supports global pause/quit hotkeys, and leaves PyAutoGUI's corner
-  fail-safe enabled.
+  action, gives signal-only global pause/quit hotkeys priority over pending
+  waits and future inputs, and leaves PyAutoGUI's corner fail-safe enabled.
 
 ## Viewport safety layout
 

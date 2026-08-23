@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from threading import Event
+
 import numpy as np
 
 from farm_merge_valet.capture.window import WindowRegion
@@ -14,6 +16,8 @@ def _bare_bot() -> Bot:
     bot.phase = Phase.CLAIM_CRATES
     bot.paused = False
     bot._quit_requested = False
+    bot._interrupt_event = Event()
+    bot._resume_requested = Event()
     return bot
 
 
@@ -51,9 +55,9 @@ def test_initialize_discards_live_references(monkeypatch) -> None:
     bot._board_store_armed = True
     bot._last_board_store_status = "found"
     bot._scene_calibration = object()
-    monkeypatch.setattr("farm_merge_valet.core.bot.initialize_environment", lambda: None)
+    monkeypatch.setattr("farm_merge_valet.core.bot.initialize_environment", lambda _event: True)
 
-    bot.initialize()
+    assert bot.initialize()
 
     assert not bot._board_store_armed
     assert bot._last_board_store_status is None
@@ -196,7 +200,7 @@ def test_run_forever_retries_when_target_window_is_temporarily_missing(monkeypat
         bot._quit_requested = True
 
     bot.step = step
-    bot.initialize = lambda: None
+    bot.initialize = lambda: True
     monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.add_hotkey", lambda *_args: None)
     monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.unhook_all", lambda: None)
     monkeypatch.setattr("farm_merge_valet.core.bot.time.sleep", lambda _seconds: None)
@@ -207,28 +211,53 @@ def test_run_forever_retries_when_target_window_is_temporarily_missing(monkeypat
     assert attempts == 2
 
 
-def test_resume_stays_paused_when_window_is_missing() -> None:
+def test_resume_hotkey_only_signals_the_main_loop() -> None:
     bot = _bare_bot()
     bot.paused = True
+    bot._interrupt_event.set()
 
-    def missing_window() -> None:
-        raise LookupError("window missing")
-
-    bot.initialize = missing_window
+    bot.initialize = lambda: (_ for _ in ()).throw(AssertionError("must not run in callback"))
     bot._toggle_pause()
 
     assert bot.paused
+    assert bot._resume_requested.is_set()
+
+
+def test_second_pause_press_cancels_pending_resume() -> None:
+    bot = _bare_bot()
+    bot.paused = True
+    bot._interrupt_event.set()
+
+    bot._toggle_pause()
+    bot._toggle_pause()
+
+    assert bot.paused
+    assert not bot._resume_requested.is_set()
+
+
+def test_quit_interrupts_actions_and_cancels_resume() -> None:
+    bot = _bare_bot()
+    bot.paused = True
+    bot._resume_requested.set()
+
+    bot.request_quit()
+
+    assert bot._quit_requested
+    assert bot.paused
+    assert bot._interrupt_event.is_set()
+    assert not bot._resume_requested.is_set()
 
 
 def test_run_forever_retries_initialization_when_window_is_missing(monkeypatch) -> None:
     bot = _bare_bot()
     initialization_attempts = 0
 
-    def initialize() -> None:
+    def initialize() -> bool:
         nonlocal initialization_attempts
         initialization_attempts += 1
         if initialization_attempts == 1:
             raise LookupError("window missing")
+        return True
 
     bot.initialize = initialize
     bot.step = lambda: bot.request_quit()

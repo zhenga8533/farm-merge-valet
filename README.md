@@ -73,6 +73,9 @@ farm-merge-valet run
 `run` starts paused by default. Press the configured pause hotkey (`F9` by
 default) to enter Chrome F11 mode, expand Reddit's game view, normalize the
 camera, and begin. Press it again to pause. The default quit hotkey is `F10`.
+Hotkey callbacks only signal the bot, so they are not blocked by CDP reads or
+environment setup. Pause and quit cancel pending waits and stop before the next
+input; a mouse gesture already underway may take up to 0.3 seconds to finish.
 
 Template assets can be refreshed from a browser network capture:
 

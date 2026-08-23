@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import time
+from threading import Event
 
 from farm_merge_valet.actions.input import drag, press, scroll
 from farm_merge_valet.capture.window import WindowRegion, find_window
@@ -35,7 +36,7 @@ _SCROLL_TO_BOTTOM_REPEATS = 5
 _PAN_DISTANCE_RATIO = 0.28
 
 
-def zoom_out_fully(region: WindowRegion) -> None:
+def zoom_out_fully(region: WindowRegion, stop_event: Event | None = None) -> bool:
     """Zoom out to the game's own minimum zoom via repeated mouse-wheel
     scrolls down -- `scroll()`'s pyautogui convention is that negative
     `clicks` is a downward scroll, confirmed empirically to zoom out
@@ -43,11 +44,24 @@ def zoom_out_fully(region: WindowRegion) -> None:
     more than one call."""
     cx, cy = region.width // 2, region.height // 2
     for _ in range(_ZOOM_OUT_REPEATS):
+        if stop_event is not None and stop_event.is_set():
+            return False
         scroll(region, cx, cy, _ZOOM_OUT_CLICKS)
-        time.sleep(_SETTLE_DELAY)
+        if stop_event is not None:
+            if stop_event.wait(_SETTLE_DELAY):
+                return False
+        else:
+            time.sleep(_SETTLE_DELAY)
+    return True
 
 
-def pan(region: WindowRegion, *, toward_bottom: bool, repeats: int = 1) -> None:
+def pan(
+    region: WindowRegion,
+    *,
+    toward_bottom: bool,
+    repeats: int = 1,
+    stop_event: Event | None = None,
+) -> bool:
     """One or more pan gestures in the viewport's dedicated right-side lane.
 
     `toward_bottom` picks the drag direction: confirmed empirically
@@ -59,49 +73,78 @@ def pan(region: WindowRegion, *, toward_bottom: bool, repeats: int = 1) -> None:
     distance = min(round(region.height * _PAN_DISTANCE_RATIO), cy, region.height - 1 - cy)
     start, end = (cy - distance, cy + distance) if toward_bottom else (cy + distance, cy - distance)
     for _ in range(repeats):
+        if stop_event is not None and stop_event.is_set():
+            return False
         drag(region, (x, start), (x, end), duration=0.15)
+    if stop_event is not None:
+        return not stop_event.wait(_SETTLE_DELAY)
     time.sleep(_SETTLE_DELAY)
+    return True
 
 
-def scroll_to_bottom(region: WindowRegion) -> None:
+def scroll_to_bottom(region: WindowRegion, stop_event: Event | None = None) -> bool:
     """Pan the view down to the bottom of the board -- its fixed starting
     area (see module docstring)."""
-    pan(region, toward_bottom=True, repeats=_SCROLL_TO_BOTTOM_REPEATS)
+    return pan(
+        region,
+        toward_bottom=True,
+        repeats=_SCROLL_TO_BOTTOM_REPEATS,
+        stop_event=stop_event,
+    )
 
 
-def ensure_reddit_fullscreen() -> WindowRegion:
+def ensure_reddit_fullscreen(stop_event: Event | None = None) -> WindowRegion | None:
     """Idempotently enable Chrome F11 mode and Reddit's expanded game view."""
+    if stop_event is not None and stop_event.is_set():
+        return None
     state = read_fullscreen_state(settings.cdp_port, settings.window_title)
     if state is None:
         raise CdpConnectionError("Could not read Reddit fullscreen state.")
+    if stop_event is not None and stop_event.is_set():
+        return None
 
     if not state.browser_fullscreen:
         logger.info("Entering Chrome fullscreen mode.")
         press("f11")
-        time.sleep(_FULLSCREEN_SETTLE_DELAY)
+        if stop_event is not None:
+            if stop_event.wait(_FULLSCREEN_SETTLE_DELAY):
+                return None
+        else:
+            time.sleep(_FULLSCREEN_SETTLE_DELAY)
         find_window(settings.window_title)
 
+    if stop_event is not None and stop_event.is_set():
+        return None
     result = expand_game(settings.cdp_port, settings.window_title)
     if result == "not-found":
         raise CdpConnectionError("Could not find Reddit's game fullscreen control.")
     if result == "expanded":
         logger.info("Expanding the Reddit game view.")
-        time.sleep(_FULLSCREEN_SETTLE_DELAY)
+        if stop_event is not None:
+            if stop_event.wait(_FULLSCREEN_SETTLE_DELAY):
+                return None
+        else:
+            time.sleep(_FULLSCREEN_SETTLE_DELAY)
 
+    if stop_event is not None and stop_event.is_set():
+        return None
     verified = read_fullscreen_state(settings.cdp_port, settings.window_title)
     if verified is None or not verified.browser_fullscreen or verified.game_expanded is not True:
         raise CdpConnectionError("Reddit/Chrome fullscreen initialization did not complete.")
+    if stop_event is not None and stop_event.is_set():
+        return None
     return find_window(settings.window_title)
 
 
-def initialize_environment() -> None:
+def initialize_environment(stop_event: Event | None = None) -> bool:
     """Force the game into a known, stable state: fully zoomed out, panned
     to the bottom of the board. Zoom is settled first, since zooming can
     itself shift the visible area (typically toward the zoom center),
     which would undo a scroll done beforehand.
     """
     logger.info("Initializing Reddit/Chrome fullscreen environment.")
-    region = ensure_reddit_fullscreen()
+    region = ensure_reddit_fullscreen(stop_event)
+    if region is None:
+        return False
     logger.info("Zooming out and scrolling to the board bottom.")
-    zoom_out_fully(region)
-    scroll_to_bottom(region)
+    return zoom_out_fully(region, stop_event) and scroll_to_bottom(region, stop_event)

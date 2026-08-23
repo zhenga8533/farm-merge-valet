@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from enum import Enum, auto
+from threading import Event
 
 import keyboard
 import numpy as np
@@ -78,6 +79,8 @@ class Bot:
         self._merge_five_overrides = merge_five_overrides or {}
         self.paused = False
         self._quit_requested = False
+        self._interrupt_event = Event()
+        self._resume_requested = Event()
         self.phase = Phase.CLAIM_CRATES
         # Fixed UI templates are matched directly across plausible scales.
         self._supply_crate_template = load_template(
@@ -100,14 +103,16 @@ class Bot:
             logger.info("Phase %s -> %s", self.phase.name, phase.name)
             self.phase = phase
 
-    def initialize(self) -> None:
+    def initialize(self) -> bool:
         """Normalize the view and discard board knowledge from before a
         startup or pause. Blocking; takes a few seconds."""
-        initialize_environment()
+        if not initialize_environment(self._interrupt_event):
+            return False
         self.board = BoardGrid()
         self._board_store_armed = False
         self._last_board_store_status = None
         self._scene_calibration = None
+        return True
 
     def _refresh_calibration(self, region: WindowRegion) -> None:
         """Recompute `_scene_calibration` for the current frame -- see its
@@ -273,7 +278,13 @@ class Bot:
             elif best_distance is not None and distance >= best_distance:
                 toward_bottom = not toward_bottom
             best_distance = distance
-            pan(region, toward_bottom=toward_bottom, repeats=1)
+            if not pan(
+                region,
+                toward_bottom=toward_bottom,
+                repeats=1,
+                stop_event=self._interrupt_event,
+            ):
+                return False
         logger.warning(
             "Could not scroll %s into view within %d attempts.",
             target,
@@ -282,6 +293,8 @@ class Bot:
         return False
 
     def _execute_merge_action(self, region: WindowRegion, action: MergeAction) -> bool:
+        if self._interrupt_event.is_set():
+            return False
         item = action.item
         if action.kind is MergeActionKind.TRIGGER:
             logger.info(
@@ -429,7 +442,8 @@ class Bot:
                     return
                 click(region, *match.center)
                 total_clicks += 1
-                time.sleep(settings.crate_click_settle)
+                if self._interrupt_event.wait(settings.crate_click_settle):
+                    return
                 if total_clicks >= self._MAX_CRATE_CLICKS_PER_STEP:
                     break
 
@@ -469,22 +483,24 @@ class Bot:
 
     def _toggle_pause(self) -> None:
         if self.paused:
-            # Reinitialize while paused so no step can use pre-pause board state.
-            logger.warning("Resuming (hotkey) -- re-initializing environment.")
-            try:
-                self.initialize()
-            except (CdpConnectionError, LookupError, WindowActivationError) as exc:
-                logger.warning("%s Still paused; press the resume hotkey to retry.", exc)
-                return
-            self.paused = False
-            logger.warning("Resumed")
+            if self._resume_requested.is_set():
+                self._resume_requested.clear()
+                logger.warning("Resume canceled (hotkey)")
+            else:
+                self._resume_requested.set()
+                logger.warning("Resume requested (hotkey)")
         else:
             self.paused = True
+            self._interrupt_event.set()
+            self._resume_requested.clear()
             logger.warning("Paused (hotkey)")
 
     def request_quit(self) -> None:
         logger.warning("Quit requested (hotkey)")
         self._quit_requested = True
+        self.paused = True
+        self._interrupt_event.set()
+        self._resume_requested.clear()
 
     def run_forever(self) -> None:
         # Global hotkeys remain reachable while Chrome has focus. If OS hook
@@ -506,6 +522,7 @@ class Bot:
         needs_initialization = not settings.start_paused
         if settings.start_paused:
             self.paused = True
+            self._interrupt_event.set()
             logger.warning(
                 "Starting paused -- press %s to begin (this defers environment "
                 "setup too, so nothing touches the game until then).",
@@ -515,21 +532,42 @@ class Bot:
         try:
             while not self._quit_requested:
                 if self.paused:
+                    if self._resume_requested.is_set():
+                        self._resume_requested.clear()
+                        self._interrupt_event.clear()
+                        self.paused = False
+                        logger.warning("Resuming (hotkey) -- re-initializing environment.")
+                        try:
+                            initialized = self.initialize()
+                        except (CdpConnectionError, LookupError, WindowActivationError) as exc:
+                            logger.warning(
+                                "%s Still paused; press the resume hotkey to retry.", exc
+                            )
+                            initialized = False
+                        if not initialized or self._interrupt_event.is_set():
+                            self.paused = True
+                            self._interrupt_event.set()
+                            continue
+                        needs_initialization = False
+                        logger.warning("Resumed")
+                        continue
                     time.sleep(0.1)
                     continue
                 if needs_initialization:
                     try:
-                        self.initialize()
+                        initialized = self.initialize()
                     except (CdpConnectionError, LookupError, WindowActivationError) as exc:
                         logger.warning("%s Retrying initialization next iteration.", exc)
                         time.sleep(settings.loop_interval)
+                        continue
+                    if not initialized:
                         continue
                     needs_initialization = False
                 try:
                     self.step()
                 except (LookupError, WindowActivationError) as exc:
                     logger.warning("%s Retrying next iteration.", exc)
-                time.sleep(settings.loop_interval)
+                self._interrupt_event.wait(settings.loop_interval)
         except KeyboardInterrupt:
             logger.info("Stopped by user.")
         finally:
