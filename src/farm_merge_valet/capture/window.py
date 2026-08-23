@@ -1,9 +1,4 @@
-"""Locate the host application window that the game is running inside.
-
-The game (Farm Merge Valley) is embedded inside different host apps
-(Discord desktop client, a browser tab, etc.), so we target by window
-title substring rather than assuming a fixed process.
-"""
+"""Locate the Chrome window hosting the Reddit game by title substring."""
 
 from __future__ import annotations
 

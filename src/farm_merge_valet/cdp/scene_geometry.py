@@ -53,6 +53,7 @@ _CELL_POSITIONS_EXPRESSION = """
     // anchor convention, so their center is the real visual center for
     // any sprite/container.
     try { b = cell._content.getBounds(); } catch (e) { continue; }
+    if (!(b.width > 0 && b.height > 0)) continue;
     const x = b.x + b.width / 2;
     const y = b.y + b.height / 2;
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
@@ -105,6 +106,7 @@ class SceneCalibration:
     """Column/row -> OS-window-region-relative pixel mapping, entirely
     derived from live game/browser/window state (see module docstring)."""
 
+    rendered_coords: frozenset[GridCoord]
     origin: Vector  # canvas-internal pixel at grid (0, 0)
     col_step: Vector
     row_step: Vector
@@ -146,7 +148,9 @@ def _fit_grid_affine(points: list[dict]) -> tuple[Vector, Vector, Vector] | None
     return (float(ox), float(oy)), (float(cx), float(cy)), (float(rx), float(ry))
 
 
-def read_scene_calibration(port: int, region: WindowRegion) -> SceneCalibration | None:
+def read_scene_calibration(
+    port: int, region: WindowRegion, page_title: str | None = None
+) -> SceneCalibration | None:
     """Build a `SceneCalibration` from live game/browser/window state.
 
     Returns None (rather than raising) for any of several expected,
@@ -155,7 +159,7 @@ def read_scene_calibration(port: int, region: WindowRegion) -> SceneCalibration 
     geometry from, or either CDP target isn't reachable -- callers should
     just wait and retry next step in all of these cases.
     """
-    cell_data = evaluate(port, _CELL_POSITIONS_EXPRESSION)
+    cell_data = evaluate(port, _CELL_POSITIONS_EXPRESSION, page_title)
     if not isinstance(cell_data, dict) or not cell_data.get("points"):
         return None
     fit = _fit_grid_affine(cell_data["points"])
@@ -163,7 +167,7 @@ def read_scene_calibration(port: int, region: WindowRegion) -> SceneCalibration 
         return None
     origin, col_step, row_step = fit
 
-    iframe_data = evaluate_top_page(port, _IFRAME_RECT_EXPRESSION)
+    iframe_data = evaluate_top_page(port, _IFRAME_RECT_EXPRESSION, page_title)
     if not isinstance(iframe_data, dict):
         return None
 
@@ -186,6 +190,9 @@ def read_scene_calibration(port: int, region: WindowRegion) -> SceneCalibration 
     canvas_scale = (canvas_to_css_x * dpr, canvas_to_css_y * dpr)
 
     return SceneCalibration(
+        rendered_coords=frozenset(
+            (int(point["column"]), int(point["row"])) for point in cell_data["points"]
+        ),
         origin=origin,
         col_step=col_step,
         row_step=row_step,

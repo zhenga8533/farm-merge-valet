@@ -1,9 +1,6 @@
 """A semi-transparent overlay window showing live bot logs.
 
-Runs Qt's event loop on its own background thread, not the main thread
-where `Bot.run_forever()`'s blocking loop and its hotkey callbacks live --
-Qt only requires a `QApplication` and its event loop to share a thread
-with *each other*, not with the rest of the process.
+Qt owns the main thread while the blocking bot loop runs on a worker thread.
 
 `gui_overlay_mode` keeps the window always-on-top *and* click-through by
 default -- ordinary clicks land on whatever's behind it (the game),
@@ -29,6 +26,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import threading
+from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QFont
@@ -64,6 +62,10 @@ class _LogBridge(QObject):
     safely."""
 
     new_line = Signal(str)
+
+
+class _AppBridge(QObject):
+    bot_finished = Signal()
 
 
 class QtLogHandler(logging.Handler):
@@ -150,29 +152,40 @@ class OverlayWindow(QMainWindow):
         self.log_view.appendPlainText(message)
 
 
-def _run(ready: threading.Event) -> None:
+def run_overlay(run_bot: Callable[[], None], stop_bot: Callable[[], None]) -> int:
+    """Run Qt on the main thread and the bot loop on a worker thread.
+
+    Closing the overlay requests a bot stop; a bot-side quit request closes
+    the overlay when the worker exits.
+    """
     app = QApplication.instance() or QApplication([])
     window = OverlayWindow()
 
-    bridge = _LogBridge()
-    bridge.new_line.connect(window.append_log)
-    handler = QtLogHandler(bridge)
+    log_bridge = _LogBridge()
+    log_bridge.new_line.connect(window.append_log)
+    handler = QtLogHandler(log_bridge)
     handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", "%H:%M:%S"))
-    logging.getLogger().addHandler(handler)
+    root_logger = logging.getLogger()
+    root_logger.addHandler(handler)
+
+    app_bridge = _AppBridge()
+    app_bridge.bot_finished.connect(app.quit)
+    app.aboutToQuit.connect(stop_bot)
+
+    def worker() -> None:
+        try:
+            run_bot()
+        finally:
+            app_bridge.bot_finished.emit()
+
+    thread = threading.Thread(target=worker, daemon=True, name="fmv-bot")
 
     window.show()
     window._update_click_through()  # set the initial (inactive) state
-    ready.set()
-    app.exec()
-
-
-def start_overlay() -> threading.Thread:
-    """Launch the overlay window on a background daemon thread (so it
-    doesn't block process exit) and return once it's actually up, so a
-    caller can rely on log messages emitted right after this call
-    appearing in it."""
-    ready = threading.Event()
-    thread = threading.Thread(target=_run, args=(ready,), daemon=True, name="fmv-gui")
     thread.start()
-    ready.wait(timeout=5)
-    return thread
+    try:
+        return app.exec()
+    finally:
+        stop_bot()
+        thread.join(timeout=5)
+        root_logger.removeHandler(handler)

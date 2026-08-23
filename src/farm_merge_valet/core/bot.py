@@ -39,8 +39,9 @@ from farm_merge_valet.core.board_scan import (
     discover_blueprint_items,
 )
 from farm_merge_valet.core.environment import initialize_environment, pan
+from farm_merge_valet.core.viewport import viewport_layout
 from farm_merge_valet.vision.grid import calibrate_grid
-from farm_merge_valet.vision.matcher import find_best_match, load_template
+from farm_merge_valet.vision.matcher import Match, find_best_match, load_template
 
 logger = logging.getLogger(__name__)
 
@@ -52,31 +53,19 @@ _LIVE_STATE_CELL_KIND = {
     "premium_cloud": CellKind.CLOUD,
 }
 
-# Fixed buildings/decoration blueprint IDs observed live -- necessarily
-# incomplete (there's no live signal that distinguishes "permanent
-# building" from "harvested product" the way there is for the markers
-# above). Anything not in this set and not otherwise recognized is
-# assumed to be a transient product (e.g. "egg") rather than a building
-# -- low-consequence if wrong, since PRODUCT cells aren't acted on yet
-# either way; extend this set as new building types are observed.
-_KNOWN_STRUCTURE_BLUEPRINTS = {
-    "bakery",
-    "market",
-    "trainstation",
-    "traintrack_stop",
-    "delivery_truck",
-    "delivery_cargo",
-    "likes_billboard",
+# Structure anchors do not describe their full footprint in the cell map.
+# These observed offsets are relative to each anchor; explicit footprints
+# avoid hiding unrelated empty cells around one-cell structures.
+_TWO_BY_TWO_FOOTPRINT = frozenset({(-1, -1), (0, -1), (-1, 0), (0, 0)})
+_STRUCTURE_FOOTPRINTS = {
+    "bakery": _TWO_BY_TWO_FOOTPRINT,
+    "market": _TWO_BY_TWO_FOOTPRINT,
+    "trainstation": _TWO_BY_TWO_FOOTPRINT,
+    "likes_billboard": _TWO_BY_TWO_FOOTPRINT,
+    "traintrack_stop": frozenset({(0, 0)}),
+    "delivery_truck": frozenset({(0, 0)}),
+    "delivery_cargo": frozenset({(0, 0)}),
 }
-
-# 8-connected (including diagonals) -- used only to detect whether an
-# "empty" cell is actually part of a multi-cell structure's footprint
-# (see `_sync_board_from_live_state`). Merge adjacency elsewhere stays
-# 4-connected (`core.board.NEIGHBOR_OFFSETS`); footprint and
-# merge-touching are different, unrelated relationships.
-_FOOTPRINT_NEIGHBOR_OFFSETS = tuple(
-    (dc, dr) for dc in (-1, 0, 1) for dr in (-1, 0, 1) if (dc, dr) != (0, 0)
-)
 
 
 def _scale_template(template: np.ndarray, scale: float) -> np.ndarray:
@@ -187,7 +176,9 @@ class Bot:
         """Recompute `_scene_calibration` for the current frame -- see its
         docstring in `__init__`."""
         try:
-            self._scene_calibration = read_scene_calibration(settings.cdp_port, region)
+            self._scene_calibration = read_scene_calibration(
+                settings.cdp_port, region, settings.window_title
+            )
         except CdpConnectionError as exc:
             logger.debug("Could not read scene geometry: %s", exc)
             self._scene_calibration = None
@@ -200,14 +191,14 @@ class Bot:
         if self._board_store_armed:
             return
         try:
-            result = arm_board_store(settings.cdp_port)
+            result = arm_board_store(settings.cdp_port, settings.window_title)
         except CdpConnectionError as exc:
             logger.debug("Could not arm live board-state capture: %s", exc)
             return
         if result != self._last_board_store_status:
             logger.info("Live board-state capture: %s", result)
             self._last_board_store_status = result
-        if result in ("patched", "already-captured", "already-patched"):
+        if result.startswith("found") or result == "already-captured":
             self._board_store_armed = True
 
     def _sync_board_from_live_state(self) -> bool:
@@ -217,7 +208,7 @@ class Bot:
         touched) if a live reference hasn't been captured yet.
         """
         try:
-            raw = read_board_state(settings.cdp_port)
+            raw = read_board_state(settings.cdp_port, settings.window_title)
         except CdpConnectionError as exc:
             logger.debug("Could not read live board state: %s", exc)
             return False
@@ -225,7 +216,7 @@ class Bot:
             return False
 
         board = BoardGrid()
-        structure_anchors: set[GridCoord] = set()
+        structure_cells: set[GridCoord] = set()
         empty_coords: set[GridCoord] = set()
 
         for coord, blueprint_id in raw.items():
@@ -242,20 +233,17 @@ class Bot:
             kind = _LIVE_STATE_CELL_KIND.get(blueprint_id)
             if kind is not None:
                 board.set_cell(coord, Cell(kind=kind))
-            elif blueprint_id in _KNOWN_STRUCTURE_BLUEPRINTS:
+            elif footprint := _STRUCTURE_FOOTPRINTS.get(blueprint_id):
                 board.set_cell(coord, Cell(kind=CellKind.STRUCTURE))
-                structure_anchors.add(coord)
+                col, row = coord
+                structure_cells.update((col + dc, row + dr) for dc, dr in footprint)
             else:
                 # Not a known item, marker, or building -- assumed a
                 # transient product (e.g. "egg") waiting to be collected.
                 board.set_cell(coord, Cell(kind=CellKind.PRODUCT))
 
-        # Multi-cell structures expose only one anchor; infer their remaining
-        # footprint from adjacent cells that otherwise report as empty.
         for coord in empty_coords:
-            col, row = coord
-            neighbors = {(col + dc, row + dr) for dc, dr in _FOOTPRINT_NEIGHBOR_OFFSETS}
-            kind = CellKind.STRUCTURE if neighbors & structure_anchors else CellKind.EMPTY
+            kind = CellKind.STRUCTURE if coord in structure_cells else CellKind.EMPTY
             board.set_cell(coord, Cell(kind=kind))
 
         self.board = board
@@ -279,6 +267,18 @@ class Bot:
         MergeActionKind.GATHER: 2,
     }
 
+    def _plan_merge_actions(self) -> list[MergeAction]:
+        return [
+            action
+            for item in self.board.items_present()
+            if (
+                action := plan_merge_action(
+                    self.board, item, prefer_five=self._prefers_five(item)
+                )
+            )
+            is not None
+        ]
+
     def _is_action_visible(self, action: MergeAction, frame_shape: tuple[int, ...]) -> bool:
         """Whether both ends of `action`'s drag land within the currently
         visible, non-UI-chrome region of the captured frame.
@@ -286,13 +286,11 @@ class Bot:
         Live board state includes cells outside the viewport, so both drag
         endpoints must be inside the configured clickable board area.
         """
-        height, _width = frame_shape[:2]
+        height, width = frame_shape[:2]
+        layout = viewport_layout(width, height)
         for coord in (action.start, action.end):
             x, y = self._grid_to_pixel(coord)
-            if not (
-                settings.board_min_pixel_x <= x <= settings.board_max_pixel_x
-                and settings.board_min_pixel_y <= y <= height
-            ):
+            if not layout.is_actionable(x, y):
                 return False
         return True
 
@@ -314,16 +312,7 @@ class Bot:
         candidate so it (or something else) becomes actionable next step.
         Returns whether either kind of action was taken.
         """
-        actions = [
-            action
-            for item in self.board.items_present()
-            if (
-                action := plan_merge_action(
-                    self.board, item, prefer_five=self._prefers_five(item)
-                )
-            )
-            is not None
-        ]
+        actions = self._plan_merge_actions()
         if not actions:
             return False
 
@@ -354,7 +343,7 @@ class Bot:
 
         Returns whether `target` ended up visible.
         """
-        toward_bottom = True
+        toward_bottom: bool | None = None
         best_distance: float | None = None
         for _ in range(self._MAX_SCROLL_ATTEMPTS):
             if self._quit_requested or self.paused:
@@ -364,15 +353,15 @@ class Bot:
                 return False
 
             x, y = self._grid_to_pixel(target)
-            if (
-                settings.board_min_pixel_x <= x <= settings.board_max_pixel_x
-                and settings.board_min_pixel_y <= y <= region.height
-            ):
+            layout = viewport_layout(region.width, region.height)
+            if layout.is_actionable(x, y):
                 return True
 
-            desired_y = (settings.board_min_pixel_y + region.height) / 2
+            desired_y = (layout.board.top + layout.board.bottom) / 2
             distance = abs(y - desired_y)
-            if best_distance is not None and distance >= best_distance:
+            if toward_bottom is None:
+                toward_bottom = y < desired_y
+            elif best_distance is not None and distance >= best_distance:
                 toward_bottom = not toward_bottom
             best_distance = distance
             pan(region, toward_bottom=toward_bottom, repeats=1)
@@ -446,27 +435,32 @@ class Bot:
         if self.phase is Phase.MERGE:
             self._refresh_calibration(region)
 
-        board_full = self._is_board_full(frame, live_synced=live_synced)
+        board_needs_merge = self._board_needs_merge(frame, live_synced=live_synced)
 
         if self.phase is Phase.CLAIM_CRATES:
-            self._step_claim_crates(region, frame, board_full=board_full)
+            self._step_claim_crates(
+                region,
+                frame,
+                live_synced=live_synced,
+                board_needs_merge=board_needs_merge,
+            )
         elif self.phase is Phase.MERGE:
-            self._step_merge(region, frame, board_full=board_full)
+            self._step_merge(region, frame, board_needs_merge=board_needs_merge)
 
-    def _is_board_full(self, frame: np.ndarray, *, live_synced: bool) -> bool:
-        """Whether there's anywhere left for a crate to spawn something.
+    def _board_needs_merge(self, frame: np.ndarray, *, live_synced: bool) -> bool:
+        """Whether crate claiming should yield to merge-space recovery.
 
-        With live state synced, this is the game's own truth --
-        `self.board` was just replaced wholesale from it, so "no EMPTY
-        cell anywhere known" really does mean full. Falls back to the
-        on-screen "Need more empty space!" banner otherwise -- confirmed
-        live to be unreliable on its own (it never appeared even once
-        across dozens of crate clicks against a genuinely full board),
-        which is exactly why the live-state check is preferred whenever
-        it's available.
+        Live state reserves enough empty cells for merge rearrangements.
+        Without live state, the full-board banner remains the fallback.
         """
         if live_synced:
-            return not self.board.find_empty()
+            empty_count = len(self.board.find_empty())
+            if empty_count == 0:
+                return True
+            return (
+                empty_count <= settings.merge_empty_cell_reserve
+                and bool(self._plan_merge_actions())
+            )
         return (
             find_best_match(frame, self._need_space_template_scaled, settings.need_space_confidence)
             is not None
@@ -474,15 +468,40 @@ class Bot:
 
     # Circuit breaker on the burst-click loop below: there's no reliable
     # "out of crates" signal (the crate icon can stay on screen regardless
-    # of held count -- see automation-methodology.md), so if `board_full`
+    # of held count -- see automation-methodology.md), so if the board check
     # never trips either, the crate template matching every single time
     # would otherwise spin here forever. Comfortably above any realistic
     # single-session crate count; hitting it just means falling back to
     # the normal step cadence and trying again next iteration.
     _MAX_CRATE_CLICKS_PER_STEP = 50
 
+    def _find_supply_crate(self, frame: np.ndarray) -> Match | None:
+        """Verify the crate button inside its fixed bottom-center region."""
+        height, width = frame.shape[:2]
+        crate = viewport_layout(width, height).crate
+        crop = frame[crate.top : crate.bottom, crate.left : crate.right]
+        match = find_best_match(
+            crop,
+            self._supply_crate_template_scaled,
+            settings.match_confidence,
+        )
+        if match is None:
+            return None
+        return Match(
+            x=crate.left + match.x,
+            y=crate.top + match.y,
+            width=match.width,
+            height=match.height,
+            confidence=match.confidence,
+        )
+
     def _step_claim_crates(
-        self, region: WindowRegion, frame: np.ndarray, *, board_full: bool
+        self,
+        region: WindowRegion,
+        frame: np.ndarray,
+        *,
+        live_synced: bool,
+        board_needs_merge: bool,
     ) -> None:
         """Claim crates back-to-back until the crate icon stops matching or
         the board fills up, instead of one click per outer step.
@@ -492,8 +511,8 @@ class Bot:
         `crate_click_batch_size` clicks, not before every single one --
         it isn't going to have moved a click later.
         """
-        if board_full:
-            logger.warning("Board is full; switching to merge phase.")
+        if board_needs_merge:
+            logger.info("Board reached the merge-space reserve; switching to merge phase.")
             self._set_phase(Phase.MERGE)
             return
 
@@ -502,17 +521,28 @@ class Bot:
             # Keep pause and quit responsive during a multi-click burst.
             if self._quit_requested or self.paused:
                 return
-            match = find_best_match(
-                frame, self._supply_crate_template_scaled, settings.match_confidence
-            )
+            match = self._find_supply_crate(frame)
             if match is None:
+                return
+            batch_size = min(
+                settings.crate_click_batch_size,
+                self._MAX_CRATE_CLICKS_PER_STEP - total_clicks,
+            )
+            if live_synced:
+                reserve = (
+                    settings.merge_empty_cell_reserve if self._plan_merge_actions() else 0
+                )
+                available = len(self.board.find_empty()) - reserve
+                batch_size = min(batch_size, max(0, available))
+            if batch_size == 0:
+                self._set_phase(Phase.MERGE)
                 return
             logger.info(
                 "Clicking supply crate up to %d times (confidence=%.2f)",
-                settings.crate_click_batch_size,
+                batch_size,
                 match.confidence,
             )
-            for _ in range(settings.crate_click_batch_size):
+            for _ in range(batch_size):
                 if self._quit_requested or self.paused:
                     return
                 click(region, *match.center)
@@ -523,8 +553,8 @@ class Bot:
 
             frame = capture_region(region)
             live_synced = self._sync_board_from_live_state()
-            if self._is_board_full(frame, live_synced=live_synced):
-                logger.warning("Board is full; switching to merge phase.")
+            if self._board_needs_merge(frame, live_synced=live_synced):
+                logger.info("Board reached the merge-space reserve; switching to merge phase.")
                 self._set_phase(Phase.MERGE)
                 return
         logger.warning(
@@ -533,7 +563,9 @@ class Bot:
             self._MAX_CRATE_CLICKS_PER_STEP,
         )
 
-    def _step_merge(self, region: WindowRegion, frame: np.ndarray, *, board_full: bool) -> None:
+    def _step_merge(
+        self, region: WindowRegion, frame: np.ndarray, *, board_needs_merge: bool
+    ) -> None:
         if self._scene_calibration is None:
             # No grid geometry to act against this step (e.g. Chrome's CDP
             # endpoint wasn't readable, or nothing is on screen yet to
@@ -541,14 +573,15 @@ class Bot:
             # next step.
             return
         merged = self._try_merge(region, frame)
-        if not merged and not board_full:
+        if not merged and not board_needs_merge:
             logger.info("Board has space again; switching back to claim-crates phase.")
             self._set_phase(Phase.CLAIM_CRATES)
-        # If board_full and nothing was merged (no known cluster ready to
-        # merge yet -- board knowledge is partial, see core/board.py),
-        # just stay in this phase and try again next step; there's nothing
-        # else productive to do until either a merge becomes possible or
-        # space frees up some other way.
+        elif not merged and not self.board.find_empty():
+            logger.error(
+                "Board is full and no merge action is available; pausing so a cell can be "
+                "freed manually."
+            )
+            self.paused = True
 
     def _toggle_pause(self) -> None:
         if self.paused:
@@ -560,14 +593,18 @@ class Bot:
             # callback thread; blocking here is fine since the main loop
             # is parked.
             logger.warning("Resuming (hotkey) -- re-initializing environment.")
-            self.initialize()
+            try:
+                self.initialize()
+            except (CdpConnectionError, LookupError, WindowActivationError) as exc:
+                logger.warning("%s Still paused; press the resume hotkey to retry.", exc)
+                return
             self.paused = False
             logger.warning("Resumed")
         else:
             self.paused = True
             logger.warning("Paused (hotkey)")
 
-    def _request_quit(self) -> None:
+    def request_quit(self) -> None:
         logger.warning("Quit requested (hotkey)")
         self._quit_requested = True
 
@@ -582,7 +619,7 @@ class Bot:
         # proceed and rely on Ctrl+C instead.
         try:
             keyboard.add_hotkey(settings.pause_hotkey, self._toggle_pause)
-            keyboard.add_hotkey(settings.quit_hotkey, self._request_quit)
+            keyboard.add_hotkey(settings.quit_hotkey, self.request_quit)
             logger.info(
                 "Hotkeys active: %s to pause/resume, %s to quit.",
                 settings.pause_hotkey,
@@ -594,6 +631,7 @@ class Bot:
                 "will stop the bot."
             )
 
+        needs_initialization = not settings.start_paused
         if settings.start_paused:
             self.paused = True
             logger.warning(
@@ -601,18 +639,23 @@ class Bot:
                 "setup too, so nothing touches the game until then).",
                 settings.pause_hotkey,
             )
-        else:
-            self.initialize()
-
         logger.info("Starting bot loop (interval=%.1fs)", settings.loop_interval)
         try:
             while not self._quit_requested:
                 if self.paused:
                     time.sleep(0.1)
                     continue
+                if needs_initialization:
+                    try:
+                        self.initialize()
+                    except (CdpConnectionError, LookupError, WindowActivationError) as exc:
+                        logger.warning("%s Retrying initialization next iteration.", exc)
+                        time.sleep(settings.loop_interval)
+                        continue
+                    needs_initialization = False
                 try:
                     self.step()
-                except WindowActivationError as exc:
+                except (LookupError, WindowActivationError) as exc:
                     logger.warning("%s Retrying next iteration.", exc)
                 time.sleep(settings.loop_interval)
         except KeyboardInterrupt:

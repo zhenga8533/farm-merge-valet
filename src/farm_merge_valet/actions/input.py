@@ -39,3 +39,7 @@ def scroll(region: WindowRegion, x: int, y: int, clicks: int) -> None:
     """
     pyautogui.moveTo(region.left + x, region.top + y)
     pyautogui.scroll(clicks)
+
+
+def press(key: str) -> None:
+    pyautogui.press(key)
