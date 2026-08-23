@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     # Stop claiming before the board is completely full so gather/degroup
     # moves always have a destination. Relocating an item vacates its source,
     # so one reserved cell is enough for a multi-step rearrangement.
-    merge_empty_cell_reserve: int = Field(default=1, ge=1)
+    merge_empty_cell_reserve: int = Field(default=1, ge=0)
 
     # Resolution-independent dead-zone slices around the viewport. The
     # bottom-center crate rectangle is an additional outlier inside the board.

@@ -26,6 +26,10 @@ most valid live Pixi bounds. Screenshots are used only to locate fixed UI
 elements. Each fixed UI template is matched directly across plausible scales;
 this is separate from the CDP-derived board-to-screen geometry.
 
+In the live map, a cell with no content object is an available board slot.
+The game's `"empty"` blueprint instead marks unavailable placeholder cells
+around fixed structures and is never counted as open space.
+
 `diagnose-live-state` writes a read-only JSON report of every cell-map
 candidate and the complete board-to-screen transform. It is intended for
 verifying map identity, camera position, canvas scaling, and viewport filtering

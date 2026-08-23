@@ -5,6 +5,7 @@ from threading import Event
 import numpy as np
 
 from farm_merge_valet.capture.window import WindowRegion
+from farm_merge_valet.cdp.board_store import LiveCellState
 from farm_merge_valet.core.board import BoardGrid, Cell, CellKind, ItemRef
 from farm_merge_valet.core.bot import Bot, Phase
 from farm_merge_valet.vision.matcher import Match
@@ -188,24 +189,18 @@ def test_full_board_without_a_merge_action_pauses_for_manual_recovery(monkeypatc
     assert bot.paused
 
 
-def test_live_sync_applies_only_explicit_structure_footprints(monkeypatch) -> None:
+def test_live_sync_distinguishes_open_cells_from_structure_placeholders(monkeypatch) -> None:
     bot = _bare_bot()
     bot._blueprint_items = {}
     raw = {
-        (5, 5): "market",
-        (4, 4): "empty",
-        (5, 4): "empty",
-        (4, 5): "empty",
-        (6, 5): "empty",
-        (6, 6): "empty",
+        (5, 5): LiveCellState(True, "market"),
+        (4, 4): LiveCellState(True, "empty"),
+        (6, 6): LiveCellState(False, None),
     }
     monkeypatch.setattr("farm_merge_valet.core.bot.read_board_state", lambda *_args: raw)
 
     assert bot._sync_board_from_live_state()
     assert bot.board.get_cell((4, 4)).kind is CellKind.STRUCTURE
-    assert bot.board.get_cell((5, 4)).kind is CellKind.STRUCTURE
-    assert bot.board.get_cell((4, 5)).kind is CellKind.STRUCTURE
-    assert bot.board.get_cell((6, 5)).kind is CellKind.EMPTY
     assert bot.board.get_cell((6, 6)).kind is CellKind.EMPTY
 
 

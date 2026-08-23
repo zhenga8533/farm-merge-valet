@@ -103,7 +103,7 @@ settings are:
 | `FMV_WINDOW_TITLE` | Distinctive substring of the target Chrome window title |
 | `FMV_CDP_PORT` | Chrome remote-debugging port |
 | `FMV_PREFER_MERGE_FIVE` | Prefer efficient merge-5 actions instead of merge-3 |
-| `FMV_MERGE_EMPTY_CELL_RESERVE` | Empty cells preserved for merge rearrangements |
+| `FMV_MERGE_EMPTY_CELL_RESERVE` | Empty cells preserved for merge rearrangements; `0` disables it |
 | `FMV_BOARD_DEAD_*_RATIO` | Proportional outer UI slices excluded from actions |
 | `FMV_CRATE_DEAD_*_RATIO` | Bottom-center crate-button exclusion rectangle |
 | `FMV_PAN_ANCHOR_*_RATIO` | Safe background point used to drag the board camera |

@@ -227,7 +227,16 @@ def diagnose_live_state_cmd(
         "candidate_maps": candidates,
         "selected_board": {
             "reported_cells": len(board_state) if board_state is not None else None,
-            "common_blueprints": Counter((board_state or {}).values()).most_common(20),
+            "open_cells": (
+                sum(not state.has_content for state in board_state.values())
+                if board_state is not None
+                else None
+            ),
+            "common_blueprints": Counter(
+                state.blueprint_id
+                for state in (board_state or {}).values()
+                if state.blueprint_id is not None
+            ).most_common(20),
         },
         "scene": {
             "rendered_cells": len(rendered_coords),

@@ -37,24 +37,25 @@ logger = logging.getLogger(__name__)
 # Non-item `blueprintID` values from the game's live board state (see
 # cdp/board_store.py) that map to a known CellKind rather than an ItemRef.
 _LIVE_STATE_CELL_KIND = {
-    "empty": CellKind.EMPTY,
     "area_cloud": CellKind.CLOUD,
     "premium_cloud": CellKind.CLOUD,
 }
 
-# Structure anchors do not describe their full footprint in the cell map.
-# These observed offsets are relative to each anchor; explicit footprints
-# avoid hiding unrelated empty cells around one-cell structures.
-_TWO_BY_TWO_FOOTPRINT = frozenset({(-1, -1), (0, -1), (-1, 0), (0, 0)})
-_STRUCTURE_FOOTPRINTS = {
-    "bakery": _TWO_BY_TWO_FOOTPRINT,
-    "market": _TWO_BY_TWO_FOOTPRINT,
-    "trainstation": _TWO_BY_TWO_FOOTPRINT,
-    "likes_billboard": _TWO_BY_TWO_FOOTPRINT,
-    "traintrack_stop": frozenset({(0, 0)}),
-    "delivery_truck": frozenset({(0, 0)}),
-    "delivery_cargo": frozenset({(0, 0)}),
-}
+_STRUCTURE_BLUEPRINTS = frozenset(
+    {
+        "bakery",
+        "dairy",
+        "market",
+        "trainstation",
+        "likes_billboard",
+        "traintrack_stop",
+        "delivery_truck",
+        "delivery_cargo",
+        # Despite its name, this blueprint marks unavailable cells around
+        # fixed structures. Truly open cells have no content object at all.
+        "empty",
+    }
+)
 
 
 class Phase(Enum):
@@ -157,35 +158,24 @@ class Bot:
             return False
 
         board = BoardGrid()
-        structure_cells: set[GridCoord] = set()
-        empty_coords: set[GridCoord] = set()
-
-        for coord, blueprint_id in raw.items():
-            item = self._blueprint_items.get(blueprint_id)
+        for coord, state in raw.items():
+            if not state.has_content:
+                board.set_cell(coord, Cell(kind=CellKind.EMPTY))
+                continue
+            blueprint_id = state.blueprint_id
+            item = self._blueprint_items.get(blueprint_id) if blueprint_id is not None else None
             if item is not None:
                 board.set_cell(coord, Cell(kind=CellKind.ITEM, item=item))
                 continue
-            if blueprint_id == "empty":
-                # Deferred to the second pass below, once every
-                # structure's anchor cell (found later in this same
-                # iteration) is known.
-                empty_coords.add(coord)
-                continue
-            kind = _LIVE_STATE_CELL_KIND.get(blueprint_id)
+            kind = _LIVE_STATE_CELL_KIND.get(blueprint_id) if blueprint_id is not None else None
             if kind is not None:
                 board.set_cell(coord, Cell(kind=kind))
-            elif footprint := _STRUCTURE_FOOTPRINTS.get(blueprint_id):
+            elif blueprint_id in _STRUCTURE_BLUEPRINTS:
                 board.set_cell(coord, Cell(kind=CellKind.STRUCTURE))
-                col, row = coord
-                structure_cells.update((col + dc, row + dr) for dc, dr in footprint)
             else:
                 # Not a known item, marker, or building -- assumed a
                 # transient product (e.g. "egg") waiting to be collected.
                 board.set_cell(coord, Cell(kind=CellKind.PRODUCT))
-
-        for coord in empty_coords:
-            kind = CellKind.STRUCTURE if coord in structure_cells else CellKind.EMPTY
-            board.set_cell(coord, Cell(kind=kind))
 
         self.board = board
         logger.debug("Synced %d cell(s) from live game state.", len(board.known_coords()))
@@ -439,9 +429,11 @@ class Bot:
                 self._set_phase(Phase.MERGE)
                 return
             logger.info(
-                "Clicking supply crate up to %d times (confidence=%.2f)",
+                "Clicking supply crate up to %d times (confidence=%.2f, open=%d, reserved=%d)",
                 batch_size,
                 match.confidence,
+                len(self.board.find_empty()),
+                reserve,
             )
             for _ in range(batch_size):
                 if self._quit_requested or self.paused:

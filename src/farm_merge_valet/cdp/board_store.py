@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from typing import Any
 
 import websockets
@@ -154,12 +155,21 @@ _READ_EXPRESSION = """
     out.push({
       column: cell.column,
       row: cell.row,
+      hasContent: Boolean(cell._content),
       blueprintID: cell._content ? cell._content._blueprintID : null,
     });
   }
   return out;
 })()
 """
+
+
+@dataclass(frozen=True)
+class LiveCellState:
+    """Authoritative content state for one game-board coordinate."""
+
+    has_content: bool
+    blueprint_id: str | None
 
 
 async def _call(ws: Any, id_: int, method: str, params: dict | None = None) -> dict:
@@ -276,17 +286,15 @@ def inspect_board_maps(port: int, page_title: str | None = None) -> list[dict[st
     return run_game_frame_operation(port, page_title, inspect)
 
 
-def read_board_state(port: int, page_title: str | None = None) -> dict[GridCoord, str] | None:
-    """Every cell's current content, straight from the game's own live
-    data -- `{(column, row): blueprintID}`. `blueprintID` is the game's
-    own item-identifier string (e.g. `"wheat_1"`, matching
-    `<item name>_<tier>`; see `core/board_scan.discover_blueprint_items`),
-    or a non-item marker like `"empty"` (genuinely empty farmland),
-    `"area_cloud"`/`"premium_cloud"` (locked/premium), or a building's own
-    ID (e.g. `"bakery"`) for fixed decoration.
+def read_board_state(
+    port: int, page_title: str | None = None
+) -> dict[GridCoord, LiveCellState] | None:
+    """Every cell's current content, straight from the game's live map.
 
-    Cells with no content at all (no data either way) are omitted rather
-    than guessed at.
+    A cell with no `_content` is an available board slot. A present content
+    object may expose an item, cloud, building, product, or the game's
+    misleadingly named `"empty"` blueprint used for unavailable structure
+    footprint cells.
 
     Returns None if `arm_board_store` hasn't successfully captured a
     reference yet.
@@ -294,8 +302,13 @@ def read_board_state(port: int, page_title: str | None = None) -> dict[GridCoord
     raw = evaluate(port, _READ_EXPRESSION, page_title)
     if not isinstance(raw, list):
         return None
-    return {
-        (entry["column"], entry["row"]): entry["blueprintID"]
-        for entry in raw
-        if entry.get("blueprintID") is not None
-    }
+    states: dict[GridCoord, LiveCellState] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        blueprint_id = entry.get("blueprintID")
+        states[(entry["column"], entry["row"])] = LiveCellState(
+            has_content=entry.get("hasContent") is True,
+            blueprint_id=blueprint_id if isinstance(blueprint_id, str) else None,
+        )
+    return states
