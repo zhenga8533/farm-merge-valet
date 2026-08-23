@@ -1,42 +1,47 @@
 # Farm Merge Valet
 
-A screen-automation tool for [Farm Merge Valley](https://discord.com/discovery/applications/1187013846746005515),
-a merge/farming game embedded as an app inside host clients like Discord
-(and elsewhere). This project does **not** modify or reimplement the game —
-it observes the screen and drives mouse/keyboard input to automate play.
-
-Because the game can run inside different host applications (Discord
-desktop client, a browser tab, etc.) rather than as its own standalone
-process, automation is host-agnostic: it targets a window by title and
-operates purely on pixels, so it works regardless of which app is hosting
-the game.
+Farm Merge Valet automates parts of [Farm Merge Valley](https://discord.com/discovery/applications/1187013846746005515)
+by reading the live game board through Chrome DevTools Protocol (CDP) and
+driving ordinary mouse input. It does not modify or reimplement the game.
 
 ## Status
 
-Early scaffolding. The CLI can locate the target window and run an empty
-perceive-decide-act loop; game-specific vision templates and strategy are
-not yet implemented.
+Early, usable automation for the crate-and-merge loop:
+
+- finds and activates the configured Chrome window;
+- normalizes the game zoom and camera position;
+- reads board contents and render geometry from the live game iframe via CDP;
+- claims supply crates until the board is full;
+- plans and performs merge-3 or merge-5 actions, including regrouping items;
+- exposes global pause/quit hotkeys and an optional log overlay.
+
+Order fulfillment, product collection, obstacle clearing, visits, and other
+gameplay phases are not implemented yet. See
+[Automation Methodology](docs/automation-methodology.md) for the current loop
+and roadmap.
+
+The current live-state integration is specific to the Reddit-hosted game in a
+Chrome instance launched with remote debugging. The capture and input layers
+remain window-based, but the bot is not currently host-agnostic.
 
 ## Architecture
 
-```
+```text
 src/farm_merge_valet/
-  capture/        Locate the host window and grab screenshots of it (mss)
-  vision/         Template matching to find UI elements in a frame (OpenCV)
-  actions/        Mouse/keyboard simulation, scoped to the target window
-  core/           Bot loop (perceive -> decide -> act) and run statistics
-  integrations/   Outbound integrations (e.g. Discord webhook stat posts)
-  cli.py          Typer-based CLI entry point
+  cdp/             Read live board state and board-to-screen geometry
+  capture/         Locate the target window and capture screenshots
+  vision/          Match fixed UI templates and measure render scale
+  actions/         Send mouse input relative to the target window
+  core/            Model the board, plan merges, and run the bot loop
+  gui/             Optional live-log overlay
+  tools/           Extract templates from game sprite atlases
+  cli.py           Typer-based CLI entry point
 ```
-
-Planned, not yet built:
-- Game-specific vision templates + decision logic in `core/`
-- A GUI (separate from the CLI) for monitoring/controlling the bot
-- Additional integrations beyond Discord webhooks
 
 ## Setup
 
-Requires Python 3.11+ on Windows.
+Requires Python 3.11+ on Windows and a separate Chrome profile for remote
+debugging.
 
 ```powershell
 python -m venv .venv
@@ -45,34 +50,57 @@ pip install -e ".[dev]"
 copy .env.example .env
 ```
 
-Edit `.env` to set `FMV_WINDOW_TITLE` to a substring of your target
-window's title (run `farm-merge-valet list-windows` to see open titles).
+Launch Chrome with remote debugging enabled. Chrome requires a non-default
+profile for this mode:
+
+```powershell
+chrome.exe --remote-debugging-port=9222 --user-data-dir="C:\path\to\fmv-profile"
+```
+
+Open the Reddit post containing the game, click **Play**, then set
+`FMV_WINDOW_TITLE` in `.env` to a distinctive substring of that Chrome
+window's title. `farm-merge-valet list-windows` shows the available titles.
 
 ## Usage
 
 ```powershell
-farm-merge-valet list-windows   # see open window titles
-farm-merge-valet calibrate      # verify the target window can be found
-farm-merge-valet run            # start the automation loop
+farm-merge-valet list-windows
+farm-merge-valet calibrate
+farm-merge-valet capture
+farm-merge-valet visualize-positions
+farm-merge-valet run
 ```
 
-## Development
+`run` starts paused by default. Press the configured pause hotkey (`F9` by
+default) to initialize the view and begin; press it again to pause. The default
+quit hotkey is `F10`.
+
+Template assets can be refreshed from a browser network capture:
 
 ```powershell
-pytest
-ruff check .
-mypy src
+farm-merge-valet extract-templates path\to\game.har
 ```
 
 ## Configuration
 
-All settings are environment variables prefixed `FMV_` (see
-`.env.example`), loaded via `pydantic-settings`. Key options:
+Settings are loaded from `.env` using the `FMV_` prefix. See
+[`.env.example`](.env.example) for the complete, annotated list. The main
+settings are:
 
-| Variable                 | Purpose                                             |
-| ------------------------ | ---------------------------------------------------- |
-| `FMV_WINDOW_TITLE`       | Substring to match the host window's title           |
-| `FMV_MATCH_CONFIDENCE`   | Minimum template-match confidence (0-1)               |
-| `FMV_LOOP_INTERVAL`      | Seconds between bot loop iterations                   |
-| `FMV_DISCORD_WEBHOOK_URL`| Webhook URL for posting run stats to Discord (optional)|
-| `FMV_LOG_LEVEL`          | Logging verbosity                                     |
+| Variable | Purpose |
+| --- | --- |
+| `FMV_WINDOW_TITLE` | Distinctive substring of the target Chrome window title |
+| `FMV_CDP_PORT` | Chrome remote-debugging port |
+| `FMV_PREFER_MERGE_FIVE` | Prefer efficient merge-5 actions instead of merge-3 |
+| `FMV_PAUSE_HOTKEY` / `FMV_QUIT_HOTKEY` | Global bot controls |
+| `FMV_START_PAUSED` | Wait for an explicit resume before touching the game |
+| `FMV_GUI_ENABLED` | Show the optional live-log overlay |
+| `FMV_LOG_LEVEL` | Logging verbosity |
+
+## Development
+
+```powershell
+pytest --cov=farm_merge_valet
+ruff check .
+mypy src
+```

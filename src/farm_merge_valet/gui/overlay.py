@@ -18,12 +18,10 @@ through Qt requires hiding and re-showing the window (see
 `setWindowFlags`'s docs), which would steal/disrupt focus on every single
 activation change -- exactly the moments this needs to react to.
 
-Positioned on top of whatever's on screen, which includes the game window
-`capture_region` reads from: placing it somewhere it visually overlaps
-the game's on-screen content would bake overlay pixels into every screen
-capture, corrupting vision-based matching (the crate/need-space
-templates, the vision fallback board scan). Keep it clear of the game
-window, or accept that risk knowingly.
+Positioned on top of whatever is on screen, including the game window that
+`capture_region` reads. If it overlaps the game, overlay pixels become part of
+each capture and can corrupt fixed-UI template matching. Keep it clear of the
+game window.
 """
 
 from __future__ import annotations

@@ -23,33 +23,23 @@ Vector = tuple[float, float]
 
 @dataclass(frozen=True)
 class GridCalibration:
-    """The scale factor the anchor template had to be resized by to match
-    the live capture, and the pixel center where that scaled match was
-    found."""
+    """Scale factor the anchor template needed to match the live capture."""
 
     scale: float
-    anchor: Vector
 
 
 def _best_scale(
     frame: np.ndarray, template_bgr: np.ndarray, template_mask: np.ndarray, scales: list[float]
-) -> tuple[float, float, Vector] | None:
-    """Returns (diff, scale, center) for whichever candidate scale gets the
-    single best (lowest-difference) match somewhere in `frame`, or None if
-    the template never fits within the frame at any candidate scale.
-    `center` is that match's pixel center in `frame` -- returned so callers
-    don't need a second, separately-scaled search just to relocate the
-    same match (a redundant search at the *unscaled* template size missed
-    it entirely once render scale drifted enough, confirmed live).
+) -> tuple[float, float] | None:
+    """Return ``(diff, scale)`` for the best candidate match, or None if no
+    candidate fits inside the frame.
 
     Uses TM_SQDIFF_NORMED, not TM_CCORR_NORMED: OpenCV only supports
-    masking with SQDIFF/CCORR (not CCOEFF), and CCORR isn't mean-centered,
-    so it can report a deceptively high "match" against completely
-    unrelated or even flat/empty content -- confirmed against the crate
-    button template earlier and reproduced here against synthetic content
-    (see tests/test_grid.py). SQDIFF actually measures pixel difference.
+    masking with SQDIFF/CCORR (not CCOEFF), and CCORR is not mean-centered,
+    so it can report a high match against flat or unrelated content. SQDIFF
+    measures pixel difference directly.
     """
-    best: tuple[float, float, Vector] | None = None  # (diff, scale, center)
+    best: tuple[float, float] | None = None
     for scale in scales:
         resized_bgr = cv2.resize(
             template_bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA
@@ -66,11 +56,9 @@ def _best_scale(
         # divide by zero (-> NaN) against flat/empty regions, and
         # cv2.minMaxLoc doesn't skip NaN.
         result = np.nan_to_num(result, nan=1.0)
-        min_val, _, min_loc, _ = cv2.minMaxLoc(result)
+        min_val, _, _, _ = cv2.minMaxLoc(result)
         if best is None or min_val < best[0]:
-            h, w = resized_mask.shape[:2]
-            center = (min_loc[0] + w / 2, min_loc[1] + h / 2)
-            best = (float(min_val), scale, center)
+            best = (float(min_val), scale)
     return best
 
 
@@ -102,6 +90,5 @@ def calibrate_grid(
     picked = _best_scale(frame, template_bgr, template_mask, scales)
     if picked is None or picked[0] > max_diff:
         return None
-    _diff, scale, anchor = picked
-
-    return GridCalibration(scale=scale, anchor=anchor)
+    _diff, scale = picked
+    return GridCalibration(scale=scale)

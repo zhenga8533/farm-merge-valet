@@ -37,10 +37,8 @@ from farm_merge_valet.core.board import (
 from farm_merge_valet.core.board_scan import (
     discover_background_templates,
     discover_blueprint_items,
-    discover_item_templates,
 )
 from farm_merge_valet.core.environment import initialize_environment, pan
-from farm_merge_valet.core.stats import RunStats
 from farm_merge_valet.vision.grid import calibrate_grid
 from farm_merge_valet.vision.matcher import find_best_match, load_template
 
@@ -111,16 +109,12 @@ class Bot:
         tier 2 specifically regardless of the global default. Not yet
         env-var configurable; pass directly for now.
         """
-        self.stats = RunStats()
         self._merge_five_overrides = merge_five_overrides or {}
         self.paused = False
         self._quit_requested = False
         self.phase = Phase.CLAIM_CRATES
-        # UI templates render at the board's on-screen scale too, same as
-        # items (see `_ensure_item_scale`) -- confirmed live, matching the
-        # need-space banner at native scale scored 0.838, just under
-        # `match_confidence`. Rescaled once `_item_scale` is known; until
-        # then, matching falls back to the native, unscaled template.
+        # Fixed UI templates scale with the game. Use native size until the
+        # current render scale can be measured.
         self._supply_crate_template = load_template(
             settings.templates_dir / "ui" / "supply_crate.png"
         )
@@ -130,31 +124,19 @@ class Bot:
         )
         self._need_space_template_scaled = self._need_space_template
 
-        # blueprintID (e.g. "wheat_1") -> ItemRef, for interpreting the
-        # game's own live board state (see cdp/board_store.py) -- the sole
-        # board-content source; item templates otherwise only feed
-        # `_ensure_item_scale`'s render-scale measurement below, not any
-        # vision-based board scanning.
-        self._item_templates_full = discover_item_templates(settings.templates_dir / "items")
-        self._blueprint_items = discover_blueprint_items(self._item_templates_full)
+        # blueprintID (e.g. "wheat_1") -> ItemRef for interpreting live
+        # board state. Item images are not used to scan board contents.
+        self._blueprint_items = discover_blueprint_items(settings.templates_dir / "items")
         self._board_store_armed = False
         self._last_board_store_status: str | None = None
-        # Only the "cloud" entry is actually used (see `_ensure_item_scale`,
-        # an always-present, robust template-matching anchor for measuring
-        # render scale) -- not for any vision-based board content scanning.
+        # The cloud background is the stable anchor used to measure scale.
         self._background_templates = discover_background_templates(
             settings.templates_dir / "backgrounds"
         )
         self._item_scale: float | None = None
 
-        # Recomputed fresh every step() -- caching it across steps was
-        # what made stale board knowledge after a scroll/zoom a real bug
-        # before. Derived live from the game's own rendered item
-        # positions and real browser/window DOM state every time (see
-        # `cdp/scene_geometry.py`), so it's never stale and never needs
-        # hand-correcting; None only for the brief window after the game
-        # loads before the live board-cell map has anything on it yet to
-        # derive geometry from (see `cdp/board_store.py`).
+        # Recomputed from live rendering and DOM state during merge steps.
+        # None means there is not enough current state to fit the mapping.
         self._scene_calibration: SceneCalibration | None = None
         self.board = BoardGrid()
 
@@ -164,18 +146,8 @@ class Bot:
             self.phase = phase
 
     def initialize(self) -> None:
-        """Zoom the game out to maximize visible board area, and reset any
-        board knowledge from a previous session/pause. Blocking; takes a
-        few seconds. Called once before `run_forever`'s loop starts, and
-        again on resume from pause, since that's an explicit opportunity
-        for the user to have scrolled/zoomed the game themselves.
-
-        Grid alignment itself doesn't depend on this known state -- it's
-        derived fresh from the game's own live rendering/DOM state every
-        step (see `_refresh_calibration`) and works at any scroll position
-        or zoom level. This only still exists to maximize the visible
-        board area and to drop stale board state.
-        """
+        """Normalize the view and discard board knowledge from before a
+        startup or pause. Blocking; takes a few seconds."""
         region = find_window(settings.window_title)
         initialize_environment(region)
         self.board = BoardGrid()
@@ -190,9 +162,7 @@ class Bot:
         detection (see `cdp/board_store.py`/`cdp/scene_geometry.py` for
         that).
 
-        Cheap enough to run every step until it first succeeds, then never
-        again -- nothing needs rebuilding once the render scale is known,
-        and re-running gains nothing.
+        Runs until it first succeeds, then caches the scale for the session.
         """
         if self._item_scale is not None:
             return
@@ -280,13 +250,8 @@ class Bot:
                 # transient product (e.g. "egg") waiting to be collected.
                 board.set_cell(coord, Cell(kind=CellKind.PRODUCT))
 
-        # A cell reporting "empty" is only genuinely open ground if it
-        # isn't part of a structure's footprint -- confirmed live, a 2x2
-        # shop's game data only records content on one anchor cell, with
-        # its other 3 cells reporting "empty" identically to real open
-        # ground. There's no footprint/size data to read directly (see
-        # cdp/board_store.py), so this is inferred from 8-connected
-        # adjacency to a known structure anchor instead.
+        # Multi-cell structures expose only one anchor; infer their remaining
+        # footprint from adjacent cells that otherwise report as empty.
         for coord in empty_coords:
             col, row = coord
             neighbors = {(col + dc, row + dr) for dc, dr in _FOOTPRINT_NEIGHBOR_OFFSETS}
@@ -318,13 +283,8 @@ class Bot:
         """Whether both ends of `action`'s drag land within the currently
         visible, non-UI-chrome region of the captured frame.
 
-        Board content now comes from live game state, not vision, so
-        `plan_merge_action` can select cells anywhere on the whole map --
-        including ones currently scrolled out of view. Dragging to an
-        off-screen pixel position is a silent no-op at best: confirmed
-        live, the same "ready" cluster kept getting reselected and
-        re-attempted step after step, since the drag never actually
-        landed on real board content.
+        Live board state includes cells outside the viewport, so both drag
+        endpoints must be inside the configured clickable board area.
         """
         height, _width = frame_shape[:2]
         for coord in (action.start, action.end):
@@ -456,7 +416,6 @@ class Bot:
             # knowledge in between.
             self.board.clear_cell(action.start)
             self.board.clear_cell(action.end)
-        self.stats.actions_taken += 1
         return True
 
     def step(self) -> None:
@@ -483,11 +442,7 @@ class Bot:
         self._ensure_board_store_armed()
         live_synced = self._sync_board_from_live_state()
 
-        # Calibration is only ever consumed by the merge phase
-        # (`_grid_to_pixel`, cluster-finding) -- running it unconditionally,
-        # every phase, was confirmed live to stretch a crate-claiming step
-        # to several seconds against a 1s `loop_interval`, not worth it
-        # when claiming crates needs neither.
+        # Only merge actions need grid-to-screen geometry.
         if self.phase is Phase.MERGE:
             self._refresh_calibration(region)
 
@@ -497,8 +452,6 @@ class Bot:
             self._step_claim_crates(region, frame, board_full=board_full)
         elif self.phase is Phase.MERGE:
             self._step_merge(region, frame, board_full=board_full)
-
-        self.stats.iterations += 1
 
     def _is_board_full(self, frame: np.ndarray, *, live_synced: bool) -> bool:
         """Whether there's anywhere left for a crate to spawn something.
@@ -532,8 +485,7 @@ class Bot:
         self, region: WindowRegion, frame: np.ndarray, *, board_full: bool
     ) -> None:
         """Claim crates back-to-back until the crate icon stops matching or
-        the board fills up, instead of one click per (much longer,
-        board-scan-throttled) outer step -- see `step`.
+        the board fills up, instead of one click per outer step.
 
         The crate button is a fixed UI element, not board content, so its
         on-screen position only needs (re-)finding once per batch of
@@ -547,11 +499,7 @@ class Bot:
 
         total_clicks = 0
         while total_clicks < self._MAX_CRATE_CLICKS_PER_STEP:
-            # Checked inside this loop, not just between `step()` calls
-            # (see `run_forever`) -- otherwise a quit/pause request has to
-            # wait out the rest of a potentially many-click burst before
-            # it's even noticed, confirmed live to take several seconds
-            # longer than expected to actually stop.
+            # Keep pause and quit responsive during a multi-click burst.
             if self._quit_requested or self.paused:
                 return
             match = find_best_match(
@@ -568,7 +516,6 @@ class Bot:
                 if self._quit_requested or self.paused:
                     return
                 click(region, *match.center)
-                self.stats.actions_taken += 1
                 total_clicks += 1
                 time.sleep(settings.crate_click_settle)
                 if total_clicks >= self._MAX_CRATE_CLICKS_PER_STEP:
@@ -667,7 +614,6 @@ class Bot:
                     self.step()
                 except WindowActivationError as exc:
                     logger.warning("%s Retrying next iteration.", exc)
-                    self.stats.errors += 1
                 time.sleep(settings.loop_interval)
         except KeyboardInterrupt:
             logger.info("Stopped by user.")

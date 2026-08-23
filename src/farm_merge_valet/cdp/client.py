@@ -88,8 +88,8 @@ def find_top_page_target(port: int) -> str:
 
     Needed for anything that has to know the iframe's own position/size
     from the *outside*: a cross-origin iframe can never read that about
-    itself (`window.frameElement` is null across the origin boundary,
-    confirmed live) -- see `cdp/scene_geometry.py`.
+    itself (`window.frameElement` is null across the origin boundary) --
+    see `cdp/scene_geometry.py`.
     """
     try:
         resp = httpx.get(f"http://localhost:{port}/json", timeout=5)
@@ -159,4 +159,3 @@ def evaluate_top_page(port: int, expression: str) -> object:
     iframe can't see about its own placement (see `find_top_page_target`)."""
     ws_url = find_top_page_target(port)
     return asyncio.run(_evaluate_async(ws_url, expression))
-

@@ -1,30 +1,11 @@
 """Read the game's own live board/cell state directly from its in-memory
 data store, instead of inferring it from screen captures.
 
-The board has no accessible persisted copy (`localStorage`/`IndexedDB`/
-Cache Storage all confirmed empty for this origin; the only real service
-worker on the page is Reddit's own, unrelated to the game), so the
-authoritative state only ever exists as live objects in the page's JS
-memory.
-
-An earlier version of this module found the board's data by searching the
-webpack module graph for a class with a matching cell-store method
-signature, then monkey-patching one of its methods (`setContent`, later
-`getContent`, later several at once) to capture `this` on the next call.
-That turned out to be fundamentally unreliable, confirmed live: the
-matched class had *zero* live instances on the heap at all (checked via
-CDP's `Runtime.queryObjects`) -- it's dead/unused code that happens to
-share the method signature, not the real store. No amount of patching it
-was ever going to fire.
-
-Instead, `arm_board_store` searches every live `Map` instance on the heap
-directly (also via `Runtime.queryObjects`, using `Map.prototype` this
-time) for one whose values structurally look like board cells (`column`,
-`row`, `_content`, `_neighbors` -- confirmed live to uniquely identify it
-among every `Map` on the page) and stashes a direct reference at
-`window.__fmvBoardCells`. This finds the real, already-populated data
-immediately, with no dependency on timing, a future method call, or
-guessing which class actually gets instantiated.
+The authoritative state exists in live JavaScript objects rather than browser
+storage. `arm_board_store` uses CDP's `Runtime.queryObjects` to find a live
+`Map` whose values have the board-cell shape (`column`, `row`, `_content`, and
+`_neighbors`), then stores a reference at `window.__fmvBoardCells` for later
+reads.
 """
 
 from __future__ import annotations
@@ -38,10 +19,9 @@ import websockets
 from farm_merge_valet.cdp.client import evaluate, find_game_frame_target
 from farm_merge_valet.core.board import GridCoord
 
-# Confirmed live to uniquely identify the board's cell map among every Map
-# instance on the page -- nothing else matches both the size range and
-# shape. `_content` holds the cell's item/marker (a Pixi display object
-# with a `_blueprintID` string field), `_neighbors` its adjacency links.
+# `_content` holds the cell's Pixi display object and `_neighbors` its
+# adjacency links. The size bounds and keys distinguish the cell map from
+# other Maps in the game runtime.
 _CELL_SHAPE_KEYS = ("column", "row", "_content", "_neighbors")
 _CELL_MAP_MIN_SIZE = 50
 _CELL_MAP_MAX_SIZE = 5000

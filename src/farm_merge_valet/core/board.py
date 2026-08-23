@@ -78,11 +78,8 @@ class BoardGrid:
     def clear_cell(self, coord: GridCoord) -> None:
         """Forget a cell, returning it to UNKNOWN rather than any specific
         kind. Used after taking an action that changes a cell (e.g. a
-        merge) instead of guessing the new state ourselves -- the next
-        board scan observes the real outcome (including any "Lucky Merge"
-        randomness, see docs/automation-methodology.md) rather than us
-        symbolically predicting it and risking drift from what actually
-        happened."""
+        merge) instead of guessing the new state ourselves. The next live
+        sync observes the real outcome without risking model drift."""
         self._cells.pop(coord, None)
 
     def is_known(self, coord: GridCoord) -> bool:

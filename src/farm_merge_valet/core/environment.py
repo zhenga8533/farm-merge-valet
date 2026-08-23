@@ -1,14 +1,8 @@
-"""One-time environment setup: force the game into a known, stable state
-(fully zoomed out, panned to the bottom of the board) so grid geometry only
-needs to be calibrated once per session rather than re-derived every scan.
+"""Normalize the game view by zooming fully out and panning to the board's
+bottom.
 
-A per-scan dynamic calibration (inferring tile pixel geometry from vectors
-between matched item icons) turned out to be both slow and fragile in
-practice -- see chat history. Since the game's zoom and scroll position are
-the only things that actually vary run to run, and both are things *we*
-control once the bot is driving input, it's simpler and far more robust to
-force them into a fixed, known state once and calibrate against that,
-rather than support arbitrary zoom/scroll at every step.
+Scene geometry is calibrated dynamically, but a normalized view maximizes the
+visible board area and reduces the amount of panning needed during a run.
 
 Assumes the user doesn't interact with the game while the bot is running.
 If they do -- or the bot is paused and resumed, since that's an explicit
@@ -28,28 +22,14 @@ logger = logging.getLogger(__name__)
 
 _SETTLE_DELAY = 0.3
 
-# A single `scroll()` call has no gesture-distance limit, so in principle
-# one sufficiently large scroll should reach the game's own minimum-zoom
-# clamp outright -- but a lone burst isn't reliably registered in full
-# (confirmed live: one -300 call sometimes left the view well short of
-# minimum zoom, apparently OS/app-side wheel-event coalescing under a
-# single rapid burst rather than an actual smaller zoom range). Repeating
-# the burst, like `scroll_to_bottom`'s repeated drags below, fixes that:
-# once already at minimum zoom, an extra burst is a harmless no-op, so a
-# fixed repeat count is safe without needing to poll for convergence.
+# Repeated bursts avoid OS/app wheel-event coalescing. Extra bursts are
+# harmless after the game reaches its minimum zoom.
 _ZOOM_OUT_CLICKS = -300
 _ZOOM_OUT_REPEATS = 5
 _SCROLL_TO_BOTTOM_REPEATS = 5
 
-# Fixed screen-space column reserved for panning drags -- never board
-# content, and never a clickable UI button either. Between the board's
-# confirmed right extent (`Settings.board_max_pixel_x`, tuned this session
-# via live testing of the board-scan cutoffs) and the fixed settings/
-# shovel/currency icon column further right (~1855px+ in a 1920px-wide
-# capture): dragging from the middle of the screen instead risks the
-# start or end point landing on a real tile, which in this game can
-# itself be misread as a merge-drag between two board items -- the exact
-# gesture `Bot._merge_cluster` uses for real merges.
+# Screen-space column reserved for panning, between board content and the
+# game's right-side controls. This avoids dragging across a real tile.
 _DRAG_ANCHOR_X = 1780
 
 

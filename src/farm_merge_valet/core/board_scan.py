@@ -1,15 +1,9 @@
 """Discover item/background template images and the game's own item-ID
 naming convention from `assets/templates/`.
 
-Board *content* comes exclusively from the game's own live cell data
-(`cdp/board_store.py`); nothing here does any vision-based scanning of a
-captured frame anymore. What remains is used for two unrelated,
-narrower things: `discover_item_templates`/`discover_blueprint_items`
-build the blueprintID -> ItemRef mapping `Bot` needs to interpret that
-live data, and `discover_background_templates` supplies the "cloud"
-template `Bot._ensure_item_scale` matches to measure the board's
-on-screen render scale (for resizing fixed-size UI templates like the
-supply-crate button, unrelated to board content).
+Board content comes from the game's live cell data (`cdp/board_store.py`).
+This module builds the blueprintID-to-ItemRef mapping used to interpret that
+data and loads background templates used to measure UI render scale.
 """
 
 from __future__ import annotations
@@ -30,10 +24,13 @@ from farm_merge_valet.vision.matcher import load_template
 _TIER_STEM_PREFIX = "tier_"
 
 
-def discover_item_templates(items_dir: Path) -> dict[ItemRef, np.ndarray]:
-    """Walk assets/templates/items/ and load every tier_N.png, keyed by the
-    ItemRef it represents. Layout is uniform: <category>/<name>/tier_N.png."""
-    templates: dict[ItemRef, np.ndarray] = {}
+def discover_blueprint_items(items_dir: Path) -> dict[str, ItemRef]:
+    """Map game blueprint IDs to ItemRefs from the item asset layout.
+
+    Paths are uniform: ``<category>/<name>/tier_N.png``; the corresponding
+    blueprint ID is ``<name>_N``.
+    """
+    items: dict[str, ItemRef] = {}
     for category_dir in sorted(items_dir.iterdir()):
         if not category_dir.is_dir():
             continue
@@ -43,19 +40,8 @@ def discover_item_templates(items_dir: Path) -> dict[ItemRef, np.ndarray]:
             for tier_path in sorted(name_dir.glob(f"{_TIER_STEM_PREFIX}*.png")):
                 tier = int(tier_path.stem[len(_TIER_STEM_PREFIX) :])
                 item = ItemRef(category=category_dir.name, name=name_dir.name, tier=tier)
-                templates[item] = load_template(tier_path)
-    return templates
-
-
-def discover_blueprint_items(templates: dict[ItemRef, np.ndarray]) -> dict[str, ItemRef]:
-    """Map the game's own item-identifier naming convention
-    (`<item name>_<tier>`, e.g. `"wheat_1"`) to the `ItemRef` it
-    represents, derived from an already-loaded `discover_item_templates`
-    result rather than re-walking the filesystem. Used to interpret
-    `blueprintID` values read directly from the game's live board state
-    -- see `cdp/board_store.py`, which is where that naming convention was
-    confirmed live."""
-    return {f"{item.name}_{item.tier}": item for item in templates}
+                items[f"{item.name}_{item.tier}"] = item
+    return items
 
 
 def discover_background_templates(backgrounds_dir: Path) -> dict[str, np.ndarray]:

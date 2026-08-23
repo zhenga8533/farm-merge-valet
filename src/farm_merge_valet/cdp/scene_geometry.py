@@ -1,49 +1,15 @@
-"""Resolve exact on-screen pixel positions for board cells directly from
-the game's own live rendering state, instead of a hardcoded, empirically
-curve-fit camera model.
+"""Resolve board cells to window-relative pixels from live rendering state.
 
-An earlier version of this project built its board-to-screen geometry
-from a handful of manually-measured reference constants: one matched
-screen point, a hand-derived tile-step vector, a fitted camera-to-pixel
-slope. Every one of those turned out to need a real, hands-on correction
-at some point (a stale reference point, an off-by-one tile anchor, an
-unaccounted-for icon render offset) -- because none of them were ever the
-actual ground truth, just a model of it built from a single past
-observation.
+Each calibration combines:
 
-This module asks the game directly instead, every time it's called, using
-only real, live values:
+1. Pixi bounds for rendered cell content.
+2. A least-squares affine mapping from grid coordinates to canvas pixels.
+3. Canvas DOM size and scale.
+4. The cross-origin game iframe's position, read from the top-level page.
+5. OS window bounds and browser display scaling.
 
-  1. Each on-screen item's exact visual center, via Pixi's own
-     `DisplayObject.getBounds()` on the cell's `_content` object (see
-     `cdp/board_store.py` for how that's found on the heap) -- the same
-     rectangle the game engine itself uses to render/hit-test it, already
-     correct for whatever the current camera position/zoom happens to be.
-  2. A column/row -> pixel affine mapping, fitted fresh from every
-     currently-visible item's (column, row, pixel) triple (confirmed
-     live: ordinary least squares over the ~50+ items typically visible
-     at once easily separates `col_step`/`row_step`/origin, no assumed
-     tile geometry required).
-  3. The canvas's real DOM geometry (`getBoundingClientRect()` vs. its
-     internal pixel resolution) to convert that Pixi/canvas-space
-     position into CSS pixels.
-  4. The game iframe's real position on the Reddit page -- found by
-     walking the page's shadow DOM (Reddit embeds the game inside a
-     shadow root, confirmed live: it's invisible to a plain
-     `querySelectorAll`) from a *second* CDP connection to the top-level
-     page, since a cross-origin iframe can never read its own position
-     from the inside (`window.frameElement` is null across the origin
-     boundary).
-  5. The real OS window bounds (`capture.window.find_window`, via
-     Windows' own DWM API) to fold in the browser's chrome height (title
-     bar/tab strip/address bar) and any OS display-scaling factor,
-     derived by subtracting the page's own reported viewport size (scaled
-     by `devicePixelRatio`) from those real bounds -- not measured by eye.
-
-Nothing here is a stored reference point that can go stale, and nothing
-needs re-deriving by hand after a game update, a window resize, or a
-display-scaling change -- nothing is cached across calls at all, since
-every input is already cheap to re-read live.
+Inputs are read fresh on every call so camera, window, and display changes do
+not leave stale geometry behind.
 """
 
 from __future__ import annotations
@@ -102,11 +68,8 @@ _CELL_POSITIONS_EXPRESSION = """
 })()
 """
 
-# Walks the page's shadow DOM (a plain `querySelectorAll('iframe')` from
-# the top-level document misses it entirely -- confirmed live, Reddit
-# embeds devvit apps inside a shadow root) looking for the game's own
-# iframe, identified the same way `find_game_frame_target` identifies it
-# from the CDP side: its `src` containing GAME_FRAME_URL_MARKER.
+# Walk the page's shadow DOM for the game iframe; Reddit embeds Devvit apps
+# inside a shadow root, so a document-level iframe query cannot see it.
 _IFRAME_RECT_EXPRESSION = f"""
 (() => {{
   const marker = {GAME_FRAME_URL_MARKER!r};
@@ -164,12 +127,8 @@ def _fit_grid_affine(points: list[dict]) -> tuple[Vector, Vector, Vector] | None
     on-screen item positions -- tile geometry measured fresh from the live
     board every call, rather than trusted as a fixed constant.
 
-    Different item types render their icon at slightly different local
-    offsets from their tile (confirmed live: e.g. a tall tree sprite vs. a
-    flat crop), which shows up as scatter around the fitted line rather
-    than a clean fit to any single point -- exactly what ordinary least
-    squares over many mixed-type points is for; no single item's position
-    is trusted as exact.
+    Different item types have different local visual offsets. Fitting many
+    points reduces the influence of any single sprite.
     """
     if len(points) < _MIN_FIT_POINTS:
         return None

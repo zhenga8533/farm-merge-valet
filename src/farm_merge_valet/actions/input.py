@@ -7,8 +7,6 @@ and are translated to absolute screen coordinates here.
 
 from __future__ import annotations
 
-import time
-
 import pyautogui
 
 from farm_merge_valet.capture.window import WindowRegion
@@ -41,7 +39,3 @@ def scroll(region: WindowRegion, x: int, y: int, clicks: int) -> None:
     """
     pyautogui.moveTo(region.left + x, region.top + y)
     pyautogui.scroll(clicks)
-
-
-def sleep(seconds: float) -> None:
-    time.sleep(seconds)
