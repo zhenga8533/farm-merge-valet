@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     # because checking every time is expensive.
     crate_click_batch_size: int = 10
 
+    # Delay between crate clicks, just long enough for the game to
+    # register one click before the next -- much shorter than
+    # `loop_interval`, since a click doesn't need board scanning to
+    # justify a full second (see `Bot._step_claim_crates`).
+    crate_click_settle: float = 0.1
+
     # Board scanning checks "is this cell occupied?" (matched against a
     # handful of background tile templates, see
     # assets/templates/backgrounds/ and core/board_scan.py) before ever

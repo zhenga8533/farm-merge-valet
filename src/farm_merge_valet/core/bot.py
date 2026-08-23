@@ -478,11 +478,6 @@ class Bot:
             is not None
         )
 
-    # Between crate clicks, just long enough for the game to register the
-    # click and update the crate/space state before the next capture --
-    # much shorter than `loop_interval`, since there's no board scanning
-    # to justify a full second here (see `step`).
-    _CRATE_CLICK_SETTLE = 0.4
     # Circuit breaker on the burst-click loop below: there's no reliable
     # "out of crates" signal (the crate icon can stay on screen regardless
     # of held count -- see automation-methodology.md), so if `board_full`
@@ -497,29 +492,48 @@ class Bot:
     ) -> None:
         """Claim crates back-to-back until the crate icon stops matching or
         the board fills up, instead of one click per (much longer,
-        board-scan-throttled) outer step -- see `step`."""
+        board-scan-throttled) outer step -- see `step`.
+
+        The crate button is a fixed UI element, not board content, so its
+        on-screen position only needs (re-)finding once per batch of
+        `crate_click_batch_size` clicks, not before every single one --
+        it isn't going to have moved a click later.
+        """
         if board_full:
             logger.warning("Board is full; switching to merge phase.")
             self._set_phase(Phase.MERGE)
             return
 
-        clicks_since_check = 0
-        for _ in range(self._MAX_CRATE_CLICKS_PER_STEP):
+        total_clicks = 0
+        while total_clicks < self._MAX_CRATE_CLICKS_PER_STEP:
+            # Checked inside this loop, not just between `step()` calls
+            # (see `run_forever`) -- otherwise a quit/pause request has to
+            # wait out the rest of a potentially many-click burst before
+            # it's even noticed, confirmed live to take several seconds
+            # longer than expected to actually stop.
+            if self._quit_requested or self.paused:
+                return
             match = find_best_match(
                 frame, self._supply_crate_template_scaled, settings.match_confidence
             )
             if match is None:
                 return
-            logger.info("Clicking supply crate (confidence=%.2f)", match.confidence)
-            click(region, *match.center)
-            self.stats.actions_taken += 1
-            time.sleep(self._CRATE_CLICK_SETTLE)
-            clicks_since_check += 1
+            logger.info(
+                "Clicking supply crate up to %d times (confidence=%.2f)",
+                settings.crate_click_batch_size,
+                match.confidence,
+            )
+            for _ in range(settings.crate_click_batch_size):
+                if self._quit_requested or self.paused:
+                    return
+                click(region, *match.center)
+                self.stats.actions_taken += 1
+                total_clicks += 1
+                time.sleep(settings.crate_click_settle)
+                if total_clicks >= self._MAX_CRATE_CLICKS_PER_STEP:
+                    break
 
             frame = capture_region(region)
-            if clicks_since_check < settings.crate_click_batch_size:
-                continue
-            clicks_since_check = 0
             live_synced = self._sync_board_from_live_state()
             if self._is_board_full(frame, live_synced=live_synced):
                 logger.warning("Board is full; switching to merge phase.")
