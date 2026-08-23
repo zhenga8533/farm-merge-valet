@@ -2,11 +2,10 @@
 Chrome DevTools Protocol (CDP), instead of inferring it from screen
 captures.
 
-Confirmed live: the game persists its camera state (world position + zoom)
-to `localStorage['cameraData']` on every frame. Reading that directly gives
-an exact, always-correct board-to-screen alignment -- see
-`vision/camera_calibration.py` -- replacing the fragile, error-prone
-vision-based grid calibration this project started with.
+`evaluate`/`evaluate_top_page` are the low-level building blocks; see
+`cdp/board_store.py` for board content and `cdp/scene_geometry.py` for
+board-to-screen pixel positions -- both read real, live objects out of
+the page directly rather than inferring anything from a screen capture.
 
 Requires Chrome to be launched with remote debugging enabled, which Chrome
 refuses to do on your normal, default profile (a deliberate security
@@ -32,8 +31,15 @@ import websockets
 # The game is a Reddit "devvit" app, embedded as a cross-origin iframe
 # inside the Reddit post page -- this is what distinguishes its CDP target
 # from the top-level Reddit page and any other iframe (e.g. a reCAPTCHA
-# challenge frame) that might also be open.
-_GAME_FRAME_URL_MARKER = "devvit.net"
+# challenge frame) that might also be open. Not underscore-prefixed since
+# `cdp/scene_geometry.py` reuses it to identify the *same* iframe from the
+# outside (matching its `src`, from the top-level page's own DOM).
+GAME_FRAME_URL_MARKER = "devvit.net"
+
+# Distinguishes the actual Reddit post page hosting the game from any
+# other unrelated tab that might happen to be open in the same
+# remote-debugging Chrome instance -- see `find_top_page_target`.
+_REDDIT_PAGE_URL_MARKER = "reddit.com"
 
 
 class CdpConnectionError(RuntimeError):
@@ -63,15 +69,47 @@ def find_game_frame_target(port: int) -> str:
         ) from exc
 
     for target in targets:
-        if target.get("type") == "iframe" and _GAME_FRAME_URL_MARKER in target.get("url", ""):
+        if target.get("type") == "iframe" and GAME_FRAME_URL_MARKER in target.get("url", ""):
             ws_url = target.get("webSocketDebuggerUrl")
             if ws_url:
                 return str(ws_url)
 
     raise CdpConnectionError(
         "Chrome's remote debugging endpoint is reachable, but no game iframe "
-        f"(url containing {_GAME_FRAME_URL_MARKER!r}) is currently open. "
+        f"(url containing {GAME_FRAME_URL_MARKER!r}) is currently open. "
         "Has the game been loaded (clicked 'Play') in that browser?"
+    )
+
+
+def find_top_page_target(port: int) -> str:
+    """Returns the `webSocketDebuggerUrl` for the top-level Reddit post
+    page hosting the game -- as opposed to the game's own cross-origin
+    iframe (`find_game_frame_target`).
+
+    Needed for anything that has to know the iframe's own position/size
+    from the *outside*: a cross-origin iframe can never read that about
+    itself (`window.frameElement` is null across the origin boundary,
+    confirmed live) -- see `cdp/scene_geometry.py`.
+    """
+    try:
+        resp = httpx.get(f"http://localhost:{port}/json", timeout=5)
+        resp.raise_for_status()
+        targets = resp.json()
+    except httpx.HTTPError as exc:
+        raise CdpConnectionError(
+            f"Could not reach Chrome's remote debugging endpoint on port {port}. "
+            "Is Chrome running with --remote-debugging-port set?"
+        ) from exc
+
+    for target in targets:
+        if target.get("type") == "page" and _REDDIT_PAGE_URL_MARKER in target.get("url", ""):
+            ws_url = target.get("webSocketDebuggerUrl")
+            if ws_url:
+                return str(ws_url)
+
+    raise CdpConnectionError(
+        "Chrome's remote debugging endpoint is reachable, but no Reddit post page "
+        f"(url containing {_REDDIT_PAGE_URL_MARKER!r}) is currently open."
     )
 
 
@@ -115,14 +153,10 @@ def evaluate(port: int, expression: str) -> object:
     return asyncio.run(_evaluate_async(ws_url, expression))
 
 
-def read_camera_data(port: int) -> dict | None:
-    """Reads and parses the game's live camera state from localStorage.
-    Returns None if the key isn't set yet (e.g. game just loaded and
-    hasn't rendered a frame). See module docstring for the shape:
-    `{"cameraPosition": {"x": ..., "y": ...}, "cameraZoom": ...}`.
-    """
-    raw = evaluate(port, "localStorage.getItem('cameraData')")
-    if not isinstance(raw, str):
-        return None
-    result: dict = json.loads(raw)
-    return result
+def evaluate_top_page(port: int, expression: str) -> object:
+    """Same as `evaluate`, but in the top-level Reddit page's JS context
+    rather than the game's own iframe -- for reading things a cross-origin
+    iframe can't see about its own placement (see `find_top_page_target`)."""
+    ws_url = find_top_page_target(port)
+    return asyncio.run(_evaluate_async(ws_url, expression))
+

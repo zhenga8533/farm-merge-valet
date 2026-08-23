@@ -1,28 +1,14 @@
-"""Derive the isometric board's tile-to-pixel geometry from a live capture.
+"""Measure the board's on-screen item render scale from a live capture.
 
-`core/environment.py` forces the game into a known, fixed state (fully
-zoomed out, panned to the bottom of the board) before the bot starts
-acting, specifically so that geometry doesn't have to be rediscovered from
-scratch every session. With zoom pinned, the tile grid's *shape* -- the
-pixel offset per grid step -- is a fixed constant of that state, not
-something to re-infer at runtime: it was measured once, directly, against
-a reference capture (by overlaying candidate grid lines on the board's
-tile-boundary pattern and adjusting until they lined up -- see chat
-history), and is reused as-is here.
-
-An earlier version of this module instead *inferred* the step vectors at
-runtime, by matching several instances of a common item template and
-clustering the pixel vectors between them. That turned out to be fragile
-in practice: a small/low-contrast template (e.g. a young wheat sprout)
-produced thousands of spurious matches against grass and other green
-content, and even after several rounds of filtering (mirror-pair
-requirements, minimum-length floors), it kept locking onto short,
-coincidental vectors between unrelated matches rather than genuine
-adjacent tiles -- because on a real, busy board there are enough
-same-tier item instances that *some* pair of them looks plausible by
-chance. None of that problem exists once the geometry itself is a known
-constant; only the board's scroll-independent *origin* still needs to be
-located per session, via a single confident template match.
+Board-to-screen tile geometry itself is no longer derived here at all --
+see `cdp/scene_geometry.py`, which reads it directly from the game's own
+live rendering state instead. What's left is a narrower, unrelated job:
+`calibrate_grid` confirms a known template (the always-present "cloud"
+background tile) is visible somewhere in a captured frame and reports
+what scale factor it had to be resized by to match -- the same factor
+`Bot._ensure_item_scale` then uses to resize the fixed-size UI templates
+(the supply-crate button, the "need more space" banner) that render at
+that same scale.
 """
 
 from __future__ import annotations
@@ -34,60 +20,15 @@ import numpy as np
 
 Vector = tuple[float, float]
 
-# Measured once, directly, against a 1920x1020 capture of the game fully
-# zoomed out (see `core/environment.zoom_out_fully`): the pixel offset for
-# one step along each isometric grid axis. Assumes the window stays this
-# size -- if that ever changes, this needs to be remeasured the same way.
-#
-# Went through two corrections to get here, both confirmed against the
-# game's own extracted map data (assets/board_map/ -- see
-# tools/template_extraction.py) rather than by eye:
-#   1. An initial by-eye ruler measurement gave (80, 50) -- its 1.6:1 x:y
-#      ratio didn't match the game's tile art (320x160 = exactly 2:1 for
-#      a standard isometric projection), corrected to 2:1 while keeping
-#      the same magnitude (~94.3px/step).
-#   2. That magnitude itself was still off by ~3.2%: fitting a
-#      least-squares regression against 76 real, precisely
-#      template-matched cloud-tile positions (matching a background
-#      template gives sub-pixel accuracy no by-eye measurement can) gave
-#      a magnitude of ~97.3px/step instead. This is the version that
-#      finally lines up with the map's own (column, row) coordinates
-#      cleanly (integer-valued relative offsets between matched tiles,
-#      confirmed live).
-REFERENCE_COL_STEP: Vector = (87.045, 43.755)
-REFERENCE_ROW_STEP: Vector = (-87.045, 43.755)
-
 
 @dataclass(frozen=True)
 class GridCalibration:
-    """Screen-pixel offset per +1 step along each grid axis, the scale
-    factor the anchor template had to be resized by to match the live
-    capture, and the pixel center where that scaled match was found."""
+    """The scale factor the anchor template had to be resized by to match
+    the live capture, and the pixel center where that scaled match was
+    found."""
 
-    col_step: Vector
-    row_step: Vector
     scale: float
     anchor: Vector
-
-    def grid_to_pixel_delta(self, d_col: float, d_row: float) -> Vector:
-        return (
-            self.col_step[0] * d_col + self.row_step[0] * d_row,
-            self.col_step[1] * d_col + self.row_step[1] * d_row,
-        )
-
-    def pixel_to_grid_delta(self, dx: float, dy: float) -> tuple[float, float]:
-        """Inverse of `grid_to_pixel_delta` -- solves the 2x2 linear system
-        for (d_col, d_row) given a pixel offset. Returned as floats; round
-        to the nearest int once you trust the result is a whole number of
-        tile steps."""
-        a, b = self.col_step
-        c, d = self.row_step
-        det = a * d - b * c
-        if abs(det) < 1e-6:
-            raise ValueError("col_step and row_step are degenerate (parallel)")
-        d_col = (dx * d - dy * c) / det
-        d_row = (a * dy - b * dx) / det
-        return d_col, d_row
 
 
 def _best_scale(
@@ -142,9 +83,7 @@ def calibrate_grid(
 ) -> GridCalibration | None:
     """Confirm `template_bgra` (a BGRA item template -- alpha channel
     required, used as the `cv2.matchTemplate` mask) is confidently visible
-    somewhere in `frame`, at whatever scale it's actually rendered at, and
-    pair that render scale with the fixed reference grid geometry (see
-    module docstring).
+    somewhere in `frame`, at whatever scale it's actually rendered at.
 
     `max_diff` is a TM_SQDIFF_NORMED threshold (lower = more similar; 0 is
     a pixel-perfect match). 0.2 comfortably separates a real match (~0.15,
@@ -154,7 +93,7 @@ def calibrate_grid(
     Returns None if the template can't be confidently matched at any
     scale -- this only confirms the game is actually on screen and
     measures its render scale, it doesn't need multiple instances the way
-    the old vector-inference approach did.
+    an earlier, vector-inference-based approach to tile geometry did.
     """
     scales = scales or [0.5 + 0.05 * i for i in range(31)]  # 0.5x - 2.0x
     template_bgr = template_bgra[:, :, :3]
@@ -165,6 +104,4 @@ def calibrate_grid(
         return None
     _diff, scale, anchor = picked
 
-    return GridCalibration(
-        col_step=REFERENCE_COL_STEP, row_step=REFERENCE_ROW_STEP, scale=scale, anchor=anchor
-    )
+    return GridCalibration(scale=scale, anchor=anchor)

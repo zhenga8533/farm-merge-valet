@@ -5,98 +5,71 @@ The board has no accessible persisted copy (`localStorage`/`IndexedDB`/
 Cache Storage all confirmed empty for this origin; the only real service
 worker on the page is Reddit's own, unrelated to the game), so the
 authoritative state only ever exists as live objects in the page's JS
-memory. The class holding it was identified by searching the game's
-minified webpack module graph for a board/cell-manager method signature,
-then confirmed live (via a debugger breakpoint hit on a real merge) to be
-the one actually mutated by real gameplay.
+memory.
 
-Rather than depending on a debugger breakpoint at runtime, `arm_board_store`
-monkey-patches that class's `setContent` directly via a plain
-`Runtime.evaluate`, so the *first* real call -- which happens automatically
-as the game populates the board from saved data, no gameplay action
-required -- stashes a live reference at `window.__fmvBoardStore`. Patching
-the prototype (not an instance) also works retroactively on an
-already-running game, since existing instances share it.
+An earlier version of this module found the board's data by searching the
+webpack module graph for a class with a matching cell-store method
+signature, then monkey-patching one of its methods (`setContent`, later
+`getContent`, later several at once) to capture `this` on the next call.
+That turned out to be fundamentally unreliable, confirmed live: the
+matched class had *zero* live instances on the heap at all (checked via
+CDP's `Runtime.queryObjects`) -- it's dead/unused code that happens to
+share the method signature, not the real store. No amount of patching it
+was ever going to fire.
 
-The class is found by method signature every call, not a cached module ID
--- bundle filenames are content-hashed, so a redeploy can renumber every
-module. Not bulletproof (a redeploy could also rename the methods
-themselves), which is why `arm_board_store` fails soft -- returns a status
-string, never raises -- so that kind of breakage is diagnosable from logs
-and falls back to vision (see `core/bot.py`) instead of crashing.
+Instead, `arm_board_store` searches every live `Map` instance on the heap
+directly (also via `Runtime.queryObjects`, using `Map.prototype` this
+time) for one whose values structurally look like board cells (`column`,
+`row`, `_content`, `_neighbors` -- confirmed live to uniquely identify it
+among every `Map` on the page) and stashes a direct reference at
+`window.__fmvBoardCells`. This finds the real, already-populated data
+immediately, with no dependency on timing, a future method call, or
+guessing which class actually gets instantiated.
 """
 
 from __future__ import annotations
 
-from farm_merge_valet.cdp.client import evaluate
+import asyncio
+import json
+from typing import Any
+
+import websockets
+
+from farm_merge_valet.cdp.client import evaluate, find_game_frame_target
 from farm_merge_valet.core.board import GridCoord
 
-# Method names that, together, uniquely identified the board/cell-store
-# class among every module in the game's bundle (~1200 modules, checked
-# live) -- see module docstring. Re-searched every `arm_board_store` call
-# rather than caching a module ID, so this survives the game's bundle
-# being renumbered by a redeploy.
-_CELL_STORE_SIGNATURE = [
-    "setContent",
-    "getContent",
-    "addCell",
-    "hasCell",
-    "_onCellContentAdded",
-    "_onCellContentRemoved",
-    "connectCellToNeighbours",
-]
+# Confirmed live to uniquely identify the board's cell map among every Map
+# instance on the page -- nothing else matches both the size range and
+# shape. `_content` holds the cell's item/marker (a Pixi display object
+# with a `_blueprintID` string field), `_neighbors` its adjacency links.
+_CELL_SHAPE_KEYS = ("column", "row", "_content", "_neighbors")
+_CELL_MAP_MIN_SIZE = 50
+_CELL_MAP_MAX_SIZE = 5000
 
-_ARM_SCRIPT = f"""
-(() => {{
-  if (window.__fmvBoardStore) return 'already-captured';
-  if (window.__fmvBoardStorePatched) return 'already-patched';
-  const chunkArr = window.webpackChunkfarm_merge_game;
-  if (!chunkArr) return 'no-chunk-array';
-  let req;
-  try {{
-    chunkArr.push([[Symbol()], {{}}, (r) => {{ req = r; }}]);
-  }} catch (e) {{ return 'push-failed: ' + e; }}
-  if (!req || !req.m) return 'no-require';
-
-  const REQUIRED = {_CELL_STORE_SIGNATURE!r};
-  let target = null;
-  for (const id of Object.keys(req.m)) {{
-    let exp;
-    try {{ exp = req(id); }} catch (e) {{ continue; }}
-    if (!exp || typeof exp !== 'object') continue;
-    for (const key of Object.keys(exp)) {{
-      const candidate = exp[key];
-      if (typeof candidate !== 'function' || !candidate.prototype) continue;
-      let protoKeys;
-      try {{
-        protoKeys = Object.getOwnPropertyNames(candidate.prototype);
-      }} catch (e) {{ continue; }}
-      if (REQUIRED.every((m) => protoKeys.includes(m))) {{
-        target = candidate;
-        break;
+_FIND_CELLS_MAP_EXPRESSION = f"""
+function() {{
+  for (const m of this) {{
+    try {{
+      if (m.size < {_CELL_MAP_MIN_SIZE} || m.size > {_CELL_MAP_MAX_SIZE}) continue;
+      const first = m.values().next().value;
+      if (!first || typeof first !== 'object') continue;
+      const keys = {list(_CELL_SHAPE_KEYS)!r};
+      if (keys.every((k) => k in first)) {{
+        window.__fmvBoardCells = m;
+        return 'found';
       }}
-    }}
-    if (target) break;
+    }} catch (e) {{}}
   }}
-  if (!target) return 'class-not-found';
-
-  const proto = target.prototype;
-  const orig = proto.setContent;
-  proto.setContent = function(...args) {{
-    if (!window.__fmvBoardStore) window.__fmvBoardStore = this;
-    return orig.apply(this, args);
-  }};
-  window.__fmvBoardStorePatched = true;
-  return 'patched';
-}})()
+  return 'not-found';
+}}
 """
 
-_READ_SCRIPT = """
+_READ_EXPRESSION = """
 (() => {
-  const store = window.__fmvBoardStore;
-  if (!store || !store._cells) return null;
+  const cells = window.__fmvBoardCells;
+  if (!cells) return null;
   const out = [];
-  for (const cell of store._cells.values()) {
+  for (const cell of cells.values()) {
     out.push({
       column: cell.column,
       row: cell.row,
@@ -108,20 +81,70 @@ _READ_SCRIPT = """
 """
 
 
-def arm_board_store(port: int) -> str:
-    """Best-effort, idempotent: patch the game's board-store class so the
-    next real `setContent` call (naturally triggered by the game itself,
-    no gameplay action needed -- see module docstring) stashes a live
-    reference for `read_board_state` to use. Safe to call every step;
-    cheap once already armed/captured (a couple of property checks).
+async def _call(ws: Any, id_: int, method: str, params: dict | None = None) -> dict:
+    await ws.send(json.dumps({"id": id_, "method": method, "params": params or {}}))
+    while True:
+        response = json.loads(await ws.recv())
+        if response.get("id") == id_:
+            return response
 
-    Returns a short status string for logging (`"patched"`,
-    `"already-captured"`, `"module-not-loaded"`, etc.) rather than a
-    bool/None, so a game update that breaks this (see module docstring)
-    is diagnosable from logs instead of silently doing nothing.
+
+async def _arm_board_store_async(ws_url: str) -> str:
+    async with websockets.connect(ws_url, max_size=50 * 1024 * 1024) as ws:
+        await _call(ws, 0, "Runtime.enable")
+
+        already = await _call(
+            ws,
+            1,
+            "Runtime.evaluate",
+            {"expression": "!!window.__fmvBoardCells", "returnByValue": True},
+        )
+        if already["result"]["result"].get("value"):
+            return "already-captured"
+
+        proto = await _call(
+            ws, 2, "Runtime.evaluate", {"expression": "Map.prototype", "returnByValue": False}
+        )
+        proto_result = proto.get("result", {}).get("result", {})
+        proto_object_id = proto_result.get("objectId")
+        if not proto_object_id:
+            return "no-map-prototype"
+
+        instances = await _call(
+            ws, 3, "Runtime.queryObjects", {"prototypeObjectId": proto_object_id}
+        )
+        instances_result = instances.get("result", {}).get("objects", {})
+        instances_object_id = instances_result.get("objectId")
+        if not instances_object_id:
+            return "query-objects-failed"
+
+        found = await _call(
+            ws,
+            4,
+            "Runtime.callFunctionOn",
+            {
+                "objectId": instances_object_id,
+                "functionDeclaration": _FIND_CELLS_MAP_EXPRESSION,
+                "returnByValue": True,
+            },
+        )
+        value = found.get("result", {}).get("result", {}).get("value")
+        return str(value) if value else "cells-map-not-found"
+
+
+def arm_board_store(port: int) -> str:
+    """Best-effort, idempotent: locate the board's live cell `Map` on the
+    heap and stash a reference at `window.__fmvBoardCells` for
+    `read_board_state` to use. Safe to call every step; cheap once already
+    captured (a single property check).
+
+    Returns a short status string for logging (`"found"`,
+    `"already-captured"`, `"cells-map-not-found"`, etc.) rather than a
+    bool/None, so a game update that breaks this (see module docstring) is
+    diagnosable from logs instead of silently doing nothing.
     """
-    result = evaluate(port, _ARM_SCRIPT)
-    return str(result) if result is not None else "no-result"
+    ws_url = find_game_frame_target(port)
+    return asyncio.run(_arm_board_store_async(ws_url))
 
 
 def read_board_state(port: int) -> dict[GridCoord, str] | None:
@@ -133,14 +156,13 @@ def read_board_state(port: int) -> dict[GridCoord, str] | None:
     `"area_cloud"`/`"premium_cloud"` (locked/premium), or a building's own
     ID (e.g. `"bakery"`) for fixed decoration.
 
-    Cells the game has never called `setContent` on at all (no data
-    either way -- confirmed live, ~3% of cells even on a well-progressed
-    account) are omitted rather than guessed at.
+    Cells with no content at all (no data either way) are omitted rather
+    than guessed at.
 
     Returns None if `arm_board_store` hasn't successfully captured a
     reference yet.
     """
-    raw = evaluate(port, _READ_SCRIPT)
+    raw = evaluate(port, _READ_EXPRESSION)
     if not isinstance(raw, list):
         return None
     return {

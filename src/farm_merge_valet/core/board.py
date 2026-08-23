@@ -26,6 +26,13 @@ class CellKind(Enum):
     # board state (see cdp/board_store.py): distinct from ITEM since
     # products have no tier/merge identity of their own.
     PRODUCT = auto()
+    # A placed building/decoration (shop, "likes" billboard, etc.) -- and,
+    # since these commonly have a footprint bigger than one cell but the
+    # game's own cell data only records content on a single anchor cell
+    # (confirmed live: a 2x2 shop's other 3 cells report blueprintID
+    # "empty", same as genuinely open ground), the cells immediately
+    # around that anchor too. Never farmable, unlike EMPTY.
+    STRUCTURE = auto()
 
 
 @dataclass(frozen=True)

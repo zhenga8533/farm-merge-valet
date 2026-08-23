@@ -31,15 +31,6 @@ class Settings(BaseSettings):
     # Where template images used for vision matching live.
     templates_dir: Path = PROJECT_ROOT / "assets" / "templates"
 
-    # Where the static board layout (extracted once from the game's own
-    # level data -- see tools/template_extraction.py's extract_board_map
-    # -- since the map is the same for every player) lives, and which map
-    # file to use -- "map_facebook" is the default starter map (the one a
-    # fresh account actually plays on; "map_island" etc. are event/DLC
-    # variants).
-    board_map_dir: Path = PROJECT_ROOT / "assets" / "board_map"
-    board_map_name: str = "map_facebook"
-
     # Where downloaded game atlas PNGs/manifests are cached between
     # `extract-templates` runs, so re-running without --force doesn't
     # re-fetch everything.
@@ -82,31 +73,16 @@ class Settings(BaseSettings):
     # justify a full second (see `Bot._step_claim_crates`).
     crate_click_settle: float = 0.1
 
-    # Board scanning checks "is this cell occupied?" (matched against a
-    # handful of background tile templates, see
-    # assets/templates/backgrounds/ and core/board_scan.py) before ever
-    # trying to classify *which* item is there -- much cheaper than
-    # sweeping all ~100+ item templates over the whole frame just to find
-    # candidates. `occupancy_threshold` is how confidently a cell's crop
-    # must match a known background to be treated as empty; real items
-    # measured well under this live (0.13-0.35), genuine background tiles
-    # measured well over it (0.63-1.0), so 0.6 has margin on both sides.
-    # Parallelized across `board_scan_workers` threads (cv2.matchTemplate
-    # releases the GIL).
-    occupancy_threshold: float = 0.6
-    board_scan_workers: int = 8
-
     # Fixed UI chrome bounding box, in captured-frame pixels: above
     # `board_min_pixel_y` is the browser tabs/address bar; left of
     # `board_min_pixel_x`/right of `board_max_pixel_x` are the level
     # badge/quest-list column and the settings/currency icon column.
-    # Confirmed live, none of that content matches any background
-    # template (correctly -- it isn't board content) but isn't a real
-    # item either, and it isn't something the static board map
-    # (core/board_map.py) can ever account for -- see
-    # core/board_scan.py's `visible_grid_coords`. There's no real
-    # board-boundary detector yet; these are pragmatic stand-ins tuned to
-    # this specific window layout.
+    # Used to decide whether a planned merge drag's endpoints actually
+    # land somewhere real/clickable (`Bot._is_action_visible`) rather than
+    # on UI chrome, since board content itself comes from the game's live
+    # state and can reference any cell on the whole map, not just what's
+    # currently on screen. There's no real board-boundary detector yet;
+    # these are pragmatic stand-ins tuned to this specific window layout.
     board_min_pixel_x: float = 200.0
     board_max_pixel_x: float = 1700.0
     board_min_pixel_y: float = 170.0
