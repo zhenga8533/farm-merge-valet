@@ -22,11 +22,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+import logging
+from collections.abc import Callable
+from threading import Lock
+from typing import Any, TypeVar
 
 import httpx
 import websockets
 from websockets.exceptions import WebSocketException
+
+logger = logging.getLogger(__name__)
 
 # The game is a Reddit "devvit" app, embedded as a cross-origin iframe
 # inside the Reddit post page -- this is what distinguishes its CDP target
@@ -40,6 +45,12 @@ GAME_FRAME_URL_MARKER = "playfmv-"
 # other unrelated tab that might happen to be open in the same
 # remote-debugging Chrome instance -- see `find_top_page_target`.
 _REDDIT_PAGE_URL_MARKER = "reddit.com"
+
+_TargetPair = tuple[str, str]
+_TargetKey = tuple[int, str | None]
+_target_pairs: dict[_TargetKey, _TargetPair] = {}
+_target_pairs_lock = Lock()
+_T = TypeVar("_T")
 
 
 class CdpConnectionError(RuntimeError):
@@ -104,9 +115,26 @@ def _select_target_pair(
     )
 
 
+def _target_pair(port: int, page_title: str | None = None) -> _TargetPair:
+    key = (port, page_title)
+    with _target_pairs_lock:
+        cached = _target_pairs.get(key)
+    if cached is not None:
+        return cached
+
+    selected = _select_target_pair(_load_targets(port), page_title)
+    with _target_pairs_lock:
+        return _target_pairs.setdefault(key, selected)
+
+
+def _invalidate_target_pair(port: int, page_title: str | None = None) -> None:
+    with _target_pairs_lock:
+        _target_pairs.pop((port, page_title), None)
+
+
 def find_game_frame_target(port: int, page_title: str | None = None) -> str:
     """Return the game iframe target paired with its owning Reddit page."""
-    game_ws, _ = _select_target_pair(_load_targets(port), page_title)
+    game_ws, _ = _target_pair(port, page_title)
     return game_ws
 
 
@@ -120,8 +148,41 @@ def find_top_page_target(port: int, page_title: str | None = None) -> str:
     itself (`window.frameElement` is null across the origin boundary) --
     see `cdp/scene_geometry.py`.
     """
-    _, page_ws = _select_target_pair(_load_targets(port), page_title)
+    _, page_ws = _target_pair(port, page_title)
     return page_ws
+
+
+def run_game_frame_operation(
+    port: int,
+    page_title: str | None,
+    operation: Callable[[str], _T],
+) -> _T:
+    """Run against the cached game target, refreshing it once on failure."""
+    for attempt in range(2):
+        try:
+            return operation(find_game_frame_target(port, page_title))
+        except CdpConnectionError:
+            _invalidate_target_pair(port, page_title)
+            if attempt == 1:
+                raise
+            logger.info("CDP game target changed; refreshing Chrome targets.")
+    raise AssertionError("unreachable")
+
+
+def _run_top_page_operation(
+    port: int,
+    page_title: str | None,
+    operation: Callable[[str], _T],
+) -> _T:
+    for attempt in range(2):
+        try:
+            return operation(find_top_page_target(port, page_title))
+        except CdpConnectionError:
+            _invalidate_target_pair(port, page_title)
+            if attempt == 1:
+                raise
+            logger.info("CDP page target changed; refreshing Chrome targets.")
+    raise AssertionError("unreachable")
 
 
 async def _evaluate_async(ws_url: str, expression: str) -> object:
@@ -171,13 +232,19 @@ def evaluate(port: int, expression: str, page_title: str | None = None) -> objec
     """Evaluate `expression` in the game iframe's JS context and return its
     value (must be JSON-serializable -- CDP's `returnByValue` requirement).
     """
-    ws_url = find_game_frame_target(port, page_title)
-    return _evaluate_target(ws_url, expression)
+    return run_game_frame_operation(
+        port,
+        page_title,
+        lambda ws_url: _evaluate_target(ws_url, expression),
+    )
 
 
 def evaluate_top_page(port: int, expression: str, page_title: str | None = None) -> object:
     """Same as `evaluate`, but in the top-level Reddit page's JS context
     rather than the game's own iframe -- for reading things a cross-origin
     iframe can't see about its own placement (see `find_top_page_target`)."""
-    ws_url = find_top_page_target(port, page_title)
-    return _evaluate_target(ws_url, expression)
+    return _run_top_page_operation(
+        port,
+        page_title,
+        lambda ws_url: _evaluate_target(ws_url, expression),
+    )

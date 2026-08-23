@@ -92,6 +92,9 @@ These phases are not implemented yet:
   on the game's current runtime structure and assets, so game updates can
   require template extraction or adapter changes. The game iframe is paired
   with its owning Reddit tab through CDP; ambiguous matching tabs are rejected.
+  The selected target pair is cached because Chrome target discovery is slow.
+  A failed CDP connection invalidates the cache and retries discovery once, so
+  iframe reloads still recover automatically.
 - **Safety:** the bot reactivates the target window before each screen-based
   action, gives signal-only global pause/quit hotkeys priority over pending
   waits and future inputs, and leaves PyAutoGUI's corner fail-safe enabled.

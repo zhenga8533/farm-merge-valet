@@ -17,7 +17,7 @@ from typing import Any
 import websockets
 from websockets.exceptions import WebSocketException
 
-from farm_merge_valet.cdp.client import CdpConnectionError, evaluate, find_game_frame_target
+from farm_merge_valet.cdp.client import CdpConnectionError, evaluate, run_game_frame_operation
 from farm_merge_valet.core.board import GridCoord
 
 # `_content` holds the cell's Pixi display object and `_neighbors` its
@@ -254,20 +254,26 @@ def arm_board_store(port: int, page_title: str | None = None) -> str:
     Returns a short status string for logging (`"found (...)"`,
     `"cells-map-not-found"`, etc.) so discovery failures remain diagnosable.
     """
-    ws_url = find_game_frame_target(port, page_title)
-    try:
-        return asyncio.run(_arm_board_store_async(ws_url))
-    except (OSError, ValueError, WebSocketException) as exc:
-        raise CdpConnectionError("Lost the board-store CDP connection.") from exc
+
+    def arm(ws_url: str) -> str:
+        try:
+            return asyncio.run(_arm_board_store_async(ws_url))
+        except (OSError, ValueError, WebSocketException) as exc:
+            raise CdpConnectionError("Lost the board-store CDP connection.") from exc
+
+    return run_game_frame_operation(port, page_title, arm)
 
 
 def inspect_board_maps(port: int, page_title: str | None = None) -> list[dict[str, Any]]:
     """Return non-mutating summaries of every cell-shaped map in the game heap."""
-    ws_url = find_game_frame_target(port, page_title)
-    try:
-        return asyncio.run(_inspect_board_maps_async(ws_url))
-    except (OSError, ValueError, WebSocketException) as exc:
-        raise CdpConnectionError("Lost the board-diagnostics CDP connection.") from exc
+
+    def inspect(ws_url: str) -> list[dict[str, Any]]:
+        try:
+            return asyncio.run(_inspect_board_maps_async(ws_url))
+        except (OSError, ValueError, WebSocketException) as exc:
+            raise CdpConnectionError("Lost the board-diagnostics CDP connection.") from exc
+
+    return run_game_frame_operation(port, page_title, inspect)
 
 
 def read_board_state(port: int, page_title: str | None = None) -> dict[GridCoord, str] | None:

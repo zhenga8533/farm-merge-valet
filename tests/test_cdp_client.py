@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from farm_merge_valet.cdp.client import CdpConnectionError, _evaluate_target, _select_target_pair
+from farm_merge_valet.cdp.client import (
+    CdpConnectionError,
+    _evaluate_target,
+    _invalidate_target_pair,
+    _select_target_pair,
+    evaluate,
+    find_game_frame_target,
+    find_top_page_target,
+)
 
 
 def _page(id_: str, title: str) -> dict[str, str]:
@@ -64,3 +72,53 @@ def test_evaluate_target_wraps_websocket_failures(monkeypatch) -> None:
 
     with pytest.raises(CdpConnectionError, match="WebSocket"):
         _evaluate_target("ws://frame/game", "1 + 1")
+
+
+def test_target_pair_is_shared_by_game_and_page_operations(monkeypatch) -> None:
+    port = 9333
+    title = "Cached game"
+    loads = 0
+    targets = [_page("game", title), _frame("game-frame", "game")]
+
+    def load_targets(_port: int):
+        nonlocal loads
+        loads += 1
+        return targets
+
+    _invalidate_target_pair(port, title)
+    monkeypatch.setattr("farm_merge_valet.cdp.client._load_targets", load_targets)
+
+    assert find_game_frame_target(port, title) == "ws://frame/game-frame"
+    assert find_top_page_target(port, title) == "ws://page/game"
+    assert loads == 1
+
+    _invalidate_target_pair(port, title)
+
+
+def test_evaluate_refreshes_stale_target_once(monkeypatch) -> None:
+    port = 9444
+    title = "Reloaded game"
+    loads = 0
+    used_targets = []
+
+    def load_targets(_port: int):
+        nonlocal loads
+        loads += 1
+        suffix = "old" if loads == 1 else "new"
+        return [_page(f"game-{suffix}", title), _frame(f"frame-{suffix}", f"game-{suffix}")]
+
+    def evaluate_target(ws_url: str, _expression: str):
+        used_targets.append(ws_url)
+        if ws_url.endswith("old"):
+            raise CdpConnectionError("stale iframe")
+        return 42
+
+    _invalidate_target_pair(port, title)
+    monkeypatch.setattr("farm_merge_valet.cdp.client._load_targets", load_targets)
+    monkeypatch.setattr("farm_merge_valet.cdp.client._evaluate_target", evaluate_target)
+
+    assert evaluate(port, "6 * 7", title) == 42
+    assert used_targets == ["ws://frame/frame-old", "ws://frame/frame-new"]
+    assert loads == 2
+
+    _invalidate_target_pair(port, title)

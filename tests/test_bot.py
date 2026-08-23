@@ -132,6 +132,27 @@ def test_step_takes_no_action_without_live_board_state(monkeypatch) -> None:
     assert not acted
 
 
+def test_step_does_not_read_board_after_interrupted_discovery(monkeypatch) -> None:
+    bot = _bare_bot()
+    reads = []
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.find_window", lambda *_args: WindowRegion(0, 0, 100, 100)
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.capture_region", lambda *_args: np.zeros((100, 100, 3))
+    )
+
+    def interrupt_during_discovery() -> None:
+        bot._interrupt_event.set()
+
+    bot._ensure_board_store_armed = interrupt_during_discovery
+    bot._sync_board_from_live_state = lambda: reads.append(True) or True
+
+    bot.step()
+
+    assert not reads
+
+
 def test_supply_crate_search_is_limited_to_bottom_center_region(monkeypatch) -> None:
     bot = _bare_bot()
     bot._supply_crate_template = np.zeros((10, 10, 3), dtype=np.uint8)
@@ -246,6 +267,32 @@ def test_quit_interrupts_actions_and_cancels_resume() -> None:
     assert bot.paused
     assert bot._interrupt_event.is_set()
     assert not bot._resume_requested.is_set()
+
+
+def test_scroll_direction_follows_offscreen_target(monkeypatch) -> None:
+    region = WindowRegion(0, 0, 1920, 1080)
+
+    def assert_direction(initial_y: int, expected_toward_bottom: bool) -> None:
+        bot = _bare_bot()
+        bot._scene_calibration = object()
+        current_y = initial_y
+        directions = []
+        bot._refresh_calibration = lambda _region: None
+        bot._grid_to_pixel = lambda _target: (960, current_y)
+
+        def fake_pan(_region, *, toward_bottom: bool, repeats: int, stop_event: Event) -> bool:
+            nonlocal current_y
+            directions.append(toward_bottom)
+            current_y = 540
+            return True
+
+        monkeypatch.setattr("farm_merge_valet.core.bot.pan", fake_pan)
+
+        assert bot._scroll_to_reveal(region, (0, 0))
+        assert directions == [expected_toward_bottom]
+
+    assert_direction(1000, True)
+    assert_direction(100, False)
 
 
 def test_run_forever_retries_initialization_when_window_is_missing(monkeypatch) -> None:

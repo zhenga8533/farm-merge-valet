@@ -274,7 +274,7 @@ class Bot:
             desired_y = (layout.board.top + layout.board.bottom) / 2
             distance = abs(y - desired_y)
             if toward_bottom is None:
-                toward_bottom = y < desired_y
+                toward_bottom = y > desired_y
             elif best_distance is not None and distance >= best_distance:
                 toward_bottom = not toward_bottom
             best_distance = distance
@@ -340,8 +340,14 @@ class Bot:
 
         # Arming is a no-op after the first success. The live board read stays
         # current on every phase because decisions depend on authoritative data.
+        if self._interrupt_event.is_set():
+            return
         self._ensure_board_store_armed()
+        if self._interrupt_event.is_set():
+            return
         live_synced = self._sync_board_from_live_state()
+        if self._interrupt_event.is_set():
+            return
         if not live_synced:
             logger.warning("Live board state is unavailable; skipping this step.")
             return

@@ -64,14 +64,12 @@ def pan(
 ) -> bool:
     """One or more pan gestures in the viewport's dedicated right-side lane.
 
-    `toward_bottom` picks the drag direction: confirmed empirically
-    against the live game, dragging from lower to higher on screen pans
-    the view toward the *top* of the board, so panning toward the
-    bottom drags the other way (higher to lower on screen) instead.
+    Dragging the map upward reveals the bottom of the board; dragging it
+    downward reveals the top.
     """
     x, cy = viewport_layout(region.width, region.height).pan_anchor
     distance = min(round(region.height * _PAN_DISTANCE_RATIO), cy, region.height - 1 - cy)
-    start, end = (cy - distance, cy + distance) if toward_bottom else (cy + distance, cy - distance)
+    start, end = (cy + distance, cy - distance) if toward_bottom else (cy - distance, cy + distance)
     for _ in range(repeats):
         if stop_event is not None and stop_event.is_set():
             return False

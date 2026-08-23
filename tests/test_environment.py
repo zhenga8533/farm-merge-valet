@@ -49,7 +49,7 @@ def test_fullscreen_initialization_stops_after_an_interrupted_cdp_read(monkeypat
     assert not pressed
 
 
-def test_pan_uses_dedicated_resolution_independent_lane(monkeypatch) -> None:
+def test_pan_toward_bottom_drags_map_up_in_the_dedicated_lane(monkeypatch) -> None:
     region = WindowRegion(0, 0, 1920, 1080)
     drags = []
     monkeypatch.setattr(
@@ -59,6 +59,20 @@ def test_pan_uses_dedicated_resolution_independent_lane(monkeypatch) -> None:
     monkeypatch.setattr("farm_merge_valet.core.environment.time.sleep", lambda _seconds: None)
 
     assert pan(region, toward_bottom=True)
+
+    assert drags == [((1776, 842), (1776, 238), 0.15)]
+
+
+def test_pan_toward_top_drags_map_down(monkeypatch) -> None:
+    region = WindowRegion(0, 0, 1920, 1080)
+    drags = []
+    monkeypatch.setattr(
+        "farm_merge_valet.core.environment.drag",
+        lambda _region, start, end, duration: drags.append((start, end, duration)),
+    )
+    monkeypatch.setattr("farm_merge_valet.core.environment.time.sleep", lambda _seconds: None)
+
+    assert pan(region, toward_bottom=False)
 
     assert drags == [((1776, 238), (1776, 842), 0.15)]
 
