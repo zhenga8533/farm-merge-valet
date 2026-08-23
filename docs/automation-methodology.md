@@ -62,11 +62,22 @@ Actions are prioritized as follows:
 3. **Gather** a scattered matching item into an empty cell beside an existing
    cluster.
 
-The default target is three connected identical items. When
-`FMV_PREFER_MERGE_FIVE` is enabled, the target is five. Per-item overrides are
-supported by `Bot` internally but do not yet have a configuration or GUI
-surface. Merge-5 remains disabled by default for the initial rollout, but its
-tested planner stays available to avoid removing and later rebuilding it.
+Trigger drags always lift a non-articulation member of the cluster. Removing
+the dragged source therefore leaves the stationary members connected until it
+is dropped onto an adjacent member, avoiding a temporary split that would
+cancel a line or branched merge.
+
+Merge-5 is enabled by default because exactly five connected identical items
+produce two upgrades. The planner simulates each relocation before acting: it
+can split or rebalance oversized groups, prefers moves that form exact groups
+of five, and rejects gathering moves that would create a group larger than
+five. Exact-five work is considered before any merge-3 action.
+
+When board space reaches `FMV_MERGE_EMPTY_CELL_RESERVE` and no productive
+merge-5 action exists, the bot temporarily falls back to merge-3 to recover
+space. Setting `FMV_PREFER_MERGE_FIVE=false` uses merge-3 as the normal target.
+Per-item strategy controls are deferred until the GUI provides a place to
+configure them.
 
 If an action is off-screen, the bot pans toward it and recalibrates before
 acting. After each drag, the next iteration reloads the real board state rather

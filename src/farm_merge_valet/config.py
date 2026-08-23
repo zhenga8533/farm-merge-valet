@@ -67,11 +67,9 @@ class Settings(BaseSettings):
     pan_anchor_x_ratio: float = Field(default=0.925, ge=0.0, le=1.0)
     pan_anchor_y_ratio: float = Field(default=0.50, ge=0.0, le=1.0)
 
-    # Default merge-5 preference (merging exactly 5 identical items yields
-    # 2 of the next tier instead of 1 from a merge-3 -- see
-    # docs/game-mechanics.md). Per-item/tier overrides aren't env-var
-    # configurable yet; pass `merge_five_overrides` to `Bot` directly.
-    prefer_merge_five: bool = False
+    # Merging exactly 5 identical items yields 2 of the next tier instead of
+    # 1 from a merge-3 (see docs/game-mechanics.md).
+    prefer_merge_five: bool = True
 
     # Seconds between bot loop iterations.
     loop_interval: float = Field(default=1.0, gt=0.0)

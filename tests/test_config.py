@@ -32,3 +32,7 @@ def test_settings_reject_removed_legacy_keys() -> None:
 
 def test_merge_space_reserve_can_be_disabled() -> None:
     assert Settings(_env_file=None, merge_empty_cell_reserve=0).merge_empty_cell_reserve == 0
+
+
+def test_merge_five_is_enabled_by_default() -> None:
+    assert Settings(_env_file=None).prefer_merge_five

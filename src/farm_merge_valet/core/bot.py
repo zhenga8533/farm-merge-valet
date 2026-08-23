@@ -6,6 +6,7 @@ import logging
 import time
 from enum import Enum, auto
 from threading import Event
+from typing import Literal
 
 import keyboard
 import numpy as np
@@ -70,14 +71,7 @@ class Phase(Enum):
 
 
 class Bot:
-    def __init__(self, merge_five_overrides: dict[ItemRef, bool] | None = None) -> None:
-        """`merge_five_overrides`: per-item/tier merge-5 preference,
-        overriding `settings.prefer_merge_five` for specific items -- e.g.
-        `{ItemRef("crops", "wheat", 2): True}` to prefer merge-5 for wheat
-        tier 2 specifically regardless of the global default. Not yet
-        env-var configurable; pass directly for now.
-        """
-        self._merge_five_overrides = merge_five_overrides or {}
+    def __init__(self) -> None:
         self.paused = False
         self._quit_requested = False
         self._interrupt_event = Event()
@@ -181,9 +175,6 @@ class Bot:
         logger.debug("Synced %d cell(s) from live game state.", len(board.known_coords()))
         return True
 
-    def _prefers_five(self, item: ItemRef) -> bool:
-        return self._merge_five_overrides.get(item, settings.prefer_merge_five)
-
     def _grid_to_pixel(self, coord: GridCoord) -> tuple[int, int]:
         assert self._scene_calibration is not None
         return self._scene_calibration.to_pixel(coord)
@@ -198,13 +189,36 @@ class Bot:
         MergeActionKind.GATHER: 2,
     }
 
-    def _plan_merge_actions(self) -> list[MergeAction]:
-        return [
+    @staticmethod
+    def _item_sort_key(item: ItemRef) -> tuple[str, str, int]:
+        return item.category, item.name, item.tier
+
+    def _action_sort_key(
+        self, action: MergeAction
+    ) -> tuple[int, tuple[str, str, int], GridCoord, GridCoord]:
+        return (
+            self._MERGE_ACTION_PRIORITY[action.kind],
+            self._item_sort_key(action.item),
+            action.start,
+            action.end,
+        )
+
+    def _plan_merge_actions(self, target_size: Literal[3, 5]) -> list[MergeAction]:
+        actions = [
             action
-            for item in self.board.items_present()
-            if (action := plan_merge_action(self.board, item, prefer_five=self._prefers_five(item)))
-            is not None
+            for item in sorted(self.board.items_present(), key=self._item_sort_key)
+            if (action := plan_merge_action(self.board, item, target_size=target_size)) is not None
         ]
+        return sorted(actions, key=self._action_sort_key)
+
+    def _merge_actions_for_policy(self, *, allow_three_fallback: bool) -> list[MergeAction]:
+        if not settings.prefer_merge_five:
+            return self._plan_merge_actions(3)
+
+        actions = self._plan_merge_actions(5)
+        if actions or not allow_three_fallback:
+            return actions
+        return self._plan_merge_actions(3)
 
     def _is_action_visible(self, action: MergeAction, frame_shape: tuple[int, ...]) -> bool:
         """Whether both ends of `action`'s drag land within the currently
@@ -225,18 +239,24 @@ class Bot:
     # enough attempts to cross the observed scrollable range.
     _MAX_SCROLL_ATTEMPTS = 12
 
-    def _try_merge(self, region: WindowRegion, frame: np.ndarray) -> bool:
+    def _try_merge(
+        self,
+        region: WindowRegion,
+        frame: np.ndarray,
+        *,
+        allow_three_fallback: bool,
+    ) -> bool:
         """Execute the best visible action, or pan toward an off-screen one."""
-        actions = self._plan_merge_actions()
+        actions = self._merge_actions_for_policy(allow_three_fallback=allow_three_fallback)
         if not actions:
             return False
 
         visible = [a for a in actions if self._is_action_visible(a, frame.shape)]
         if visible:
-            best = min(visible, key=lambda a: self._MERGE_ACTION_PRIORITY[a.kind])
+            best = min(visible, key=self._action_sort_key)
             return self._execute_merge_action(region, best)
 
-        best_offscreen = min(actions, key=lambda a: self._MERGE_ACTION_PRIORITY[a.kind])
+        best_offscreen = min(actions, key=self._action_sort_key)
         col = (best_offscreen.start[0] + best_offscreen.end[0]) // 2
         row = (best_offscreen.start[1] + best_offscreen.end[1]) // 2
         return self._scroll_to_reveal(region, (col, row))
@@ -286,24 +306,33 @@ class Bot:
         if self._interrupt_event.is_set():
             return False
         item = action.item
+        strategy = f"merge-{action.target_size}"
+        if settings.prefer_merge_five and action.target_size == 3:
+            strategy += " fallback"
         if action.kind is MergeActionKind.TRIGGER:
             logger.info(
-                "Merging %d x %s (%s tier %d)",
+                "Merging %d x %s (%s tier %d, %s)",
                 len(action.cluster),
                 item.name,
                 item.category,
                 item.tier,
+                strategy,
             )
         elif action.kind is MergeActionKind.DEGROUP:
             logger.info(
-                "Degrouping 1 x %s (%s tier %d) to avoid an over-sized merge",
+                "Degrouping 1 x %s (%s tier %d) toward %s",
                 item.name,
                 item.category,
                 item.tier,
+                strategy,
             )
         else:
             logger.info(
-                "Gathering 1 x %s (%s tier %d) toward a merge", item.name, item.category, item.tier
+                "Gathering 1 x %s (%s tier %d) toward %s",
+                item.name,
+                item.category,
+                item.tier,
+                strategy,
             )
         drag(region, self._grid_to_pixel(action.start), self._grid_to_pixel(action.end))
         if action.kind is MergeActionKind.TRIGGER:
@@ -365,7 +394,9 @@ class Bot:
         empty_count = len(self.board.find_empty())
         if empty_count == 0:
             return True
-        return empty_count <= settings.merge_empty_cell_reserve and bool(self._plan_merge_actions())
+        return empty_count <= settings.merge_empty_cell_reserve and bool(
+            self._merge_actions_for_policy(allow_three_fallback=True)
+        )
 
     # The crate icon can remain visible at zero supply, so bound each burst.
     _MAX_CRATE_CLICKS_PER_STEP = 50
@@ -422,7 +453,11 @@ class Bot:
                 settings.crate_click_batch_size,
                 self._MAX_CRATE_CLICKS_PER_STEP - total_clicks,
             )
-            reserve = settings.merge_empty_cell_reserve if self._plan_merge_actions() else 0
+            reserve = (
+                settings.merge_empty_cell_reserve
+                if self._merge_actions_for_policy(allow_three_fallback=True)
+                else 0
+            )
             available = len(self.board.find_empty()) - reserve
             batch_size = min(batch_size, max(0, available))
             if batch_size == 0:
@@ -468,7 +503,12 @@ class Bot:
             # derive geometry from) -- nothing safe to do but wait for the
             # next step.
             return
-        merged = self._try_merge(region, frame)
+        allow_three_fallback = len(self.board.find_empty()) <= settings.merge_empty_cell_reserve
+        merged = self._try_merge(
+            region,
+            frame,
+            allow_three_fallback=allow_three_fallback,
+        )
         if not merged and not board_needs_merge:
             logger.info("Board has space again; switching back to claim-crates phase.")
             self._set_phase(Phase.CLAIM_CRATES)

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import Literal
 
 GridCoord = tuple[int, int]
 
@@ -102,40 +103,27 @@ class BoardGrid:
         an unobserved neighbor would extend it.
         """
         targets = {c for c, cell in self._cells.items() if cell.item == item}
-        clusters: list[set[GridCoord]] = []
-        seen: set[GridCoord] = set()
-        for start in targets:
-            if start in seen:
-                continue
-            cluster: set[GridCoord] = set()
-            stack = [start]
-            while stack:
-                coord = stack.pop()
-                if coord in cluster:
-                    continue
-                cluster.add(coord)
-                x, y = coord
-                for dx, dy in NEIGHBOR_OFFSETS:
-                    neighbor = (x + dx, y + dy)
-                    if neighbor in targets and neighbor not in cluster:
-                        stack.append(neighbor)
-            seen |= cluster
-            clusters.append(cluster)
-        return clusters
+        return _find_coord_clusters(targets)
 
 
-def adjacent_pair(cluster: set[GridCoord]) -> tuple[GridCoord, GridCoord] | None:
-    """Any one pair of coordinates within `cluster` that are grid-adjacent
-    to each other -- e.g. to know which two tiles to actually drag between
-    to trigger a merge action. Returns None only if `cluster` has fewer
-    than 2 members."""
-    for coord in cluster:
-        x, y = coord
-        for dx, dy in NEIGHBOR_OFFSETS:
-            neighbor = (x + dx, y + dy)
-            if neighbor in cluster:
-                return coord, neighbor
-    return None
+def _find_coord_clusters(coords: set[GridCoord]) -> list[set[GridCoord]]:
+    remaining = set(coords)
+    clusters: list[set[GridCoord]] = []
+    while remaining:
+        start = min(remaining)
+        remaining.remove(start)
+        cluster = {start}
+        stack = [start]
+        while stack:
+            x, y = stack.pop()
+            for dx, dy in NEIGHBOR_OFFSETS:
+                neighbor = (x + dx, y + dy)
+                if neighbor in remaining:
+                    remaining.remove(neighbor)
+                    cluster.add(neighbor)
+                    stack.append(neighbor)
+        clusters.append(cluster)
+    return sorted(clusters, key=lambda cluster: (-len(cluster), min(cluster)))
 
 
 def _is_connected(coords: set[GridCoord]) -> bool:
@@ -166,35 +154,27 @@ def find_removable_member(cluster: set[GridCoord]) -> GridCoord | None:
     """
     if len(cluster) <= 1:
         return None
-    for candidate in cluster:
+    for candidate in sorted(cluster):
         if _is_connected(cluster - {candidate}):
             return candidate
     return None  # unreachable for a genuinely connected cluster
 
 
-def _empty_neighbor(board: BoardGrid, cluster: set[GridCoord]) -> GridCoord | None:
-    """A confirmed-EMPTY cell adjacent to some member of `cluster` -- where
-    a same-item cell could be relocated to join the cluster."""
-    for x, y in cluster:
-        for dx, dy in NEIGHBOR_OFFSETS:
-            neighbor = (x + dx, y + dy)
-            if neighbor in cluster:
-                continue
-            cell = board.get_cell(neighbor)
-            if cell is not None and cell.kind is CellKind.EMPTY:
-                return neighbor
-    return None
+def merge_trigger_pair(cluster: set[GridCoord]) -> tuple[GridCoord, GridCoord] | None:
+    """Choose a merge drag that keeps the stationary members connected.
 
-
-def _isolated_empty_cell(board: BoardGrid, avoid_adjacent_to: set[GridCoord]) -> GridCoord | None:
-    """A confirmed-EMPTY cell not adjacent to any coordinate in
-    `avoid_adjacent_to` -- where an item can be relocated to *without*
-    immediately re-joining that group."""
-    for coord in board.find_empty():
-        x, y = coord
-        neighbors = {(x + dx, y + dy) for dx, dy in NEIGHBOR_OFFSETS}
-        if neighbors.isdisjoint(avoid_adjacent_to):
-            return coord
+    Lifting an articulation cell can split a ready cluster before drop and
+    prevent the game from triggering the merge. The source must therefore be
+    removable, with an adjacent member of the connected remainder as target.
+    """
+    start = find_removable_member(cluster)
+    if start is None:
+        return None
+    x, y = start
+    for dx, dy in NEIGHBOR_OFFSETS:
+        neighbor = (x + dx, y + dy)
+        if neighbor in cluster:
+            return start, neighbor
     return None
 
 
@@ -202,12 +182,8 @@ class MergeActionKind(Enum):
     # An exactly-target-sized cluster is ready -- drag one member onto an
     # adjacent one to collapse the whole thing into the next tier.
     TRIGGER = auto()
-    # A cluster is bigger than the target size (only possible with
-    # `prefer_five`, since merging *auto-consumes every connected same-tier
-    # cell*, not just however many were intended -- confirmed live: a
-    # 6-cluster merge only credits 5-worth of upgrade, wasting the 6th).
-    # Relocate one member away to shrink it back to exactly the target
-    # before triggering.
+    # A cluster is bigger than the target size. Relocate one member to split
+    # or rebalance it without triggering an inefficient oversized merge.
     DEGROUP = auto()
     # Not enough of this item are touching yet to reach the target size,
     # but enough exist somewhere on the board -- relocate one same-item
@@ -221,12 +197,144 @@ class MergeAction:
     item: ItemRef
     start: GridCoord  # cell to drag from
     end: GridCoord  # cell to drag to
-    # Cells that merge away entirely -- only populated for TRIGGER, where
-    # every member of the cluster is consumed by the merge.
-    cluster: frozenset[GridCoord] = frozenset()
+    cluster: frozenset[GridCoord]
+    target_size: Literal[3, 5]
 
 
-def plan_merge_action(board: BoardGrid, item: ItemRef, *, prefer_five: bool) -> MergeAction | None:
+def _item_positions(board: BoardGrid, item: ItemRef) -> set[GridCoord]:
+    return {
+        coord
+        for coord in board.known_coords()
+        if (cell := board.get_cell(coord)) is not None and cell.item == item
+    }
+
+
+def _cluster_sizes(coords: set[GridCoord]) -> tuple[int, ...]:
+    return tuple(sorted((len(cluster) for cluster in _find_coord_clusters(coords)), reverse=True))
+
+
+def _relocations(
+    positions: set[GridCoord],
+    empty_cells: list[GridCoord],
+    *,
+    require_join: bool,
+) -> list[tuple[GridCoord, GridCoord, set[GridCoord]]]:
+    candidates: list[tuple[GridCoord, GridCoord, set[GridCoord]]] = []
+    for start in sorted(positions):
+        remaining = positions - {start}
+        for end in empty_cells:
+            if not require_join or any(neighbor in remaining for neighbor in _neighbors(end)):
+                candidates.append((start, end, remaining | {end}))
+    return candidates
+
+
+def _neighbors(coord: GridCoord) -> tuple[GridCoord, ...]:
+    x, y = coord
+    return tuple((x + dx, y + dy) for dx, dy in NEIGHBOR_OFFSETS)
+
+
+def _plan_oversize_repair(
+    board: BoardGrid,
+    item: ItemRef,
+    positions: set[GridCoord],
+    target_size: Literal[3, 5],
+) -> MergeAction | None:
+    current_sizes = _cluster_sizes(positions)
+    current_oversize = (
+        sum(max(0, size - target_size) for size in current_sizes),
+        max(current_sizes, default=0),
+    )
+    candidates: list[
+        tuple[
+            tuple[int, int, int, tuple[int, ...], GridCoord, GridCoord],
+            GridCoord,
+            GridCoord,
+            set[GridCoord],
+        ]
+    ] = []
+    for start, end, moved_positions in _relocations(
+        positions, sorted(board.find_empty()), require_join=False
+    ):
+        sizes = _cluster_sizes(moved_positions)
+        oversize = (
+            sum(max(0, size - target_size) for size in sizes),
+            max(sizes, default=0),
+        )
+        if oversize >= current_oversize:
+            continue
+        score = (
+            -sizes.count(target_size),
+            oversize[0],
+            oversize[1],
+            tuple(-size for size in sizes),
+            start,
+            end,
+        )
+        candidates.append((score, start, end, moved_positions))
+
+    if not candidates:
+        return None
+    _, start, end, moved_positions = min(candidates, key=lambda candidate: candidate[0])
+    destination_cluster = next(
+        cluster for cluster in _find_coord_clusters(moved_positions) if end in cluster
+    )
+    return MergeAction(
+        kind=MergeActionKind.DEGROUP,
+        item=item,
+        start=start,
+        end=end,
+        cluster=frozenset(destination_cluster),
+        target_size=target_size,
+    )
+
+
+def _plan_gather(
+    board: BoardGrid,
+    item: ItemRef,
+    positions: set[GridCoord],
+    target_size: Literal[3, 5],
+) -> MergeAction | None:
+    current_sizes = _cluster_sizes(positions)
+    current_progress = (current_sizes.count(target_size), current_sizes)
+    candidates: list[
+        tuple[
+            tuple[int, tuple[int, ...], GridCoord, GridCoord],
+            GridCoord,
+            GridCoord,
+            set[GridCoord],
+        ]
+    ] = []
+    for start, end, moved_positions in _relocations(
+        positions, sorted(board.find_empty()), require_join=True
+    ):
+        sizes = _cluster_sizes(moved_positions)
+        if max(sizes, default=0) > target_size:
+            continue
+        progress = (sizes.count(target_size), sizes)
+        if progress <= current_progress:
+            continue
+        score = (-progress[0], tuple(-size for size in sizes), start, end)
+        candidates.append((score, start, end, moved_positions))
+
+    if not candidates:
+        return None
+    _, start, end, moved_positions = min(candidates, key=lambda candidate: candidate[0])
+    destination_cluster = next(
+        cluster for cluster in _find_coord_clusters(moved_positions) if end in cluster
+    )
+    return MergeAction(
+        kind=MergeActionKind.GATHER,
+        item=item,
+        start=start,
+        end=end,
+        cluster=frozenset(destination_cluster),
+        target_size=target_size,
+    )
+
+
+def plan_merge_action(
+    board: BoardGrid, item: ItemRef, *, target_size: Literal[3, 5]
+) -> MergeAction | None:
     """The single next best action toward merging `item`, or None if
     there's nothing productive to do for it right now (not enough on the
     board yet, or no room to relocate anything). Re-derived fresh from
@@ -235,41 +343,34 @@ def plan_merge_action(board: BoardGrid, item: ItemRef, *, prefer_five: bool) -> 
     distance, so the number of actions needed to complete a merge doesn't
     depend on *which* available item is chosen at each step.
 
-    With `prefer_five`, clusters of 3 or 4 remain unmerged until a fifth item
-    is available, so only an exact cluster of 5 is triggered.
+    A move is only selected when its simulated board state makes measurable
+    progress and, for gathering, cannot create a cluster larger than the target.
     """
-    target = 5 if prefer_five else 3
+    if target_size not in (3, 5):
+        raise ValueError("target_size must be 3 or 5")
+
     clusters = board.find_clusters(item)
     if not clusters:
         return None
+    positions = _item_positions(board, item)
 
     for cluster in clusters:
-        if len(cluster) == target:
-            pair = adjacent_pair(cluster)
+        if len(cluster) == target_size:
+            pair = merge_trigger_pair(cluster)
             if pair is not None:
                 start, end = pair
-                return MergeAction(MergeActionKind.TRIGGER, item, start, end, frozenset(cluster))
+                return MergeAction(
+                    kind=MergeActionKind.TRIGGER,
+                    item=item,
+                    start=start,
+                    end=end,
+                    cluster=frozenset(cluster),
+                    target_size=target_size,
+                )
 
-    for cluster in clusters:
-        if len(cluster) > target:
-            donor = find_removable_member(cluster)
-            if donor is None:
-                continue
-            destination = _isolated_empty_cell(board, cluster - {donor})
-            if destination is not None:
-                return MergeAction(MergeActionKind.DEGROUP, item, donor, destination)
+    if any(len(cluster) > target_size for cluster in clusters):
+        return _plan_oversize_repair(board, item, positions, target_size)
 
-    if sum(len(c) for c in clusters) < target:
+    if len(positions) < target_size:
         return None
-    for seed in sorted(clusters, key=len, reverse=True):
-        if len(seed) >= target:
-            continue
-        destination = _empty_neighbor(board, seed)
-        if destination is None:
-            continue
-        donor_cluster = next((c for c in clusters if c is not seed), None)
-        if donor_cluster is None:
-            continue
-        donor = next(iter(donor_cluster))
-        return MergeAction(MergeActionKind.GATHER, item, donor, destination)
-    return None
+    return _plan_gather(board, item, positions, target_size)
