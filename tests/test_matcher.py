@@ -1,6 +1,7 @@
+import cv2
 import numpy as np
 
-from farm_merge_valet.vision.matcher import find_best_match
+from farm_merge_valet.vision.matcher import find_best_match, find_best_scaled_match
 
 
 def _checkerboard(height: int, width: int) -> np.ndarray:
@@ -77,3 +78,30 @@ def test_find_best_match_bgra_returns_none_below_confidence() -> None:
     match = find_best_match(frame, template, min_confidence=0.9)
 
     assert match is None
+
+
+def test_find_best_scaled_match_selects_the_actual_ui_scale() -> None:
+    frame = np.zeros((160, 180, 3), dtype=np.uint8)
+    template = _checkerboard_bgra(20, 40)
+    resized = cv2.resize(template, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_AREA)
+    frame[50:80, 60:120] = resized[:, :, :3]
+
+    match = find_best_scaled_match(frame, template, 0.9, scales=(1.0, 1.5, 2.0))
+
+    assert match is not None
+    assert (match.x, match.y, match.width, match.height) == (60, 50, 60, 30)
+
+
+def test_find_best_scaled_match_rejects_nonpositive_scale() -> None:
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    template = _checkerboard_bgra(20, 40)
+
+    with np.testing.assert_raises(ValueError):
+        find_best_scaled_match(frame, template, 0.9, scales=(0.0,))
+
+
+def test_find_best_scaled_match_skips_templates_larger_than_frame() -> None:
+    frame = np.zeros((10, 10, 3), dtype=np.uint8)
+    template = _checkerboard_bgra(20, 40)
+
+    assert find_best_scaled_match(frame, template, 0.9, scales=(1.0, 2.0)) is None

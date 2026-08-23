@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from farm_merge_valet.cdp.client import CdpConnectionError, _select_target_pair
+from farm_merge_valet.cdp.client import CdpConnectionError, _evaluate_target, _select_target_pair
 
 
 def _page(id_: str, title: str) -> dict[str, str]:
@@ -54,3 +54,13 @@ def test_select_target_pair_rejects_ambiguous_game_tabs() -> None:
 def test_select_target_pair_rejects_orphaned_iframe() -> None:
     with pytest.raises(CdpConnectionError, match="no Farm Merge Valley iframe"):
         _select_target_pair([_frame("game-frame", "missing")], "r/FarmMergeValley")
+
+
+def test_evaluate_target_wraps_websocket_failures(monkeypatch) -> None:
+    async def fail(*_args):
+        raise OSError("connection closed")
+
+    monkeypatch.setattr("farm_merge_valet.cdp.client._evaluate_async", fail)
+
+    with pytest.raises(CdpConnectionError, match="WebSocket"):
+        _evaluate_target("ws://frame/game", "1 + 1")

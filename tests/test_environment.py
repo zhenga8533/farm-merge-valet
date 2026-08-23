@@ -43,4 +43,4 @@ def test_pan_uses_dedicated_resolution_independent_lane(monkeypatch) -> None:
 
     pan(region, toward_bottom=True)
 
-    assert drags == [((1776, 240), (1776, 840), 0.15)]
+    assert drags == [((1776, 238), (1776, 842), 0.15)]

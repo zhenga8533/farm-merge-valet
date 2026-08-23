@@ -15,9 +15,7 @@ a *separate* Chrome instance/profile just for automation:
 
     chrome.exe --remote-debugging-port=9222 --user-data-dir="<some other dir>"
 
-See docs/automation-methodology.md for the full setup (copying just the
-session cookies into that separate profile, rather than a full profile
-copy, is enough to stay logged in).
+See the README for setup instructions.
 """
 
 from __future__ import annotations
@@ -28,6 +26,7 @@ from typing import Any
 
 import httpx
 import websockets
+from websockets.exceptions import WebSocketException
 
 # The game is a Reddit "devvit" app, embedded as a cross-origin iframe
 # inside the Reddit post page -- this is what distinguishes its CDP target
@@ -78,16 +77,11 @@ def _select_target_pair(
         for target in targets
         if target.get("type") == "page"
         and _REDDIT_PAGE_URL_MARKER in str(target.get("url", ""))
-        and (
-            title_filter is None
-            or title_filter in str(target.get("title", "")).casefold()
-        )
+        and (title_filter is None or title_filter in str(target.get("title", "")).casefold())
     }
     pairs: list[tuple[str, str]] = []
     for frame in targets:
-        if frame.get("type") != "iframe" or GAME_FRAME_URL_MARKER not in str(
-            frame.get("url", "")
-        ):
+        if frame.get("type") != "iframe" or GAME_FRAME_URL_MARKER not in str(frame.get("url", "")):
             continue
         page = pages.get(frame.get("parentId"))
         frame_ws = frame.get("webSocketDebuggerUrl")
@@ -150,16 +144,27 @@ async def _evaluate_async(ws_url: str, expression: str) -> object:
         while True:
             response = json.loads(await ws.recv())
             if response.get("id") == 1:
-                result = response.get("result", {}).get("result", {})
+                command_result = response.get("result", {})
+                if exception := command_result.get("exceptionDetails"):
+                    description = exception.get("exception", {}).get("description")
+                    raise CdpConnectionError(
+                        f"CDP JavaScript evaluation failed: {description or exception.get('text')}"
+                    )
+                result = command_result.get("result", {})
                 if "value" not in result:
-                    # e.g. the expression evaluated to `undefined`, or the
-                    # page threw -- CDP reports the latter under
-                    # response["result"]["exceptionDetails"], surfaced
-                    # here as a plain None rather than a raised error,
-                    # since "the key doesn't exist yet" is an expected,
-                    # non-fatal outcome for a fresh/empty localStorage read.
+                    # Intentional undefined results have no value field.
+                    # JavaScript errors are handled above.
                     return None
                 return result["value"]
+
+
+def _evaluate_target(ws_url: str, expression: str) -> object:
+    try:
+        return asyncio.run(_evaluate_async(ws_url, expression))
+    except CdpConnectionError:
+        raise
+    except (OSError, ValueError, WebSocketException) as exc:
+        raise CdpConnectionError("Lost the Chrome DevTools WebSocket connection.") from exc
 
 
 def evaluate(port: int, expression: str, page_title: str | None = None) -> object:
@@ -167,7 +172,7 @@ def evaluate(port: int, expression: str, page_title: str | None = None) -> objec
     value (must be JSON-serializable -- CDP's `returnByValue` requirement).
     """
     ws_url = find_game_frame_target(port, page_title)
-    return asyncio.run(_evaluate_async(ws_url, expression))
+    return _evaluate_target(ws_url, expression)
 
 
 def evaluate_top_page(port: int, expression: str, page_title: str | None = None) -> object:
@@ -175,4 +180,4 @@ def evaluate_top_page(port: int, expression: str, page_title: str | None = None)
     rather than the game's own iframe -- for reading things a cross-origin
     iframe can't see about its own placement (see `find_top_page_target`)."""
     ws_url = find_top_page_target(port, page_title)
-    return asyncio.run(_evaluate_async(ws_url, expression))
+    return _evaluate_target(ws_url, expression)

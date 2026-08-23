@@ -19,7 +19,6 @@ def _bare_bot() -> Bot:
 
 def test_board_needs_merge_before_the_last_empty_cell_is_consumed() -> None:
     bot = _bare_bot()
-    frame = np.zeros((10, 10, 3), dtype=np.uint8)
     item = ItemRef("crops", "wheat", 1)
     bot._merge_five_overrides = {}
     bot.board.set_cell((1, 0), Cell(CellKind.ITEM, item))
@@ -27,10 +26,10 @@ def test_board_needs_merge_before_the_last_empty_cell_is_consumed() -> None:
     bot.board.set_cell((5, 0), Cell(CellKind.ITEM, item))
     bot.board.set_cell((0, 0), Cell(CellKind.EMPTY))
 
-    assert bot._board_needs_merge(frame, live_synced=True)
+    assert bot._board_needs_merge()
 
     bot.board.set_cell((6, 0), Cell(CellKind.EMPTY))
-    assert not bot._board_needs_merge(frame, live_synced=True)
+    assert not bot._board_needs_merge()
 
 
 def test_board_store_found_status_marks_bot_as_armed(monkeypatch) -> None:
@@ -47,10 +46,33 @@ def test_board_store_found_status_marks_bot_as_armed(monkeypatch) -> None:
     assert bot._board_store_armed
 
 
+def test_initialize_discards_live_references(monkeypatch) -> None:
+    bot = _bare_bot()
+    bot._board_store_armed = True
+    bot._last_board_store_status = "found"
+    bot._scene_calibration = object()
+    monkeypatch.setattr("farm_merge_valet.core.bot.initialize_environment", lambda: None)
+
+    bot.initialize()
+
+    assert not bot._board_store_armed
+    assert bot._last_board_store_status is None
+    assert bot._scene_calibration is None
+
+
+def test_missing_live_state_triggers_board_store_rearming(monkeypatch) -> None:
+    bot = _bare_bot()
+    bot._board_store_armed = True
+    monkeypatch.setattr("farm_merge_valet.core.bot.read_board_state", lambda *_args: None)
+
+    assert not bot._sync_board_from_live_state()
+    assert not bot._board_store_armed
+
+
 def test_claim_crates_limits_batch_to_preserve_merge_space(monkeypatch) -> None:
     bot = _bare_bot()
     bot._merge_five_overrides = {}
-    bot._supply_crate_template_scaled = np.zeros((1, 1, 3), dtype=np.uint8)
+    bot._supply_crate_template = np.zeros((1, 1, 3), dtype=np.uint8)
     empty_coords = [(0, 0), (1, 0), (2, 0)]
     for coord in empty_coords:
         bot.board.set_cell(coord, Cell(CellKind.EMPTY))
@@ -69,7 +91,7 @@ def test_claim_crates_limits_batch_to_preserve_merge_space(monkeypatch) -> None:
     monkeypatch.setattr("farm_merge_valet.core.bot.click", fake_click)
     monkeypatch.setattr("farm_merge_valet.core.bot.time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
-        "farm_merge_valet.core.bot.find_best_match",
+        "farm_merge_valet.core.bot.find_best_scaled_match",
         lambda *_args, **_kwargs: Match(0, 0, 1, 1, 1.0),
     )
     monkeypatch.setattr(
@@ -80,7 +102,6 @@ def test_claim_crates_limits_batch_to_preserve_merge_space(monkeypatch) -> None:
     bot._step_claim_crates(
         WindowRegion(0, 0, 100, 100),
         np.zeros((1, 1, 3), dtype=np.uint8),
-        live_synced=True,
         board_needs_merge=False,
     )
 
@@ -89,9 +110,27 @@ def test_claim_crates_limits_batch_to_preserve_merge_space(monkeypatch) -> None:
     assert len(bot.board.find_empty()) == 1
 
 
+def test_step_takes_no_action_without_live_board_state(monkeypatch) -> None:
+    bot = _bare_bot()
+    acted = []
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.find_window", lambda *_args: WindowRegion(0, 0, 100, 100)
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.capture_region", lambda *_args: np.zeros((100, 100, 3))
+    )
+    bot._ensure_board_store_armed = lambda: None
+    bot._sync_board_from_live_state = lambda: False
+    bot._step_claim_crates = lambda *_args, **_kwargs: acted.append(True)
+
+    bot.step()
+
+    assert not acted
+
+
 def test_supply_crate_search_is_limited_to_bottom_center_region(monkeypatch) -> None:
     bot = _bare_bot()
-    bot._supply_crate_template_scaled = np.zeros((10, 10, 3), dtype=np.uint8)
+    bot._supply_crate_template = np.zeros((10, 10, 3), dtype=np.uint8)
     observed_shape = None
 
     def fake_match(frame, *_args):
@@ -99,7 +138,7 @@ def test_supply_crate_search_is_limited_to_bottom_center_region(monkeypatch) -> 
         observed_shape = frame.shape
         return Match(10, 20, 30, 40, 0.99)
 
-    monkeypatch.setattr("farm_merge_valet.core.bot.find_best_match", fake_match)
+    monkeypatch.setattr("farm_merge_valet.core.bot.find_best_scaled_match", fake_match)
 
     match = bot._find_supply_crate(np.zeros((1080, 1920, 3), dtype=np.uint8))
 

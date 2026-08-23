@@ -23,8 +23,8 @@ The live cell map is the source of truth for board contents. The game retains
 multiple cell-shaped maps in memory, including detached snapshots whose render
 bounds are missing or degenerate. Discovery selects the candidate with the
 most valid live Pixi bounds. Screenshots are used only to locate fixed UI
-elements and measure their current render scale. That template scale is
-separate from board-to-screen geometry and affects only fixed UI matching.
+elements. Each fixed UI template is matched directly across plausible scales;
+this is separate from the CDP-derived board-to-screen geometry.
 
 `diagnose-live-state` writes a read-only JSON report of every cell-map
 candidate and the complete board-to-screen transform. It is intended for
@@ -43,8 +43,8 @@ another crate and re-evaluate.
 
 There is no reliable signal for a zero supply count. A per-step click cap
 prevents an unbounded loop when the button remains visible but no supplies are
-available. If live board state is temporarily unavailable, the on-screen
-"Need more empty space!" banner is used as a fallback full-board signal.
+available. If authoritative live board state is unavailable, the bot takes no
+action and retries on the next loop iteration.
 
 ### 3. Merge — implemented
 

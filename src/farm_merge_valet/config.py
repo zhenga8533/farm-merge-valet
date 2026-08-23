@@ -7,7 +7,7 @@ defaults for local development. See `.env.example` for available options.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_prefix="FMV_",
-        extra="ignore",
+        extra="forbid",
     )
 
     # Window targeting: substring match against open window titles.
@@ -40,10 +40,6 @@ class Settings(BaseSettings):
 
     # Minimum confidence (0-1) for template matches to be accepted.
     match_confidence: float = Field(default=0.85, ge=0.0, le=1.0)
-
-    # Confidence for the "Need more empty space!" fallback. Live board
-    # state is preferred because the banner is not shown consistently.
-    need_space_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
 
     # Clicks between live board-state refreshes while claiming crates.
     crate_click_batch_size: int = Field(default=10, ge=1)
@@ -87,16 +83,10 @@ class Settings(BaseSettings):
     pause_hotkey: str = "f9"
     quit_hotkey: str = "f10"
 
-    # Start paused rather than acting immediately -- lets you get the
-    # target window in position (and check the overlay GUI/logs, if
-    # enabled) before anything drives mouse input. `initialize()` (the
-    # zoom-out/scroll-to-bottom environment setup) is deferred until the
-    # first resume too, same as pausing mid-run already does, so nothing
-    # touches the game at all until you press `pause_hotkey`.
+    # Defer environment setup and all input until the first resume.
     start_paused: bool = True
 
-    # Logging verbosity: DEBUG, INFO, WARNING, ERROR.
-    log_level: str = "INFO"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     # Overlay GUI (see gui/overlay.py) -- off by default so `run` keeps its
     # existing terminal-only behavior unless explicitly opted into.
@@ -118,11 +108,20 @@ class Settings(BaseSettings):
             raise ValueError("vertical board dead zones must leave clickable space")
         if self.crate_dead_left_ratio >= self.crate_dead_right_ratio:
             raise ValueError("crate dead-zone left edge must be before its right edge")
+        board_left = self.board_dead_left_ratio
         board_right = 1.0 - self.board_dead_right_ratio
+        board_bottom = 1.0 - self.board_dead_bottom_ratio
+        if not (
+            board_left <= self.crate_dead_left_ratio < self.crate_dead_right_ratio <= board_right
+            and self.board_dead_top_ratio <= self.crate_dead_top_ratio < board_bottom
+        ):
+            raise ValueError("crate dead zone must overlap the usable board area")
         if not board_right <= self.pan_anchor_x_ratio < 1.0:
             raise ValueError("pan anchor must be inside the right dead zone")
-        if not self.board_dead_top_ratio <= self.pan_anchor_y_ratio <= (
-            1.0 - self.board_dead_bottom_ratio
+        if (
+            not self.board_dead_top_ratio
+            <= self.pan_anchor_y_ratio
+            <= (1.0 - self.board_dead_bottom_ratio)
         ):
             raise ValueError("pan anchor must be vertically aligned with the board")
         return self

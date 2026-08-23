@@ -1,8 +1,8 @@
 # Farm Merge Valet
 
-Farm Merge Valet automates parts of [Farm Merge Valley](https://discord.com/discovery/applications/1187013846746005515)
-by reading the live game board through Chrome DevTools Protocol (CDP) and
-driving ordinary mouse input. It does not modify or reimplement the game.
+Farm Merge Valet automates parts of Farm Merge Valley by reading the live game
+board through Chrome DevTools Protocol (CDP) and driving ordinary mouse input.
+It does not modify or reimplement the game.
 
 ## Status
 
@@ -29,7 +29,7 @@ debugging. Supporting other hosts is deferred until this path is stable.
 src/farm_merge_valet/
   cdp/             Read live board state and board-to-screen geometry
   capture/         Locate the target window and capture screenshots
-  vision/          Match fixed UI templates and measure render scale
+  vision/          Match fixed UI templates across plausible scales
   actions/         Send mouse input relative to the target window
   core/            Model the board, plan merges, and run the bot loop
   gui/             Optional live-log overlay

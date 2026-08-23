@@ -8,6 +8,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+DEFAULT_TEMPLATE_SCALES = tuple(0.5 + 0.05 * index for index in range(31))
+
 
 @dataclass(frozen=True)
 class Match:
@@ -41,10 +43,8 @@ def find_best_match(frame: np.ndarray, template: np.ndarray, min_confidence: flo
     alpha channel passed as a `cv2.matchTemplate` mask -- via
     TM_SQDIFF_NORMED. OpenCV only supports masking with SQDIFF/CCORR, not
     CCOEFF, and CCORR isn't mean-centered so it can report a deceptively
-    high "match" against unrelated or even flat content (confirmed against
-    both the crate button template and synthetic data -- see
-    `vision/grid.py`). A template without an alpha channel (BGR) falls
-    back to plain, unmasked TM_CCOEFF_NORMED matching.
+    high "match" against unrelated or flat content. A template without an
+    alpha channel (BGR) falls back to plain, unmasked TM_CCOEFF_NORMED matching.
 
     `min_confidence` and the returned `Match.confidence` are always on a
     higher-is-better 0-1 scale regardless of which method ran underneath
@@ -76,3 +76,34 @@ def find_best_match(frame: np.ndarray, template: np.ndarray, min_confidence: flo
     if confidence < min_confidence:
         return None
     return Match(x=x, y=y, width=width, height=height, confidence=confidence)
+
+
+def find_best_scaled_match(
+    frame: np.ndarray,
+    template: np.ndarray,
+    min_confidence: float,
+    scales: tuple[float, ...] = DEFAULT_TEMPLATE_SCALES,
+) -> Match | None:
+    """Locate a fixed UI template without assuming the game's current scale."""
+    best: Match | None = None
+    frame_height, frame_width = frame.shape[:2]
+    for scale in scales:
+        if scale <= 0:
+            raise ValueError("template scales must be positive")
+        if scale == 1.0:
+            candidate = template
+        else:
+            candidate = cv2.resize(
+                template,
+                None,
+                fx=scale,
+                fy=scale,
+                interpolation=cv2.INTER_AREA,
+            )
+        height, width = candidate.shape[:2]
+        if height > frame_height or width > frame_width:
+            continue
+        match = find_best_match(frame, candidate, min_confidence=0.0)
+        if match is not None and (best is None or match.confidence > best.confidence):
+            best = match
+    return best if best is not None and best.confidence >= min_confidence else None

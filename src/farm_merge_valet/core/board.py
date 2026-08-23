@@ -229,9 +229,7 @@ class MergeAction:
     cluster: frozenset[GridCoord] = frozenset()
 
 
-def plan_merge_action(
-    board: BoardGrid, item: ItemRef, *, prefer_five: bool
-) -> MergeAction | None:
+def plan_merge_action(board: BoardGrid, item: ItemRef, *, prefer_five: bool) -> MergeAction | None:
     """The single next best action toward merging `item`, or None if
     there's nothing productive to do for it right now (not enough on the
     board yet, or no room to relocate anything). Re-derived fresh from
@@ -240,9 +238,8 @@ def plan_merge_action(
     distance, so the number of actions needed to complete a merge doesn't
     depend on *which* available item is chosen at each step.
 
-    With `prefer_five`, only ever targets clusters of exactly 5 -- never
-    settles for 3/4, same as before (waiting for a 5th is what avoids ever
-    needing to split a cluster after the fact).
+    With `prefer_five`, clusters of 3 or 4 remain unmerged until a fifth item
+    is available, so only an exact cluster of 5 is triggered.
     """
     target = 5 if prefer_five else 3
     clusters = board.find_clusters(item)

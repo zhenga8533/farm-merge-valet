@@ -1,11 +1,4 @@
-"""Main automation loop.
-
-The bot tracks which phase of play it's in (see docs/automation-methodology.md)
-and persists that across steps, rather than re-deciding from scratch each
-frame: e.g. once the board fills up it switches to the merge phase and
-stays there until space frees up again, instead of re-attempting crate
-clicks (and re-triggering the "need more space" banner) every iteration.
-"""
+"""Stateful crate-claiming and merge automation loop."""
 
 from __future__ import annotations
 
@@ -13,7 +6,6 @@ import logging
 import time
 from enum import Enum, auto
 
-import cv2
 import keyboard
 import numpy as np
 
@@ -34,14 +26,10 @@ from farm_merge_valet.core.board import (
     MergeActionKind,
     plan_merge_action,
 )
-from farm_merge_valet.core.board_scan import (
-    discover_background_templates,
-    discover_blueprint_items,
-)
+from farm_merge_valet.core.board_scan import discover_blueprint_items
 from farm_merge_valet.core.environment import initialize_environment, pan
 from farm_merge_valet.core.viewport import viewport_layout
-from farm_merge_valet.vision.grid import calibrate_grid
-from farm_merge_valet.vision.matcher import Match, find_best_match, load_template
+from farm_merge_valet.vision.matcher import Match, find_best_scaled_match, load_template
 
 logger = logging.getLogger(__name__)
 
@@ -68,17 +56,6 @@ _STRUCTURE_FOOTPRINTS = {
 }
 
 
-def _scale_template(template: np.ndarray, scale: float) -> np.ndarray:
-    """Resize a single BGRA template by `scale`, preserving its alpha
-    channel -- for the fixed-size UI templates (`supply_crate`,
-    `error_need_space`)."""
-    if scale == 1.0:
-        return template
-    h, w = template.shape[:2]
-    new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
-    return cv2.resize(template, new_size, interpolation=cv2.INTER_AREA)
-
-
 class Phase(Enum):
     """Which stage of the play loop the bot is currently in.
 
@@ -102,27 +79,16 @@ class Bot:
         self.paused = False
         self._quit_requested = False
         self.phase = Phase.CLAIM_CRATES
-        # Fixed UI templates scale with the game. Use native size until the
-        # current render scale can be measured.
+        # Fixed UI templates are matched directly across plausible scales.
         self._supply_crate_template = load_template(
             settings.templates_dir / "ui" / "supply_crate.png"
         )
-        self._supply_crate_template_scaled = self._supply_crate_template
-        self._need_space_template = load_template(
-            settings.templates_dir / "ui" / "error_need_space.png"
-        )
-        self._need_space_template_scaled = self._need_space_template
 
         # blueprintID (e.g. "wheat_1") -> ItemRef for interpreting live
         # board state. Item images are not used to scan board contents.
         self._blueprint_items = discover_blueprint_items(settings.templates_dir / "items")
         self._board_store_armed = False
         self._last_board_store_status: str | None = None
-        # The cloud background is the stable anchor used to measure scale.
-        self._background_templates = discover_background_templates(
-            settings.templates_dir / "backgrounds"
-        )
-        self._item_scale: float | None = None
 
         # Recomputed from live rendering and DOM state during merge steps.
         # None means there is not enough current state to fit the mapping.
@@ -137,40 +103,11 @@ class Bot:
     def initialize(self) -> None:
         """Normalize the view and discard board knowledge from before a
         startup or pause. Blocking; takes a few seconds."""
-        region = find_window(settings.window_title)
-        initialize_environment(region)
+        initialize_environment()
         self.board = BoardGrid()
-
-    def _ensure_item_scale(self, frame: np.ndarray) -> None:
-        """Best-effort, non-blocking: measure the board's actual on-screen
-        item render scale by matching the cloud background template (an
-        always-present, robust anchor, unlike any one item) against
-        `frame`, at a range of candidate scales -- used only to rescale
-        the fixed-size UI templates (`supply_crate`, `error_need_space`)
-        that render at the same scale, not for any board-content
-        detection (see `cdp/board_store.py`/`cdp/scene_geometry.py` for
-        that).
-
-        Runs until it first succeeds, then caches the scale for the session.
-        """
-        if self._item_scale is not None:
-            return
-        cloud_bgr = self._background_templates.get("cloud")
-        if cloud_bgr is None:
-            logger.warning("No 'cloud' background template found; can't measure item scale.")
-            return
-        cloud_bgra = cv2.cvtColor(cloud_bgr, cv2.COLOR_BGR2BGRA)
-        calibration = calibrate_grid(frame, cloud_bgra)
-        if calibration is None:
-            return
-        logger.info("Item render scale measured: %.3f", calibration.scale)
-        self._item_scale = calibration.scale
-        self._supply_crate_template_scaled = _scale_template(
-            self._supply_crate_template, self._item_scale
-        )
-        self._need_space_template_scaled = _scale_template(
-            self._need_space_template, self._item_scale
-        )
+        self._board_store_armed = False
+        self._last_board_store_status = None
+        self._scene_calibration = None
 
     def _refresh_calibration(self, region: WindowRegion) -> None:
         """Recompute `_scene_calibration` for the current frame -- see its
@@ -184,10 +121,7 @@ class Bot:
             self._scene_calibration = None
 
     def _ensure_board_store_armed(self) -> None:
-        """Best-effort, idempotent: try to patch the game's board-store
-        class so a real content change (its own or a merge/crate-claim)
-        stashes a live reference -- see `cdp/board_store.py`. Cheap enough
-        to call every step until armed; a no-op after."""
+        """Best-effort, idempotent: locate and retain the active board map."""
         if self._board_store_armed:
             return
         try:
@@ -211,8 +145,10 @@ class Bot:
             raw = read_board_state(settings.cdp_port, settings.window_title)
         except CdpConnectionError as exc:
             logger.debug("Could not read live board state: %s", exc)
+            self._board_store_armed = False
             return False
         if raw is None:
+            self._board_store_armed = False
             return False
 
         board = BoardGrid()
@@ -271,11 +207,7 @@ class Bot:
         return [
             action
             for item in self.board.items_present()
-            if (
-                action := plan_merge_action(
-                    self.board, item, prefer_five=self._prefers_five(item)
-                )
-            )
+            if (action := plan_merge_action(self.board, item, prefer_five=self._prefers_five(item)))
             is not None
         ]
 
@@ -294,24 +226,12 @@ class Bot:
                 return False
         return True
 
-    # Circuit breaker on `_scroll_to_reveal` below: each attempt is one
-    # bounded drag, re-measuring the real camera position afterward
-    # rather than calculating the exact distance needed (see that
-    # method's docstring for why), so a genuinely far-off target can take
-    # several attempts to reach. Comfortably enough to cross the whole
-    # scrollable range in the worst case; hitting it just means giving up
-    # on this particular target for now and trying again next step.
+    # Each attempt is one measured drag. This bounds failures while allowing
+    # enough attempts to cross the observed scrollable range.
     _MAX_SCROLL_ATTEMPTS = 12
 
     def _try_merge(self, region: WindowRegion, frame: np.ndarray) -> bool:
-        """Plan the best next action for every item type present. If the
-        best one is actually visible on screen (see `_is_action_visible`),
-        execute it. Otherwise, since board content comes from live game
-        state and can reference cells anywhere on the whole map, spend
-        this step instead scrolling toward the best *off-screen*
-        candidate so it (or something else) becomes actionable next step.
-        Returns whether either kind of action was taken.
-        """
+        """Execute the best visible action, or pan toward an off-screen one."""
         actions = self._plan_merge_actions()
         if not actions:
             return False
@@ -327,21 +247,10 @@ class Bot:
         return self._scroll_to_reveal(region, (col, row))
 
     def _scroll_to_reveal(self, region: WindowRegion, target: GridCoord) -> bool:
-        """Pan the view (one drag at a time, re-measuring the real
-        board-to-screen geometry after each one -- see `core/environment
-        .pan`) until `target` lands within the visible, non-UI-chrome
-        region.
+        """Pan until the target is actionable, remeasuring after every drag.
 
-        Direction is chosen adaptively rather than calculated from a
-        fixed pixels-per-scroll-drag distance: that relationship was only
-        validated over a small drag, not extrapolated over however far
-        this target might be, so trusting a calculated distance here
-        risks badly over- or under-shooting. Try a direction, measure
-        whether the real result actually got closer, and flip if it
-        didn't -- the same "never trust a predicted outcome without
-        re-observing it" approach used everywhere else in this project.
-
-        Returns whether `target` ended up visible.
+        The drag-to-camera relationship is not assumed to be linear. If a drag
+        does not reduce the distance, the next attempt reverses direction.
         """
         toward_bottom: bool | None = None
         best_distance: float | None = None
@@ -398,11 +307,7 @@ class Bot:
             for coord in action.cluster:
                 self.board.clear_cell(coord)
         else:
-            # A relocation, not a merge -- both the vacated source and the
-            # (now possibly wrong) destination need re-observing rather
-            # than assumed; live-state sync (see `step`) does that fresh
-            # next step regardless, this just avoids acting on stale
-            # knowledge in between.
+            # Relocation results are intentionally unknown until the next live sync.
             self.board.clear_cell(action.start)
             self.board.clear_cell(action.end)
         return True
@@ -420,59 +325,40 @@ class Bot:
         frame = capture_region(region)
         logger.debug("Captured frame: %sx%s", frame.shape[1], frame.shape[0])
 
-        # Cheap (a no-op once it's succeeded once) and needed regardless
-        # of phase -- both the crate/need-space UI templates and item
-        # templates need the board's actual render scale folded in, see
-        # `_ensure_item_scale`. Likewise arming/reading the live board
-        # state (see `cdp/board_store.py`) is just a couple of CDP round
-        # trips, not a vision scan, so it's cheap enough to keep current
-        # every step regardless of phase too.
-        self._ensure_item_scale(frame)
+        # Arming is a no-op after the first success. The live board read stays
+        # current on every phase because decisions depend on authoritative data.
         self._ensure_board_store_armed()
         live_synced = self._sync_board_from_live_state()
+        if not live_synced:
+            logger.warning("Live board state is unavailable; skipping this step.")
+            return
 
         # Only merge actions need grid-to-screen geometry.
         if self.phase is Phase.MERGE:
             self._refresh_calibration(region)
 
-        board_needs_merge = self._board_needs_merge(frame, live_synced=live_synced)
+        board_needs_merge = self._board_needs_merge()
 
         if self.phase is Phase.CLAIM_CRATES:
             self._step_claim_crates(
                 region,
                 frame,
-                live_synced=live_synced,
                 board_needs_merge=board_needs_merge,
             )
         elif self.phase is Phase.MERGE:
             self._step_merge(region, frame, board_needs_merge=board_needs_merge)
 
-    def _board_needs_merge(self, frame: np.ndarray, *, live_synced: bool) -> bool:
+    def _board_needs_merge(self) -> bool:
         """Whether crate claiming should yield to merge-space recovery.
 
-        Live state reserves enough empty cells for merge rearrangements.
-        Without live state, the full-board banner remains the fallback.
+        The caller must have synchronized authoritative live board state.
         """
-        if live_synced:
-            empty_count = len(self.board.find_empty())
-            if empty_count == 0:
-                return True
-            return (
-                empty_count <= settings.merge_empty_cell_reserve
-                and bool(self._plan_merge_actions())
-            )
-        return (
-            find_best_match(frame, self._need_space_template_scaled, settings.need_space_confidence)
-            is not None
-        )
+        empty_count = len(self.board.find_empty())
+        if empty_count == 0:
+            return True
+        return empty_count <= settings.merge_empty_cell_reserve and bool(self._plan_merge_actions())
 
-    # Circuit breaker on the burst-click loop below: there's no reliable
-    # "out of crates" signal (the crate icon can stay on screen regardless
-    # of held count -- see automation-methodology.md), so if the board check
-    # never trips either, the crate template matching every single time
-    # would otherwise spin here forever. Comfortably above any realistic
-    # single-session crate count; hitting it just means falling back to
-    # the normal step cadence and trying again next iteration.
+    # The crate icon can remain visible at zero supply, so bound each burst.
     _MAX_CRATE_CLICKS_PER_STEP = 50
 
     def _find_supply_crate(self, frame: np.ndarray) -> Match | None:
@@ -480,9 +366,9 @@ class Bot:
         height, width = frame.shape[:2]
         crate = viewport_layout(width, height).crate
         crop = frame[crate.top : crate.bottom, crate.left : crate.right]
-        match = find_best_match(
+        match = find_best_scaled_match(
             crop,
-            self._supply_crate_template_scaled,
+            self._supply_crate_template,
             settings.match_confidence,
         )
         if match is None:
@@ -500,7 +386,6 @@ class Bot:
         region: WindowRegion,
         frame: np.ndarray,
         *,
-        live_synced: bool,
         board_needs_merge: bool,
     ) -> None:
         """Claim crates back-to-back until the crate icon stops matching or
@@ -528,12 +413,9 @@ class Bot:
                 settings.crate_click_batch_size,
                 self._MAX_CRATE_CLICKS_PER_STEP - total_clicks,
             )
-            if live_synced:
-                reserve = (
-                    settings.merge_empty_cell_reserve if self._plan_merge_actions() else 0
-                )
-                available = len(self.board.find_empty()) - reserve
-                batch_size = min(batch_size, max(0, available))
+            reserve = settings.merge_empty_cell_reserve if self._plan_merge_actions() else 0
+            available = len(self.board.find_empty()) - reserve
+            batch_size = min(batch_size, max(0, available))
             if batch_size == 0:
                 self._set_phase(Phase.MERGE)
                 return
@@ -552,8 +434,10 @@ class Bot:
                     break
 
             frame = capture_region(region)
-            live_synced = self._sync_board_from_live_state()
-            if self._board_needs_merge(frame, live_synced=live_synced):
+            if not self._sync_board_from_live_state():
+                logger.warning("Live board state became unavailable; stopping crate claims.")
+                return
+            if self._board_needs_merge():
                 logger.info("Board reached the merge-space reserve; switching to merge phase.")
                 self._set_phase(Phase.MERGE)
                 return
@@ -585,13 +469,7 @@ class Bot:
 
     def _toggle_pause(self) -> None:
         if self.paused:
-            # Resuming: re-initialize *before* clearing `paused`, so stale
-            # board knowledge from before the pause (the user pausing is
-            # exactly the moment they might have scrolled/zoomed, or
-            # otherwise changed, the board themselves) is dropped before
-            # the main loop starts stepping again. Runs on the hotkey
-            # callback thread; blocking here is fine since the main loop
-            # is parked.
+            # Reinitialize while paused so no step can use pre-pause board state.
             logger.warning("Resuming (hotkey) -- re-initializing environment.")
             try:
                 self.initialize()
@@ -609,14 +487,8 @@ class Bot:
         self._quit_requested = True
 
     def run_forever(self) -> None:
-        # Global hotkeys work even when the terminal isn't focused, since
-        # the bot spends most of its time driving mouse input into a
-        # different window -- Ctrl+C alone wouldn't be reachable then.
-        # Registration can fail (e.g. insufficient OS permissions for a
-        # low-level keyboard hook); that's a real loss of the pause/quit
-        # safety net, not something to silently continue past, but it
-        # shouldn't stop the bot from running at all if you'd rather
-        # proceed and rely on Ctrl+C instead.
+        # Global hotkeys remain reachable while Chrome has focus. If OS hook
+        # registration fails, Ctrl+C remains the terminal-focused fallback.
         try:
             keyboard.add_hotkey(settings.pause_hotkey, self._toggle_pause)
             keyboard.add_hotkey(settings.quit_hotkey, self.request_quit)

@@ -32,6 +32,8 @@ _FULLSCREEN_SETTLE_DELAY = 1.0
 _ZOOM_OUT_CLICKS = -300
 _ZOOM_OUT_REPEATS = 5
 _SCROLL_TO_BOTTOM_REPEATS = 5
+_PAN_DISTANCE_RATIO = 0.28
+
 
 def zoom_out_fully(region: WindowRegion) -> None:
     """Zoom out to the game's own minimum zoom via repeated mouse-wheel
@@ -54,7 +56,8 @@ def pan(region: WindowRegion, *, toward_bottom: bool, repeats: int = 1) -> None:
     bottom drags the other way (higher to lower on screen) instead.
     """
     x, cy = viewport_layout(region.width, region.height).pan_anchor
-    start, end = (cy - 300, cy + 300) if toward_bottom else (cy + 300, cy - 300)
+    distance = min(round(region.height * _PAN_DISTANCE_RATIO), cy, region.height - 1 - cy)
+    start, end = (cy - distance, cy + distance) if toward_bottom else (cy + distance, cy - distance)
     for _ in range(repeats):
         drag(region, (x, start), (x, end), duration=0.15)
     time.sleep(_SETTLE_DELAY)
@@ -91,7 +94,7 @@ def ensure_reddit_fullscreen() -> WindowRegion:
     return find_window(settings.window_title)
 
 
-def initialize_environment(region: WindowRegion) -> None:
+def initialize_environment() -> None:
     """Force the game into a known, stable state: fully zoomed out, panned
     to the bottom of the board. Zoom is settled first, since zooming can
     itself shift the visible area (typically toward the zoom center),

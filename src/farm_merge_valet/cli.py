@@ -15,6 +15,7 @@ from rich import print as rprint
 from farm_merge_valet.capture.screen import capture_region
 from farm_merge_valet.capture.window import WindowActivationError, find_window, list_window_titles
 from farm_merge_valet.cdp.board_store import arm_board_store, inspect_board_maps, read_board_state
+from farm_merge_valet.cdp.client import CdpConnectionError
 from farm_merge_valet.cdp.scene_geometry import read_scene_calibration
 from farm_merge_valet.config import settings
 from farm_merge_valet.core.board import CellKind
@@ -144,8 +145,6 @@ def visualize_positions_cmd(
         (0, 255, 0),
         2,
     )
-
-
     cv2.drawMarker(
         annotated,
         layout.pan_anchor,
@@ -200,10 +199,14 @@ def diagnose_live_state_cmd(
         raise typer.Exit(code=1) from exc
 
     frame = capture_region(region)
-    arm_status = arm_board_store(settings.cdp_port, settings.window_title)
-    candidates = inspect_board_maps(settings.cdp_port, settings.window_title)
-    board_state = read_board_state(settings.cdp_port, settings.window_title)
-    calibration = read_scene_calibration(settings.cdp_port, region, settings.window_title)
+    try:
+        arm_status = arm_board_store(settings.cdp_port, settings.window_title)
+        candidates = inspect_board_maps(settings.cdp_port, settings.window_title)
+        board_state = read_board_state(settings.cdp_port, settings.window_title)
+        calibration = read_scene_calibration(settings.cdp_port, region, settings.window_title)
+    except CdpConnectionError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
     layout = viewport_layout(frame.shape[1], frame.shape[0])
 
     rendered_coords = sorted(calibration.rendered_coords) if calibration else []
@@ -235,9 +238,7 @@ def diagnose_live_state_cmd(
             "canvas_offset": calibration.canvas_offset if calibration else None,
             "projected_x_range": value_range([point[0] for point in projected]),
             "projected_y_range": value_range([point[1] for point in projected]),
-            "actionable_projected_cells": sum(
-                layout.is_actionable(*point) for point in projected
-            ),
+            "actionable_projected_cells": sum(layout.is_actionable(*point) for point in projected),
         },
     }
 
@@ -252,8 +253,9 @@ def diagnose_live_state_cmd(
 @app.command("extract-templates")
 def extract_templates_cmd(
     har: Path = typer.Argument(  # noqa: B008
-        ..., help="Path to a HAR capture of the game's network traffic (DevTools -> Network -> "
-        "Img filter -> 'Save all as HAR')."
+        ...,
+        help="Path to a HAR capture of the game's network traffic (DevTools -> Network -> "
+        "Img filter -> 'Save all as HAR').",
     ),
     force: bool = typer.Option(
         False, "--force", help="Re-download atlases even if already cached."

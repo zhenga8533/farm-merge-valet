@@ -15,8 +15,9 @@ import json
 from typing import Any
 
 import websockets
+from websockets.exceptions import WebSocketException
 
-from farm_merge_valet.cdp.client import evaluate, find_game_frame_target
+from farm_merge_valet.cdp.client import CdpConnectionError, evaluate, find_game_frame_target
 from farm_merge_valet.core.board import GridCoord
 
 # `_content` holds the cell's Pixi display object and `_neighbors` its
@@ -139,7 +140,7 @@ function() {{
     }} catch (e) {{}}
   }}
   return candidates.sort((a, b) =>
-    b.contentCount - a.contentCount || b.size - a.size
+    b.boundsCount - a.boundsCount || b.contentCount - a.contentCount || b.size - a.size
   );
 }}
 """
@@ -225,9 +226,7 @@ async def _inspect_board_maps_async(ws_url: str) -> list[dict[str, Any]]:
         instances = await _call(
             ws, 2, "Runtime.queryObjects", {"prototypeObjectId": proto_object_id}
         )
-        instances_object_id = (
-            instances.get("result", {}).get("objects", {}).get("objectId")
-        )
+        instances_object_id = instances.get("result", {}).get("objects", {}).get("objectId")
         if not instances_object_id:
             return []
         inspected = await _call(
@@ -253,18 +252,22 @@ def arm_board_store(port: int, page_title: str | None = None) -> str:
     until their session is armed.
 
     Returns a short status string for logging (`"found (...)"`,
-    `"cells-map-not-found"`, etc.) rather than a
-    bool/None, so a game update that breaks this (see module docstring) is
-    diagnosable from logs instead of silently doing nothing.
+    `"cells-map-not-found"`, etc.) so discovery failures remain diagnosable.
     """
     ws_url = find_game_frame_target(port, page_title)
-    return asyncio.run(_arm_board_store_async(ws_url))
+    try:
+        return asyncio.run(_arm_board_store_async(ws_url))
+    except (OSError, ValueError, WebSocketException) as exc:
+        raise CdpConnectionError("Lost the board-store CDP connection.") from exc
 
 
 def inspect_board_maps(port: int, page_title: str | None = None) -> list[dict[str, Any]]:
     """Return non-mutating summaries of every cell-shaped map in the game heap."""
     ws_url = find_game_frame_target(port, page_title)
-    return asyncio.run(_inspect_board_maps_async(ws_url))
+    try:
+        return asyncio.run(_inspect_board_maps_async(ws_url))
+    except (OSError, ValueError, WebSocketException) as exc:
+        raise CdpConnectionError("Lost the board-diagnostics CDP connection.") from exc
 
 
 def read_board_state(port: int, page_title: str | None = None) -> dict[GridCoord, str] | None:

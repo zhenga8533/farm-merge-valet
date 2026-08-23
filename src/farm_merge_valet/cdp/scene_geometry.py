@@ -25,7 +25,8 @@ from farm_merge_valet.cdp.client import (
     evaluate_top_page,
 )
 from farm_merge_valet.core.board import GridCoord
-from farm_merge_valet.vision.grid import Vector
+
+Vector = tuple[float, float]
 
 # Below this many on-screen items, a column/row -> pixel least-squares fit
 # is too underdetermined to trust (see `_fit_grid_affine`) -- there's
@@ -155,9 +156,8 @@ def read_scene_calibration(
 
     Returns None (rather than raising) for any of several expected,
     recoverable conditions: the live board-cell map isn't armed yet (see
-    `cdp/board_store.py`), too few items are currently on screen to fit
-    geometry from, or either CDP target isn't reachable -- callers should
-    just wait and retry next step in all of these cases.
+    `cdp/board_store.py`), too few display objects have valid bounds to fit
+    geometry, or either CDP target isn't reachable.
     """
     cell_data = evaluate(port, _CELL_POSITIONS_EXPRESSION, page_title)
     if not isinstance(cell_data, dict) or not cell_data.get("points"):

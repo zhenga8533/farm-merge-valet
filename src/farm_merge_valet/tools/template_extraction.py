@@ -13,11 +13,6 @@ Run via `farm-merge-valet extract-templates path/to/capture.har`. Re-run
 whenever the game updates and templates need refreshing -- capture a fresh
 HAR first, since the CDN URLs are tied to the current game instance/session
 and won't stay valid indefinitely.
-
-`error_need_space.png` isn't handled here -- it's dynamically rendered
-text, not a static atlas frame (confirmed: no manifest anywhere has a
-matching entry), so it's still sourced from a screenshot crop + color
-masking. See assets/templates/README.md.
 """
 
 from __future__ import annotations
@@ -274,8 +269,7 @@ def extract_templates(har_path: Path, *, force: bool = False) -> None:
     crate_button = _build_crate_button(atlases)
     if crate_button is None:
         print(
-            "  MISSING UI template: supply_crate.png "
-            "(btn_cratespawn_idle / icon_btn_crate_spawn)"
+            "  MISSING UI template: supply_crate.png (btn_cratespawn_idle / icon_btn_crate_spawn)"
         )
     else:
         ui_dir = templates_dir / "ui"

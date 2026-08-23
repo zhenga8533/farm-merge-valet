@@ -1,19 +1,14 @@
-"""Discover item/background template images and the game's own item-ID
-naming convention from `assets/templates/`.
+"""Discover the game's item-ID naming convention from template assets.
 
 Board content comes from the game's live cell data (`cdp/board_store.py`).
-This module builds the blueprintID-to-ItemRef mapping used to interpret that
-data and loads background templates used to measure UI render scale.
+This module builds the blueprintID-to-ItemRef mapping used to interpret it.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
-
 from farm_merge_valet.core.board import ItemRef
-from farm_merge_valet.vision.matcher import load_template
 
 # Only these represent an actual mergeable board tile. "product" is the
 # harvested-ingredient icon (not a board tile at all), and
@@ -42,11 +37,3 @@ def discover_blueprint_items(items_dir: Path) -> dict[str, ItemRef]:
                 item = ItemRef(category=category_dir.name, name=name_dir.name, tier=tier)
                 items[f"{item.name}_{item.tier}"] = item
     return items
-
-
-def discover_background_templates(backgrounds_dir: Path) -> dict[str, np.ndarray]:
-    """Walk assets/templates/backgrounds/ and load every *.png, keyed by
-    filename stem (e.g. "grass", "dirt", "cloud", "purple"). Plain BGR
-    crops of real board tile art, captured directly from a live frame --
-    see module docstring."""
-    return {path.stem: load_template(path) for path in sorted(backgrounds_dir.glob("*.png"))}
