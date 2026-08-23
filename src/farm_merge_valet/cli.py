@@ -36,6 +36,10 @@ def main() -> None:
 @app.command()
 def run() -> None:
     """Start the automation loop."""
+    if settings.gui_enabled:
+        from farm_merge_valet.gui.overlay import start_overlay
+
+        start_overlay()
     Bot().run_forever()
 
 

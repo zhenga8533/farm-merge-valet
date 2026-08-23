@@ -121,11 +121,31 @@ class Settings(BaseSettings):
     pause_hotkey: str = "f9"
     quit_hotkey: str = "f10"
 
+    # Start paused rather than acting immediately -- lets you get the
+    # target window in position (and check the overlay GUI/logs, if
+    # enabled) before anything drives mouse input. `initialize()` (the
+    # zoom-out/scroll-to-bottom environment setup) is deferred until the
+    # first resume too, same as pausing mid-run already does, so nothing
+    # touches the game at all until you press `pause_hotkey`.
+    start_paused: bool = True
+
     # Optional Discord webhook URL for posting run statistics.
     discord_webhook_url: str | None = None
 
     # Logging verbosity: DEBUG, INFO, WARNING, ERROR.
     log_level: str = "INFO"
+
+    # Overlay GUI (see gui/overlay.py) -- off by default so `run` keeps its
+    # existing terminal-only behavior unless explicitly opted into.
+    gui_enabled: bool = False
+    # 0 (fully transparent) - 1 (fully opaque).
+    gui_opacity: float = 0.85
+    # Always-on-top, and click-through (clicks land on whatever's behind
+    # it) *while it isn't the active window* -- alt-tab or click its
+    # taskbar entry to interact with it normally (drag, resize, scroll
+    # the log) until it loses focus again. Disable for a plain window
+    # instead -- see gui/overlay.py.
+    gui_overlay_mode: bool = True
 
 
 settings = Settings()

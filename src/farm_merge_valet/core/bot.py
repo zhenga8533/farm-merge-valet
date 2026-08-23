@@ -591,7 +591,15 @@ class Bot:
                 "will stop the bot."
             )
 
-        self.initialize()
+        if settings.start_paused:
+            self.paused = True
+            logger.warning(
+                "Starting paused -- press %s to begin (this defers environment "
+                "setup too, so nothing touches the game until then).",
+                settings.pause_hotkey,
+            )
+        else:
+            self.initialize()
 
         logger.info("Starting bot loop (interval=%.1fs)", settings.loop_interval)
         try:
