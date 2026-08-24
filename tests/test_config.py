@@ -17,6 +17,13 @@ from farm_merge_valet.config import Settings
         ("log_level", "VERBOSE"),
         ("board_dead_left_ratio", 0.6),
         ("pan_anchor_x_ratio", 0.5),
+        ("pan_step_ratio", 0),
+        ("pan_drag_duration", 0),
+        ("pan_release_delay", -0.1),
+        ("pan_settle", -0.1),
+        ("merge_drag_duration", 0),
+        ("merge_drag_pickup_delay", -0.1),
+        ("merge_drag_release_delay", -0.1),
     ],
 )
 def test_settings_reject_invalid_runtime_values(field: str, value: object) -> None:

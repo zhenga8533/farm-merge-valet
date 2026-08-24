@@ -1,13 +1,12 @@
-"""Normalize the game view by zooming fully out and panning to the board's
-bottom.
+"""Normalize the game host and zoom level before automation starts.
 
-Scene geometry is calibrated dynamically, but a normalized view maximizes the
-visible board area and reduces the amount of panning needed during a run.
+Scene geometry is calibrated dynamically, so the camera may start wherever the
+user left it. Fully zooming out maximizes the visible board area.
 
 Assumes the user doesn't interact with the game while the bot is running.
 If they do -- or the bot is paused and resumed, since that's an explicit
-opportunity for them to have scrolled/zoomed -- `initialize_environment`
-should be re-run to re-establish the known state.
+opportunity for them to have zoomed -- `initialize_environment` should be
+re-run to re-establish the known zoom level.
 """
 
 from __future__ import annotations
@@ -32,8 +31,6 @@ _FULLSCREEN_SETTLE_DELAY = 1.0
 # harmless after the game reaches its minimum zoom.
 _ZOOM_OUT_CLICKS = -300
 _ZOOM_OUT_REPEATS = 5
-_SCROLL_TO_BOTTOM_REPEATS = 5
-_PAN_DISTANCE_RATIO = 0.28
 
 
 def zoom_out_fully(region: WindowRegion, stop_event: Event | None = None) -> bool:
@@ -68,27 +65,31 @@ def pan(
     downward reveals the top.
     """
     x, cy = viewport_layout(region.width, region.height).pan_anchor
-    distance = min(round(region.height * _PAN_DISTANCE_RATIO), cy, region.height - 1 - cy)
-    start, end = (cy + distance, cy - distance) if toward_bottom else (cy - distance, cy + distance)
+    travel = min(
+        max(1, round(region.height * settings.pan_step_ratio)),
+        2 * cy,
+        2 * (region.height - 1 - cy),
+    )
+    upper = cy - travel // 2
+    lower = upper + travel
+    start, end = (lower, upper) if toward_bottom else (upper, lower)
     for _ in range(repeats):
         if stop_event is not None and stop_event.is_set():
             return False
-        drag(region, (x, start), (x, end), duration=0.15)
-    if stop_event is not None:
-        return not stop_event.wait(_SETTLE_DELAY)
-    time.sleep(_SETTLE_DELAY)
+        drag(
+            region,
+            (x, start),
+            (x, end),
+            duration=settings.pan_drag_duration,
+            release_delay=settings.pan_release_delay,
+            decelerate=True,
+        )
+        if stop_event is not None:
+            if stop_event.wait(settings.pan_settle):
+                return False
+        else:
+            time.sleep(settings.pan_settle)
     return True
-
-
-def scroll_to_bottom(region: WindowRegion, stop_event: Event | None = None) -> bool:
-    """Pan the view down to the bottom of the board -- its fixed starting
-    area (see module docstring)."""
-    return pan(
-        region,
-        toward_bottom=True,
-        repeats=_SCROLL_TO_BOTTOM_REPEATS,
-        stop_event=stop_event,
-    )
 
 
 def ensure_reddit_fullscreen(stop_event: Event | None = None) -> WindowRegion | None:
@@ -135,14 +136,10 @@ def ensure_reddit_fullscreen(stop_event: Event | None = None) -> WindowRegion | 
 
 
 def initialize_environment(stop_event: Event | None = None) -> bool:
-    """Force the game into a known, stable state: fully zoomed out, panned
-    to the bottom of the board. Zoom is settled first, since zooming can
-    itself shift the visible area (typically toward the zoom center),
-    which would undo a scroll done beforehand.
-    """
+    """Enter the supported fullscreen host view and fully zoom out."""
     logger.info("Initializing Reddit/Chrome fullscreen environment.")
     region = ensure_reddit_fullscreen(stop_event)
     if region is None:
         return False
-    logger.info("Zooming out and scrolling to the board bottom.")
-    return zoom_out_fully(region, stop_event) and scroll_to_bottom(region, stop_event)
+    logger.info("Zooming out to maximize the visible board area.")
+    return zoom_out_fully(region, stop_event)

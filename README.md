@@ -9,10 +9,10 @@ It does not modify or reimplement the game.
 Early, usable automation for the crate-and-merge loop:
 
 - finds and activates the configured Chrome window;
-- normalizes the game zoom and camera position;
+- normalizes the game zoom while preserving the current camera position;
 - reads board contents and render geometry from the live game iframe via CDP;
 - claims supply crates while preserving space for merge rearrangements;
-- plans and performs merge-3 or merge-5 actions, including regrouping items;
+- plans and performs merge-3 or merge-5 actions, including full-board swaps;
 - exposes global pause/quit hotkeys and an optional color-coded log overlay.
 
 Order fulfillment, product collection, obstacle clearing, visits, and other
@@ -72,10 +72,10 @@ farm-merge-valet run
 
 `run` starts paused by default. Press the configured pause hotkey (`F9` by
 default) to enter Chrome F11 mode, expand Reddit's game view, normalize the
-camera, and begin. Press it again to pause. The default quit hotkey is `F10`.
+zoom, and begin. Press it again to pause. The default quit hotkey is `F10`.
 Hotkey callbacks only signal the bot, so they are not blocked by CDP reads or
 environment setup. Pause and quit cancel pending waits and stop before the next
-input; a mouse gesture already underway may take up to 0.3 seconds to finish.
+input; a mouse gesture already underway finishes before control returns.
 
 Template assets can be refreshed from a browser network capture:
 
@@ -102,11 +102,13 @@ settings are:
 | --- | --- |
 | `FMV_WINDOW_TITLE` | Distinctive substring of the target Chrome window title |
 | `FMV_CDP_PORT` | Chrome remote-debugging port |
-| `FMV_PREFER_MERGE_FIVE` | Prefer exact merge-5 actions; use merge-3 only when the board is full |
+| `FMV_PREFER_MERGE_FIVE` | Build exact merge-5 bases; use merge-3 only for a true full-board deadlock |
 | `FMV_MERGE_EMPTY_CELL_RESERVE` | Empty cells preserved for merge rearrangements; `0` disables it |
 | `FMV_BOARD_DEAD_*_RATIO` | Proportional outer UI slices excluded from actions |
 | `FMV_CRATE_DEAD_*_RATIO` | Bottom-center crate-button exclusion rectangle |
 | `FMV_PAN_ANCHOR_*_RATIO` | Safe background point used to drag the board camera |
+| `FMV_PAN_STEP_RATIO` / `FMV_PAN_DRAG_DURATION` / `FMV_PAN_RELEASE_DELAY` / `FMV_PAN_SETTLE` | Camera-pan distance, speed, endpoint hold, and stabilization delay |
+| `FMV_MERGE_DRAG_*` | Item-drag travel, pickup hold, and target hold timing |
 | `FMV_PAUSE_HOTKEY` / `FMV_QUIT_HOTKEY` | Global bot controls |
 | `FMV_START_PAUSED` | Wait for an explicit resume before touching the game |
 | `FMV_GUI_ENABLED` | Show the optional live-log overlay |

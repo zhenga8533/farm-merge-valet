@@ -6,8 +6,9 @@ from farm_merge_valet.core.board import (
     CellKind,
     ItemRef,
     MergeActionKind,
-    find_removable_member,
+    MoveEffect,
     plan_merge_action,
+    plan_merge_actions,
 )
 
 WHEAT_1 = ItemRef(category="crops", name="wheat", tier=1)
@@ -73,20 +74,6 @@ def test_find_clusters_never_spans_unknown_cells() -> None:
     assert sorted(len(c) for c in clusters) == [1, 1]
 
 
-def test_find_removable_member_keeps_remainder_connected() -> None:
-    cluster = {(0, 0), (1, 0), (2, 0)}  # a straight line
-    donor = find_removable_member(cluster)
-    assert donor is not None
-    # Removing an end of the line keeps the rest connected; removing the
-    # middle would not, so the middle must never be chosen.
-    assert donor != (1, 0)
-
-
-def test_find_removable_member_of_tiny_cluster_is_none() -> None:
-    assert find_removable_member(set()) is None
-    assert find_removable_member({(0, 0)}) is None
-
-
 def test_plan_merge_action_triggers_an_exactly_sized_cluster() -> None:
     grid = BoardGrid()
     for coord in [(0, 0), (1, 0), (2, 0)]:
@@ -124,21 +111,22 @@ def test_plan_merge_action_below_target_with_nothing_else_is_none() -> None:
     assert plan_merge_action(grid, WHEAT_1, target_size=3) is None
 
 
-def test_plan_merge_action_gathers_scattered_items_toward_the_target() -> None:
+def test_merge_three_drops_a_donor_directly_onto_a_connected_pair() -> None:
     grid = BoardGrid()
-    # A pair at (0,0)-(1,0), a lone item far away at (10,10), and an empty
-    # cell adjacent to the pair for the donor to relocate into.
+    # A pair and a remote donor are sufficient; the final drop targets the
+    # occupied pair rather than requiring an empty tile beside it.
     grid.set_cell((0, 0), Cell(kind=CellKind.ITEM, item=WHEAT_1))
     grid.set_cell((1, 0), Cell(kind=CellKind.ITEM, item=WHEAT_1))
-    grid.set_cell((2, 0), Cell(kind=CellKind.EMPTY))
     grid.set_cell((10, 10), Cell(kind=CellKind.ITEM, item=WHEAT_1))
 
     action = plan_merge_action(grid, WHEAT_1, target_size=3)
 
     assert action is not None
-    assert action.kind is MergeActionKind.GATHER
+    assert action.kind is MergeActionKind.TRIGGER
+    assert action.effect is MoveEffect.MERGE
     assert action.start == (10, 10)
-    assert action.end == (2, 0)
+    assert action.end in {(0, 0), (1, 0)}
+    assert action.cluster == {(0, 0), (1, 0), (10, 10)}
 
 
 def test_plan_merge_action_degroups_a_cluster_over_the_five_target() -> None:
@@ -174,15 +162,150 @@ def test_merge_five_rebalances_six_and_four_into_two_exact_groups() -> None:
     action = plan_merge_action(grid, WHEAT_1, target_size=5)
 
     assert action is not None
-    assert action.kind is MergeActionKind.DEGROUP
-    moved = {
+    assert action.kind is MergeActionKind.TRIGGER
+    assert action.effect is MoveEffect.MERGE
+    remaining = {
         coord
         for coord in grid.known_coords()
         if (cell := grid.get_cell(coord)) is not None and cell.item == WHEAT_1
-    }
-    moved.remove(action.start)
-    moved.add(action.end)
-    assert sorted(len(cluster) for cluster in _clusters_for(moved)) == [5, 5]
+    } - set(action.cluster)
+    assert sorted(len(cluster) for cluster in _clusters_for(remaining)) == [5]
+
+
+def test_merge_five_drops_a_donor_directly_onto_a_four_item_base() -> None:
+    grid = BoardGrid()
+    base = {(0, 0), (1, 0), (2, 0), (3, 0)}
+    for coord in base | {(10, 10)}:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+
+    action = plan_merge_action(grid, WHEAT_1, target_size=5)
+
+    assert action is not None
+    assert action.kind is MergeActionKind.TRIGGER
+    assert action.effect is MoveEffect.MERGE
+    assert action.start == (10, 10)
+    assert action.end in base
+    assert action.cluster == base | {(10, 10)}
+
+
+def test_merge_five_builds_its_four_item_base_into_an_empty_cell() -> None:
+    grid = BoardGrid()
+    for coord in [(0, 0), (1, 0), (10, 10), (11, 11), (12, 12)]:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    grid.set_cell((2, 0), Cell(kind=CellKind.EMPTY))
+
+    action = plan_merge_action(grid, WHEAT_1, target_size=5)
+
+    assert action is not None
+    assert action.kind is MergeActionKind.GATHER
+    assert action.effect is MoveEffect.MOVE
+    assert action.end == (2, 0)
+    assert action.displaced_item is None
+
+
+def test_merge_five_builds_its_base_by_swapping_on_a_full_board() -> None:
+    grid = BoardGrid()
+    for coord in [(0, 0), (1, 0), (10, 10), (11, 11), (12, 12)]:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    grid.set_cell((2, 0), Cell(kind=CellKind.ITEM, item=WHEAT_2))
+
+    action = plan_merge_action(grid, WHEAT_1, target_size=5)
+
+    assert action is not None
+    assert action.kind is MergeActionKind.GATHER
+    assert action.effect is MoveEffect.SWAP
+    assert action.end == (2, 0)
+    assert action.displaced_item == WHEAT_2
+
+
+def test_swap_candidates_exclude_non_items_and_matching_items() -> None:
+    grid = BoardGrid()
+    positions = {(0, 0), (10, 10), (20, 20), (30, 30), (40, 40)}
+    for coord in positions:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    grid.set_cell((1, 0), Cell(kind=CellKind.PRODUCT))
+    grid.set_cell((-1, 0), Cell(kind=CellKind.STRUCTURE))
+    grid.set_cell((0, 1), Cell(kind=CellKind.CLOUD))
+    grid.set_cell((0, -1), Cell(kind=CellKind.ITEM, item=WHEAT_1))
+
+    assert not plan_merge_actions(grid, WHEAT_1, target_size=5)
+
+
+def test_merge_three_mode_triggers_any_connected_group_of_three_or_more() -> None:
+    grid = BoardGrid()
+    cluster = {(x, 0) for x in range(6)}
+    for coord in cluster:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+
+    action = plan_merge_action(grid, WHEAT_1, target_size=3)
+
+    assert action is not None
+    assert action.kind is MergeActionKind.TRIGGER
+    assert action.effect is MoveEffect.MERGE
+    assert action.cluster == cluster
+
+
+def test_smallest_trigger_preference_chooses_the_smallest_merge_group() -> None:
+    grid = BoardGrid()
+    small = {(x, 0) for x in range(3)}
+    large = {(x, 2) for x in range(6)}
+    for coord in small | large:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+
+    actions = plan_merge_actions(
+        grid,
+        WHEAT_1,
+        target_size=3,
+        prefer_smallest_trigger=True,
+    )
+
+    assert actions
+    assert actions[0].cluster == small
+
+
+def test_merge_five_preserves_existing_four_item_bases() -> None:
+    grid = BoardGrid()
+    first_base = {(x, 0) for x in range(4)}
+    second_base = {(x, 2) for x in range(4)}
+    for coord in first_base | second_base:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    grid.set_cell((10, 9), Cell(kind=CellKind.EMPTY))
+
+    assert not plan_merge_actions(grid, WHEAT_1, target_size=5)
+
+    donor = (10, 10)
+    grid.set_cell(donor, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    action = plan_merge_action(grid, WHEAT_1, target_size=5)
+
+    assert action is not None
+    assert action.kind is MergeActionKind.TRIGGER
+    assert action.start == donor
+
+
+def test_merge_five_does_not_swap_through_another_items_four_item_base() -> None:
+    grid = BoardGrid()
+    cow = ItemRef(category="animals", name="cow", tier=1)
+    for coord in {(0, 0), (1, 0), (10, 10), (20, 20), (30, 30)}:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    for coord in {(2, 0), (3, 0), (4, 0), (5, 0)}:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=cow))
+    grid.set_cell((100, 100), Cell(kind=CellKind.EMPTY))
+
+    assert not plan_merge_actions(grid, WHEAT_1, target_size=5)
+
+
+def test_full_board_can_use_an_existing_four_item_base_as_a_donor() -> None:
+    grid = BoardGrid()
+    first_base = {(x, 0) for x in range(4)}
+    second_base = {(x, 2) for x in range(4)}
+    for coord in first_base | second_base:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+
+    action = plan_merge_action(grid, WHEAT_1, target_size=5)
+
+    assert action is not None
+    assert action.kind is MergeActionKind.TRIGGER
+    assert len(action.cluster) == 5
 
 
 def test_merge_five_can_split_an_oversized_group_at_an_articulation_cell() -> None:
@@ -198,23 +321,13 @@ def test_merge_five_can_split_an_oversized_group_at_an_articulation_cell() -> No
     assert action.start not in {(0, 0), (9, 0)}
 
 
-def test_merge_five_gather_never_creates_a_group_larger_than_five() -> None:
+def test_merge_five_does_not_bridge_two_completed_bases() -> None:
     grid = BoardGrid()
     for coord in [(x, 0) for x in range(4)] + [(x, 0) for x in range(5, 9)]:
         grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
     grid.set_cell((4, 0), Cell(kind=CellKind.EMPTY))
 
-    action = plan_merge_action(grid, WHEAT_1, target_size=5)
-
-    assert action is not None
-    moved = {
-        coord
-        for coord in grid.known_coords()
-        if (cell := grid.get_cell(coord)) is not None and cell.item == WHEAT_1
-    }
-    moved.remove(action.start)
-    moved.add(action.end)
-    assert max(len(cluster) for cluster in _clusters_for(moved)) <= 5
+    assert plan_merge_action(grid, WHEAT_1, target_size=5) is None
 
 
 def _clusters_for(positions: set[tuple[int, int]]) -> list[set[tuple[int, int]]]:

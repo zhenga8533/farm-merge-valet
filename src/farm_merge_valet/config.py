@@ -44,9 +44,9 @@ class Settings(BaseSettings):
     # Delay between crate clicks so the game can register each action.
     crate_click_settle: float = Field(default=0.1, ge=0.0)
 
-    # Stop claiming before the board is completely full so gather/degroup
-    # moves always have a destination. Relocating an item vacates its source,
-    # so one reserved cell is enough for a multi-step rearrangement.
+    # Stop claiming before the board is completely full when productive merge
+    # work exists. Swaps can recover a full board, while one reserved empty cell
+    # also permits ordinary gather/degroup moves.
     merge_empty_cell_reserve: int = Field(default=1, ge=0)
 
     # Resolution-independent dead-zone slices around the viewport. The
@@ -63,6 +63,19 @@ class Settings(BaseSettings):
     # inside the right dead zone, away from tiles and the fixed toolbar.
     pan_anchor_x_ratio: float = Field(default=0.925, ge=0.0, le=1.0)
     pan_anchor_y_ratio: float = Field(default=0.50, ge=0.0, le=1.0)
+
+    # Controlled camera-pan gesture. A short, slow drag avoids triggering the
+    # game's inertial fling behavior before live geometry is measured again.
+    pan_step_ratio: float = Field(default=0.12, gt=0.0, le=0.5)
+    pan_drag_duration: float = Field(default=0.6, gt=0.0)
+    pan_release_delay: float = Field(default=0.3, ge=0.0)
+    pan_settle: float = Field(default=0.6, ge=0.0)
+
+    # Deliberate item pickup, movement, and endpoint hold. Pixi can interpret
+    # a quick release while a tile is still moving as a drop on its neighbor.
+    merge_drag_duration: float = Field(default=0.8, gt=0.0)
+    merge_drag_pickup_delay: float = Field(default=0.2, ge=0.0)
+    merge_drag_release_delay: float = Field(default=0.3, ge=0.0)
 
     # Merging exactly 5 identical items yields 2 of the next tier instead of
     # 1 from a merge-3 (see docs/game-mechanics.md).

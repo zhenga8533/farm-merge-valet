@@ -4,7 +4,7 @@ from threading import Event
 
 from farm_merge_valet.capture.window import WindowRegion
 from farm_merge_valet.cdp.reddit_host import RedditFullscreenState
-from farm_merge_valet.core.environment import ensure_reddit_fullscreen, pan
+from farm_merge_valet.core.environment import ensure_reddit_fullscreen, initialize_environment, pan
 
 
 def test_ensure_reddit_fullscreen_enters_f11_and_expands_game(monkeypatch) -> None:
@@ -49,18 +49,42 @@ def test_fullscreen_initialization_stops_after_an_interrupted_cdp_read(monkeypat
     assert not pressed
 
 
+def test_environment_initialization_preserves_camera_position(monkeypatch) -> None:
+    region = WindowRegion(0, 0, 1600, 900)
+    zoomed = []
+    monkeypatch.setattr(
+        "farm_merge_valet.core.environment.ensure_reddit_fullscreen",
+        lambda _stop_event: region,
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.core.environment.zoom_out_fully",
+        lambda observed_region, _stop_event: zoomed.append(observed_region) or True,
+    )
+
+    assert initialize_environment()
+    assert zoomed == [region]
+
+
 def test_pan_toward_bottom_drags_map_up_in_the_dedicated_lane(monkeypatch) -> None:
     region = WindowRegion(0, 0, 1920, 1080)
     drags = []
     monkeypatch.setattr(
         "farm_merge_valet.core.environment.drag",
-        lambda _region, start, end, duration: drags.append((start, end, duration)),
+        lambda _region, start, end, **timing: drags.append((start, end, timing)),
     )
-    monkeypatch.setattr("farm_merge_valet.core.environment.time.sleep", lambda _seconds: None)
+    waits = []
+    monkeypatch.setattr("farm_merge_valet.core.environment.time.sleep", waits.append)
 
     assert pan(region, toward_bottom=True)
 
-    assert drags == [((1776, 842), (1776, 238), 0.15)]
+    assert drags == [
+        (
+            (1776, 605),
+            (1776, 475),
+            {"duration": 0.6, "release_delay": 0.3, "decelerate": True},
+        )
+    ]
+    assert waits == [0.6]
 
 
 def test_pan_toward_top_drags_map_down(monkeypatch) -> None:
@@ -68,13 +92,36 @@ def test_pan_toward_top_drags_map_down(monkeypatch) -> None:
     drags = []
     monkeypatch.setattr(
         "farm_merge_valet.core.environment.drag",
-        lambda _region, start, end, duration: drags.append((start, end, duration)),
+        lambda _region, start, end, **timing: drags.append((start, end, timing)),
     )
     monkeypatch.setattr("farm_merge_valet.core.environment.time.sleep", lambda _seconds: None)
 
     assert pan(region, toward_bottom=False)
 
-    assert drags == [((1776, 238), (1776, 842), 0.15)]
+    assert drags == [
+        (
+            (1776, 475),
+            (1776, 605),
+            {"duration": 0.6, "release_delay": 0.3, "decelerate": True},
+        )
+    ]
+
+
+def test_pan_settles_between_repeated_gestures(monkeypatch) -> None:
+    region = WindowRegion(0, 0, 1920, 1080)
+    events = []
+    monkeypatch.setattr(
+        "farm_merge_valet.core.environment.drag",
+        lambda *_args, **_kwargs: events.append("drag"),
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.core.environment.time.sleep",
+        lambda _seconds: events.append("settle"),
+    )
+
+    assert pan(region, toward_bottom=True, repeats=2)
+
+    assert events == ["drag", "settle", "drag", "settle"]
 
 
 def test_pan_stops_before_input_when_interrupted(monkeypatch) -> None:

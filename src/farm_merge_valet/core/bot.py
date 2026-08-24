@@ -27,7 +27,8 @@ from farm_merge_valet.core.board import (
     ItemRef,
     MergeAction,
     MergeActionKind,
-    plan_merge_action,
+    MoveEffect,
+    plan_merge_actions,
 )
 from farm_merge_valet.core.board_scan import discover_blueprint_items
 from farm_merge_valet.core.environment import initialize_environment, pan
@@ -72,6 +73,8 @@ class Phase(Enum):
 
 
 class Bot:
+    _MAX_IDENTICAL_ACTION_FAILURES = 2
+
     def __init__(self) -> None:
         self.paused = False
         self._quit_requested = False
@@ -86,6 +89,10 @@ class Bot:
         # blueprintID (e.g. "wheat_1") -> ItemRef for interpreting live
         # board state. Item images are not used to scan board contents.
         self._blueprint_items = discover_blueprint_items(settings.templates_dir / "items")
+        self._max_item_tiers: dict[tuple[str, str], int] = {}
+        for item in self._blueprint_items.values():
+            key = (item.category, item.name)
+            self._max_item_tiers[key] = max(item.tier, self._max_item_tiers.get(key, 0))
         self._board_store_armed = False
         self._last_board_store_status: str | None = None
         self._crate_inventory_armed = False
@@ -95,6 +102,10 @@ class Bot:
         # None means there is not enough current state to fit the mapping.
         self._scene_calibration: SceneCalibration | None = None
         self.board = BoardGrid()
+        self._pending_merge_action: MergeAction | None = None
+        self._pending_action_signature: tuple[tuple[GridCoord, Cell | None], ...] | None = None
+        self._last_failed_action: tuple[MoveEffect, ItemRef, GridCoord, GridCoord] | None = None
+        self._identical_action_failures = 0
 
     def _set_phase(self, phase: Phase) -> None:
         if phase != self.phase:
@@ -112,6 +123,10 @@ class Bot:
         self._crate_inventory_armed = False
         self._last_crate_inventory_status = None
         self._scene_calibration = None
+        self._pending_merge_action = None
+        self._pending_action_signature = None
+        self._last_failed_action = None
+        self._identical_action_failures = 0
         return True
 
     def _refresh_calibration(self, region: WindowRegion) -> None:
@@ -220,27 +235,75 @@ class Bot:
         MergeActionKind.GATHER: 2,
     }
 
-    @staticmethod
-    def _item_sort_key(item: ItemRef) -> tuple[str, str, int]:
-        return item.category, item.name, item.tier
+    _ITEM_PRIORITY = {
+        ("animals", None): 0,
+        ("crops", None): 0,
+        ("resources", "brick"): 1,
+        ("resources", "wood"): 1,
+        ("currencies", "coin"): 2,
+        ("currencies", "gem"): 3,
+    }
+
+    @classmethod
+    def _item_priority(cls, item: ItemRef) -> int:
+        return cls._ITEM_PRIORITY.get(
+            (item.category, item.name),
+            cls._ITEM_PRIORITY.get((item.category, None), 4),
+        )
+
+    @classmethod
+    def _item_sort_key(cls, item: ItemRef) -> tuple[int, int, str, str]:
+        return cls._item_priority(item), item.tier, item.category, item.name
 
     def _action_sort_key(
-        self, action: MergeAction
-    ) -> tuple[int, tuple[str, str, int], GridCoord, GridCoord]:
+        self,
+        action: MergeAction,
+        planner_rank: int,
+        *,
+        prefer_smallest_trigger: bool,
+    ) -> tuple[int, int, int, int, int, int, str, str, tuple[int, int], tuple[int, int]]:
         return (
             self._MERGE_ACTION_PRIORITY[action.kind],
-            self._item_sort_key(action.item),
+            len(action.cluster)
+            if prefer_smallest_trigger and action.kind is MergeActionKind.TRIGGER
+            else 0,
+            self._item_priority(action.item),
+            action.item.tier,
+            planner_rank,
+            abs(action.start[0] - action.end[0]) + abs(action.start[1] - action.end[1]),
+            action.item.category,
+            action.item.name,
             action.start,
             action.end,
         )
 
-    def _plan_merge_actions(self, target_size: Literal[3, 5]) -> list[MergeAction]:
-        actions = [
-            action
+    def _plan_merge_actions(
+        self, target_size: Literal[3, 5], *, prefer_smallest_trigger: bool = False
+    ) -> list[MergeAction]:
+        ranked_actions = [
+            (planner_rank, action)
             for item in sorted(self.board.items_present(), key=self._item_sort_key)
-            if (action := plan_merge_action(self.board, item, target_size=target_size)) is not None
+            if item.tier < self._max_item_tiers.get((item.category, item.name), item.tier + 1)
+            for planner_rank, action in enumerate(
+                plan_merge_actions(
+                    self.board,
+                    item,
+                    target_size=target_size,
+                    prefer_smallest_trigger=prefer_smallest_trigger,
+                )
+            )
         ]
-        return sorted(actions, key=self._action_sort_key)
+        return [
+            action
+            for planner_rank, action in sorted(
+                ranked_actions,
+                key=lambda ranked: self._action_sort_key(
+                    ranked[1],
+                    ranked[0],
+                    prefer_smallest_trigger=prefer_smallest_trigger,
+                ),
+            )
+        ]
 
     def _merge_actions_for_policy(self) -> list[MergeAction]:
         if not settings.prefer_merge_five:
@@ -249,7 +312,7 @@ class Bot:
         actions = self._plan_merge_actions(5)
         if actions or self.board.find_empty():
             return actions
-        return self._plan_merge_actions(3)
+        return self._plan_merge_actions(3, prefer_smallest_trigger=True)
 
     def _is_action_visible(self, action: MergeAction, frame_shape: tuple[int, ...]) -> bool:
         """Whether both ends of `action`'s drag land within the currently
@@ -266,6 +329,17 @@ class Bot:
                 return False
         return True
 
+    def _action_can_fit(self, action: MergeAction, frame_shape: tuple[int, ...]) -> bool:
+        height, width = frame_shape[:2]
+        layout = viewport_layout(width, height)
+        start = self._grid_to_pixel(action.start)
+        end = self._grid_to_pixel(action.end)
+        return (
+            layout.board.left <= start[0] < layout.board.right
+            and layout.board.left <= end[0] < layout.board.right
+            and abs(start[1] - end[1]) < layout.board.bottom - layout.board.top
+        )
+
     # Each attempt is one measured drag. This bounds failures while allowing
     # enough attempts to cross the observed scrollable range.
     _MAX_SCROLL_ATTEMPTS = 12
@@ -276,40 +350,50 @@ class Bot:
         if not actions:
             return False
 
-        visible = [a for a in actions if self._is_action_visible(a, frame.shape)]
+        visible = [action for action in actions if self._is_action_visible(action, frame.shape)]
         if visible:
-            best = min(visible, key=self._action_sort_key)
+            return self._execute_merge_action(region, visible[0])
+
+        reachable = [action for action in actions if self._action_can_fit(action, frame.shape)]
+        if not reachable:
+            self._pause_for_edge_drag(actions[0])
+            return True
+
+        best = reachable[0]
+        reveal_result = self._scroll_action_to_reveal(region, best)
+        if reveal_result == "ready":
             return self._execute_merge_action(region, best)
+        if reveal_result == "unreachable":
+            self._pause_for_edge_drag(best)
+        return True
 
-        best_offscreen = min(actions, key=self._action_sort_key)
-        col = (best_offscreen.start[0] + best_offscreen.end[0]) // 2
-        row = (best_offscreen.start[1] + best_offscreen.end[1]) // 2
-        return self._scroll_to_reveal(region, (col, row))
-
-    def _scroll_to_reveal(self, region: WindowRegion, target: GridCoord) -> bool:
-        """Pan until the target is actionable, remeasuring after every drag.
-
-        The drag-to-camera relationship is not assumed to be linear. If a drag
-        does not reduce the distance, the next attempt reverses direction.
-        """
+    def _scroll_action_to_reveal(
+        self, region: WindowRegion, action: MergeAction
+    ) -> Literal["ready", "unavailable", "unreachable", "interrupted"]:
+        """Pan until both drag endpoints are actionable in the same frame."""
         toward_bottom: bool | None = None
         best_distance: float | None = None
         for _ in range(self._MAX_SCROLL_ATTEMPTS):
             if self._quit_requested or self.paused:
-                return False
+                return "interrupted"
             self._refresh_calibration(region)
             if self._scene_calibration is None:
-                return False
+                return "unavailable"
 
-            x, y = self._grid_to_pixel(target)
+            frame_shape = (region.height, region.width)
+            if self._is_action_visible(action, frame_shape):
+                return "ready"
+            if not self._action_can_fit(action, frame_shape):
+                return "unreachable"
+
+            start_y = self._grid_to_pixel(action.start)[1]
+            end_y = self._grid_to_pixel(action.end)[1]
             layout = viewport_layout(region.width, region.height)
-            if layout.is_actionable(x, y):
-                return True
-
             desired_y = (layout.board.top + layout.board.bottom) / 2
-            distance = abs(y - desired_y)
+            action_y = (start_y + end_y) / 2
+            distance = abs(action_y - desired_y)
             if toward_bottom is None:
-                toward_bottom = y > desired_y
+                toward_bottom = action_y > desired_y
             elif best_distance is not None and distance >= best_distance:
                 toward_bottom = not toward_bottom
             best_distance = distance
@@ -319,13 +403,26 @@ class Bot:
                 repeats=1,
                 stop_event=self._interrupt_event,
             ):
-                return False
+                return "interrupted"
         logger.warning(
-            "Could not scroll %s into view within %d attempts.",
-            target,
+            "Could not bring merge drag %s -> %s into one viewport within %d attempts.",
+            action.start,
+            action.end,
             self._MAX_SCROLL_ATTEMPTS,
         )
-        return False
+        return "unreachable"
+
+    def _pause_for_edge_drag(self, action: MergeAction) -> None:
+        logger.error(
+            "%s tier %d %s -> %s requires held-edge scrolling, which is not yet "
+            "implemented; pausing for manual positioning.",
+            action.item.name,
+            action.item.tier,
+            action.start,
+            action.end,
+        )
+        self.paused = True
+        self._interrupt_event.set()
 
     def _execute_merge_action(self, region: WindowRegion, action: MergeAction) -> bool:
         if self._interrupt_event.is_set():
@@ -334,7 +431,7 @@ class Bot:
         strategy = f"merge-{action.target_size}"
         if settings.prefer_merge_five and action.target_size == 3:
             strategy += " fallback"
-        if action.kind is MergeActionKind.TRIGGER:
+        if action.effect is MoveEffect.MERGE:
             logger.info(
                 "Merging %d x %s (%s tier %d, %s)",
                 len(action.cluster),
@@ -343,9 +440,22 @@ class Bot:
                 item.tier,
                 strategy,
             )
+        elif action.effect is MoveEffect.SWAP:
+            assert action.displaced_item is not None
+            purpose = "degroup" if action.kind is MergeActionKind.DEGROUP else "build a base"
+            logger.info(
+                "Swapping 1 x %s (%s tier %d) with %s tier %d to %s for %s",
+                item.name,
+                item.category,
+                item.tier,
+                action.displaced_item.name,
+                action.displaced_item.tier,
+                purpose,
+                strategy,
+            )
         elif action.kind is MergeActionKind.DEGROUP:
             logger.info(
-                "Degrouping 1 x %s (%s tier %d) toward %s",
+                "Moving 1 x %s (%s tier %d) to degroup for %s",
                 item.name,
                 item.category,
                 item.tier,
@@ -353,20 +463,95 @@ class Bot:
             )
         else:
             logger.info(
-                "Gathering 1 x %s (%s tier %d) toward %s",
+                "Moving 1 x %s (%s tier %d) to build a base for %s",
                 item.name,
                 item.category,
                 item.tier,
                 strategy,
             )
-        drag(region, self._grid_to_pixel(action.start), self._grid_to_pixel(action.end))
-        if action.kind is MergeActionKind.TRIGGER:
+        drag(
+            region,
+            self._grid_to_pixel(action.start),
+            self._grid_to_pixel(action.end),
+            duration=settings.merge_drag_duration,
+            pickup_delay=settings.merge_drag_pickup_delay,
+            release_delay=settings.merge_drag_release_delay,
+        )
+        self._pending_merge_action = action
+        self._pending_action_signature = self._action_signature(action)
+        if action.effect is MoveEffect.MERGE:
             for coord in action.cluster:
                 self.board.clear_cell(coord)
         else:
             # Relocation results are intentionally unknown until the next live sync.
             self.board.clear_cell(action.start)
             self.board.clear_cell(action.end)
+        return True
+
+    def _merge_action_succeeded(self, action: MergeAction) -> bool:
+        def has_item(coord: GridCoord, item: ItemRef) -> bool:
+            cell = self.board.get_cell(coord)
+            return cell is not None and cell.item == item
+
+        if action.effect in (MoveEffect.MOVE, MoveEffect.SWAP):
+            return has_item(action.end, action.item)
+        return all(
+            (cell := self.board.get_cell(coord)) is not None and cell.item != action.item
+            for coord in action.cluster
+        )
+
+    def _action_signature(self, action: MergeAction) -> tuple[tuple[GridCoord, Cell | None], ...]:
+        relevant_coords = set(action.cluster) | {action.start, action.end}
+        return tuple((coord, self.board.get_cell(coord)) for coord in sorted(relevant_coords))
+
+    def _verify_pending_merge_action(self) -> bool:
+        action = self._pending_merge_action
+        if action is None:
+            return True
+        self._pending_merge_action = None
+        previous_state = self._pending_action_signature
+        self._pending_action_signature = None
+
+        action_key = (action.effect, action.item, action.start, action.end)
+        if self._merge_action_succeeded(action):
+            self._last_failed_action = None
+            self._identical_action_failures = 0
+            return True
+
+        if previous_state is not None and self._action_signature(action) != previous_state:
+            logger.warning(
+                "Merge drag %s -> %s changed the board but did not reach its intended "
+                "destination; replanning from live state.",
+                action.start,
+                action.end,
+            )
+            self._last_failed_action = None
+            self._identical_action_failures = 0
+            return True
+
+        if action_key == self._last_failed_action:
+            self._identical_action_failures += 1
+        else:
+            self._last_failed_action = action_key
+            self._identical_action_failures = 1
+
+        if self._identical_action_failures >= self._MAX_IDENTICAL_ACTION_FAILURES:
+            logger.error(
+                "Merge drag %s -> %s failed to reach its intended tile %d times; "
+                "pausing to prevent repeated unintended drops.",
+                action.start,
+                action.end,
+                self._identical_action_failures,
+            )
+            self.paused = True
+            self._interrupt_event.set()
+            return False
+
+        logger.warning(
+            "Merge drag %s -> %s did not change the board; replanning once.",
+            action.start,
+            action.end,
+        )
         return True
 
     def step(self) -> None:
@@ -394,6 +579,8 @@ class Bot:
             return
         if not live_synced:
             logger.warning("Live board state is unavailable; skipping this step.")
+            return
+        if not self._verify_pending_merge_action():
             return
 
         # Only merge actions need grid-to-screen geometry.
@@ -464,6 +651,9 @@ class Bot:
             logger.warning("Live crate inventory is unavailable; skipping crate claims.")
             return
         if crate_count == 0:
+            if self._merge_actions_for_policy():
+                logger.info("Supply is empty; switching to merge available items.")
+                self._set_phase(Phase.MERGE)
             return
 
         match = self._find_supply_crate(frame)
@@ -496,6 +686,9 @@ class Bot:
             return
         if self._board_needs_merge():
             logger.info("Board reached the merge-space reserve; switching to merge phase.")
+            self._set_phase(Phase.MERGE)
+        elif click_count == crate_count and self._merge_actions_for_policy():
+            logger.info("Claimed all available supplies; switching to merge available items.")
             self._set_phase(Phase.MERGE)
 
     def _step_merge(

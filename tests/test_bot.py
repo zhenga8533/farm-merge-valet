@@ -6,7 +6,15 @@ import numpy as np
 
 from farm_merge_valet.capture.window import WindowRegion
 from farm_merge_valet.cdp.board_store import LiveCellState
-from farm_merge_valet.core.board import BoardGrid, Cell, CellKind, ItemRef
+from farm_merge_valet.core.board import (
+    BoardGrid,
+    Cell,
+    CellKind,
+    ItemRef,
+    MergeAction,
+    MergeActionKind,
+    MoveEffect,
+)
 from farm_merge_valet.core.bot import Bot, Phase
 from farm_merge_valet.vision.matcher import Match
 
@@ -21,6 +29,11 @@ def _bare_bot() -> Bot:
     bot._resume_requested = Event()
     bot._crate_inventory_armed = False
     bot._last_crate_inventory_status = None
+    bot._max_item_tiers = {}
+    bot._pending_merge_action = None
+    bot._pending_action_signature = None
+    bot._last_failed_action = None
+    bot._identical_action_failures = 0
     return bot
 
 
@@ -182,6 +195,68 @@ def test_claim_crates_takes_no_action_when_inventory_is_empty(monkeypatch) -> No
         board_needs_merge=False,
     )
 
+    assert bot.phase is Phase.CLAIM_CRATES
+
+
+def test_empty_inventory_switches_to_an_available_merge(monkeypatch) -> None:
+    bot = _bare_bot()
+    bot._crate_inventory_armed = True
+    wheat = ItemRef("crops", "wheat", 1)
+    for x in range(5):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+    bot.board.set_cell((10, 10), Cell(CellKind.EMPTY))
+    monkeypatch.setattr("farm_merge_valet.core.bot.read_crate_count", lambda *_args: 0)
+    monkeypatch.setattr(
+        bot,
+        "_find_supply_crate",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not search for crate button")),
+    )
+
+    bot._step_claim_crates(
+        WindowRegion(0, 0, 100, 100),
+        np.zeros((1, 1, 3), dtype=np.uint8),
+        board_needs_merge=False,
+    )
+
+    assert bot.phase is Phase.MERGE
+
+
+def test_claiming_last_supply_switches_to_a_newly_available_merge(monkeypatch) -> None:
+    bot = _bare_bot()
+    bot._crate_inventory_armed = True
+    bot._supply_crate_template = np.zeros((1, 1, 3), dtype=np.uint8)
+    wheat = ItemRef("crops", "wheat", 1)
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+    empty_coords = [(3, 0), (4, 0), (10, 10), (11, 10), (12, 10)]
+    for coord in empty_coords:
+        bot.board.set_cell(coord, Cell(CellKind.EMPTY))
+
+    clicks = 0
+
+    def fake_click(*_args, **_kwargs) -> None:
+        nonlocal clicks
+        bot.board.set_cell(empty_coords[clicks], Cell(CellKind.ITEM, wheat))
+        clicks += 1
+
+    monkeypatch.setattr("farm_merge_valet.core.bot.read_crate_count", lambda *_args: 2)
+    monkeypatch.setattr("farm_merge_valet.core.bot.click", fake_click)
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.find_best_scaled_match",
+        lambda *_args, **_kwargs: Match(0, 0, 1, 1, 1.0),
+    )
+    bot._sync_board_from_live_state = lambda: True
+
+    bot._step_claim_crates(
+        WindowRegion(0, 0, 100, 100),
+        np.zeros((1, 1, 3), dtype=np.uint8),
+        board_needs_merge=False,
+    )
+
+    assert clicks == 2
+    assert len(bot.board.find_empty()) == 3
+    assert bot.phase is Phase.MERGE
+
 
 def test_step_takes_no_action_without_live_board_state(monkeypatch) -> None:
     bot = _bare_bot()
@@ -290,6 +365,110 @@ def test_merge_five_policy_uses_three_only_when_the_board_is_full(monkeypatch) -
     assert {action.target_size for action in fallback} == {3}
 
 
+def test_merge_three_fallback_chooses_the_smallest_group(monkeypatch) -> None:
+    bot = _bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    small = {(x, 0) for x in range(3)}
+    large = {(x, 2) for x in range(6)}
+    for coord in small | large:
+        bot.board.set_cell(coord, Cell(CellKind.ITEM, wheat))
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.prefer_merge_five", True)
+
+    actions = bot._merge_actions_for_policy()
+
+    assert actions
+    assert actions[0].target_size == 3
+    assert actions[0].cluster == small
+
+
+def test_merge_three_fallback_chooses_group_size_before_item_priority(monkeypatch) -> None:
+    bot = _bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    gem = ItemRef("currencies", "gem", 1)
+    for coord in {(x, 0) for x in range(4)}:
+        bot.board.set_cell(coord, Cell(CellKind.ITEM, wheat))
+    gem_group = {(x, 2) for x in range(3)}
+    for coord in gem_group:
+        bot.board.set_cell(coord, Cell(CellKind.ITEM, gem))
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.prefer_merge_five", True)
+
+    actions = bot._merge_actions_for_policy()
+
+    assert actions
+    assert actions[0].item == gem
+    assert actions[0].cluster == gem_group
+
+
+def test_merge_order_uses_item_class_then_absolute_tier(monkeypatch) -> None:
+    bot = _bare_bot()
+    items = [
+        ItemRef("currencies", "gem", 1),
+        ItemRef("currencies", "coin", 1),
+        ItemRef("resources", "wood", 1),
+        ItemRef("animals", "cow", 4),
+        ItemRef("crops", "wheat", 2),
+    ]
+    for row, item in enumerate(items):
+        for column in range(3):
+            bot.board.set_cell((column, row * 2), Cell(CellKind.ITEM, item))
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.prefer_merge_five", True)
+
+    actions = bot._merge_actions_for_policy()
+
+    first_action_by_item = list(dict.fromkeys(action.item for action in actions))
+    assert first_action_by_item == [items[4], items[3], items[2], items[1], items[0]]
+
+
+def test_merge_order_uses_shorter_drag_as_a_tiebreaker() -> None:
+    bot = _bare_bot()
+    cow = ItemRef("animals", "cow", 1)
+    wheat = ItemRef("crops", "wheat", 1)
+    for coord in {(0, 0), (1, 0), (10, 0)}:
+        bot.board.set_cell(coord, Cell(CellKind.ITEM, cow))
+    for coord in {(20, 0), (21, 0), (23, 0)}:
+        bot.board.set_cell(coord, Cell(CellKind.ITEM, wheat))
+
+    actions = bot._plan_merge_actions(3)
+
+    assert actions[0].item == wheat
+    assert abs(actions[0].start[0] - actions[0].end[0]) == 2
+
+
+def test_top_catalog_tier_is_excluded_from_merge_planning() -> None:
+    bot = _bare_bot()
+    wheat_3 = ItemRef("crops", "wheat", 3)
+    wheat_4 = ItemRef("crops", "wheat", 4)
+    bot._max_item_tiers[("crops", "wheat")] = 4
+    for x in range(5):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat_4))
+        bot.board.set_cell((x, 2), Cell(CellKind.ITEM, wheat_3))
+
+    actions = bot._plan_merge_actions(5)
+
+    assert actions
+    assert {action.item for action in actions} == {wheat_3}
+
+
+def test_full_board_swap_is_preferred_over_merge_three_fallback(monkeypatch) -> None:
+    bot = _bare_bot()
+    cow = ItemRef("animals", "cow", 1)
+    goat = ItemRef("animals", "goat", 1)
+    wheat = ItemRef("crops", "wheat", 1)
+    for coord in [(0, 0), (1, 0), (10, 10), (11, 11), (12, 12)]:
+        bot.board.set_cell(coord, Cell(CellKind.ITEM, cow))
+    bot.board.set_cell((2, 0), Cell(CellKind.ITEM, wheat))
+    for coord in [(20, 20), (21, 20), (22, 20)]:
+        bot.board.set_cell(coord, Cell(CellKind.ITEM, goat))
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.prefer_merge_five", True)
+
+    actions = bot._merge_actions_for_policy()
+
+    assert actions
+    assert {action.target_size for action in actions} == {5}
+    assert actions[0].item == cow
+    assert actions[0].effect is MoveEffect.SWAP
+
+
 def test_live_sync_distinguishes_open_cells_from_structure_placeholders(monkeypatch) -> None:
     bot = _bare_bot()
     bot._blueprint_items = {}
@@ -367,6 +546,16 @@ def test_quit_interrupts_actions_and_cancels_resume() -> None:
 
 def test_scroll_direction_follows_offscreen_target(monkeypatch) -> None:
     region = WindowRegion(0, 0, 1920, 1080)
+    item = ItemRef("crops", "wheat", 1)
+    action = MergeAction(
+        kind=MergeActionKind.GATHER,
+        item=item,
+        start=(0, 0),
+        end=(1, 0),
+        cluster=frozenset({(1, 0)}),
+        target_size=5,
+        effect=MoveEffect.MOVE,
+    )
 
     def assert_direction(initial_y: int, expected_toward_bottom: bool) -> None:
         bot = _bare_bot()
@@ -374,7 +563,7 @@ def test_scroll_direction_follows_offscreen_target(monkeypatch) -> None:
         current_y = initial_y
         directions = []
         bot._refresh_calibration = lambda _region: None
-        bot._grid_to_pixel = lambda _target: (960, current_y)
+        bot._grid_to_pixel = lambda coord: (960, current_y + coord[0] * 50)
 
         def fake_pan(_region, *, toward_bottom: bool, repeats: int, stop_event: Event) -> bool:
             nonlocal current_y
@@ -384,11 +573,176 @@ def test_scroll_direction_follows_offscreen_target(monkeypatch) -> None:
 
         monkeypatch.setattr("farm_merge_valet.core.bot.pan", fake_pan)
 
-        assert bot._scroll_to_reveal(region, (0, 0))
+        assert bot._scroll_action_to_reveal(region, action) == "ready"
         assert directions == [expected_toward_bottom]
 
     assert_direction(1000, True)
     assert_direction(100, False)
+
+
+def test_edge_drag_only_merge_pauses_instead_of_falling_back(monkeypatch) -> None:
+    bot = _bare_bot()
+    bot._scene_calibration = object()
+    item = ItemRef("animals", "cow", 1)
+    action = MergeAction(
+        kind=MergeActionKind.TRIGGER,
+        item=item,
+        start=(0, 0),
+        end=(1, 0),
+        cluster=frozenset({(0, 0), (1, 0), (2, 0), (3, 0), (4, 0)}),
+        target_size=5,
+        effect=MoveEffect.MERGE,
+    )
+    bot._merge_actions_for_policy = lambda: [action]
+    bot._grid_to_pixel = lambda coord: (960, 100 if coord == action.start else 1000)
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.drag",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not drag")),
+    )
+
+    assert bot._try_merge(WindowRegion(0, 0, 1920, 1080), np.zeros((1080, 1920, 3), dtype=np.uint8))
+    assert bot.paused
+    assert bot._interrupt_event.is_set()
+
+
+def test_executing_a_swap_invalidates_both_changed_cells(monkeypatch) -> None:
+    bot = _bare_bot()
+    bot._scene_calibration = object()
+    cow = ItemRef("animals", "cow", 1)
+    wheat = ItemRef("crops", "wheat", 1)
+    bot.board.set_cell((0, 0), Cell(CellKind.ITEM, cow))
+    bot.board.set_cell((1, 0), Cell(CellKind.ITEM, wheat))
+    action = MergeAction(
+        kind=MergeActionKind.GATHER,
+        item=cow,
+        start=(0, 0),
+        end=(1, 0),
+        cluster=frozenset({(1, 0)}),
+        target_size=5,
+        effect=MoveEffect.SWAP,
+        displaced_item=wheat,
+    )
+    drags = []
+    bot._grid_to_pixel = lambda coord: coord
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.drag",
+        lambda _region, start, end, **_kwargs: drags.append((start, end)),
+    )
+
+    assert bot._execute_merge_action(WindowRegion(0, 0, 100, 100), action)
+    assert drags == [((0, 0), (1, 0))]
+    assert bot.board.get_cell((0, 0)) is None
+    assert bot.board.get_cell((1, 0)) is None
+
+
+def test_successful_swap_is_verified_from_live_board_state() -> None:
+    bot = _bare_bot()
+    sugarcane = ItemRef("crops", "sugarcane", 1)
+    cow = ItemRef("animals", "cow", 2)
+    action = MergeAction(
+        kind=MergeActionKind.GATHER,
+        item=sugarcane,
+        start=(0, 0),
+        end=(1, 0),
+        cluster=frozenset({(1, 0)}),
+        target_size=5,
+        effect=MoveEffect.SWAP,
+        displaced_item=cow,
+    )
+    bot.board.set_cell(action.start, Cell(CellKind.ITEM, sugarcane))
+    bot.board.set_cell(action.end, Cell(CellKind.ITEM, cow))
+    bot._pending_merge_action = action
+    bot._pending_action_signature = bot._action_signature(action)
+    bot.board.set_cell(action.start, Cell(CellKind.EMPTY))
+    bot.board.set_cell(action.end, Cell(CellKind.ITEM, sugarcane))
+
+    assert bot._verify_pending_merge_action()
+    assert bot._pending_merge_action is None
+    assert bot._identical_action_failures == 0
+
+
+def test_repeated_failed_drag_pauses_instead_of_looping() -> None:
+    bot = _bare_bot()
+    sugarcane = ItemRef("crops", "sugarcane", 1)
+    cow = ItemRef("animals", "cow", 2)
+    action = MergeAction(
+        kind=MergeActionKind.GATHER,
+        item=sugarcane,
+        start=(0, 0),
+        end=(1, 0),
+        cluster=frozenset({(1, 0)}),
+        target_size=5,
+        effect=MoveEffect.SWAP,
+        displaced_item=cow,
+    )
+    bot.board.set_cell(action.start, Cell(CellKind.ITEM, sugarcane))
+    bot.board.set_cell(action.end, Cell(CellKind.ITEM, cow))
+
+    bot._pending_merge_action = action
+    bot._pending_action_signature = bot._action_signature(action)
+    assert bot._verify_pending_merge_action()
+    assert not bot.paused
+
+    bot._pending_merge_action = action
+    bot._pending_action_signature = bot._action_signature(action)
+    assert not bot._verify_pending_merge_action()
+    assert bot.paused
+    assert bot._interrupt_event.is_set()
+
+
+def test_misdirected_drag_replans_without_counting_a_no_op() -> None:
+    bot = _bare_bot()
+    sugarcane = ItemRef("crops", "sugarcane", 1)
+    cow = ItemRef("animals", "cow", 2)
+    chicken = ItemRef("animals", "chicken", 1)
+    action = MergeAction(
+        kind=MergeActionKind.GATHER,
+        item=sugarcane,
+        start=(0, 0),
+        end=(1, 0),
+        cluster=frozenset({(1, 0)}),
+        target_size=5,
+        effect=MoveEffect.SWAP,
+        displaced_item=cow,
+    )
+    bot.board.set_cell(action.start, Cell(CellKind.ITEM, sugarcane))
+    bot.board.set_cell(action.end, Cell(CellKind.ITEM, cow))
+    bot.board.set_cell((2, 0), Cell(CellKind.ITEM, chicken))
+    bot._pending_merge_action = action
+    bot._pending_action_signature = bot._action_signature(action)
+
+    bot.board.set_cell(action.start, Cell(CellKind.ITEM, chicken))
+    bot.board.set_cell((2, 0), Cell(CellKind.ITEM, sugarcane))
+
+    assert bot._verify_pending_merge_action()
+    assert not bot.paused
+    assert bot._identical_action_failures == 0
+
+
+def test_unrelated_board_change_does_not_hide_a_drag_no_op() -> None:
+    bot = _bare_bot()
+    sugarcane = ItemRef("crops", "sugarcane", 1)
+    cow = ItemRef("animals", "cow", 2)
+    action = MergeAction(
+        kind=MergeActionKind.GATHER,
+        item=sugarcane,
+        start=(0, 0),
+        end=(1, 0),
+        cluster=frozenset({(1, 0)}),
+        target_size=5,
+        effect=MoveEffect.SWAP,
+        displaced_item=cow,
+    )
+    bot.board.set_cell(action.start, Cell(CellKind.ITEM, sugarcane))
+    bot.board.set_cell(action.end, Cell(CellKind.ITEM, cow))
+    bot.board.set_cell((20, 20), Cell(CellKind.EMPTY))
+    bot._pending_merge_action = action
+    bot._pending_action_signature = bot._action_signature(action)
+
+    bot.board.set_cell((20, 20), Cell(CellKind.PRODUCT))
+
+    assert bot._verify_pending_merge_action()
+    assert bot._identical_action_failures == 1
 
 
 def test_run_forever_retries_initialization_when_window_is_missing(monkeypatch) -> None:
