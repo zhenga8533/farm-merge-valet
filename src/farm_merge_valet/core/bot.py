@@ -16,6 +16,7 @@ from farm_merge_valet.capture.screen import capture_region
 from farm_merge_valet.capture.window import WindowActivationError, WindowRegion, find_window
 from farm_merge_valet.cdp.board_store import arm_board_store, read_board_state
 from farm_merge_valet.cdp.client import CdpConnectionError
+from farm_merge_valet.cdp.inventory_store import arm_crate_inventory, read_crate_count
 from farm_merge_valet.cdp.scene_geometry import SceneCalibration, read_scene_calibration
 from farm_merge_valet.config import settings
 from farm_merge_valet.core.board import (
@@ -87,6 +88,8 @@ class Bot:
         self._blueprint_items = discover_blueprint_items(settings.templates_dir / "items")
         self._board_store_armed = False
         self._last_board_store_status: str | None = None
+        self._crate_inventory_armed = False
+        self._last_crate_inventory_status: str | None = None
 
         # Recomputed from live rendering and DOM state during merge steps.
         # None means there is not enough current state to fit the mapping.
@@ -106,6 +109,8 @@ class Bot:
         self.board = BoardGrid()
         self._board_store_armed = False
         self._last_board_store_status = None
+        self._crate_inventory_armed = False
+        self._last_crate_inventory_status = None
         self._scene_calibration = None
         return True
 
@@ -175,6 +180,32 @@ class Bot:
         logger.debug("Synced %d cell(s) from live game state.", len(board.known_coords()))
         return True
 
+    def _ensure_crate_inventory_armed(self) -> None:
+        """Best-effort, idempotent: retain the live supply inventory item."""
+        if self._crate_inventory_armed:
+            return
+        try:
+            result = arm_crate_inventory(settings.cdp_port, settings.window_title)
+        except CdpConnectionError as exc:
+            logger.debug("Could not arm live crate inventory: %s", exc)
+            return
+        if result != self._last_crate_inventory_status:
+            logger.info("Live crate inventory: %s", result)
+            self._last_crate_inventory_status = result
+        if result.startswith("found") or result.startswith("already-captured"):
+            self._crate_inventory_armed = True
+
+    def _read_crate_count(self) -> int | None:
+        try:
+            amount = read_crate_count(settings.cdp_port, settings.window_title)
+        except CdpConnectionError as exc:
+            logger.debug("Could not read live crate inventory: %s", exc)
+            self._crate_inventory_armed = False
+            return None
+        if amount is None:
+            self._crate_inventory_armed = False
+        return amount
+
     def _grid_to_pixel(self, coord: GridCoord) -> tuple[int, int]:
         assert self._scene_calibration is not None
         return self._scene_calibration.to_pixel(coord)
@@ -211,12 +242,12 @@ class Bot:
         ]
         return sorted(actions, key=self._action_sort_key)
 
-    def _merge_actions_for_policy(self, *, allow_three_fallback: bool) -> list[MergeAction]:
+    def _merge_actions_for_policy(self) -> list[MergeAction]:
         if not settings.prefer_merge_five:
             return self._plan_merge_actions(3)
 
         actions = self._plan_merge_actions(5)
-        if actions or not allow_three_fallback:
+        if actions or self.board.find_empty():
             return actions
         return self._plan_merge_actions(3)
 
@@ -239,15 +270,9 @@ class Bot:
     # enough attempts to cross the observed scrollable range.
     _MAX_SCROLL_ATTEMPTS = 12
 
-    def _try_merge(
-        self,
-        region: WindowRegion,
-        frame: np.ndarray,
-        *,
-        allow_three_fallback: bool,
-    ) -> bool:
+    def _try_merge(self, region: WindowRegion, frame: np.ndarray) -> bool:
         """Execute the best visible action, or pan toward an off-screen one."""
-        actions = self._merge_actions_for_policy(allow_three_fallback=allow_three_fallback)
+        actions = self._merge_actions_for_policy()
         if not actions:
             return False
 
@@ -395,11 +420,8 @@ class Bot:
         if empty_count == 0:
             return True
         return empty_count <= settings.merge_empty_cell_reserve and bool(
-            self._merge_actions_for_policy(allow_three_fallback=True)
+            self._merge_actions_for_policy()
         )
-
-    # The crate icon can remain visible at zero supply, so bound each burst.
-    _MAX_CRATE_CLICKS_PER_STEP = 50
 
     def _find_supply_crate(self, frame: np.ndarray) -> Match | None:
         """Verify the crate button inside its fixed bottom-center region."""
@@ -428,71 +450,53 @@ class Bot:
         *,
         board_needs_merge: bool,
     ) -> None:
-        """Claim crates back-to-back until the crate icon stops matching or
-        the board fills up, instead of one click per outer step.
-
-        The crate button is a fixed UI element, not board content, so its
-        on-screen position only needs (re-)finding once per batch of
-        `crate_click_batch_size` clicks, not before every single one --
-        it isn't going to have moved a click later.
-        """
+        """Claim as many crates as current inventory and board space allow."""
         if board_needs_merge:
             logger.info("Board reached the merge-space reserve; switching to merge phase.")
             self._set_phase(Phase.MERGE)
             return
 
-        total_clicks = 0
-        while total_clicks < self._MAX_CRATE_CLICKS_PER_STEP:
-            # Keep pause and quit responsive during a multi-click burst.
+        self._ensure_crate_inventory_armed()
+        if self._interrupt_event.is_set():
+            return
+        crate_count = self._read_crate_count()
+        if crate_count is None:
+            logger.warning("Live crate inventory is unavailable; skipping crate claims.")
+            return
+        if crate_count == 0:
+            return
+
+        match = self._find_supply_crate(frame)
+        if match is None:
+            return
+        reserve = settings.merge_empty_cell_reserve if self._merge_actions_for_policy() else 0
+        open_count = len(self.board.find_empty())
+        click_count = min(crate_count, max(0, open_count - reserve))
+        if click_count == 0:
+            self._set_phase(Phase.MERGE)
+            return
+        logger.info(
+            "Clicking supply crate %d time(s) "
+            "(available=%d, confidence=%.2f, open=%d, reserved=%d)",
+            click_count,
+            crate_count,
+            match.confidence,
+            open_count,
+            reserve,
+        )
+        for _ in range(click_count):
             if self._quit_requested or self.paused:
                 return
-            match = self._find_supply_crate(frame)
-            if match is None:
+            click(region, *match.center)
+            if self._interrupt_event.wait(settings.crate_click_settle):
                 return
-            batch_size = min(
-                settings.crate_click_batch_size,
-                self._MAX_CRATE_CLICKS_PER_STEP - total_clicks,
-            )
-            reserve = (
-                settings.merge_empty_cell_reserve
-                if self._merge_actions_for_policy(allow_three_fallback=True)
-                else 0
-            )
-            available = len(self.board.find_empty()) - reserve
-            batch_size = min(batch_size, max(0, available))
-            if batch_size == 0:
-                self._set_phase(Phase.MERGE)
-                return
-            logger.info(
-                "Clicking supply crate up to %d times (confidence=%.2f, open=%d, reserved=%d)",
-                batch_size,
-                match.confidence,
-                len(self.board.find_empty()),
-                reserve,
-            )
-            for _ in range(batch_size):
-                if self._quit_requested or self.paused:
-                    return
-                click(region, *match.center)
-                total_clicks += 1
-                if self._interrupt_event.wait(settings.crate_click_settle):
-                    return
-                if total_clicks >= self._MAX_CRATE_CLICKS_PER_STEP:
-                    break
 
-            frame = capture_region(region)
-            if not self._sync_board_from_live_state():
-                logger.warning("Live board state became unavailable; stopping crate claims.")
-                return
-            if self._board_needs_merge():
-                logger.info("Board reached the merge-space reserve; switching to merge phase.")
-                self._set_phase(Phase.MERGE)
-                return
-        logger.warning(
-            "Hit the %d-click burst cap without running out of crates or filling the "
-            "board; pausing until the next step.",
-            self._MAX_CRATE_CLICKS_PER_STEP,
-        )
+        if not self._sync_board_from_live_state():
+            logger.warning("Live board state became unavailable; stopping crate claims.")
+            return
+        if self._board_needs_merge():
+            logger.info("Board reached the merge-space reserve; switching to merge phase.")
+            self._set_phase(Phase.MERGE)
 
     def _step_merge(
         self, region: WindowRegion, frame: np.ndarray, *, board_needs_merge: bool
@@ -503,12 +507,7 @@ class Bot:
             # derive geometry from) -- nothing safe to do but wait for the
             # next step.
             return
-        allow_three_fallback = len(self.board.find_empty()) <= settings.merge_empty_cell_reserve
-        merged = self._try_merge(
-            region,
-            frame,
-            allow_three_fallback=allow_three_fallback,
-        )
+        merged = self._try_merge(region, frame)
         if not merged and not board_needs_merge:
             logger.info("Board has space again; switching back to claim-crates phase.")
             self._set_phase(Phase.CLAIM_CRATES)

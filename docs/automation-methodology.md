@@ -16,7 +16,8 @@ bottom of the board. Each active iteration then:
 
 1. re-finds and activates the target window;
 2. captures a frame for fixed UI matching;
-3. locates the game's live cell map through Chrome DevTools Protocol (CDP);
+3. locates the game's live cell and inventory models through Chrome DevTools
+   Protocol (CDP);
 4. replaces its in-memory board with the current live cell contents.
 
 The live cell map is the source of truth for board contents. The game retains
@@ -37,18 +38,16 @@ before changing discovery or geometry logic.
 
 ### 2. Claim crates — implemented
 
-In `CLAIM_CRATES`, the bot finds the supply-crate button and clicks it in
-short batches. Matching is restricted to the expected bottom-center crate
-region rather than searching the whole frame. After each batch it refreshes
-the board state. When a merge is available and the configured empty-cell
+In `CLAIM_CRATES`, the bot reads the spendable supply count from the game's
+live inventory model, including crates received from rewards above the passive
+regeneration cap. It clicks the supply-crate button at most once per available
+crate and open board slot, then refreshes the board state. Matching is
+restricted to the expected bottom-center crate region rather than searching
+the whole frame. When a merge is available and the configured empty-cell
 reserve is reached, it switches to `MERGE` before consuming the final
 rearrangement space. If no merge is yet possible, it may use the reserve for
-another crate and re-evaluate.
-
-There is no reliable signal for a zero supply count. A per-step click cap
-prevents an unbounded loop when the button remains visible but no supplies are
-available. If authoritative live board state is unavailable, the bot takes no
-action and retries on the next loop iteration.
+another crate and re-evaluate. If authoritative inventory or board state is
+unavailable, the bot takes no action and retries on the next loop iteration.
 
 ### 3. Merge — implemented
 
@@ -73,11 +72,13 @@ can split or rebalance oversized groups, prefers moves that form exact groups
 of five, and rejects gathering moves that would create a group larger than
 five. Exact-five work is considered before any merge-3 action.
 
-When board space reaches `FMV_MERGE_EMPTY_CELL_RESERVE` and no productive
-merge-5 action exists, the bot temporarily falls back to merge-3 to recover
-space. Setting `FMV_PREFER_MERGE_FIVE=false` uses merge-3 as the normal target.
-Per-item strategy controls are deferred until the GUI provides a place to
-configure them.
+The empty-cell reserve can start productive merge-5 work before the board
+fills. If no merge-5 action exists, the bot continues claiming available crates
+and waits for more supply rather than sacrificing a group of three. Merge-3 is
+used as a deadlock fallback only when there are zero open cells. Setting
+`FMV_PREFER_MERGE_FIVE=false` uses merge-3 as the normal target. Per-item
+strategy controls are deferred until the GUI provides a place to configure
+them.
 
 If an action is off-screen, the bot pans toward it and recalibrates before
 acting. After each drag, the next iteration reloads the real board state rather

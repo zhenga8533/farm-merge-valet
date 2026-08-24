@@ -11,7 +11,6 @@ from farm_merge_valet.config import Settings
     [
         ("cdp_port", 0),
         ("match_confidence", 1.1),
-        ("crate_click_batch_size", 0),
         ("merge_empty_cell_reserve", -1),
         ("loop_interval", 0),
         ("gui_opacity", 1.1),
@@ -25,9 +24,10 @@ def test_settings_reject_invalid_runtime_values(field: str, value: object) -> No
         Settings(_env_file=None, **{field: value})
 
 
-def test_settings_reject_removed_legacy_keys() -> None:
+@pytest.mark.parametrize("field", ["need_space_confidence", "crate_click_batch_size"])
+def test_settings_reject_removed_legacy_keys(field: str) -> None:
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, need_space_confidence=0.8)
+        Settings(_env_file=None, **{field: 1})
 
 
 def test_merge_space_reserve_can_be_disabled() -> None:

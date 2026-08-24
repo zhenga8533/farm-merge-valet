@@ -41,9 +41,6 @@ class Settings(BaseSettings):
     # Minimum confidence (0-1) for template matches to be accepted.
     match_confidence: float = Field(default=0.85, ge=0.0, le=1.0)
 
-    # Clicks between live board-state refreshes while claiming crates.
-    crate_click_batch_size: int = Field(default=10, ge=1)
-
     # Delay between crate clicks so the game can register each action.
     crate_click_settle: float = Field(default=0.1, ge=0.0)
 

@@ -19,21 +19,37 @@ def _bare_bot() -> Bot:
     bot._quit_requested = False
     bot._interrupt_event = Event()
     bot._resume_requested = Event()
+    bot._crate_inventory_armed = False
+    bot._last_crate_inventory_status = None
     return bot
 
 
-def test_board_needs_merge_before_the_last_empty_cell_is_consumed() -> None:
+def test_merge_five_work_uses_the_reserve_before_the_last_empty_is_consumed(
+    monkeypatch,
+) -> None:
     bot = _bare_bot()
     item = ItemRef("crops", "wheat", 1)
-    bot.board.set_cell((1, 0), Cell(CellKind.ITEM, item))
-    bot.board.set_cell((2, 0), Cell(CellKind.ITEM, item))
-    bot.board.set_cell((5, 0), Cell(CellKind.ITEM, item))
+    for coord in [(x, 0) for x in range(1, 6)]:
+        bot.board.set_cell(coord, Cell(CellKind.ITEM, item))
     bot.board.set_cell((0, 0), Cell(CellKind.EMPTY))
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.prefer_merge_five", True)
 
     assert bot._board_needs_merge()
 
     bot.board.set_cell((6, 0), Cell(CellKind.EMPTY))
     assert not bot._board_needs_merge()
+
+
+def test_merge_three_does_not_use_the_reserve_when_merge_five_is_enabled(monkeypatch) -> None:
+    bot = _bare_bot()
+    item = ItemRef("crops", "wheat", 1)
+    for coord in [(x, 0) for x in range(3)]:
+        bot.board.set_cell(coord, Cell(CellKind.ITEM, item))
+    bot.board.set_cell((10, 10), Cell(CellKind.EMPTY))
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.prefer_merge_five", True)
+
+    assert not bot._board_needs_merge()
+    assert not bot._merge_actions_for_policy()
 
 
 def test_board_store_found_status_marks_bot_as_armed(monkeypatch) -> None:
@@ -54,6 +70,8 @@ def test_initialize_discards_live_references(monkeypatch) -> None:
     bot = _bare_bot()
     bot._board_store_armed = True
     bot._last_board_store_status = "found"
+    bot._crate_inventory_armed = True
+    bot._last_crate_inventory_status = "found (40 available)"
     bot._scene_calibration = object()
     monkeypatch.setattr("farm_merge_valet.core.bot.initialize_environment", lambda _event: True)
 
@@ -61,6 +79,8 @@ def test_initialize_discards_live_references(monkeypatch) -> None:
 
     assert not bot._board_store_armed
     assert bot._last_board_store_status is None
+    assert not bot._crate_inventory_armed
+    assert bot._last_crate_inventory_status is None
     assert bot._scene_calibration is None
 
 
@@ -73,16 +93,18 @@ def test_missing_live_state_triggers_board_store_rearming(monkeypatch) -> None:
     assert not bot._board_store_armed
 
 
-def test_claim_crates_limits_batch_to_preserve_merge_space(monkeypatch) -> None:
+def test_claim_crates_preserves_merge_space(monkeypatch) -> None:
     bot = _bare_bot()
     bot._supply_crate_template = np.zeros((1, 1, 3), dtype=np.uint8)
     empty_coords = [(0, 0), (1, 0), (2, 0)]
     for coord in empty_coords:
         bot.board.set_cell(coord, Cell(CellKind.EMPTY))
     item = ItemRef("crops", "wheat", 1)
-    bot.board.set_cell((3, 0), Cell(CellKind.ITEM, item))
-    bot.board.set_cell((4, 0), Cell(CellKind.ITEM, item))
-    bot.board.set_cell((6, 0), Cell(CellKind.ITEM, item))
+    for coord in [(x, 0) for x in range(3, 8)]:
+        bot.board.set_cell(coord, Cell(CellKind.ITEM, item))
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.prefer_merge_five", True)
+    bot._crate_inventory_armed = True
+    monkeypatch.setattr("farm_merge_valet.core.bot.read_crate_count", lambda *_args: 1000)
 
     clicks = 0
 
@@ -111,6 +133,54 @@ def test_claim_crates_limits_batch_to_preserve_merge_space(monkeypatch) -> None:
     assert clicks == 2
     assert bot.phase is Phase.MERGE
     assert len(bot.board.find_empty()) == 1
+
+
+def test_claim_crates_stops_at_live_inventory_count(monkeypatch) -> None:
+    bot = _bare_bot()
+    bot._crate_inventory_armed = True
+    bot._supply_crate_template = np.zeros((1, 1, 3), dtype=np.uint8)
+    for x in range(5):
+        bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
+
+    clicks = 0
+
+    def fake_click(*_args, **_kwargs) -> None:
+        nonlocal clicks
+        clicks += 1
+
+    monkeypatch.setattr("farm_merge_valet.core.bot.read_crate_count", lambda *_args: 2)
+    monkeypatch.setattr("farm_merge_valet.core.bot.click", fake_click)
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.find_best_scaled_match",
+        lambda *_args, **_kwargs: Match(0, 0, 1, 1, 1.0),
+    )
+    bot._sync_board_from_live_state = lambda: True
+
+    bot._step_claim_crates(
+        WindowRegion(0, 0, 100, 100),
+        np.zeros((1, 1, 3), dtype=np.uint8),
+        board_needs_merge=False,
+    )
+
+    assert clicks == 2
+    assert bot.phase is Phase.CLAIM_CRATES
+
+
+def test_claim_crates_takes_no_action_when_inventory_is_empty(monkeypatch) -> None:
+    bot = _bare_bot()
+    bot._crate_inventory_armed = True
+    monkeypatch.setattr("farm_merge_valet.core.bot.read_crate_count", lambda *_args: 0)
+    monkeypatch.setattr(
+        bot,
+        "_find_supply_crate",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("must not search for crate button")),
+    )
+
+    bot._step_claim_crates(
+        WindowRegion(0, 0, 100, 100),
+        np.zeros((1, 1, 3), dtype=np.uint8),
+        board_needs_merge=False,
+    )
 
 
 def test_step_takes_no_action_without_live_board_state(monkeypatch) -> None:
@@ -197,22 +267,25 @@ def test_merge_five_policy_prioritizes_five_over_available_three(monkeypatch) ->
         bot.board.set_cell(coord, Cell(CellKind.ITEM, chicken))
     monkeypatch.setattr("farm_merge_valet.core.bot.settings.prefer_merge_five", True)
 
-    actions = bot._merge_actions_for_policy(allow_three_fallback=True)
+    actions = bot._merge_actions_for_policy()
 
     assert actions
     assert {action.target_size for action in actions} == {5}
     assert {action.item for action in actions} == {wheat}
 
 
-def test_merge_five_policy_uses_three_only_when_fallback_is_allowed(monkeypatch) -> None:
+def test_merge_five_policy_uses_three_only_when_the_board_is_full(monkeypatch) -> None:
     bot = _bare_bot()
     wheat = ItemRef("crops", "wheat", 1)
     for coord in [(x, 0) for x in range(3)]:
         bot.board.set_cell(coord, Cell(CellKind.ITEM, wheat))
+    bot.board.set_cell((10, 10), Cell(CellKind.EMPTY))
     monkeypatch.setattr("farm_merge_valet.core.bot.settings.prefer_merge_five", True)
 
-    assert not bot._merge_actions_for_policy(allow_three_fallback=False)
-    fallback = bot._merge_actions_for_policy(allow_three_fallback=True)
+    assert not bot._merge_actions_for_policy()
+
+    bot.board.set_cell((10, 10), Cell(CellKind.PRODUCT))
+    fallback = bot._merge_actions_for_policy()
     assert fallback
     assert {action.target_size for action in fallback} == {3}
 

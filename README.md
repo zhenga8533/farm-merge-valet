@@ -27,7 +27,7 @@ debugging. Supporting other hosts is deferred until this path is stable.
 
 ```text
 src/farm_merge_valet/
-  cdp/             Read live board state and board-to-screen geometry
+  cdp/             Read live board/inventory state and board-to-screen geometry
   capture/         Locate the target window and capture screenshots
   vision/          Match fixed UI templates across plausible scales
   actions/         Send mouse input relative to the target window
@@ -102,7 +102,7 @@ settings are:
 | --- | --- |
 | `FMV_WINDOW_TITLE` | Distinctive substring of the target Chrome window title |
 | `FMV_CDP_PORT` | Chrome remote-debugging port |
-| `FMV_PREFER_MERGE_FIVE` | Prefer exact merge-5 actions; fall back to merge-3 under space pressure |
+| `FMV_PREFER_MERGE_FIVE` | Prefer exact merge-5 actions; use merge-3 only when the board is full |
 | `FMV_MERGE_EMPTY_CELL_RESERVE` | Empty cells preserved for merge rearrangements; `0` disables it |
 | `FMV_BOARD_DEAD_*_RATIO` | Proportional outer UI slices excluded from actions |
 | `FMV_CRATE_DEAD_*_RATIO` | Bottom-center crate-button exclusion rectangle |
