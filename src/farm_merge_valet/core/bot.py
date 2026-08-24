@@ -3,21 +3,29 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum, auto
-from threading import Event
+from queue import Empty, Queue
+from threading import Event, Lock, Thread
 from typing import Literal
 
 import keyboard
-import numpy as np
 
-from farm_merge_valet.actions.input import click, drag
-from farm_merge_valet.capture.screen import capture_region
-from farm_merge_valet.capture.window import WindowActivationError, WindowRegion, find_window
-from farm_merge_valet.cdp.board_store import arm_board_store, read_board_state
-from farm_merge_valet.cdp.client import CdpConnectionError
-from farm_merge_valet.cdp.inventory_store import arm_crate_inventory, read_crate_count
-from farm_merge_valet.cdp.scene_geometry import SceneCalibration, read_scene_calibration
+from farm_merge_valet.cdp.board_store import LiveCellState, read_board_state
+from farm_merge_valet.cdp.client import (
+    CdpCancelledError,
+    CdpConnectionError,
+    read_background_flag_status,
+)
+from farm_merge_valet.cdp.runtime import (
+    ActionStatus,
+    GameRuntime,
+    GameRuntimeAdapter,
+    RuntimeHealth,
+)
 from farm_merge_valet.config import settings
 from farm_merge_valet.core.board import (
     BoardGrid,
@@ -31,19 +39,16 @@ from farm_merge_valet.core.board import (
     plan_merge_actions,
 )
 from farm_merge_valet.core.board_scan import discover_blueprint_items
-from farm_merge_valet.core.environment import initialize_environment, pan
-from farm_merge_valet.core.viewport import viewport_layout
-from farm_merge_valet.vision.matcher import Match, find_best_scaled_match, load_template
 
 logger = logging.getLogger(__name__)
 
-# Non-item `blueprintID` values from the game's live board state (see
-# cdp/board_store.py) that map to a known CellKind rather than an ItemRef.
-_LIVE_STATE_CELL_KIND = {
-    "area_cloud": CellKind.CLOUD,
-    "premium_cloud": CellKind.CLOUD,
-}
+_ACTION_SETTLE_SECONDS = 3.0
+_ACTION_STABLE_SECONDS = 0.75
+_ACTION_MAX_PENDING_SECONDS = 8.0
+_ACTION_RETRY_SECONDS = 10.0
+_ACTION_FAILURE_LIMIT = 3
 
+_LIVE_STATE_CELL_KIND = {"area_cloud": CellKind.CLOUD, "premium_cloud": CellKind.CLOUD}
 _STRUCTURE_BLUEPRINTS = frozenset(
     {
         "bakery",
@@ -54,187 +59,166 @@ _STRUCTURE_BLUEPRINTS = frozenset(
         "traintrack_stop",
         "delivery_truck",
         "delivery_cargo",
-        # Despite its name, this blueprint marks unavailable cells around
-        # fixed structures. Truly open cells have no content object at all.
         "empty",
     }
 )
 
 
 class Phase(Enum):
-    """Which stage of the play loop the bot is currently in.
-
-    See docs/automation-methodology.md for the full planned phase order;
-    only the first two are implemented so far.
-    """
-
     CLAIM_CRATES = auto()
     MERGE = auto()
 
 
-class Bot:
-    _MAX_IDENTICAL_ACTION_FAILURES = 2
+@dataclass
+class _PendingAction:
+    action: MergeAction
+    signature: tuple[tuple[GridCoord, Cell | None], ...]
+    scene_id: int | None
+    submitted_at: float = 0.0
+    last_signature: tuple[tuple[GridCoord, Cell | None], ...] | None = None
+    last_change_at: float = 0.0
+    scene_change_logged: bool = False
 
-    def __init__(self) -> None:
-        self.paused = False
-        self._quit_requested = False
+
+class Bot:
+    def __init__(self, runtime: GameRuntime | None = None) -> None:
         self._interrupt_event = Event()
         self._resume_requested = Event()
-        self.phase = Phase.CLAIM_CRATES
-        # Fixed UI templates are matched directly across plausible scales.
-        self._supply_crate_template = load_template(
-            settings.templates_dir / "ui" / "supply_crate.png"
+        self.runtime = runtime or GameRuntimeAdapter(
+            settings.cdp_port,
+            settings.window_title,
+            crate_delay_min=settings.crate_delay_min,
+            crate_delay_max=settings.crate_delay_max,
         )
-
-        # blueprintID (e.g. "wheat_1") -> ItemRef for interpreting live
-        # board state. Item images are not used to scan board contents.
+        if callable(set_cancel_event := getattr(self.runtime, "set_cancel_event", None)):
+            set_cancel_event(self._interrupt_event)
+        self.paused = False
+        self._quit_requested = False
+        self._quit_lock = Lock()
+        self.phase = Phase.CLAIM_CRATES
         self._blueprint_items = discover_blueprint_items(settings.templates_dir / "items")
         self._max_item_tiers: dict[tuple[str, str], int] = {}
         for item in self._blueprint_items.values():
             key = (item.category, item.name)
             self._max_item_tiers[key] = max(item.tier, self._max_item_tiers.get(key, 0))
-        self._board_store_armed = False
-        self._last_board_store_status: str | None = None
-        self._crate_inventory_armed = False
-        self._last_crate_inventory_status: str | None = None
-
-        # Recomputed from live rendering and DOM state during merge steps.
-        # None means there is not enough current state to fit the mapping.
-        self._scene_calibration: SceneCalibration | None = None
         self.board = BoardGrid()
-        self._pending_merge_action: MergeAction | None = None
-        self._pending_action_signature: tuple[tuple[GridCoord, Cell | None], ...] | None = None
-        self._last_failed_action: tuple[MoveEffect, ItemRef, GridCoord, GridCoord] | None = None
-        self._identical_action_failures = 0
+        self._pending_action: _PendingAction | None = None
+        self._action_failures: dict[tuple, int] = {}
+        self._action_retry_at: dict[tuple, float] = {}
+        self._next_item_action_at = 0.0
+        self._last_health: RuntimeHealth | None = None
+        self._last_wait_reason: str | None = None
+        self._last_wait_log_at = 0.0
+        self._capability_retry_at = 0.0
+        self._capability_retry_delay = settings.loop_interval
 
     def _set_phase(self, phase: Phase) -> None:
-        if phase != self.phase:
-            logger.info("Phase %s -> %s", self.phase.name, phase.name)
+        if phase is not self.phase:
+            logger.debug("Phase %s -> %s.", self.phase.name, phase.name)
             self.phase = phase
+            self._last_wait_reason = None
 
     def initialize(self) -> bool:
-        """Normalize the view and discard board knowledge from before a
-        startup or pause. Blocking; takes a few seconds."""
-        if not initialize_environment(self._interrupt_event):
-            return False
         self.board = BoardGrid()
-        self._board_store_armed = False
-        self._last_board_store_status = None
-        self._crate_inventory_armed = False
-        self._last_crate_inventory_status = None
-        self._scene_calibration = None
-        self._pending_merge_action = None
-        self._pending_action_signature = None
-        self._last_failed_action = None
-        self._identical_action_failures = 0
+        flag_status = read_background_flag_status(
+            settings.cdp_port, cancel_event=self._interrupt_event
+        )
+        if flag_status.get("available") is True and flag_status.get("all_present") is False:
+            missing_flags = flag_status.get("missing")
+            missing = missing_flags if isinstance(missing_flags, list) else []
+            logger.error(
+                "Browser is missing required background flags: %s",
+                ", ".join(str(value) for value in missing),
+            )
+            self.paused = True
+            self._interrupt_event.set()
+            return False
+        if flag_status.get("available") is False:
+            logger.warning("Could not verify browser background flags: %s", flag_status["detail"])
+        self._last_health = self.runtime.discover()
+        if not self._last_health.available:
+            logger.warning(
+                "Game target found, but action runtime is unavailable: %s "
+                "(board=%s, item actions=%s, crate claims=%s, inventory=%s).",
+                self._last_health.detail or "no diagnostic detail",
+                self._last_health.board_available,
+                self._last_health.item_drop_available,
+                self._last_health.crate_spawn_available,
+                self._last_health.inventory_available,
+            )
+            return False
+        if self._last_health.detail:
+            logger.warning(
+                "Game runtime is partially ready: %s (item actions=%s, crate claims=%s).",
+                self._last_health.detail,
+                self._last_health.item_drop_available,
+                self._last_health.crate_spawn_available,
+            )
+        if not self._sync_board_from_live_state():
+            logger.warning("Game runtime was discovered, but its board state could not be read.")
+            return False
+        if self._last_health.heartbeat_advancing:
+            logger.info("Game runtime ready (scene=%s).", self._last_health.scene_id)
+        else:
+            logger.info(
+                "Game runtime connected (scene=%s); waiting for the heartbeat to advance.",
+                self._last_health.scene_id,
+            )
         return True
 
-    def _refresh_calibration(self, region: WindowRegion) -> None:
-        """Recompute `_scene_calibration` for the current frame -- see its
-        docstring in `__init__`."""
-        try:
-            self._scene_calibration = read_scene_calibration(
-                settings.cdp_port, region, settings.window_title
-            )
-        except CdpConnectionError as exc:
-            logger.debug("Could not read scene geometry: %s", exc)
-            self._scene_calibration = None
-
-    def _ensure_board_store_armed(self) -> None:
-        """Best-effort, idempotent: locate and retain the active board map."""
-        if self._board_store_armed:
-            return
-        try:
-            result = arm_board_store(settings.cdp_port, settings.window_title)
-        except CdpConnectionError as exc:
-            logger.debug("Could not arm live board-state capture: %s", exc)
-            return
-        if result != self._last_board_store_status:
-            logger.info("Live board-state capture: %s", result)
-            self._last_board_store_status = result
-        if result.startswith("found") or result == "already-captured":
-            self._board_store_armed = True
+    def _resume_cached_runtime(self) -> bool:
+        previous = self._last_health
+        if previous is None or previous.scene_id is None:
+            return False
+        health = self.runtime.read_runtime_health()
+        if (
+            not health.available
+            or not health.board_available
+            or health.scene_id != previous.scene_id
+        ):
+            return False
+        self._last_health = health
+        logger.debug("Resumed cached game runtime (scene=%s).", health.scene_id)
+        return True
 
     def _sync_board_from_live_state(self) -> bool:
-        """Replace `self.board` outright with the game's own live cell
-        data (see `cdp/board_store.py`) -- exact and per-player-current,
-        the sole board-content source. Returns False (no board knowledge
-        touched) if a live reference hasn't been captured yet.
-        """
         try:
-            raw = read_board_state(settings.cdp_port, settings.window_title)
+            raw = read_board_state(
+                settings.cdp_port,
+                settings.window_title,
+                cancel_event=self._interrupt_event,
+            )
         except CdpConnectionError as exc:
             logger.debug("Could not read live board state: %s", exc)
-            self._board_store_armed = False
             return False
         if raw is None:
-            self._board_store_armed = False
             return False
-
         board = BoardGrid()
         for coord, state in raw.items():
-            if not state.has_content:
-                board.set_cell(coord, Cell(kind=CellKind.EMPTY))
-                continue
-            blueprint_id = state.blueprint_id
-            item = self._blueprint_items.get(blueprint_id) if blueprint_id is not None else None
-            if item is not None:
-                board.set_cell(coord, Cell(kind=CellKind.ITEM, item=item))
-                continue
-            kind = _LIVE_STATE_CELL_KIND.get(blueprint_id) if blueprint_id is not None else None
-            if kind is not None:
-                board.set_cell(coord, Cell(kind=kind))
-            elif blueprint_id in _STRUCTURE_BLUEPRINTS:
-                board.set_cell(coord, Cell(kind=CellKind.STRUCTURE))
-            else:
-                # Not a known item, marker, or building -- assumed a
-                # transient product (e.g. "egg") waiting to be collected.
-                board.set_cell(coord, Cell(kind=CellKind.PRODUCT))
-
+            self._set_live_cell(board, coord, state)
         self.board = board
-        logger.debug("Synced %d cell(s) from live game state.", len(board.known_coords()))
         return True
 
-    def _ensure_crate_inventory_armed(self) -> None:
-        """Best-effort, idempotent: retain the live supply inventory item."""
-        if self._crate_inventory_armed:
+    def _set_live_cell(self, board: BoardGrid, coord: GridCoord, state: LiveCellState) -> None:
+        if not state.has_content:
+            board.set_cell(coord, Cell(CellKind.EMPTY))
             return
-        try:
-            result = arm_crate_inventory(settings.cdp_port, settings.window_title)
-        except CdpConnectionError as exc:
-            logger.debug("Could not arm live crate inventory: %s", exc)
-            return
-        if result != self._last_crate_inventory_status:
-            logger.info("Live crate inventory: %s", result)
-            self._last_crate_inventory_status = result
-        if result.startswith("found") or result.startswith("already-captured"):
-            self._crate_inventory_armed = True
+        blueprint_id = state.blueprint_id
+        item = self._blueprint_items.get(blueprint_id) if blueprint_id is not None else None
+        if item is not None:
+            board.set_cell(coord, Cell(CellKind.ITEM, item))
+        elif blueprint_id in _LIVE_STATE_CELL_KIND:
+            board.set_cell(coord, Cell(_LIVE_STATE_CELL_KIND[blueprint_id]))
+        elif blueprint_id in _STRUCTURE_BLUEPRINTS:
+            board.set_cell(coord, Cell(CellKind.STRUCTURE))
+        else:
+            board.set_cell(coord, Cell(CellKind.PRODUCT))
 
-    def _read_crate_count(self) -> int | None:
-        try:
-            amount = read_crate_count(settings.cdp_port, settings.window_title)
-        except CdpConnectionError as exc:
-            logger.debug("Could not read live crate inventory: %s", exc)
-            self._crate_inventory_armed = False
-            return None
-        if amount is None:
-            self._crate_inventory_armed = False
-        return amount
-
-    def _grid_to_pixel(self, coord: GridCoord) -> tuple[int, int]:
-        assert self._scene_calibration is not None
-        return self._scene_calibration.to_pixel(coord)
-
-    # Actions are chosen in this order across every item type present:
-    # complete a ready merge before fixing an over-sized cluster, and fix
-    # that before spending a step just gathering toward a future merge --
-    # see `core/board.plan_merge_action`.
     _MERGE_ACTION_PRIORITY = {
         MergeActionKind.TRIGGER: 0,
         MergeActionKind.DEGROUP: 1,
         MergeActionKind.GATHER: 2,
     }
-
     _ITEM_PRIORITY = {
         ("animals", None): 0,
         ("crops", None): 0,
@@ -247,8 +231,7 @@ class Bot:
     @classmethod
     def _item_priority(cls, item: ItemRef) -> int:
         return cls._ITEM_PRIORITY.get(
-            (item.category, item.name),
-            cls._ITEM_PRIORITY.get((item.category, None), 4),
+            (item.category, item.name), cls._ITEM_PRIORITY.get((item.category, None), 4)
         )
 
     @classmethod
@@ -256,12 +239,8 @@ class Bot:
         return cls._item_priority(item), item.tier, item.category, item.name
 
     def _action_sort_key(
-        self,
-        action: MergeAction,
-        planner_rank: int,
-        *,
-        prefer_smallest_trigger: bool,
-    ) -> tuple[int, int, int, int, int, int, str, str, tuple[int, int], tuple[int, int]]:
+        self, action: MergeAction, rank: int, *, prefer_smallest_trigger: bool
+    ) -> tuple:
         return (
             self._MERGE_ACTION_PRIORITY[action.kind],
             len(action.cluster)
@@ -269,7 +248,7 @@ class Bot:
             else 0,
             self._item_priority(action.item),
             action.item.tier,
-            planner_rank,
+            rank,
             abs(action.start[0] - action.end[0]) + abs(action.start[1] - action.end[1]),
             action.item.category,
             action.item.name,
@@ -280,11 +259,11 @@ class Bot:
     def _plan_merge_actions(
         self, target_size: Literal[3, 5], *, prefer_smallest_trigger: bool = False
     ) -> list[MergeAction]:
-        ranked_actions = [
-            (planner_rank, action)
+        ranked = [
+            (rank, action)
             for item in sorted(self.board.items_present(), key=self._item_sort_key)
             if item.tier < self._max_item_tiers.get((item.category, item.name), item.tier + 1)
-            for planner_rank, action in enumerate(
+            for rank, action in enumerate(
                 plan_merge_actions(
                     self.board,
                     item,
@@ -295,12 +274,10 @@ class Bot:
         ]
         return [
             action
-            for planner_rank, action in sorted(
-                ranked_actions,
-                key=lambda ranked: self._action_sort_key(
-                    ranked[1],
-                    ranked[0],
-                    prefer_smallest_trigger=prefer_smallest_trigger,
+            for rank, action in sorted(
+                ranked,
+                key=lambda pair: self._action_sort_key(
+                    pair[1], pair[0], prefer_smallest_trigger=prefer_smallest_trigger
                 ),
             )
         ]
@@ -308,457 +285,360 @@ class Bot:
     def _merge_actions_for_policy(self) -> list[MergeAction]:
         if not settings.prefer_merge_five:
             return self._plan_merge_actions(3)
-
         actions = self._plan_merge_actions(5)
         if actions or self.board.find_empty():
             return actions
         return self._plan_merge_actions(3, prefer_smallest_trigger=True)
 
-    def _is_action_visible(self, action: MergeAction, frame_shape: tuple[int, ...]) -> bool:
-        """Whether both ends of `action`'s drag land within the currently
-        visible, non-UI-chrome region of the captured frame.
-
-        Live board state includes cells outside the viewport, so both drag
-        endpoints must be inside the configured clickable board area.
-        """
-        height, width = frame_shape[:2]
-        layout = viewport_layout(width, height)
-        for coord in (action.start, action.end):
-            x, y = self._grid_to_pixel(coord)
-            if not layout.is_actionable(x, y):
-                return False
-        return True
-
-    def _action_can_fit(self, action: MergeAction, frame_shape: tuple[int, ...]) -> bool:
-        height, width = frame_shape[:2]
-        layout = viewport_layout(width, height)
-        start = self._grid_to_pixel(action.start)
-        end = self._grid_to_pixel(action.end)
-        return (
-            layout.board.left <= start[0] < layout.board.right
-            and layout.board.left <= end[0] < layout.board.right
-            and abs(start[1] - end[1]) < layout.board.bottom - layout.board.top
+    def _board_needs_merge(self) -> bool:
+        empty_count = len(self.board.find_empty())
+        return empty_count == 0 or (
+            empty_count <= settings.merge_empty_cell_reserve
+            and bool(self._merge_actions_for_policy())
         )
 
-    # Each attempt is one measured drag. This bounds failures while allowing
-    # enough attempts to cross the observed scrollable range.
-    _MAX_SCROLL_ATTEMPTS = 12
+    def _action_signature(self, action: MergeAction) -> tuple[tuple[GridCoord, Cell | None], ...]:
+        coords = set(action.cluster) | {action.start, action.end}
+        return tuple((coord, self.board.get_cell(coord)) for coord in sorted(coords))
 
-    def _try_merge(self, region: WindowRegion, frame: np.ndarray) -> bool:
-        """Execute the best visible action, or pan toward an off-screen one."""
-        actions = self._merge_actions_for_policy()
-        if not actions:
-            return False
+    @staticmethod
+    def _action_key(action: MergeAction) -> tuple:
+        return action.kind, action.item, action.start, action.end
 
-        visible = [action for action in actions if self._is_action_visible(action, frame.shape)]
-        if visible:
-            return self._execute_merge_action(region, visible[0])
-
-        reachable = [action for action in actions if self._action_can_fit(action, frame.shape)]
-        if not reachable:
-            self._pause_for_edge_drag(actions[0])
-            return True
-
-        best = reachable[0]
-        reveal_result = self._scroll_action_to_reveal(region, best)
-        if reveal_result == "ready":
-            return self._execute_merge_action(region, best)
-        if reveal_result == "unreachable":
-            self._pause_for_edge_drag(best)
-        return True
-
-    def _scroll_action_to_reveal(
-        self, region: WindowRegion, action: MergeAction
-    ) -> Literal["ready", "unavailable", "unreachable", "interrupted"]:
-        """Pan until both drag endpoints are actionable in the same frame."""
-        toward_bottom: bool | None = None
-        best_distance: float | None = None
-        for _ in range(self._MAX_SCROLL_ATTEMPTS):
-            if self._quit_requested or self.paused:
-                return "interrupted"
-            self._refresh_calibration(region)
-            if self._scene_calibration is None:
-                return "unavailable"
-
-            frame_shape = (region.height, region.width)
-            if self._is_action_visible(action, frame_shape):
-                return "ready"
-            if not self._action_can_fit(action, frame_shape):
-                return "unreachable"
-
-            start_y = self._grid_to_pixel(action.start)[1]
-            end_y = self._grid_to_pixel(action.end)[1]
-            layout = viewport_layout(region.width, region.height)
-            desired_y = (layout.board.top + layout.board.bottom) / 2
-            action_y = (start_y + end_y) / 2
-            distance = abs(action_y - desired_y)
-            if toward_bottom is None:
-                toward_bottom = action_y > desired_y
-            elif best_distance is not None and distance >= best_distance:
-                toward_bottom = not toward_bottom
-            best_distance = distance
-            if not pan(
-                region,
-                toward_bottom=toward_bottom,
-                repeats=1,
-                stop_event=self._interrupt_event,
-            ):
-                return "interrupted"
-        logger.warning(
-            "Could not bring merge drag %s -> %s into one viewport within %d attempts.",
-            action.start,
-            action.end,
-            self._MAX_SCROLL_ATTEMPTS,
+    def _schedule_next_item_action(self, now: float) -> None:
+        self._next_item_action_at = now + random.uniform(
+            settings.item_action_delay_min, settings.item_action_delay_max
         )
-        return "unreachable"
 
-    def _pause_for_edge_drag(self, action: MergeAction) -> None:
-        logger.error(
-            "%s tier %d %s -> %s requires held-edge scrolling, which is not yet "
-            "implemented; pausing for manual positioning.",
-            action.item.name,
-            action.item.tier,
-            action.start,
-            action.end,
-        )
-        self.paused = True
-        self._interrupt_event.set()
-
-    def _execute_merge_action(self, region: WindowRegion, action: MergeAction) -> bool:
-        if self._interrupt_event.is_set():
-            return False
-        item = action.item
-        strategy = f"merge-{action.target_size}"
-        if settings.prefer_merge_five and action.target_size == 3:
-            strategy += " fallback"
-        if action.effect is MoveEffect.MERGE:
-            logger.info(
-                "Merging %d x %s (%s tier %d, %s)",
-                len(action.cluster),
-                item.name,
-                item.category,
-                item.tier,
-                strategy,
-            )
-        elif action.effect is MoveEffect.SWAP:
-            assert action.displaced_item is not None
-            purpose = "degroup" if action.kind is MergeActionKind.DEGROUP else "build a base"
-            logger.info(
-                "Swapping 1 x %s (%s tier %d) with %s tier %d to %s for %s",
-                item.name,
-                item.category,
-                item.tier,
-                action.displaced_item.name,
-                action.displaced_item.tier,
-                purpose,
-                strategy,
-            )
-        elif action.kind is MergeActionKind.DEGROUP:
-            logger.info(
-                "Moving 1 x %s (%s tier %d) to degroup for %s",
-                item.name,
-                item.category,
-                item.tier,
-                strategy,
-            )
-        else:
-            logger.info(
-                "Moving 1 x %s (%s tier %d) to build a base for %s",
-                item.name,
-                item.category,
-                item.tier,
-                strategy,
-            )
-        drag(
-            region,
-            self._grid_to_pixel(action.start),
-            self._grid_to_pixel(action.end),
-            duration=settings.merge_drag_duration,
-            pickup_delay=settings.merge_drag_pickup_delay,
-            release_delay=settings.merge_drag_release_delay,
-        )
-        self._pending_merge_action = action
-        self._pending_action_signature = self._action_signature(action)
-        if action.effect is MoveEffect.MERGE:
-            for coord in action.cluster:
-                self.board.clear_cell(coord)
-        else:
-            # Relocation results are intentionally unknown until the next live sync.
-            self.board.clear_cell(action.start)
-            self.board.clear_cell(action.end)
-        return True
+    @staticmethod
+    def _describe_cell(cell: Cell | None) -> str:
+        if cell is None:
+            return "unknown"
+        if cell.item is None:
+            return cell.kind.name.lower()
+        return f"{cell.item.name} tier {cell.item.tier}"
 
     def _merge_action_succeeded(self, action: MergeAction) -> bool:
         def has_item(coord: GridCoord, item: ItemRef) -> bool:
             cell = self.board.get_cell(coord)
             return cell is not None and cell.item == item
 
-        if action.effect in (MoveEffect.MOVE, MoveEffect.SWAP):
-            return has_item(action.end, action.item)
+        if action.effect is MoveEffect.MOVE:
+            return not has_item(action.start, action.item) and has_item(action.end, action.item)
+        if action.effect is MoveEffect.SWAP:
+            return not has_item(action.start, action.item) and has_item(action.end, action.item)
         return all(
             (cell := self.board.get_cell(coord)) is not None and cell.item != action.item
             for coord in action.cluster
         )
 
-    def _action_signature(self, action: MergeAction) -> tuple[tuple[GridCoord, Cell | None], ...]:
-        relevant_coords = set(action.cluster) | {action.start, action.end}
-        return tuple((coord, self.board.get_cell(coord)) for coord in sorted(relevant_coords))
-
-    def _verify_pending_merge_action(self) -> bool:
-        action = self._pending_merge_action
-        if action is None:
+    def _verify_pending_action(self, health: RuntimeHealth) -> bool:
+        pending = self._pending_action
+        if pending is None:
             return True
-        self._pending_merge_action = None
-        previous_state = self._pending_action_signature
-        self._pending_action_signature = None
-
-        action_key = (action.effect, action.item, action.start, action.end)
-        if self._merge_action_succeeded(action):
-            self._last_failed_action = None
-            self._identical_action_failures = 0
-            return True
-
-        if previous_state is not None and self._action_signature(action) != previous_state:
+        if not health.heartbeat_advancing:
+            return False
+        now = time.monotonic()
+        current_signature = self._action_signature(pending.action)
+        if health.scene_id != pending.scene_id and not pending.scene_change_logged:
             logger.warning(
-                "Merge drag %s -> %s changed the board but did not reach its intended "
-                "destination; replanning from live state.",
-                action.start,
-                action.end,
+                "Runtime scene changed from %s to %s while an item action was pending; "
+                "verifying against the reloaded board.",
+                pending.scene_id,
+                health.scene_id,
             )
-            self._last_failed_action = None
-            self._identical_action_failures = 0
+            pending.scene_change_logged = True
+        if self._merge_action_succeeded(pending.action):
+            self._pending_action = None
+            action_key = self._action_key(pending.action)
+            self._action_failures.pop(action_key, None)
+            self._action_retry_at.pop(action_key, None)
+            self._schedule_next_item_action(now)
+            logger.info(
+                "%s confirmed: %s -> %s.",
+                pending.action.effect.name.title(),
+                pending.action.start,
+                pending.action.end,
+            )
             return True
 
-        if action_key == self._last_failed_action:
-            self._identical_action_failures += 1
-        else:
-            self._last_failed_action = action_key
-            self._identical_action_failures = 1
+        if pending.last_signature is None or current_signature != pending.last_signature:
+            pending.last_signature = current_signature
+            pending.last_change_at = now
 
-        if self._identical_action_failures >= self._MAX_IDENTICAL_ACTION_FAILURES:
-            logger.error(
-                "Merge drag %s -> %s failed to reach its intended tile %d times; "
-                "pausing to prevent repeated unintended drops.",
-                action.start,
-                action.end,
-                self._identical_action_failures,
-            )
-            self.paused = True
-            self._interrupt_event.set()
+        age = now - pending.submitted_at
+        stable_for = now - pending.last_change_at
+        settled = age >= _ACTION_SETTLE_SECONDS and stable_for >= _ACTION_STABLE_SECONDS
+        if health.item_action_busy or (not settled and age < _ACTION_MAX_PENDING_SECONDS):
             return False
 
-        logger.warning(
-            "Merge drag %s -> %s did not change the board; replanning once.",
-            action.start,
-            action.end,
-        )
+        self._pending_action = None
+        self._schedule_next_item_action(now)
+        action = pending.action
+        if current_signature != pending.signature:
+            logger.warning(
+                "%s %s -> %s produced an unexpected board state after %.1fs "
+                "(source: %s; destination: %s); replanning.",
+                action.effect.name.title(),
+                action.start,
+                action.end,
+                age,
+                self._describe_cell(self.board.get_cell(action.start)),
+                self._describe_cell(self.board.get_cell(action.end)),
+            )
+        else:
+            action_key = self._action_key(action)
+            failure_count = self._action_failures.get(action_key, 0) + 1
+            self._action_failures[action_key] = failure_count
+            self._action_retry_at[action_key] = now + _ACTION_RETRY_SECONDS
+            logger.warning(
+                "%s %s -> %s was not accepted after %.1fs (attempt %d/%d); replanning.",
+                action.effect.name.title(),
+                action.start,
+                action.end,
+                age,
+                failure_count,
+                _ACTION_FAILURE_LIMIT,
+            )
+            if failure_count >= _ACTION_FAILURE_LIMIT:
+                logger.error(
+                    "%s %s -> %s failed %d times; pausing to avoid repeated attempts.",
+                    action.effect.name.title(),
+                    action.start,
+                    action.end,
+                    failure_count,
+                )
+                self.paused = True
+                self._interrupt_event.set()
+                return False
         return True
 
-    def step(self) -> None:
-        """Run a single perceive-decide-act iteration for the current phase.
-
-        The target window is (re-)located and brought to the foreground on
-        every step, not just once at startup: capture and actions are both
-        screen-coordinate based, so if a different window has since become
-        foreground, acting without re-checking would silently operate on
-        the wrong application.
-        """
-        region = find_window(settings.window_title)
-        frame = capture_region(region)
-        logger.debug("Captured frame: %sx%s", frame.shape[1], frame.shape[0])
-
-        # Arming is a no-op after the first success. The live board read stays
-        # current on every phase because decisions depend on authoritative data.
-        if self._interrupt_event.is_set():
-            return
-        self._ensure_board_store_armed()
-        if self._interrupt_event.is_set():
-            return
-        live_synced = self._sync_board_from_live_state()
-        if self._interrupt_event.is_set():
-            return
-        if not live_synced:
-            logger.warning("Live board state is unavailable; skipping this step.")
-            return
-        if not self._verify_pending_merge_action():
-            return
-
-        # Only merge actions need grid-to-screen geometry.
-        if self.phase is Phase.MERGE:
-            self._refresh_calibration(region)
-
-        board_needs_merge = self._board_needs_merge()
-
-        if self.phase is Phase.CLAIM_CRATES:
-            self._step_claim_crates(
-                region,
-                frame,
-                board_needs_merge=board_needs_merge,
+    def _submit_merge(self, action: MergeAction, health: RuntimeHealth) -> bool:
+        result = self.runtime.submit_item_drop(action.start, action.end)
+        if result.status is ActionStatus.SUBMITTED:
+            submitted_at = time.monotonic()
+            signature = self._action_signature(action)
+            self._pending_action = _PendingAction(
+                action,
+                signature,
+                health.scene_id,
+                submitted_at,
+                signature,
+                submitted_at,
             )
-        elif self.phase is Phase.MERGE:
-            self._step_merge(region, frame, board_needs_merge=board_needs_merge)
-
-    def _board_needs_merge(self) -> bool:
-        """Whether crate claiming should yield to merge-space recovery.
-
-        The caller must have synchronized authoritative live board state.
-        """
-        empty_count = len(self.board.find_empty())
-        if empty_count == 0:
+            self._last_wait_reason = None
             return True
-        return empty_count <= settings.merge_empty_cell_reserve and bool(
-            self._merge_actions_for_policy()
-        )
+        if result.status not in (ActionStatus.BUSY, ActionStatus.UNAVAILABLE):
+            logger.warning(
+                "%s %s -> %s could not be submitted: %s (%s).",
+                action.effect.name.title(),
+                action.start,
+                action.end,
+                result.status.value,
+                result.detail or "no detail",
+            )
+            self._action_retry_at[self._action_key(action)] = (
+                time.monotonic() + _ACTION_RETRY_SECONDS
+            )
+        elif result.status is ActionStatus.BUSY:
+            self._report_wait("the game is finishing another item action")
+        else:
+            self._report_wait(result.detail or "item interaction handler unavailable")
+        return False
 
-    def _find_supply_crate(self, frame: np.ndarray) -> Match | None:
-        """Verify the crate button inside its fixed bottom-center region."""
-        height, width = frame.shape[:2]
-        crate = viewport_layout(width, height).crate
-        crop = frame[crate.top : crate.bottom, crate.left : crate.right]
-        match = find_best_scaled_match(
-            crop,
-            self._supply_crate_template,
-            settings.match_confidence,
-        )
-        if match is None:
-            return None
-        return Match(
-            x=crate.left + match.x,
-            y=crate.top + match.y,
-            width=match.width,
-            height=match.height,
-            confidence=match.confidence,
-        )
-
-    def _step_claim_crates(
-        self,
-        region: WindowRegion,
-        frame: np.ndarray,
-        *,
-        board_needs_merge: bool,
-    ) -> None:
-        """Claim as many crates as current inventory and board space allow."""
+    def _step_claim_crates(self, board_needs_merge: bool) -> None:
         if board_needs_merge:
-            logger.info("Board reached the merge-space reserve; switching to merge phase.")
             self._set_phase(Phase.MERGE)
-            return
-
-        self._ensure_crate_inventory_armed()
-        if self._interrupt_event.is_set():
-            return
-        crate_count = self._read_crate_count()
-        if crate_count is None:
-            logger.warning("Live crate inventory is unavailable; skipping crate claims.")
-            return
-        if crate_count == 0:
-            if self._merge_actions_for_policy():
-                logger.info("Supply is empty; switching to merge available items.")
-                self._set_phase(Phase.MERGE)
-            return
-
-        match = self._find_supply_crate(frame)
-        if match is None:
             return
         reserve = settings.merge_empty_cell_reserve if self._merge_actions_for_policy() else 0
-        open_count = len(self.board.find_empty())
-        click_count = min(crate_count, max(0, open_count - reserve))
-        if click_count == 0:
+        limit = max(0, len(self.board.find_empty()) - reserve)
+        if limit == 0:
             self._set_phase(Phase.MERGE)
             return
-        logger.info(
-            "Clicking supply crate %d time(s) "
-            "(available=%d, confidence=%.2f, open=%d, reserved=%d)",
-            click_count,
-            crate_count,
-            match.confidence,
-            open_count,
-            reserve,
-        )
-        for _ in range(click_count):
-            if self._quit_requested or self.paused:
-                return
-            click(region, *match.center)
-            if self._interrupt_event.wait(settings.crate_click_settle):
-                return
-
-        if not self._sync_board_from_live_state():
-            logger.warning("Live board state became unavailable; stopping crate claims.")
-            return
-        if self._board_needs_merge():
-            logger.info("Board reached the merge-space reserve; switching to merge phase.")
-            self._set_phase(Phase.MERGE)
-        elif click_count == crate_count and self._merge_actions_for_policy():
-            logger.info("Claimed all available supplies; switching to merge available items.")
+        result = self.runtime.spawn_supply_crates(limit)
+        if result.spawned:
+            self._last_wait_reason = None
+            logger.info("Spawned %d supply crate(s); %s remain.", result.spawned, result.remaining)
+        elif result.status is ActionStatus.BUSY:
+            self._report_wait("crate handler is busy")
+        elif result.status is ActionStatus.UNAVAILABLE:
+            self._report_wait(result.detail or "crate handler unavailable")
+        elif result.remaining == 0:
+            self._report_wait("no supply crates are available")
+        elif result.status is ActionStatus.REJECTED:
+            self._report_wait(result.detail or "crate spawn was not accepted")
+        if result.remaining == 0 and self._merge_actions_for_policy():
             self._set_phase(Phase.MERGE)
 
-    def _step_merge(
-        self, region: WindowRegion, frame: np.ndarray, *, board_needs_merge: bool
-    ) -> None:
-        if self._scene_calibration is None:
-            # No grid geometry to act against this step (e.g. Chrome's CDP
-            # endpoint wasn't readable, or nothing is on screen yet to
-            # derive geometry from) -- nothing safe to do but wait for the
-            # next step.
+    def _step_merge(self, health: RuntimeHealth, board_needs_merge: bool) -> None:
+        if time.monotonic() < self._next_item_action_at:
             return
-        merged = self._try_merge(region, frame)
-        if not merged and not board_needs_merge:
-            logger.info("Board has space again; switching back to claim-crates phase.")
+        actions = self._merge_actions_for_policy()
+        eligible_actions = [
+            action
+            for action in actions
+            if self._action_retry_at.get(self._action_key(action), 0.0) <= time.monotonic()
+        ]
+        if eligible_actions:
+            self._submit_merge(eligible_actions[0], health)
+        elif actions:
+            self._report_wait("failed item actions are cooling down before retry")
+        elif not board_needs_merge:
             self._set_phase(Phase.CLAIM_CRATES)
-        elif not merged and not self.board.find_empty():
-            logger.error(
-                "Board is full and no merge action is available; pausing so a cell can be "
-                "freed manually."
-            )
+        elif not self.board.find_empty():
+            logger.error("Board is full and no merge action is available; pausing.")
             self.paused = True
+            self._interrupt_event.set()
+
+    def step(self) -> None:
+        """Run one perceive -> plan -> internal action -> verify iteration."""
+        try:
+            health_started = time.monotonic()
+            health = self.runtime.read_runtime_health()
+            self._log_slow_stage("runtime health read", health_started)
+            capability_missing = (
+                not health.available
+                or (self.phase is Phase.MERGE and not health.item_drop_available)
+                or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
+            )
+            if capability_missing:
+                now = time.monotonic()
+                if now < self._capability_retry_at:
+                    self._report_wait(health.detail or "required runtime capability unavailable")
+                    return
+                health = self.runtime.discover()
+                capability_missing = (
+                    not health.available
+                    or (self.phase is Phase.MERGE and not health.item_drop_available)
+                    or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
+                )
+                if capability_missing:
+                    self._capability_retry_at = time.monotonic() + self._capability_retry_delay
+                    self._capability_retry_delay = min(10.0, self._capability_retry_delay * 2)
+                else:
+                    self._capability_retry_at = 0.0
+                    self._capability_retry_delay = settings.loop_interval
+        except CdpConnectionError as exc:
+            if self._interrupt_event.is_set():
+                return
+            self._report_wait(str(exc))
+            return
+        self._last_health = health
+        board_started = time.monotonic()
+        board_synced = self._sync_board_from_live_state()
+        self._log_slow_stage("board-state read", board_started)
+        if not board_synced:
+            if self._interrupt_event.is_set():
+                return
+            self._report_wait("authoritative board state unavailable")
+            return
+        if not self._verify_pending_action(health):
+            return
+        if not health.available:
+            self._report_wait(health.detail or "runtime unavailable")
+            return
+        if not health.heartbeat_advancing:
+            age = (
+                f", last frame {health.heartbeat_age_ms:.0f}ms ago"
+                if health.heartbeat_age_ms is not None
+                else ""
+            )
+            self._report_wait(f"game heartbeat is not advancing{age}")
+            return
+        board_needs_merge = self._board_needs_merge()
+        if self.phase is Phase.CLAIM_CRATES:
+            self._step_claim_crates(board_needs_merge)
+        else:
+            self._step_merge(health, board_needs_merge)
 
     def _toggle_pause(self) -> None:
         if self.paused:
             if self._resume_requested.is_set():
                 self._resume_requested.clear()
-                logger.warning("Resume canceled (hotkey)")
+                logger.info("Resume request cancelled.")
             else:
                 self._resume_requested.set()
-                logger.warning("Resume requested (hotkey)")
+                logger.info("Resume requested.")
         else:
             self.paused = True
             self._interrupt_event.set()
             self._resume_requested.clear()
-            logger.warning("Paused (hotkey)")
+            logger.info("Paused.")
 
     def request_quit(self) -> None:
-        logger.warning("Quit requested (hotkey)")
-        self._quit_requested = True
-        self.paused = True
-        self._interrupt_event.set()
-        self._resume_requested.clear()
+        with self._quit_lock:
+            if self._quit_requested:
+                return
+            self._quit_requested = True
+            self.paused = True
+            self._interrupt_event.set()
+            self._resume_requested.clear()
+            logger.info("Quit requested.")
+
+    def _log_slow_stage(self, stage: str, started: float) -> None:
+        elapsed = time.monotonic() - started
+        if elapsed >= 1.0:
+            logger.warning("Slow %s: %.1fs.", stage, elapsed)
+
+    def _report_wait(self, reason: str) -> None:
+        now = time.monotonic()
+        if reason != self._last_wait_reason or now - self._last_wait_log_at >= 15:
+            logger.info("Waiting: %s.", reason.rstrip("."))
+            self._last_wait_reason = reason
+            self._last_wait_log_at = now
+
+    @staticmethod
+    def _register_hotkey(hotkey: str, callback: Callable[[], None]) -> None:
+        if "+" in hotkey:
+            keyboard.add_hotkey(hotkey, callback)
+            return
+
+        latch_lock = Lock()
+        held = False
+
+        def press(_event: object) -> None:
+            nonlocal held
+            with latch_lock:
+                if held:
+                    return
+                held = True
+            callback()
+
+        def release(_event: object) -> None:
+            nonlocal held
+            with latch_lock:
+                held = False
+
+        keyboard.on_press_key(hotkey, press)
+        keyboard.on_release_key(hotkey, release)
 
     def run_forever(self) -> None:
-        # Global hotkeys remain reachable while Chrome has focus. If OS hook
-        # registration fails, Ctrl+C remains the terminal-focused fallback.
         try:
-            keyboard.add_hotkey(settings.pause_hotkey, self._toggle_pause)
-            keyboard.add_hotkey(settings.quit_hotkey, self.request_quit)
+            self._register_hotkey(settings.pause_hotkey, self._toggle_pause)
+            self._register_hotkey(settings.quit_hotkey, self.request_quit)
             logger.info(
-                "Hotkeys active: %s to pause/resume, %s to quit.",
+                "Global hotkeys registered: %s pause/resume, %s quit.",
                 settings.pause_hotkey,
                 settings.quit_hotkey,
             )
         except Exception:
-            logger.exception(
-                "Could not register hotkeys; only Ctrl+C (terminal must be focused) "
-                "will stop the bot."
-            )
-
+            logger.exception("Could not register global hotkeys; Ctrl+C remains available.")
         needs_initialization = not settings.start_paused
+        discovery_thread: Thread | None = None
+        discovery_results: Queue[tuple[bool | None, BaseException | None]] = Queue(maxsize=1)
+        retry_delay = settings.loop_interval
+
+        def discover_runtime() -> None:
+            try:
+                ready = self._resume_cached_runtime() or self.initialize()
+                discovery_results.put((ready, None))
+            except Exception as exc:
+                discovery_results.put((None, exc))
+
         if settings.start_paused:
             self.paused = True
             self._interrupt_event.set()
-            logger.warning(
-                "Starting paused -- press %s to begin (this defers environment "
-                "setup too, so nothing touches the game until then).",
-                settings.pause_hotkey,
-            )
-        logger.info("Starting bot loop (interval=%.1fs)", settings.loop_interval)
+            logger.warning("Starting paused; press %s to begin.", settings.pause_hotkey)
         try:
             while not self._quit_requested:
                 if self.paused:
@@ -766,37 +646,38 @@ class Bot:
                         self._resume_requested.clear()
                         self._interrupt_event.clear()
                         self.paused = False
-                        logger.warning("Resuming (hotkey) -- re-initializing environment.")
-                        try:
-                            initialized = self.initialize()
-                        except (CdpConnectionError, LookupError, WindowActivationError) as exc:
-                            logger.warning(
-                                "%s Still paused; press the resume hotkey to retry.", exc
-                            )
-                            initialized = False
-                        if not initialized or self._interrupt_event.is_set():
-                            self.paused = True
-                            self._interrupt_event.set()
-                            continue
-                        needs_initialization = False
-                        logger.warning("Resumed")
+                        needs_initialization = True
+                    else:
+                        time.sleep(0.1)
                         continue
-                    time.sleep(0.1)
-                    continue
                 if needs_initialization:
+                    if discovery_thread is None:
+                        discovery_thread = Thread(
+                            target=discover_runtime, name="fmv-runtime-discovery", daemon=True
+                        )
+                        discovery_thread.start()
                     try:
-                        initialized = self.initialize()
-                    except (CdpConnectionError, LookupError, WindowActivationError) as exc:
-                        logger.warning("%s Retrying initialization next iteration.", exc)
-                        time.sleep(settings.loop_interval)
+                        initialized, error = discovery_results.get_nowait()
+                    except Empty:
+                        self._interrupt_event.wait(0.1)
                         continue
+                    discovery_thread = None
+                    if error is not None:
+                        if isinstance(error, CdpCancelledError):
+                            continue
+                        if isinstance(error, CdpConnectionError):
+                            logger.warning("%s Retrying runtime discovery.", error)
+                        else:
+                            raise error
+                        initialized = False
                     if not initialized:
+                        if self._interrupt_event.wait(retry_delay):
+                            continue
+                        retry_delay = min(10.0, max(settings.loop_interval, retry_delay * 2))
                         continue
                     needs_initialization = False
-                try:
-                    self.step()
-                except (LookupError, WindowActivationError) as exc:
-                    logger.warning("%s Retrying next iteration.", exc)
+                    retry_delay = settings.loop_interval
+                self.step()
                 self._interrupt_event.wait(settings.loop_interval)
         except KeyboardInterrupt:
             logger.info("Stopped by user.")

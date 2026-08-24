@@ -9,40 +9,64 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
+import numpy as np
 import typer
 from rich import print as rprint
 
-from farm_merge_valet.capture.screen import capture_region
-from farm_merge_valet.capture.window import WindowActivationError, find_window, list_window_titles
+from farm_merge_valet.browser import BrowserKind, BrowserManager, BrowserManagerError
 from farm_merge_valet.cdp.board_store import arm_board_store, inspect_board_maps, read_board_state
-from farm_merge_valet.cdp.client import CdpConnectionError
+from farm_merge_valet.cdp.client import (
+    CdpConnectionError,
+    capture_game_frame,
+    list_targets,
+    read_background_flag_status,
+)
+from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
 from farm_merge_valet.cdp.scene_geometry import read_scene_calibration
 from farm_merge_valet.config import settings
 from farm_merge_valet.core.board import CellKind
 from farm_merge_valet.core.bot import Bot
-from farm_merge_valet.core.viewport import viewport_layout
 from farm_merge_valet.logging_setup import configure_logging
 from farm_merge_valet.tools.template_extraction import extract_templates
 
 app = typer.Typer(help="Automation tool for Farm Merge Valley.")
+browser_app = typer.Typer(help="Manage the dedicated Chromium-family browser.")
+app.add_typer(browser_app, name="browser")
 
 
 @app.callback()
 def main() -> None:
-    # Window titles (and other OS-provided strings we echo back, e.g. in
-    # error messages) can contain characters the Windows console's legacy
-    # codepage can't encode, which otherwise crashes the CLI on a plain
-    # print. Replacing unencodable characters keeps the message readable
-    # instead of losing it to a traceback.
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
     configure_logging(settings.log_level)
 
 
+def _default_output(suffix: str) -> Path:
+    return Path("captures") / f"{datetime.now():%Y%m%d-%H%M%S}{suffix}"
+
+
+def _capture_image() -> np.ndarray:
+    encoded = np.frombuffer(capture_game_frame(settings.cdp_port, settings.window_title), np.uint8)
+    image = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+    if image is None:
+        raise CdpConnectionError("Could not decode the browser's game screenshot.")
+    return image
+
+
 @app.command()
 def run() -> None:
-    """Start the automation loop."""
+    if settings.browser_auto_launch:
+        try:
+            status = BrowserManager(settings).ensure_running()
+        except BrowserManagerError as exc:
+            rprint(f"[red]Managed browser startup failed:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+        browser_name = status.kind.value if status.kind else "browser"
+        rprint(
+            f"[green]Managed browser ready:[/green] {browser_name} "
+            f"(game_loaded={status.game_loaded})"
+        )
     bot = Bot()
     if settings.gui_enabled:
         from farm_merge_valet.gui.overlay import run_overlay
@@ -52,208 +76,207 @@ def run() -> None:
         bot.run_forever()
 
 
-@app.command("list-windows")
-def list_windows() -> None:
-    """List open window titles, to help pick a value for FMV_WINDOW_TITLE."""
-    for title in list_window_titles():
-        typer.echo(title)
-
-
-@app.command()
-def calibrate() -> None:
-    """Locate the configured target window and report its region."""
+def _browser_manager(browser: str | None) -> BrowserManager:
     try:
-        region = find_window(settings.window_title)
-    except (LookupError, WindowActivationError) as exc:
-        rprint(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1) from exc
-    rprint(f"[green]Found window[/green]: {region}")
+        return BrowserManager(settings, BrowserKind(browser) if browser else None)
+    except (ValueError, BrowserManagerError) as exc:
+        raise typer.BadParameter(str(exc), param_hint="--browser") from exc
 
 
-@app.command()
-def capture(
-    output: Path = typer.Option(  # noqa: B008
-        None, "--output", "-o", help="Where to save the PNG (default: captures/<timestamp>.png)."
-    ),
+def _print_browser_status(manager: BrowserManager) -> None:
+    typer.echo(json.dumps(manager.status_dict(manager.status()), indent=2))
+
+
+@browser_app.command("list")
+def browser_list_cmd() -> None:
+    """List installed supported and experimental browser candidates."""
+    installations = BrowserManager(settings).installations()
+    if not installations:
+        typer.echo("No compatible Chromium-family browser was detected.")
+        return
+    for installation in installations:
+        typer.echo(
+            f"{installation.kind.value:<9} {installation.support.value:<12} "
+            f"{installation.executable}"
+        )
+
+
+@browser_app.command("status")
+def browser_status_cmd(
+    browser: str | None = typer.Option(None, "--browser"),  # noqa: B008
 ) -> None:
-    """Save a screenshot of the configured target window, e.g. for building templates."""
+    """Inspect the browser currently exposed on the configured CDP port."""
+    _print_browser_status(_browser_manager(browser))
+
+
+@browser_app.command("launch")
+def browser_launch_cmd(
+    browser: str | None = typer.Option(None, "--browser"),  # noqa: B008
+) -> None:
+    """Launch or reuse a compatible dedicated browser profile."""
+    manager = _browser_manager(browser)
     try:
-        region = find_window(settings.window_title)
-    except (LookupError, WindowActivationError) as exc:
+        status = manager.launch()
+    except BrowserManagerError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(manager.status_dict(status), indent=2))
+
+
+@browser_app.command("restart")
+def browser_restart_cmd(
+    browser: str | None = typer.Option(None, "--browser"),  # noqa: B008
+) -> None:
+    """Restart only a verified Farm Merge Valet-managed browser."""
+    manager = _browser_manager(browser)
+    try:
+        status = manager.restart()
+    except BrowserManagerError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(manager.status_dict(status), indent=2))
+
+
+@browser_app.command("stop")
+def browser_stop_cmd(
+    browser: str | None = typer.Option(None, "--browser"),  # noqa: B008
+) -> None:
+    """Stop only a verified Farm Merge Valet-managed browser."""
+    manager = _browser_manager(browser)
+    try:
+        manager.stop()
+    except BrowserManagerError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    rprint("[green]Managed browser stopped.[/green]")
+
+
+@app.command("list-targets")
+def list_targets_cmd() -> None:
+    """List browser DevTools targets available on the configured port."""
+    try:
+        for target in list_targets(settings.cdp_port):
+            typer.echo(f"{target['type']:<10} {target['title'] or '-'}\n  {target['url'] or '-'}")
+    except CdpConnectionError as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
 
-    if output is None:
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        output = Path("captures") / f"{timestamp}.png"
-    output.parent.mkdir(parents=True, exist_ok=True)
 
-    frame = capture_region(region)
+@app.command()
+def capture(output: Path | None = typer.Option(None, "--output", "-o")) -> None:  # noqa: B008
+    """Save a CDP screenshot cropped to the game iframe."""
+    try:
+        frame = _capture_image()
+    except CdpConnectionError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    output = output or _default_output(".png")
+    output.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(output), frame)
-    rprint(f"[green]Saved[/green] {frame.shape[1]}x{frame.shape[0]} capture to {output}")
+    rprint(f"[green]Saved[/green] {frame.shape[1]}x{frame.shape[0]} game capture to {output}")
 
 
 @app.command("visualize-positions")
 def visualize_positions_cmd(
-    output: Path = typer.Option(  # noqa: B008
-        None,
-        "--output",
-        "-o",
-        help="Where to save the annotated PNG (default: captures/<timestamp>_positions.png).",
-    ),
+    output: Path | None = typer.Option(None, "--output", "-o"),  # noqa: B008
 ) -> None:
-    """Visualize actionable positions and viewport safety zones.
-
-    Dead zones are shaded red, the usable board is outlined green, and the
-    pan anchor is marked blue. Item circles are drawn only when their computed
-    positions are on-screen and outside every dead zone.
-    """
+    """Mark rendered cells by their current live-state classification."""
     try:
-        region = find_window(settings.window_title)
-    except (LookupError, WindowActivationError) as exc:
+        frame = _capture_image()
+        bot = Bot()
+        arm_board_store(settings.cdp_port, settings.window_title)
+        synced = bot._sync_board_from_live_state()
+        calibration = read_scene_calibration(settings.cdp_port, settings.window_title)
+    except CdpConnectionError as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
-
-    frame = capture_region(region)
-    bot = Bot()
-    bot._ensure_board_store_armed()
-    live_synced = bot._sync_board_from_live_state()
-    bot._refresh_calibration(region)
-    if bot._scene_calibration is None:
-        rprint(
-            "[red]Could not read scene calibration (CDP unreachable, live board-cell map "
-            "not armed yet, or nothing on screen yet to derive geometry from).[/red]"
-        )
+    if calibration is None:
+        rprint("[red]Could not derive live scene geometry.[/red]")
         raise typer.Exit(code=1)
-
-    annotated = frame.copy()
-    layout = viewport_layout(frame.shape[1], frame.shape[0])
-    dead_zone_overlay = annotated.copy()
-    for dead_zone in layout.dead_zones:
-        cv2.rectangle(
-            dead_zone_overlay,
-            (dead_zone.left, dead_zone.top),
-            (dead_zone.right - 1, dead_zone.bottom - 1),
-            (0, 0, 255),
-            -1,
-        )
-    cv2.addWeighted(dead_zone_overlay, 0.18, annotated, 0.82, 0, annotated)
-    cv2.rectangle(
-        annotated,
-        (layout.board.left, layout.board.top),
-        (layout.board.right - 1, layout.board.bottom - 1),
-        (0, 255, 0),
-        2,
-    )
-    cv2.drawMarker(
-        annotated,
-        layout.pan_anchor,
-        (255, 128, 0),
-        cv2.MARKER_CROSS,
-        24,
-        2,
-    )
-    drawn = 0
-    classified_out = 0
-    outside_actionable_area = 0
-    for coord in sorted(bot._scene_calibration.rendered_coords):
+    colors = {
+        CellKind.ITEM: (40, 220, 40),
+        CellKind.EMPTY: (220, 180, 40),
+        CellKind.CLOUD: (200, 200, 200),
+        CellKind.STRUCTURE: (180, 80, 220),
+        CellKind.PRODUCT: (40, 160, 255),
+    }
+    counts: Counter[str] = Counter()
+    for coord in sorted(calibration.rendered_coords):
         cell = bot.board.get_cell(coord)
-        if cell is not None and cell.kind in (CellKind.EMPTY, CellKind.CLOUD):
-            classified_out += 1
-            continue
-        x, y = bot._grid_to_pixel(coord)
-        if not layout.is_actionable(x, y):
-            outside_actionable_area += 1
-            continue
-        cv2.circle(annotated, (x, y), 12, (0, 0, 255), 2)
-        drawn += 1
-
-    if output is None:
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        output = Path("captures") / f"{timestamp}_positions.png"
+        kind = cell.kind if cell is not None else CellKind.PRODUCT
+        x, y = calibration.to_pixel(coord)
+        if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
+            cv2.circle(frame, (x, y), 8, colors[kind], 2)
+            counts[kind.name.lower()] += 1
+    legend = "  ".join(f"{name}:{count}" for name, count in sorted(counts.items()))
+    cv2.rectangle(frame, (6, 6), (min(frame.shape[1] - 6, 14 + len(legend) * 8), 32), (0, 0, 0), -1)
+    cv2.putText(frame, legend, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    output = output or _default_output("_positions.png")
     output.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(output), annotated)
-    rprint(
-        f"[green]Saved[/green] {frame.shape[1]}x{frame.shape[0]} capture with "
-        f"{drawn} marked position(s) to {output} "
-        f"(rendered_cells={len(bot._scene_calibration.rendered_coords)}, "
-        f"classified_out={classified_out}, outside={outside_actionable_area}, "
-        f"live_synced={live_synced})"
-    )
+    cv2.imwrite(str(output), frame)
+    rprint(f"[green]Saved[/green] classified positions to {output} (live_synced={synced})")
 
 
 @app.command("diagnose-live-state")
 def diagnose_live_state_cmd(
-    output: Path = typer.Option(  # noqa: B008
-        None,
-        "--output",
-        "-o",
-        help="Where to save the JSON report (default: captures/<timestamp>_live-state.json).",
+    output: Path | None = typer.Option(None, "--output", "-o"),  # noqa: B008
+    include_heap_candidates: bool = typer.Option(
+        False,
+        "--include-heap-candidates",
+        help="Run the slower heap-wide board-map candidate inspection.",
     ),
 ) -> None:
-    """Capture read-only board-map and coordinate-transform diagnostics."""
+    """Write board, runtime-capability, heartbeat, and scene diagnostics."""
     try:
-        region = find_window(settings.window_title)
-    except (LookupError, WindowActivationError) as exc:
-        rprint(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1) from exc
-
-    frame = capture_region(region)
-    try:
-        arm_status = arm_board_store(settings.cdp_port, settings.window_title)
-        candidates = inspect_board_maps(settings.cdp_port, settings.window_title)
+        adapter = GameRuntimeAdapter(settings.cdp_port, settings.window_title)
+        health = adapter.discover()
+        runtime_discovery = adapter.inspect_runtime()
+        arm_status = "already-armed" if health.board_available else "not-found"
+        candidates = (
+            inspect_board_maps(settings.cdp_port, settings.window_title)
+            if include_heap_candidates
+            else []
+        )
         board_state = read_board_state(settings.cdp_port, settings.window_title)
-        calibration = read_scene_calibration(settings.cdp_port, region, settings.window_title)
+        calibration = read_scene_calibration(settings.cdp_port, settings.window_title)
     except CdpConnectionError as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
-    layout = viewport_layout(frame.shape[1], frame.shape[0])
-
-    rendered_coords = sorted(calibration.rendered_coords) if calibration else []
-    projected = [calibration.to_pixel(coord) for coord in rendered_coords] if calibration else []
-
-    def value_range(values: list[int]) -> dict[str, int] | None:
-        return {"min": min(values), "max": max(values)} if values else None
-
     report = {
-        "capture": {"width": frame.shape[1], "height": frame.shape[0]},
-        "window_region": {
-            "left": region.left,
-            "top": region.top,
-            "width": region.width,
-            "height": region.height,
+        "runtime": {
+            "available": health.available,
+            "scene_id": health.scene_id,
+            "board": health.board_available,
+            "item_drop": health.item_drop_available,
+            "crate_spawn": health.crate_spawn_available,
+            "inventory": health.inventory_available,
+            "heartbeat": health.heartbeat,
+            "heartbeat_age_ms": health.heartbeat_age_ms,
+            "heartbeat_advancing": health.heartbeat_advancing,
+            "heartbeat_installed": health.heartbeat_installed,
+            "detail": health.detail,
+            "discovery": runtime_discovery,
         },
+        "browser_background_flags": read_background_flag_status(settings.cdp_port),
         "arm_status": arm_status,
         "candidate_maps": candidates,
         "selected_board": {
             "reported_cells": len(board_state) if board_state is not None else None,
-            "open_cells": (
-                sum(not state.has_content for state in board_state.values())
-                if board_state is not None
-                else None
-            ),
+            "open_cells": sum(not value.has_content for value in (board_state or {}).values()),
             "common_blueprints": Counter(
-                state.blueprint_id
-                for state in (board_state or {}).values()
-                if state.blueprint_id is not None
+                value.blueprint_id for value in (board_state or {}).values() if value.blueprint_id
             ).most_common(20),
         },
         "scene": {
-            "rendered_cells": len(rendered_coords),
+            "rendered_cells": len(calibration.rendered_coords) if calibration else 0,
             "origin": calibration.origin if calibration else None,
             "column_step": calibration.col_step if calibration else None,
             "row_step": calibration.row_step if calibration else None,
             "canvas_scale": calibration.canvas_scale if calibration else None,
             "canvas_offset": calibration.canvas_offset if calibration else None,
-            "projected_x_range": value_range([point[0] for point in projected]),
-            "projected_y_range": value_range([point[1] for point in projected]),
-            "actionable_projected_cells": sum(layout.is_actionable(*point) for point in projected),
         },
     }
-
-    if output is None:
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        output = Path("captures") / f"{timestamp}_live-state.json"
+    output = output or _default_output("_live-state.json")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2), encoding="utf-8")
     rprint(f"[green]Saved live-state diagnostics[/green] to {output}")
@@ -261,21 +284,9 @@ def diagnose_live_state_cmd(
 
 @app.command("extract-templates")
 def extract_templates_cmd(
-    har: Path = typer.Argument(  # noqa: B008
-        ...,
-        help="Path to a HAR capture of the game's network traffic (DevTools -> Network -> "
-        "Img filter -> 'Save all as HAR').",
-    ),
-    force: bool = typer.Option(
-        False, "--force", help="Re-download atlases even if already cached."
-    ),
+    har: Path = typer.Argument(...),  # noqa: B008
+    force: bool = False,
 ) -> None:
-    """Rebuild vision templates from the game's own sprite atlases.
-
-    Re-run whenever the game updates and templates need refreshing; capture
-    a fresh HAR first since the CDN URLs are tied to the current game
-    instance/session and won't stay valid indefinitely.
-    """
     try:
         extract_templates(har, force=force)
     except RuntimeError as exc:

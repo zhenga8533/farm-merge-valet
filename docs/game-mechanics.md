@@ -13,10 +13,12 @@ Facebook/TikTok community posts, and direct in-app observation (marked
 
 - **Tap/click**: select an item, or interact with buildings (train, shop,
   tree/rock stumps when a visitor).
-- **Drag & drop**: dropping an item onto a different item swaps their tiles.
+- **Drag & drop**: dropping an item onto a different item replaces the target
+  tile with the dragged item. The displaced item moves to an available empty
+  cell, which may be the source tile but is not guaranteed to be.
   Dropping it onto a matching member of a connected group of at least two
   triggers a merge containing the dragged item and that group. The displaced
-  item in an ordinary swap cannot trigger a merge. These behaviors are
+  item in an ordinary replacement cannot trigger a merge. These behaviors are
   *observed*; merging is drag-based, not click-based.
 - A **shovel tool** exists for removing individual items from the board to
   free up space.

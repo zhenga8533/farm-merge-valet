@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
-from typing import Any
+from threading import Event
 
-import websockets
-from websockets.exceptions import WebSocketException
-
-from farm_merge_valet.cdp.client import CdpConnectionError, evaluate, run_game_frame_operation
+from farm_merge_valet.cdp.client import (
+    CdpConnectionError,
+    _command_target,
+    evaluate,
+    run_game_frame_operation,
+)
 
 _FIND_CRATE_ITEM_EXPRESSION = """
 function() {
@@ -45,53 +45,52 @@ _READ_CRATE_COUNT_EXPRESSION = """
 """
 
 
-async def _call(ws: Any, id_: int, method: str, params: dict | None = None) -> dict:
-    await ws.send(json.dumps({"id": id_, "method": method, "params": params or {}}))
-    while True:
-        response = json.loads(await ws.recv())
-        if response.get("id") == id_:
-            return response
+def _arm_crate_inventory_target(ws_url: str, cancel_event: Event | None) -> str:
+    _command_target(ws_url, "Runtime.enable", cancel_event=cancel_event)
+    captured = _command_target(
+        ws_url,
+        "Runtime.evaluate",
+        {"expression": _READ_CRATE_COUNT_EXPRESSION, "returnByValue": True},
+        cancel_event=cancel_event,
+    )
+    captured_amount = captured.get("result", {}).get("value")
+    if isinstance(captured_amount, int) and not isinstance(captured_amount, bool):
+        return f"already-captured ({captured_amount} available)"
 
+    prototype = _command_target(
+        ws_url,
+        "Runtime.evaluate",
+        {"expression": "Map.prototype", "returnByValue": False},
+        cancel_event=cancel_event,
+    )
+    prototype_id = prototype.get("result", {}).get("objectId")
+    if not prototype_id:
+        return "no-map-prototype"
 
-async def _arm_crate_inventory_async(ws_url: str) -> str:
-    async with websockets.connect(ws_url, max_size=50 * 1024 * 1024) as ws:
-        await _call(ws, 0, "Runtime.enable")
-        captured = await _call(
-            ws,
-            1,
-            "Runtime.evaluate",
-            {"expression": _READ_CRATE_COUNT_EXPRESSION, "returnByValue": True},
-        )
-        captured_amount = captured.get("result", {}).get("result", {}).get("value")
-        if isinstance(captured_amount, int) and not isinstance(captured_amount, bool):
-            return f"already-captured ({captured_amount} available)"
+    instances = _command_target(
+        ws_url,
+        "Runtime.queryObjects",
+        {"prototypeObjectId": prototype_id},
+        timeout=30,
+        cancel_event=cancel_event,
+    )
+    instances_id = instances.get("objects", {}).get("objectId")
+    if not instances_id:
+        return "query-objects-failed"
 
-        prototype = await _call(
-            ws,
-            2,
-            "Runtime.evaluate",
-            {"expression": "Map.prototype", "returnByValue": False},
-        )
-        prototype_id = prototype.get("result", {}).get("result", {}).get("objectId")
-        if not prototype_id:
-            return "no-map-prototype"
-
-        instances = await _call(ws, 3, "Runtime.queryObjects", {"prototypeObjectId": prototype_id})
-        instances_id = instances.get("result", {}).get("objects", {}).get("objectId")
-        if not instances_id:
-            return "query-objects-failed"
-
-        found = await _call(
-            ws,
-            4,
+    try:
+        found = _command_target(
+            ws_url,
             "Runtime.callFunctionOn",
             {
                 "objectId": instances_id,
                 "functionDeclaration": _FIND_CRATE_ITEM_EXPRESSION,
                 "returnByValue": True,
             },
+            timeout=30,
+            cancel_event=cancel_event,
         )
-        value = found.get("result", {}).get("result", {}).get("value")
+        value = found.get("result", {}).get("value")
         if not isinstance(value, dict):
             return "crate-inventory-not-found"
         status = value.get("status")
@@ -99,18 +98,21 @@ async def _arm_crate_inventory_async(ws_url: str) -> str:
         if status in {"found", "already-captured"} and isinstance(amount, int):
             return f"{status} ({amount} available)"
         return str(status) if status else "crate-inventory-not-found"
+    finally:
+        try:
+            _command_target(ws_url, "Runtime.releaseObject", {"objectId": instances_id}, timeout=1)
+        except CdpConnectionError:
+            pass
 
 
-def arm_crate_inventory(port: int, page_title: str | None = None) -> str:
+def arm_crate_inventory(
+    port: int, page_title: str | None = None, *, cancel_event: Event | None = None
+) -> str:
     """Locate and retain the live supply-crate inventory item."""
 
-    def arm(ws_url: str) -> str:
-        try:
-            return asyncio.run(_arm_crate_inventory_async(ws_url))
-        except (OSError, ValueError, WebSocketException) as exc:
-            raise CdpConnectionError("Lost the crate-inventory CDP connection.") from exc
-
-    return run_game_frame_operation(port, page_title, arm)
+    return run_game_frame_operation(
+        port, page_title, lambda ws_url: _arm_crate_inventory_target(ws_url, cancel_event)
+    )
 
 
 def read_crate_count(port: int, page_title: str | None = None) -> int | None:

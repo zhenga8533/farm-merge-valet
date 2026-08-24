@@ -13,23 +13,20 @@ window style toggled directly via ctypes rather than Qt's own
 `Qt.WindowType.WindowTransparentForInput` flag, since changing that flag
 through Qt requires hiding and re-showing the window (see
 `setWindowFlags`'s docs), which would steal/disrupt focus on every single
-activation change -- exactly the moments this needs to react to.
-
-Positioned on top of whatever is on screen, including the game window that
-`capture_region` reads. If it overlaps the game, overlay pixels become part of
-each capture and can corrupt fixed-UI template matching. Keep it clear of the
-game window.
+activation change -- exactly the moments this needs to react to. Diagnostic
+captures come from CDP, so the overlay cannot contaminate them.
 """
 
 from __future__ import annotations
 
 import ctypes
 import logging
+import signal
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QApplication, QMainWindow, QPlainTextEdit, QTabWidget
 
@@ -226,7 +223,30 @@ def run_overlay(run_bot: Callable[[], None], stop_bot: Callable[[], None]) -> in
 
     app_bridge = _AppBridge()
     app_bridge.bot_finished.connect(app.quit)
-    app.aboutToQuit.connect(stop_bot)
+    stop_lock = threading.Lock()
+    stopped = False
+
+    def stop_once() -> None:
+        nonlocal stopped
+        with stop_lock:
+            if stopped:
+                return
+            stopped = True
+        stop_bot()
+
+    app.aboutToQuit.connect(stop_once)
+
+    interrupt_timer = QTimer()
+    interrupt_timer.setInterval(100)
+    interrupt_timer.timeout.connect(lambda: None)
+    previous_sigint_handler = signal.getsignal(signal.SIGINT)
+
+    def handle_sigint(_signum: int, _frame: object) -> None:
+        stop_once()
+        app.quit()
+
+    signal.signal(signal.SIGINT, handle_sigint)
+    interrupt_timer.start()
 
     def worker() -> None:
         try:
@@ -242,6 +262,8 @@ def run_overlay(run_bot: Callable[[], None], stop_bot: Callable[[], None]) -> in
     try:
         return app.exec()
     finally:
-        stop_bot()
+        interrupt_timer.stop()
+        signal.signal(signal.SIGINT, previous_sigint_handler)
+        stop_once()
         thread.join(timeout=5)
         root_logger.removeHandler(handler)

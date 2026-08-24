@@ -26,6 +26,7 @@ def test_run_overlay_keeps_qt_in_caller_and_bot_in_worker(monkeypatch) -> None:
 
         def quit(self) -> None:
             events.append("quit")
+            self.aboutToQuit.emit()
 
         def exec(self) -> int:
             events.append("qt-exec")
@@ -37,6 +38,19 @@ def test_run_overlay_keeps_qt_in_caller_and_bot_in_worker(monkeypatch) -> None:
         @staticmethod
         def instance() -> FakeApp:
             return app
+
+    class FakeTimer:
+        def __init__(self) -> None:
+            self.timeout = _Signal()
+
+        def setInterval(self, interval: int) -> None:
+            assert interval == 100
+
+        def start(self) -> None:
+            events.append("timer-start")
+
+        def stop(self) -> None:
+            events.append("timer-stop")
 
     class FakeWindow:
         def append_log(
@@ -80,6 +94,7 @@ def test_run_overlay_keeps_qt_in_caller_and_bot_in_worker(monkeypatch) -> None:
             events.append("worker-join")
 
     monkeypatch.setattr(overlay, "QApplication", FakeApplication)
+    monkeypatch.setattr(overlay, "QTimer", FakeTimer)
     monkeypatch.setattr(overlay, "OverlayWindow", FakeWindow)
     monkeypatch.setattr(overlay, "_LogBridge", FakeLogBridge)
     monkeypatch.setattr(overlay, "_AppBridge", FakeAppBridge)
@@ -94,7 +109,8 @@ def test_run_overlay_keeps_qt_in_caller_and_bot_in_worker(monkeypatch) -> None:
     assert result == 0
     assert events.index("worker-start") < events.index("qt-exec")
     assert "bot-run" in events
-    assert events[-2:] == ["bot-stop", "worker-join"]
+    assert events.count("bot-stop") == 1
+    assert events[-1] == "worker-join"
 
 
 def test_log_handler_forwards_structured_level_information() -> None:

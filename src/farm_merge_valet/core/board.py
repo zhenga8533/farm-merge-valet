@@ -1,11 +1,8 @@
-"""Persistent, partial model of the game board.
+"""Coordinate-based model of the authoritative live game board.
 
-The board extends far enough vertically that scrolling to see all of it is
-expensive (see docs/automation-methodology.md), so this is deliberately a
-*sparse, partial* map rather than something that has to be fully known
-before it's useful: cells are recorded as they're observed and never
-assumed to exist otherwise. `UNKNOWN` (a cell simply absent from the grid)
-is a distinct state from `EMPTY` (observed and known to be empty).
+The runtime normally supplies the complete active board map. The model still
+distinguishes an absent, unknown coordinate from an observed `EMPTY` cell so a
+missing or partial live-state read is never mistaken for usable board space.
 """
 
 from __future__ import annotations

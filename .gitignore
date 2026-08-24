@@ -33,3 +33,4 @@ logs/
 *.log
 captures/
 .atlas_cache/
+.browser-profile/

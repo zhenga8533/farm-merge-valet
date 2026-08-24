@@ -1,13 +1,11 @@
 # Templates
 
-Reference images used to interpret live blueprint IDs and match fixed game UI.
+Reference images used to interpret live blueprint IDs.
 
 ## Layout
 
 ```text
 templates/
-  ui/
-    supply_crate.png
   items/
     crops/<name>/tier_1.png ... tier_4.png
     animals/<name>/tier_1.png ... tier_4.png
@@ -31,12 +29,5 @@ farm-merge-valet extract-templates path\to\game.har
 ```
 
 The command caches downloaded atlas files under `.atlas_cache/` and rebuilds
-the item templates plus `ui/supply_crate.png`. CDN URLs are session-dependent,
-so use a recent HAR when refreshing assets.
-
-## Fixed UI templates
-
-- `supply_crate.png` composites the game's crate icon with its circular button
-  background. Its lower portion is omitted because the live counter covers it.
-The template retains its alpha mask. Fixed UI is matched directly across
-plausible scales, so it does not depend on a separate board-scale calibration.
+the item templates. CDN URLs are session-dependent, so use a recent HAR when
+refreshing assets.

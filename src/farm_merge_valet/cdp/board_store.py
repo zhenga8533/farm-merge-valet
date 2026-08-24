@@ -10,15 +10,16 @@ reads. The same map pass also retains the live supply-crate inventory item.
 
 from __future__ import annotations
 
-import asyncio
-import json
 from dataclasses import dataclass
+from threading import Event
 from typing import Any
 
-import websockets
-from websockets.exceptions import WebSocketException
-
-from farm_merge_valet.cdp.client import CdpConnectionError, evaluate, run_game_frame_operation
+from farm_merge_valet.cdp.client import (
+    CdpConnectionError,
+    _command_target,
+    evaluate,
+    run_game_frame_operation,
+)
 from farm_merge_valet.core.board import GridCoord
 
 # `_content` holds the cell's Pixi display object and `_neighbors` its
@@ -183,45 +184,44 @@ class LiveCellState:
     blueprint_id: str | None
 
 
-async def _call(ws: Any, id_: int, method: str, params: dict | None = None) -> dict:
-    await ws.send(json.dumps({"id": id_, "method": method, "params": params or {}}))
-    while True:
-        response = json.loads(await ws.recv())
-        if response.get("id") == id_:
-            return response
+def _arm_board_store_target(ws_url: str, cancel_event: Event | None) -> str:
+    _command_target(ws_url, "Runtime.enable", cancel_event=cancel_event)
+    proto = _command_target(
+        ws_url,
+        "Runtime.evaluate",
+        {"expression": "Map.prototype", "returnByValue": False},
+        cancel_event=cancel_event,
+    )
+    proto_result = proto.get("result", {})
+    proto_object_id = proto_result.get("objectId")
+    if not proto_object_id:
+        return "no-map-prototype"
 
+    instances = _command_target(
+        ws_url,
+        "Runtime.queryObjects",
+        {"prototypeObjectId": proto_object_id},
+        timeout=30,
+        cancel_event=cancel_event,
+    )
+    instances_result = instances.get("objects", {})
+    instances_object_id = instances_result.get("objectId")
+    if not instances_object_id:
+        return "query-objects-failed"
 
-async def _arm_board_store_async(ws_url: str) -> str:
-    async with websockets.connect(ws_url, max_size=50 * 1024 * 1024) as ws:
-        await _call(ws, 0, "Runtime.enable")
-
-        proto = await _call(
-            ws, 1, "Runtime.evaluate", {"expression": "Map.prototype", "returnByValue": False}
-        )
-        proto_result = proto.get("result", {}).get("result", {})
-        proto_object_id = proto_result.get("objectId")
-        if not proto_object_id:
-            return "no-map-prototype"
-
-        instances = await _call(
-            ws, 2, "Runtime.queryObjects", {"prototypeObjectId": proto_object_id}
-        )
-        instances_result = instances.get("result", {}).get("objects", {})
-        instances_object_id = instances_result.get("objectId")
-        if not instances_object_id:
-            return "query-objects-failed"
-
-        found = await _call(
-            ws,
-            3,
+    try:
+        found = _command_target(
+            ws_url,
             "Runtime.callFunctionOn",
             {
                 "objectId": instances_object_id,
                 "functionDeclaration": _FIND_CELLS_MAP_EXPRESSION,
                 "returnByValue": True,
             },
+            timeout=30,
+            cancel_event=cancel_event,
         )
-        value = found.get("result", {}).get("result", {}).get("value")
+        value = found.get("result", {}).get("value")
         if isinstance(value, dict) and value.get("status") == "found":
             content_count = value.get("contentCount", 0)
             renderable_count = value.get("renderableCount", 0)
@@ -233,38 +233,57 @@ async def _arm_board_store_async(ws_url: str) -> str:
         if isinstance(value, dict) and value.get("status"):
             return str(value["status"])
         return str(value) if value else "cells-map-not-found"
+    finally:
+        try:
+            _command_target(
+                ws_url,
+                "Runtime.releaseObject",
+                {"objectId": instances_object_id},
+                timeout=1,
+            )
+        except CdpConnectionError:
+            pass
 
 
-async def _inspect_board_maps_async(ws_url: str) -> list[dict[str, Any]]:
-    async with websockets.connect(ws_url, max_size=50 * 1024 * 1024) as ws:
-        await _call(ws, 0, "Runtime.enable")
-        proto = await _call(
-            ws, 1, "Runtime.evaluate", {"expression": "Map.prototype", "returnByValue": False}
-        )
-        proto_object_id = proto.get("result", {}).get("result", {}).get("objectId")
-        if not proto_object_id:
-            return []
-        instances = await _call(
-            ws, 2, "Runtime.queryObjects", {"prototypeObjectId": proto_object_id}
-        )
-        instances_object_id = instances.get("result", {}).get("objects", {}).get("objectId")
-        if not instances_object_id:
-            return []
-        inspected = await _call(
-            ws,
-            3,
+def _inspect_board_maps_target(ws_url: str) -> list[dict[str, Any]]:
+    _command_target(ws_url, "Runtime.enable")
+    proto = _command_target(
+        ws_url, "Runtime.evaluate", {"expression": "Map.prototype", "returnByValue": False}
+    )
+    proto_object_id = proto.get("result", {}).get("objectId")
+    if not proto_object_id:
+        return []
+    instances = _command_target(
+        ws_url, "Runtime.queryObjects", {"prototypeObjectId": proto_object_id}, timeout=30
+    )
+    instances_object_id = instances.get("objects", {}).get("objectId")
+    if not instances_object_id:
+        return []
+    try:
+        inspected = _command_target(
+            ws_url,
             "Runtime.callFunctionOn",
             {
                 "objectId": instances_object_id,
                 "functionDeclaration": _INSPECT_CELLS_MAPS_EXPRESSION,
                 "returnByValue": True,
             },
+            timeout=30,
         )
-        value = inspected.get("result", {}).get("result", {}).get("value")
+        value = inspected.get("result", {}).get("value")
         return value if isinstance(value, list) else []
+    finally:
+        try:
+            _command_target(
+                ws_url, "Runtime.releaseObject", {"objectId": instances_object_id}, timeout=1
+            )
+        except CdpConnectionError:
+            pass
 
 
-def arm_board_store(port: int, page_title: str | None = None) -> str:
+def arm_board_store(
+    port: int, page_title: str | None = None, *, cancel_event: Event | None = None
+) -> str:
     """Best-effort, idempotent: locate the board's live cell `Map` on the
     heap and stash a reference at `window.__fmvBoardCells` for
     `read_board_state` to use. When multiple cell-shaped maps exist, the
@@ -276,29 +295,19 @@ def arm_board_store(port: int, page_title: str | None = None) -> str:
     `"cells-map-not-found"`, etc.) so discovery failures remain diagnosable.
     """
 
-    def arm(ws_url: str) -> str:
-        try:
-            return asyncio.run(_arm_board_store_async(ws_url))
-        except (OSError, ValueError, WebSocketException) as exc:
-            raise CdpConnectionError("Lost the board-store CDP connection.") from exc
-
-    return run_game_frame_operation(port, page_title, arm)
+    return run_game_frame_operation(
+        port, page_title, lambda ws_url: _arm_board_store_target(ws_url, cancel_event)
+    )
 
 
 def inspect_board_maps(port: int, page_title: str | None = None) -> list[dict[str, Any]]:
     """Return non-mutating summaries of every cell-shaped map in the game heap."""
 
-    def inspect(ws_url: str) -> list[dict[str, Any]]:
-        try:
-            return asyncio.run(_inspect_board_maps_async(ws_url))
-        except (OSError, ValueError, WebSocketException) as exc:
-            raise CdpConnectionError("Lost the board-diagnostics CDP connection.") from exc
-
-    return run_game_frame_operation(port, page_title, inspect)
+    return run_game_frame_operation(port, page_title, _inspect_board_maps_target)
 
 
 def read_board_state(
-    port: int, page_title: str | None = None
+    port: int, page_title: str | None = None, *, cancel_event: Event | None = None
 ) -> dict[GridCoord, LiveCellState] | None:
     """Every cell's current content, straight from the game's live map.
 
@@ -310,7 +319,7 @@ def read_board_state(
     Returns None if `arm_board_store` hasn't successfully captured a
     reference yet.
     """
-    raw = evaluate(port, _READ_EXPRESSION, page_title)
+    raw = evaluate(port, _READ_EXPRESSION, page_title, cancel_event=cancel_event)
     if not isinstance(raw, list):
         return None
     states: dict[GridCoord, LiveCellState] = {}

@@ -158,40 +158,6 @@ def _find_frame(atlases: Atlases, frame_name: str) -> np.ndarray | None:
     return None
 
 
-def _build_crate_button(atlases: Atlases) -> np.ndarray | None:
-    """Composite the crate icon onto its circular button background.
-
-    The game keeps these as two separate atlas frames (there's no single
-    pre-composited sprite), and the circle is cropped to its top ~70%: in
-    the live UI the bottom is always covered by the "N/40" counter label
-    below it, so including that region just adds a permanent mismatch
-    against every real capture. Both facts (separate layers, occlusion
-    crop) and the ~70% figure were confirmed empirically by matching
-    against real screenshots -- see assets/templates/README.md.
-    """
-    circle = _find_frame(atlases, "btn_cratespawn_idle")
-    crate = _find_frame(atlases, "icon_btn_crate_spawn")
-    if circle is None or crate is None:
-        return None
-
-    ch, cw = circle.shape[:2]
-    crh, crw = crate.shape[:2]
-    y0, x0 = (ch - crh) // 2, (cw - crw) // 2
-
-    composite = circle.copy()
-    region = composite[y0 : y0 + crh, x0 : x0 + crw]
-    crate_bgr = crate[:, :, :3].astype(np.float32)
-    crate_a = crate[:, :, 3:4].astype(np.float32) / 255.0
-    region_bgr = region[:, :, :3].astype(np.float32)
-    blended_bgr = (crate_bgr * crate_a + region_bgr * (1 - crate_a)).astype(np.uint8)
-    blended_a = np.maximum(region[:, :, 3:4], crate[:, :, 3:4])
-    composite[y0 : y0 + crh, x0 : x0 + crw, :3] = blended_bgr
-    composite[y0 : y0 + crh, x0 : x0 + crw, 3:4] = blended_a
-
-    keep_h = int(ch * 0.7)
-    return composite[:keep_h, :]
-
-
 def _extract_chain(
     atlases: Atlases,
     items_dir: Path,
@@ -265,14 +231,3 @@ def extract_templates(har_path: Path, *, force: bool = False) -> None:
                 continue
             cv2.imwrite(str(dst_dir / f"tier_{value}.png"), crop)
         print(f"{group}/{folder}: {len(tier_values)} tiers -> {dst_dir}")
-
-    crate_button = _build_crate_button(atlases)
-    if crate_button is None:
-        print(
-            "  MISSING UI template: supply_crate.png (btn_cratespawn_idle / icon_btn_crate_spawn)"
-        )
-    else:
-        ui_dir = templates_dir / "ui"
-        ui_dir.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(ui_dir / "supply_crate.png"), crate_button)
-        print("ui/supply_crate.png <- btn_cratespawn_idle + icon_btn_crate_spawn (composited)")

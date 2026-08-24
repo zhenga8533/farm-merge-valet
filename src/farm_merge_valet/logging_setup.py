@@ -14,4 +14,5 @@ def configure_logging(level: str = "INFO") -> None:
         datefmt="[%X]",
         handlers=[RichHandler(rich_tracebacks=True, show_path=False)],
     )
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    for logger_name in ("httpcore", "httpx", "websockets"):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)

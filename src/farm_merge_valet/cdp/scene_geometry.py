@@ -1,12 +1,10 @@
-"""Resolve board cells to window-relative pixels from live rendering state.
+"""Resolve board cells to game-capture-relative pixels from live rendering state.
 
 Each calibration combines:
 
 1. Pixi bounds for rendered cell content.
 2. A least-squares affine mapping from grid coordinates to canvas pixels.
-3. Canvas DOM size and scale.
-4. The cross-origin game iframe's position, read from the top-level page.
-5. OS window bounds and browser display scaling.
+3. Canvas DOM position, size, and scale inside the game iframe.
 
 Inputs are read fresh on every call so camera, window, and display changes do
 not leave stale geometry behind.
@@ -18,12 +16,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from farm_merge_valet.capture.window import WindowRegion
-from farm_merge_valet.cdp.client import (
-    GAME_FRAME_URL_MARKER,
-    evaluate,
-    evaluate_top_page,
-)
+from farm_merge_valet.cdp.client import evaluate
 from farm_merge_valet.core.board import GridCoord
 
 Vector = tuple[float, float]
@@ -66,46 +59,16 @@ _CELL_POSITIONS_EXPRESSION = """
     canvasHeight: canvas.height,
     canvasCssWidth: rect.width,
     canvasCssHeight: rect.height,
+    canvasCssLeft: rect.left,
+    canvasCssTop: rect.top,
   };
 })()
-"""
-
-# Walk the page's shadow DOM for the game iframe; Reddit embeds Devvit apps
-# inside a shadow root, so a document-level iframe query cannot see it.
-_IFRAME_RECT_EXPRESSION = f"""
-(() => {{
-  const marker = {GAME_FRAME_URL_MARKER!r};
-  let found = null;
-  function walk(root) {{
-    for (const el of root.querySelectorAll('*')) {{
-      if (el.tagName === 'IFRAME' && (el.src || '').includes(marker)) {{
-        const r = el.getBoundingClientRect();
-        found = {{ left: r.left, top: r.top }};
-        return;
-      }}
-      if (el.shadowRoot) {{
-        walk(el.shadowRoot);
-        if (found) return;
-      }}
-    }}
-  }}
-  walk(document);
-  if (!found) return null;
-  return {{
-    iframeLeft: found.left,
-    iframeTop: found.top,
-    devicePixelRatio: window.devicePixelRatio,
-    innerWidth: window.innerWidth,
-    innerHeight: window.innerHeight,
-  }};
-}})()
 """
 
 
 @dataclass(frozen=True)
 class SceneCalibration:
-    """Column/row -> OS-window-region-relative pixel mapping, entirely
-    derived from live game/browser/window state (see module docstring)."""
+    """Column/row -> game-capture-relative pixel mapping."""
 
     rendered_coords: frozenset[GridCoord]
     origin: Vector  # canvas-internal pixel at grid (0, 0)
@@ -149,9 +112,7 @@ def _fit_grid_affine(points: list[dict]) -> tuple[Vector, Vector, Vector] | None
     return (float(ox), float(oy)), (float(cx), float(cy)), (float(rx), float(ry))
 
 
-def read_scene_calibration(
-    port: int, region: WindowRegion, page_title: str | None = None
-) -> SceneCalibration | None:
+def read_scene_calibration(port: int, page_title: str | None = None) -> SceneCalibration | None:
     """Build a `SceneCalibration` from live game/browser/window state.
 
     Returns None (rather than raising) for any of several expected,
@@ -167,27 +128,10 @@ def read_scene_calibration(
         return None
     origin, col_step, row_step = fit
 
-    iframe_data = evaluate_top_page(port, _IFRAME_RECT_EXPRESSION, page_title)
-    if not isinstance(iframe_data, dict):
-        return None
-
-    dpr = iframe_data["devicePixelRatio"]
     canvas_to_css_x = cell_data["canvasCssWidth"] / cell_data["canvasWidth"]
     canvas_to_css_y = cell_data["canvasCssHeight"] / cell_data["canvasHeight"]
-
-    # The browser's own chrome (title bar, tab strip, address bar) around
-    # its content viewport, derived from the real OS window bounds
-    # (`region`, from `capture.window.find_window`'s DWM query) minus the
-    # page's own reported viewport size -- not hand-measured, and stable
-    # across scrolling/zooming since window chrome doesn't move with them.
-    chrome_x = region.width - iframe_data["innerWidth"] * dpr
-    chrome_y = region.height - iframe_data["innerHeight"] * dpr
-
-    canvas_offset = (
-        chrome_x + iframe_data["iframeLeft"] * dpr,
-        chrome_y + iframe_data["iframeTop"] * dpr,
-    )
-    canvas_scale = (canvas_to_css_x * dpr, canvas_to_css_y * dpr)
+    canvas_offset = (float(cell_data["canvasCssLeft"]), float(cell_data["canvasCssTop"]))
+    canvas_scale = (canvas_to_css_x, canvas_to_css_y)
 
     return SceneCalibration(
         rendered_coords=frozenset(

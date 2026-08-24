@@ -1,0 +1,277 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from farm_merge_valet.browser.manager import (
+    BrowserKind,
+    BrowserManager,
+    BrowserManagerError,
+    BrowserStatus,
+    SupportTier,
+)
+from farm_merge_valet.config import Settings
+
+
+def _executable(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+    return path
+
+
+def test_auto_detection_prefers_supported_chrome_then_edge(tmp_path, monkeypatch) -> None:
+    program_files = tmp_path / "Program Files"
+    program_files_x86 = tmp_path / "Program Files (x86)"
+    chrome = _executable(program_files / "Google/Chrome/Application/chrome.exe")
+    edge = _executable(program_files_x86 / "Microsoft/Edge/Application/msedge.exe")
+    monkeypatch.setenv("ProgramFiles", str(program_files))
+    monkeypatch.setenv("ProgramFiles(x86)", str(program_files_x86))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+
+    installations = BrowserManager(Settings(_env_file=None)).installations()
+
+    assert [(item.kind, item.executable) for item in installations] == [
+        (BrowserKind.CHROME, chrome),
+        (BrowserKind.EDGE, edge),
+    ]
+    assert all(item.support is SupportTier.SUPPORTED for item in installations)
+
+
+def test_explicit_brave_is_marked_experimental(tmp_path) -> None:
+    executable = _executable(tmp_path / "BraveSoftware/Brave-Browser/Application/brave.exe")
+    settings = Settings(_env_file=None, browser="brave", browser_executable=executable)
+
+    installation = BrowserManager(settings).installations()[0]
+
+    assert installation.kind is BrowserKind.BRAVE
+    assert installation.support is SupportTier.EXPERIMENTAL
+
+
+def test_status_verifies_profile_flags_and_ownership(tmp_path, monkeypatch) -> None:
+    executable = _executable(tmp_path / "chrome.exe")
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    settings = Settings(
+        _env_file=None,
+        browser="chrome",
+        browser_executable=executable,
+        browser_profile_dir=profile,
+    )
+    marker = {"kind": "chrome", "executable": str(executable), "port": 9222}
+    (profile / ".farm-merge-valet-browser.json").write_text(json.dumps(marker), encoding="utf-8")
+    command_line = " ".join(
+        [
+            f'"{executable}"',
+            "--remote-debugging-port=9222",
+            f'--user-data-dir="{profile}"',
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-background-mode",
+        ]
+    )
+    manager = BrowserManager(settings)
+    monkeypatch.setattr(manager, "_endpoint_reachable", lambda: True)
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.read_browser_metadata",
+        lambda _port: {
+            "browser": "Chrome/151",
+            "executable_path": str(executable),
+            "command_line": command_line,
+        },
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.list_targets",
+        lambda _port: [{"url": "https://playfmv-test.devvit.net/index.html"}],
+    )
+
+    status = manager.status()
+
+    assert status.running
+    assert status.compatible
+    assert status.managed
+    assert status.game_loaded
+    assert status.missing_switches == ()
+
+
+def test_status_does_not_treat_launcher_as_loaded_game(tmp_path, monkeypatch) -> None:
+    executable = _executable(tmp_path / "chrome.exe")
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    settings = Settings(
+        _env_file=None,
+        browser="chrome",
+        browser_executable=executable,
+        browser_profile_dir=profile,
+    )
+    manager = BrowserManager(settings)
+    monkeypatch.setattr(manager, "_endpoint_reachable", lambda: True)
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.read_browser_metadata",
+        lambda _port: {
+            "browser": "Chrome/151",
+            "executable_path": str(executable),
+            "arguments": [],
+        },
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.list_targets",
+        lambda _port: [{"url": "https://playfmv-test.devvit.net/launcher/launcher.html"}],
+    )
+
+    assert not manager.status().game_loaded
+
+
+def test_stop_refuses_an_unowned_browser(monkeypatch) -> None:
+    manager = BrowserManager(Settings(_env_file=None))
+    monkeypatch.setattr(
+        manager,
+        "status",
+        lambda: BrowserStatus(True, True, False, kind=BrowserKind.CHROME),
+    )
+
+    with pytest.raises(BrowserManagerError, match="ownership marker"):
+        manager.stop()
+
+
+def test_status_accepts_profile_paths_with_spaces_from_argument_list(tmp_path, monkeypatch) -> None:
+    executable = _executable(tmp_path / "Browser App" / "chrome.exe")
+    profile = tmp_path / "Managed Profile"
+    settings = Settings(
+        _env_file=None,
+        browser="chrome",
+        browser_executable=executable,
+        browser_profile_dir=profile,
+    )
+    manager = BrowserManager(settings)
+    arguments = [
+        str(executable),
+        "--remote-debugging-port=9222",
+        f"--user-data-dir={profile}",
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-background-mode",
+    ]
+    monkeypatch.setattr(manager, "_endpoint_reachable", lambda: True)
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.read_browser_metadata",
+        lambda _port: {
+            "browser": "Chrome/151",
+            "executable_path": str(executable),
+            "command_line": "",
+            "arguments": arguments,
+        },
+    )
+    monkeypatch.setattr("farm_merge_valet.browser.manager.list_targets", lambda _port: [])
+
+    status = manager.status()
+
+    assert status.compatible
+    assert status.profile_dir == profile
+
+
+def test_launch_writes_marker_and_required_switches(tmp_path, monkeypatch) -> None:
+    executable = _executable(tmp_path / "chrome.exe")
+    profile = tmp_path / "profile"
+    settings = Settings(
+        _env_file=None,
+        browser="chrome",
+        browser_executable=executable,
+        browser_profile_dir=profile,
+        game_url="https://reddit.example/game",
+    )
+    manager = BrowserManager(settings)
+    ready = BrowserStatus(
+        True,
+        True,
+        True,
+        BrowserKind.CHROME,
+        SupportTier.SUPPORTED,
+        executable,
+        profile,
+    )
+    statuses = iter([BrowserStatus(False, False, False), ready])
+    endpoints = iter([True])
+    launched = []
+
+    class Process:
+        pid = 123
+        returncode = None
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(manager, "status", lambda: next(statuses))
+    monkeypatch.setattr(manager, "_endpoint_reachable", lambda: next(endpoints))
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.subprocess.Popen",
+        lambda arguments: launched.append(arguments) or Process(),
+    )
+
+    assert manager.launch() is ready
+    assert (profile / ".farm-merge-valet-browser.json").is_file()
+    arguments = launched[0]
+    assert "--remote-debugging-port=9222" in arguments
+    assert "--enable-automation" not in arguments
+    assert "--disable-background-mode" in arguments
+    assert "https://reddit.example/game" in arguments
+
+
+def test_stop_closes_only_a_verified_managed_endpoint(monkeypatch) -> None:
+    manager = BrowserManager(Settings(_env_file=None))
+    monkeypatch.setattr(
+        manager,
+        "status",
+        lambda: BrowserStatus(True, True, True, kind=BrowserKind.CHROME),
+    )
+    endpoint_samples = iter([False, False])
+    monkeypatch.setattr(manager, "_endpoint_reachable", lambda: next(endpoint_samples))
+    closed = []
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.close_browser", lambda port: closed.append(port)
+    )
+
+    manager.stop()
+
+    assert closed == [9222]
+
+
+def test_launch_retries_after_profile_handoff_exit(tmp_path, monkeypatch) -> None:
+    executable = _executable(tmp_path / "chrome.exe")
+    settings = Settings(
+        _env_file=None,
+        browser="chrome",
+        browser_executable=executable,
+        browser_profile_dir=tmp_path / "profile",
+    )
+    manager = BrowserManager(settings)
+    ready = BrowserStatus(True, True, True, kind=BrowserKind.CHROME)
+    statuses = iter([BrowserStatus(False, False, False), ready])
+    endpoints = iter([False, True])
+    launches = 0
+
+    class Process:
+        pid = 123
+        returncode = 0
+
+        def __init__(self, exited: bool) -> None:
+            self.exited = exited
+
+        def poll(self):
+            return 0 if self.exited else None
+
+    def launch(_arguments):
+        nonlocal launches
+        launches += 1
+        return Process(launches == 1)
+
+    monkeypatch.setattr(manager, "status", lambda: next(statuses))
+    monkeypatch.setattr(manager, "_endpoint_reachable", lambda: next(endpoints))
+    monkeypatch.setattr("farm_merge_valet.browser.manager.subprocess.Popen", launch)
+    monkeypatch.setattr("farm_merge_valet.browser.manager.time.sleep", lambda _seconds: None)
+
+    assert manager.launch() is ready
+    assert launches == 2

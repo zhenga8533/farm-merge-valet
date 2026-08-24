@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "farm-merge-valet"
 version = "0.1.0"
-description = "Screen-automation tool for Farm Merge Valley"
+description = "Internal-API automation tool for Farm Merge Valley"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -14,11 +14,8 @@ authors = [{ name = "Allen Zheng" }]
 dependencies = [
     "typer>=0.12",
     "rich>=13.7",
-    "mss>=9.0",
     "opencv-python>=4.9",
     "numpy>=1.26",
-    "pyautogui>=0.9.54",
-    "pygetwindow>=0.0.9; sys_platform == 'win32'",
     "keyboard>=0.13",
     "pydantic>=2.7",
     "pydantic-settings>=2.2",
