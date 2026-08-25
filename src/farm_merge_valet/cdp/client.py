@@ -34,6 +34,8 @@ from urllib.request import urlopen
 from websockets.exceptions import ConnectionClosed, WebSocketException
 from websockets.sync.client import connect
 
+from farm_merge_valet.logging_setup import log_event
+
 logger = logging.getLogger(__name__)
 
 # The game is a Reddit "devvit" app, embedded as a cross-origin iframe
@@ -473,7 +475,13 @@ def run_game_frame_operation(
             _invalidate_target_pair(port, page_title)
             if attempt == 1:
                 raise
-            logger.info("CDP game target changed; refreshing browser targets.")
+            log_event(
+                logger,
+                logging.INFO,
+                "cdp.game_target_refresh",
+                "CDP game target changed; refreshing browser targets.",
+                attempt=attempt + 1,
+            )
     raise AssertionError("unreachable")
 
 
@@ -491,7 +499,13 @@ def _run_top_page_operation(
             _invalidate_target_pair(port, page_title)
             if attempt == 1:
                 raise
-            logger.info("CDP page target changed; refreshing browser targets.")
+            log_event(
+                logger,
+                logging.INFO,
+                "cdp.page_target_refresh",
+                "CDP page target changed; refreshing browser targets.",
+                attempt=attempt + 1,
+            )
     raise AssertionError("unreachable")
 
 
@@ -602,7 +616,14 @@ def apply_background_overrides(
             except CdpCancelledError:
                 raise
             except CdpConnectionError:
-                logger.debug("CDP override %s is unavailable for this target.", method)
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    "cdp.override_unavailable",
+                    "CDP override %s is unavailable for this target.",
+                    method,
+                    method=method,
+                )
 
 
 def capture_game_frame(port: int, page_title: str | None = None) -> bytes:

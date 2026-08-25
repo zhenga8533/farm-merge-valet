@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from collections import Counter
 from datetime import datetime
@@ -26,12 +27,14 @@ from farm_merge_valet.cdp.scene_geometry import read_scene_calibration
 from farm_merge_valet.config import settings
 from farm_merge_valet.core.board import CellKind
 from farm_merge_valet.core.bot import Bot
-from farm_merge_valet.logging_setup import configure_logging
+from farm_merge_valet.logging_setup import configure_logging, log_event
 from farm_merge_valet.tools.template_extraction import extract_templates
 
 app = typer.Typer(help="Automation tool for Farm Merge Valley.")
 browser_app = typer.Typer(help="Manage the dedicated Chromium-family browser.")
 app.add_typer(browser_app, name="browser")
+
+logger = logging.getLogger(__name__)
 
 
 @app.callback()
@@ -60,12 +63,26 @@ def run() -> None:
         try:
             status = BrowserManager(settings).ensure_running()
         except BrowserManagerError as exc:
-            rprint(f"[red]Managed browser startup failed:[/red] {exc}")
+            log_event(
+                logger,
+                logging.ERROR,
+                "browser.startup_failed",
+                "Managed browser startup failed: %s",
+                exc,
+                detail=str(exc),
+            )
             raise typer.Exit(code=1) from exc
         browser_name = status.kind.value if status.kind else "browser"
-        rprint(
-            f"[green]Managed browser ready:[/green] {browser_name} "
-            f"(game_loaded={status.game_loaded})"
+        log_event(
+            logger,
+            logging.INFO,
+            "browser.ready",
+            "Managed browser ready: %s (game_loaded=%s).",
+            browser_name,
+            status.game_loaded,
+            browser=browser_name,
+            game_loaded=status.game_loaded,
+            managed=status.managed,
         )
     bot = Bot()
     if settings.gui_enabled:

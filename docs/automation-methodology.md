@@ -93,9 +93,17 @@ and heartbeat status. Heap-wide board-map candidates are collected only when
 The active loop rate-limits repeated capability discovery and periodically logs
 stable waiting conditions such as a frozen heartbeat, unavailable board state,
 busy handler, or exhausted supply. Operations taking at least one second emit a
-stage-duration warning. Routine readiness, accepted actions, and user controls
-use `INFO`; recoverable failures use `WARNING`; unsafe terminal conditions use
-`ERROR`; cached discovery and planner transitions use `DEBUG`.
+stage-duration warning. Routine readiness, accepted submissions, authoritative
+action results, and user controls use `INFO`; recoverable failures use
+`WARNING`; unsafe terminal conditions use `ERROR`; selected planner actions,
+cached discovery, and planner transitions use `DEBUG`.
+
+Operational records are emitted once with readable text, a stable `fmv_event`
+identifier, and structured `fmv_context`. The console and GUI subscribe as
+separate sinks through the central logging configuration. A future remote sink
+can therefore filter events without parsing prose. Remote delivery must run
+behind a queue rather than performing network I/O on the automation or GUI
+thread; webhook retries and rate limits belong to that sink, not the bot loop.
 
 ## Operational boundaries
 

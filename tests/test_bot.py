@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from threading import Event, Lock, Thread
 
+import pytest
+
 from farm_merge_valet.cdp.runtime import ActionResult, ActionStatus, CrateSpawnResult, RuntimeHealth
 from farm_merge_valet.core.board import (
     BoardGrid,
@@ -63,6 +65,8 @@ def bare_bot() -> Bot:
     bot._last_health = None
     bot._last_wait_reason = None
     bot._last_wait_log_at = 0.0
+    bot._last_crate_claim_limit = None
+    bot._last_crate_claim_log_at = 0.0
     bot._capability_retry_at = 0.0
     bot._capability_retry_delay = 1.0
     return bot
@@ -85,16 +89,35 @@ def test_phase_transition_is_debug_diagnostic(caplog) -> None:
     assert record.message == "Phase CLAIM_CRATES -> MERGE."
 
 
-def test_offscreen_coordinates_are_submitted_unchanged() -> None:
+def test_offscreen_coordinates_are_submitted_unchanged(caplog) -> None:
     bot = bare_bot()
     item = ItemRef("crops", "wheat", 1)
     move = action(item)
     bot.board.set_cell(move.start, Cell(CellKind.ITEM, item))
     bot.board.set_cell(move.end, Cell(CellKind.EMPTY))
 
-    assert bot._submit_merge(move, health(advancing=True))
+    with caplog.at_level(logging.INFO):
+        assert bot._submit_merge(move, health(advancing=True))
+
     assert bot.runtime.drops == [((0, 0), (1, 0))]
     assert bot._pending_action is not None
+    record = next(record for record in caplog.records if record.fmv_event == "action.submitted")
+    assert record.fmv_context["item_name"] == "wheat"
+    assert record.fmv_context["start"] == (0, 0)
+
+
+def test_selected_action_logs_plan_then_submission(monkeypatch, caplog) -> None:
+    bot = bare_bot()
+    item = ItemRef("crops", "wheat", 1)
+    move = action(item)
+    bot._merge_actions_for_policy = lambda: [move]
+    monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 10.0)
+
+    with caplog.at_level(logging.DEBUG):
+        bot._step_merge(health(advancing=True), True)
+
+    events = [record.fmv_event for record in caplog.records if hasattr(record, "fmv_event")]
+    assert events[-2:] == ["action.planned", "action.submitted"]
 
 
 def test_rejected_action_logs_detail_and_cools_down(monkeypatch, caplog) -> None:
@@ -135,6 +158,21 @@ def test_pending_action_survives_frozen_heartbeat() -> None:
 
     assert not bot._verify_pending_action(health(advancing=False))
     assert bot._pending_action is pending
+
+
+def test_frozen_heartbeat_reports_pending_action_after_settle_window(monkeypatch, caplog) -> None:
+    bot = bare_bot()
+    item = ItemRef("crops", "wheat", 1)
+    move = action(item)
+    bot._pending_action = _PendingAction(move, (), 7, submitted_at=1.0)
+    monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 5.0)
+
+    with caplog.at_level(logging.INFO):
+        assert not bot._verify_pending_action(health(advancing=False))
+
+    assert any("heartbeat is frozen" in message for message in caplog.messages)
+    record = next(record for record in caplog.records if record.fmv_event == "bot.waiting")
+    assert "submitted move" in record.fmv_context["reason"]
 
 
 def test_pending_success_is_confirmed_only_while_active() -> None:
@@ -288,16 +326,19 @@ def test_three_genuine_noops_pause_instead_of_repeating(monkeypatch) -> None:
     assert bot._interrupt_event.is_set()
 
 
-def test_crate_limit_preserves_policy_reserve(monkeypatch) -> None:
+def test_crate_limit_preserves_policy_reserve(monkeypatch, caplog) -> None:
     bot = bare_bot()
     for x in range(4):
         bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
     bot._merge_actions_for_policy = lambda: [object()]
     monkeypatch.setattr("farm_merge_valet.core.bot.settings.merge_empty_cell_reserve", 1)
 
-    bot._step_claim_crates(False)
+    with caplog.at_level(logging.INFO):
+        bot._step_claim_crates(False)
 
     assert bot.runtime.spawn_limits == [3]
+    events = [record.fmv_event for record in caplog.records if hasattr(record, "fmv_event")]
+    assert events == ["crate.claim_started", "crate.claim_completed"]
 
 
 def test_merge_five_policy_does_not_fall_back_while_space_remains(monkeypatch) -> None:
@@ -401,6 +442,31 @@ def test_quit_is_responsive_while_runtime_discovery_is_blocked(monkeypatch) -> N
     release.set()
 
     assert not runner.is_alive()
+
+
+def test_unexpected_bot_failure_is_logged_before_propagating(monkeypatch, caplog) -> None:
+    bot = bare_bot()
+    bot._resume_cached_runtime = lambda: False
+    bot.initialize = lambda: True
+
+    def fail_step() -> None:
+        raise RuntimeError("unexpected test failure")
+
+    bot.step = fail_step
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.start_paused", False)
+    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.on_press_key", lambda *_, **__: None)
+    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.on_release_key", lambda *_, **__: None)
+    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.unhook_all", lambda: None)
+
+    with (
+        caplog.at_level(logging.INFO),
+        pytest.raises(RuntimeError, match="unexpected test failure"),
+    ):
+        bot.run_forever()
+
+    events = [record.fmv_event for record in caplog.records if hasattr(record, "fmv_event")]
+    assert "bot.unhandled_error" in events
+    assert events[-1] == "bot.stopped"
 
 
 def test_step_rediscovers_a_capability_missing_from_a_partial_runtime() -> None:

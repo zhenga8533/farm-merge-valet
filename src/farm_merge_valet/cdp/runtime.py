@@ -16,6 +16,7 @@ from farm_merge_valet.cdp.board_store import arm_board_store
 from farm_merge_valet.cdp.client import apply_background_overrides, evaluate
 from farm_merge_valet.cdp.inventory_store import arm_crate_inventory
 from farm_merge_valet.core.board import GridCoord
+from farm_merge_valet.logging_setup import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -489,7 +490,12 @@ class GameRuntimeAdapter:
             return self.read_runtime_health()
         cached_board_is_current = self._evaluate(_BOARD_ARMED_EXPRESSION) is True
         if not cached_board_is_current:
-            logger.info("Cached board is absent or stale; locating the active board map.")
+            log_event(
+                logger,
+                logging.INFO,
+                "runtime.board_cache_stale",
+                "Cached board is absent or stale; locating the active board map.",
+            )
             arm_board_store(self.port, self.page_title, cancel_event=self._cancel_event)
         if is_cancelled():
             return self.read_runtime_health()
@@ -514,12 +520,18 @@ class GameRuntimeAdapter:
             time.sleep(0.05)
         health = self.read_runtime_health()
         elapsed = time.monotonic() - started
-        log = logger.debug if cached_board_is_current and elapsed < 1.0 else logger.info
-        log(
+        level = logging.DEBUG if cached_board_is_current and elapsed < 1.0 else logging.INFO
+        log_event(
+            logger,
+            level,
+            "runtime.discovery_completed",
             "Runtime discovery finished in %.1fs (cached board=%s, scene=%s).",
             elapsed,
             cached_board_is_current,
             health.scene_id,
+            elapsed_seconds=elapsed,
+            cached_board=cached_board_is_current,
+            scene_id=health.scene_id,
         )
         return health
 

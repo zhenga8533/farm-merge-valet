@@ -39,6 +39,7 @@ from farm_merge_valet.core.board import (
     plan_merge_actions,
 )
 from farm_merge_valet.core.board_scan import discover_blueprint_items
+from farm_merge_valet.logging_setup import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -109,12 +110,23 @@ class Bot:
         self._last_health: RuntimeHealth | None = None
         self._last_wait_reason: str | None = None
         self._last_wait_log_at = 0.0
+        self._last_crate_claim_limit: int | None = None
+        self._last_crate_claim_log_at = 0.0
         self._capability_retry_at = 0.0
         self._capability_retry_delay = settings.loop_interval
 
     def _set_phase(self, phase: Phase) -> None:
         if phase is not self.phase:
-            logger.debug("Phase %s -> %s.", self.phase.name, phase.name)
+            log_event(
+                logger,
+                logging.DEBUG,
+                "planner.phase_changed",
+                "Phase %s -> %s.",
+                self.phase.name,
+                phase.name,
+                previous_phase=self.phase.name,
+                phase=phase.name,
+            )
             self.phase = phase
             self._last_wait_reason = None
 
@@ -126,18 +138,32 @@ class Bot:
         if flag_status.get("available") is True and flag_status.get("all_present") is False:
             missing_flags = flag_status.get("missing")
             missing = missing_flags if isinstance(missing_flags, list) else []
-            logger.error(
+            log_event(
+                logger,
+                logging.ERROR,
+                "browser.background_flags_missing",
                 "Browser is missing required background flags: %s",
                 ", ".join(str(value) for value in missing),
+                missing_flags=missing,
             )
             self.paused = True
             self._interrupt_event.set()
             return False
         if flag_status.get("available") is False:
-            logger.warning("Could not verify browser background flags: %s", flag_status["detail"])
+            log_event(
+                logger,
+                logging.WARNING,
+                "browser.background_flags_unverified",
+                "Could not verify browser background flags: %s",
+                flag_status["detail"],
+                detail=flag_status["detail"],
+            )
         self._last_health = self.runtime.discover()
         if not self._last_health.available:
-            logger.warning(
+            log_event(
+                logger,
+                logging.WARNING,
+                "runtime.unavailable",
                 "Game target found, but action runtime is unavailable: %s "
                 "(board=%s, item actions=%s, crate claims=%s, inventory=%s).",
                 self._last_health.detail or "no diagnostic detail",
@@ -145,24 +171,48 @@ class Bot:
                 self._last_health.item_drop_available,
                 self._last_health.crate_spawn_available,
                 self._last_health.inventory_available,
+                scene_id=self._last_health.scene_id,
+                detail=self._last_health.detail,
             )
             return False
         if self._last_health.detail:
-            logger.warning(
+            log_event(
+                logger,
+                logging.WARNING,
+                "runtime.partially_ready",
                 "Game runtime is partially ready: %s (item actions=%s, crate claims=%s).",
                 self._last_health.detail,
                 self._last_health.item_drop_available,
                 self._last_health.crate_spawn_available,
+                scene_id=self._last_health.scene_id,
+                detail=self._last_health.detail,
             )
         if not self._sync_board_from_live_state():
-            logger.warning("Game runtime was discovered, but its board state could not be read.")
+            log_event(
+                logger,
+                logging.WARNING,
+                "runtime.board_unavailable",
+                "Game runtime was discovered, but its board state could not be read.",
+                scene_id=self._last_health.scene_id,
+            )
             return False
         if self._last_health.heartbeat_advancing:
-            logger.info("Game runtime ready (scene=%s).", self._last_health.scene_id)
+            log_event(
+                logger,
+                logging.INFO,
+                "runtime.ready",
+                "Game runtime ready (scene=%s).",
+                self._last_health.scene_id,
+                scene_id=self._last_health.scene_id,
+            )
         else:
-            logger.info(
+            log_event(
+                logger,
+                logging.INFO,
+                "runtime.connected",
                 "Game runtime connected (scene=%s); waiting for the heartbeat to advance.",
                 self._last_health.scene_id,
+                scene_id=self._last_health.scene_id,
             )
         return True
 
@@ -178,7 +228,14 @@ class Bot:
         ):
             return False
         self._last_health = health
-        logger.debug("Resumed cached game runtime (scene=%s).", health.scene_id)
+        log_event(
+            logger,
+            logging.DEBUG,
+            "runtime.cache_resumed",
+            "Resumed cached game runtime (scene=%s).",
+            health.scene_id,
+            scene_id=health.scene_id,
+        )
         return True
 
     def _sync_board_from_live_state(self) -> bool:
@@ -189,7 +246,14 @@ class Bot:
                 cancel_event=self._interrupt_event,
             )
         except CdpConnectionError as exc:
-            logger.debug("Could not read live board state: %s", exc)
+            log_event(
+                logger,
+                logging.DEBUG,
+                "runtime.board_read_failed",
+                "Could not read live board state: %s",
+                exc,
+                detail=str(exc),
+            )
             return False
         if raw is None:
             return False
@@ -318,6 +382,18 @@ class Bot:
             return cell.kind.name.lower()
         return f"{cell.item.name} tier {cell.item.tier}"
 
+    @staticmethod
+    def _action_event_context(action: MergeAction) -> dict[str, object]:
+        return {
+            "planner_action": action.kind.name.lower(),
+            "effect": action.effect.name.lower(),
+            "item_category": action.item.category,
+            "item_name": action.item.name,
+            "item_tier": action.item.tier,
+            "start": action.start,
+            "end": action.end,
+        }
+
     def _merge_action_succeeded(self, action: MergeAction) -> bool:
         def has_item(coord: GridCoord, item: ItemRef) -> bool:
             cell = self.board.get_cell(coord)
@@ -336,16 +412,29 @@ class Bot:
         pending = self._pending_action
         if pending is None:
             return True
-        if not health.heartbeat_advancing:
-            return False
         now = time.monotonic()
+        age = now - pending.submitted_at
+        if not health.heartbeat_advancing:
+            if age >= _ACTION_SETTLE_SECONDS:
+                self._report_wait(
+                    f"submitted {pending.action.effect.name.lower()} is pending while the "
+                    "game heartbeat is frozen",
+                    **self._action_event_context(pending.action),
+                )
+            return False
         current_signature = self._action_signature(pending.action)
         if health.scene_id != pending.scene_id and not pending.scene_change_logged:
-            logger.warning(
+            log_event(
+                logger,
+                logging.WARNING,
+                "action.pending_scene_changed",
                 "Runtime scene changed from %s to %s while an item action was pending; "
                 "verifying against the reloaded board.",
                 pending.scene_id,
                 health.scene_id,
+                previous_scene_id=pending.scene_id,
+                scene_id=health.scene_id,
+                **self._action_event_context(pending.action),
             )
             pending.scene_change_logged = True
         if self._merge_action_succeeded(pending.action):
@@ -354,11 +443,17 @@ class Bot:
             self._action_failures.pop(action_key, None)
             self._action_retry_at.pop(action_key, None)
             self._schedule_next_item_action(now)
-            logger.info(
+            self._last_wait_reason = None
+            log_event(
+                logger,
+                logging.INFO,
+                "action.confirmed",
                 "%s confirmed: %s -> %s.",
                 pending.action.effect.name.title(),
                 pending.action.start,
                 pending.action.end,
+                elapsed_seconds=now - pending.submitted_at,
+                **self._action_event_context(pending.action),
             )
             return True
 
@@ -366,17 +461,26 @@ class Bot:
             pending.last_signature = current_signature
             pending.last_change_at = now
 
-        age = now - pending.submitted_at
         stable_for = now - pending.last_change_at
         settled = age >= _ACTION_SETTLE_SECONDS and stable_for >= _ACTION_STABLE_SECONDS
         if health.item_action_busy or (not settled and age < _ACTION_MAX_PENDING_SECONDS):
+            if age >= _ACTION_SETTLE_SECONDS:
+                reason = (
+                    "the game is finishing the submitted item action"
+                    if health.item_action_busy
+                    else "the submitted item action is still resolving"
+                )
+                self._report_wait(reason, **self._action_event_context(pending.action))
             return False
 
         self._pending_action = None
         self._schedule_next_item_action(now)
         action = pending.action
         if current_signature != pending.signature:
-            logger.warning(
+            log_event(
+                logger,
+                logging.WARNING,
+                "action.unexpected_board_state",
                 "%s %s -> %s produced an unexpected board state after %.1fs "
                 "(source: %s; destination: %s); replanning.",
                 action.effect.name.title(),
@@ -385,13 +489,20 @@ class Bot:
                 age,
                 self._describe_cell(self.board.get_cell(action.start)),
                 self._describe_cell(self.board.get_cell(action.end)),
+                elapsed_seconds=age,
+                source_state=self._describe_cell(self.board.get_cell(action.start)),
+                destination_state=self._describe_cell(self.board.get_cell(action.end)),
+                **self._action_event_context(action),
             )
         else:
             action_key = self._action_key(action)
             failure_count = self._action_failures.get(action_key, 0) + 1
             self._action_failures[action_key] = failure_count
             self._action_retry_at[action_key] = now + _ACTION_RETRY_SECONDS
-            logger.warning(
+            log_event(
+                logger,
+                logging.WARNING,
+                "action.not_accepted",
                 "%s %s -> %s was not accepted after %.1fs (attempt %d/%d); replanning.",
                 action.effect.name.title(),
                 action.start,
@@ -399,14 +510,23 @@ class Bot:
                 age,
                 failure_count,
                 _ACTION_FAILURE_LIMIT,
+                elapsed_seconds=age,
+                attempt=failure_count,
+                attempt_limit=_ACTION_FAILURE_LIMIT,
+                **self._action_event_context(action),
             )
             if failure_count >= _ACTION_FAILURE_LIMIT:
-                logger.error(
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "action.failure_limit_reached",
                     "%s %s -> %s failed %d times; pausing to avoid repeated attempts.",
                     action.effect.name.title(),
                     action.start,
                     action.end,
                     failure_count,
+                    attempt=failure_count,
+                    **self._action_event_context(action),
                 )
                 self.paused = True
                 self._interrupt_event.set()
@@ -427,23 +547,50 @@ class Bot:
                 submitted_at,
             )
             self._last_wait_reason = None
+            log_event(
+                logger,
+                logging.INFO,
+                "action.submitted",
+                "Submitted %s for %s tier %d: %s -> %s; awaiting verification.",
+                action.effect.name.title(),
+                action.item.name,
+                action.item.tier,
+                action.start,
+                action.end,
+                scene_id=health.scene_id,
+                **self._action_event_context(action),
+            )
             return True
         if result.status not in (ActionStatus.BUSY, ActionStatus.UNAVAILABLE):
-            logger.warning(
+            log_event(
+                logger,
+                logging.WARNING,
+                "action.submission_rejected",
                 "%s %s -> %s could not be submitted: %s (%s).",
                 action.effect.name.title(),
                 action.start,
                 action.end,
                 result.status.value,
                 result.detail or "no detail",
+                status=result.status.value,
+                detail=result.detail,
+                **self._action_event_context(action),
             )
             self._action_retry_at[self._action_key(action)] = (
                 time.monotonic() + _ACTION_RETRY_SECONDS
             )
         elif result.status is ActionStatus.BUSY:
-            self._report_wait("the game is finishing another item action")
+            self._report_wait(
+                "the game is finishing another item action",
+                status=result.status.value,
+                **self._action_event_context(action),
+            )
         else:
-            self._report_wait(result.detail or "item interaction handler unavailable")
+            self._report_wait(
+                result.detail or "item interaction handler unavailable",
+                status=result.status.value,
+                **self._action_event_context(action),
+            )
         return False
 
     def _step_claim_crates(self, board_needs_merge: bool) -> None:
@@ -455,10 +602,36 @@ class Bot:
         if limit == 0:
             self._set_phase(Phase.MERGE)
             return
+        now = time.monotonic()
+        if limit != self._last_crate_claim_limit or now - self._last_crate_claim_log_at >= 15:
+            log_event(
+                logger,
+                logging.INFO,
+                "crate.claim_started",
+                "Claiming up to %d supply crate(s).",
+                limit,
+                claim_limit=limit,
+                empty_cells=len(self.board.find_empty()),
+                reserved_empty_cells=reserve,
+            )
+            self._last_crate_claim_limit = limit
+            self._last_crate_claim_log_at = now
         result = self.runtime.spawn_supply_crates(limit)
         if result.spawned:
             self._last_wait_reason = None
-            logger.info("Spawned %d supply crate(s); %s remain.", result.spawned, result.remaining)
+            self._last_crate_claim_limit = None
+            log_event(
+                logger,
+                logging.INFO,
+                "crate.claim_completed",
+                "Spawned %d supply crate(s); %s remain.",
+                result.spawned,
+                result.remaining,
+                claim_limit=limit,
+                spawned=result.spawned,
+                remaining=result.remaining,
+                status=result.status.value,
+            )
         elif result.status is ActionStatus.BUSY:
             self._report_wait("crate handler is busy")
         elif result.status is ActionStatus.UNAVAILABLE:
@@ -480,13 +653,33 @@ class Bot:
             if self._action_retry_at.get(self._action_key(action), 0.0) <= time.monotonic()
         ]
         if eligible_actions:
-            self._submit_merge(eligible_actions[0], health)
+            selected = eligible_actions[0]
+            log_event(
+                logger,
+                logging.DEBUG,
+                "action.planned",
+                "Planned %s %s for %s tier %d: %s -> %s.",
+                selected.kind.name.title(),
+                selected.effect.name.lower(),
+                selected.item.name,
+                selected.item.tier,
+                selected.start,
+                selected.end,
+                candidate_count=len(eligible_actions),
+                **self._action_event_context(selected),
+            )
+            self._submit_merge(selected, health)
         elif actions:
             self._report_wait("failed item actions are cooling down before retry")
         elif not board_needs_merge:
             self._set_phase(Phase.CLAIM_CRATES)
         elif not self.board.find_empty():
-            logger.error("Board is full and no merge action is available; pausing.")
+            log_event(
+                logger,
+                logging.ERROR,
+                "planner.board_full",
+                "Board is full and no merge action is available; pausing.",
+            )
             self.paused = True
             self._interrupt_event.set()
 
@@ -555,15 +748,20 @@ class Bot:
         if self.paused:
             if self._resume_requested.is_set():
                 self._resume_requested.clear()
-                logger.info("Resume request cancelled.")
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "bot.resume_cancelled",
+                    "Resume request cancelled.",
+                )
             else:
                 self._resume_requested.set()
-                logger.info("Resume requested.")
+                log_event(logger, logging.INFO, "bot.resume_requested", "Resume requested.")
         else:
             self.paused = True
             self._interrupt_event.set()
             self._resume_requested.clear()
-            logger.info("Paused.")
+            log_event(logger, logging.INFO, "bot.paused", "Paused.")
 
     def request_quit(self) -> None:
         with self._quit_lock:
@@ -573,17 +771,35 @@ class Bot:
             self.paused = True
             self._interrupt_event.set()
             self._resume_requested.clear()
-            logger.info("Quit requested.")
+            log_event(logger, logging.INFO, "bot.quit_requested", "Quit requested.")
 
     def _log_slow_stage(self, stage: str, started: float) -> None:
         elapsed = time.monotonic() - started
         if elapsed >= 1.0:
-            logger.warning("Slow %s: %.1fs.", stage, elapsed)
+            log_event(
+                logger,
+                logging.WARNING,
+                "operation.slow",
+                "Slow %s: %.1fs.",
+                stage,
+                elapsed,
+                stage=stage,
+                elapsed_seconds=elapsed,
+            )
 
-    def _report_wait(self, reason: str) -> None:
+    def _report_wait(self, reason: str, **context: object) -> None:
         now = time.monotonic()
         if reason != self._last_wait_reason or now - self._last_wait_log_at >= 15:
-            logger.info("Waiting: %s.", reason.rstrip("."))
+            normalized_reason = reason.rstrip(".")
+            log_event(
+                logger,
+                logging.INFO,
+                "bot.waiting",
+                "Waiting: %s.",
+                normalized_reason,
+                reason=normalized_reason,
+                **context,
+            )
             self._last_wait_reason = reason
             self._last_wait_log_at = now
 
@@ -616,13 +832,24 @@ class Bot:
         try:
             self._register_hotkey(settings.pause_hotkey, self._toggle_pause)
             self._register_hotkey(settings.quit_hotkey, self.request_quit)
-            logger.info(
+            log_event(
+                logger,
+                logging.INFO,
+                "bot.hotkeys_registered",
                 "Global hotkeys registered: %s pause/resume, %s quit.",
                 settings.pause_hotkey,
                 settings.quit_hotkey,
+                pause_hotkey=settings.pause_hotkey,
+                quit_hotkey=settings.quit_hotkey,
             )
         except Exception:
-            logger.exception("Could not register global hotkeys; Ctrl+C remains available.")
+            log_event(
+                logger,
+                logging.ERROR,
+                "bot.hotkey_registration_failed",
+                "Could not register global hotkeys; Ctrl+C remains available.",
+                _exc_info=True,
+            )
         needs_initialization = not settings.start_paused
         discovery_thread: Thread | None = None
         discovery_results: Queue[tuple[bool | None, BaseException | None]] = Queue(maxsize=1)
@@ -638,7 +865,14 @@ class Bot:
         if settings.start_paused:
             self.paused = True
             self._interrupt_event.set()
-            logger.warning("Starting paused; press %s to begin.", settings.pause_hotkey)
+            log_event(
+                logger,
+                logging.WARNING,
+                "bot.started_paused",
+                "Starting paused; press %s to begin.",
+                settings.pause_hotkey,
+                pause_hotkey=settings.pause_hotkey,
+            )
         try:
             while not self._quit_requested:
                 if self.paused:
@@ -666,7 +900,15 @@ class Bot:
                         if isinstance(error, CdpCancelledError):
                             continue
                         if isinstance(error, CdpConnectionError):
-                            logger.warning("%s Retrying runtime discovery.", error)
+                            log_event(
+                                logger,
+                                logging.WARNING,
+                                "runtime.discovery_retry",
+                                "%s Retrying runtime discovery.",
+                                error,
+                                detail=str(error),
+                                retry_delay_seconds=retry_delay,
+                            )
                         else:
                             raise error
                         initialized = False
@@ -680,6 +922,16 @@ class Bot:
                 self.step()
                 self._interrupt_event.wait(settings.loop_interval)
         except KeyboardInterrupt:
-            logger.info("Stopped by user.")
+            log_event(logger, logging.INFO, "bot.interrupted", "Stopped by user.")
+        except Exception:
+            log_event(
+                logger,
+                logging.ERROR,
+                "bot.unhandled_error",
+                "Bot stopped because of an unexpected error.",
+                _exc_info=True,
+            )
+            raise
         finally:
             keyboard.unhook_all()
+            log_event(logger, logging.INFO, "bot.stopped", "Bot stopped.")

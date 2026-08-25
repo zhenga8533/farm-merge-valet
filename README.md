@@ -114,11 +114,23 @@ and template-confidence settings no longer exist.
 
 ## Logging
 
-The default `INFO` level reports controls, runtime readiness, confirmed actions,
-crate claims, and rate-limited waiting conditions. `WARNING` identifies
-recoverable failures or unusually slow operations; `ERROR` identifies a
-condition that pauses or prevents safe operation. Set `FMV_LOG_LEVEL=DEBUG` for
-target refreshes, cached discovery, and planner phase transitions.
+The default `INFO` level reports controls, runtime readiness, accepted action
+submissions, authoritative confirmations, crate-claim batches, and rate-limited
+waiting conditions. `WARNING` identifies recoverable failures or unusually
+slow operations; `ERROR` identifies a condition that pauses or prevents safe
+operation. Set `FMV_LOG_LEVEL=DEBUG` for the planner's selected action, target
+refreshes, cached discovery, and planner phase transitions.
+
+All long-running operational records use one Python logging pipeline. The
+console and optional GUI are independent sinks attached to that pipeline, so
+enabling the GUI does not replace or duplicate console emission. Application
+records also carry a stable `fmv_event` name and an `fmv_context` dictionary;
+for example, action records include their planner action, effect, item, source,
+and destination. This is the integration boundary for future monitoring such
+as a Discord webhook. Network-backed sinks must consume records asynchronously
+and apply their own event/severity filters so they never block the bot loop.
+One-shot diagnostic and browser-management commands continue writing their
+requested results directly to the terminal or output file.
 
 ## Development
 

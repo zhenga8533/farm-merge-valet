@@ -31,6 +31,7 @@ from PySide6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QApplication, QMainWindow, QPlainTextEdit, QTabWidget
 
 from farm_merge_valet.config import settings
+from farm_merge_valet.logging_setup import logging_sink
 
 # Cap the log widget's content so a long-running session doesn't grow
 # unbounded memory -- oldest lines are dropped once exceeded.
@@ -218,8 +219,6 @@ def run_overlay(run_bot: Callable[[], None], stop_bot: Callable[[], None]) -> in
     log_bridge.new_record.connect(window.append_log)
     handler = QtLogHandler(log_bridge)
     handler.setFormatter(logging.Formatter("%(message)s"))
-    root_logger = logging.getLogger()
-    root_logger.addHandler(handler)
 
     app_bridge = _AppBridge()
     app_bridge.bot_finished.connect(app.quit)
@@ -256,14 +255,14 @@ def run_overlay(run_bot: Callable[[], None], stop_bot: Callable[[], None]) -> in
 
     thread = threading.Thread(target=worker, daemon=True, name="fmv-bot")
 
-    window.show()
-    window._update_click_through()  # set the initial (inactive) state
-    thread.start()
-    try:
-        return app.exec()
-    finally:
-        interrupt_timer.stop()
-        signal.signal(signal.SIGINT, previous_sigint_handler)
-        stop_once()
-        thread.join(timeout=5)
-        root_logger.removeHandler(handler)
+    with logging_sink(handler):
+        window.show()
+        window._update_click_through()  # set the initial (inactive) state
+        thread.start()
+        try:
+            return app.exec()
+        finally:
+            interrupt_timer.stop()
+            signal.signal(signal.SIGINT, previous_sigint_handler)
+            stop_once()
+            thread.join(timeout=5)

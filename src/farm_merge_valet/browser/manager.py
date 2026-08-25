@@ -24,6 +24,7 @@ from farm_merge_valet.cdp.client import (
     read_browser_metadata,
 )
 from farm_merge_valet.config import Settings
+from farm_merge_valet.logging_setup import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -375,9 +376,13 @@ class BrowserManager:
                     status = self.status()
                     if status.compatible:
                         if installation.support is SupportTier.EXPERIMENTAL:
-                            logger.warning(
+                            log_event(
+                                logger,
+                                logging.WARNING,
+                                "browser.experimental",
                                 "%s browser support is experimental.",
                                 installation.kind.value.title(),
+                                browser=installation.kind.value,
                             )
                         return status
                     if status.running:
@@ -388,7 +393,13 @@ class BrowserManager:
                     break
                 time.sleep(0.25)
             if attempt + 1 < _LAUNCH_ATTEMPTS and process.poll() is not None:
-                logger.info("Browser exited during profile handoff; retrying launch.")
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "browser.profile_handoff_retry",
+                    "Browser exited during profile handoff; retrying launch.",
+                    attempt=attempt + 1,
+                )
                 time.sleep(1.0)
                 continue
             break
