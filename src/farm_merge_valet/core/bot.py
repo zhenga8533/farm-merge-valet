@@ -42,6 +42,15 @@ from farm_merge_valet.core.board import (
     plan_merge_actions,
 )
 from farm_merge_valet.core.catalog_store import CatalogUnavailableError, load_or_refresh_catalog
+from farm_merge_valet.core.shops import (
+    ShopAction,
+    ShopActionKind,
+    ShopOrder,
+    ShopOrderState,
+    ShopPolicy,
+    plan_shop_action,
+    required_shop_claim_empty_cells,
+)
 from farm_merge_valet.logging_setup import log_event
 
 logger = logging.getLogger(__name__)
@@ -70,6 +79,7 @@ _STRUCTURE_BLUEPRINTS = frozenset(
 
 class Phase(Enum):
     CLAIM_TILES = auto()
+    SHOPS = auto()
     CLAIM_CRATES = auto()
     MERGE = auto()
 
@@ -105,6 +115,14 @@ class _PendingClaim:
     scene_change_logged: bool = False
 
 
+@dataclass
+class _PendingShopAction:
+    action: ShopAction
+    scene_id: int | None
+    submitted_at: float
+    scene_change_logged: bool = False
+
+
 class Bot:
     def __init__(self, runtime: GameRuntime | None = None) -> None:
         self._interrupt_event = Event()
@@ -128,6 +146,7 @@ class Bot:
         self._live_cells: dict[GridCoord, LiveCellState] = {}
         self._pending_action: _PendingAction | None = None
         self._pending_claim: _PendingClaim | None = None
+        self._pending_shop_action: _PendingShopAction | None = None
         self._next_claim_action_at = 0.0
         self._action_failures: dict[tuple, int] = {}
         self._action_retry_at: dict[tuple, float] = {}
@@ -194,12 +213,14 @@ class Bot:
                 logging.WARNING,
                 "runtime.unavailable",
                 "Game target found, but action runtime is unavailable: %s "
-                "(board=%s, item actions=%s, board claims=%s, crate claims=%s, inventory=%s).",
+                "(board=%s, item actions=%s, board claims=%s, crate claims=%s, "
+                "shop orders=%s, inventory=%s).",
                 self._last_health.detail or "no diagnostic detail",
                 self._last_health.board_available,
                 self._last_health.item_drop_available,
                 self._last_health.claim_available,
                 self._last_health.crate_spawn_available,
+                self._last_health.shop_available,
                 self._last_health.inventory_available,
                 scene_id=self._last_health.scene_id,
                 detail=self._last_health.detail,
@@ -211,11 +232,12 @@ class Bot:
                 logging.WARNING,
                 "runtime.partially_ready",
                 "Game runtime is partially ready: %s "
-                "(item actions=%s, board claims=%s, crate claims=%s).",
+                "(item actions=%s, board claims=%s, crate claims=%s, shop orders=%s).",
                 self._last_health.detail,
                 self._last_health.item_drop_available,
                 self._last_health.claim_available,
                 self._last_health.crate_spawn_available,
+                self._last_health.shop_available,
                 scene_id=self._last_health.scene_id,
                 detail=self._last_health.detail,
             )
@@ -377,12 +399,21 @@ class Bot:
         )
 
     def _plan_merge_actions(
-        self, target_size: Literal[3, 5], *, prefer_smallest_trigger: bool = False
+        self,
+        target_size: Literal[3, 5],
+        *,
+        prefer_smallest_trigger: bool = False,
+        prefer_merge_five: bool | None = None,
     ) -> list[MergeAction]:
         ranked = [
             (rank, action)
             for item in sorted(self.board.items_present(), key=self._item_sort_key)
             if item.tier < self._max_item_tiers.get((item.category, item.name), item.tier + 1)
+            and settings.item_policy(item.policy_key).enabled
+            and (
+                prefer_merge_five is None
+                or settings.item_policy(item.policy_key).prefer_merge_five is prefer_merge_five
+            )
             for rank, action in enumerate(
                 plan_merge_actions(
                     self.board,
@@ -403,12 +434,25 @@ class Bot:
         ]
 
     def _merge_actions_for_policy(self) -> list[MergeAction]:
-        if not settings.prefer_merge_five:
-            return self._plan_merge_actions(3)
-        actions = self._plan_merge_actions(5)
+        actions = self._plan_merge_actions(5, prefer_merge_five=True)
+        actions.extend(self._plan_merge_actions(3, prefer_merge_five=False))
+        ranked_actions = enumerate(actions)
+        actions = [
+            action
+            for rank, action in sorted(
+                ranked_actions,
+                key=lambda pair: self._action_sort_key(
+                    pair[1], pair[0], prefer_smallest_trigger=False
+                ),
+            )
+        ]
         if actions or self.board.find_empty():
             return actions
-        return self._plan_merge_actions(3, prefer_smallest_trigger=True)
+        return self._plan_merge_actions(
+            3,
+            prefer_smallest_trigger=True,
+            prefer_merge_five=True,
+        )
 
     def _board_needs_merge(self) -> bool:
         empty_count = len(self.board.find_empty())
@@ -673,6 +717,163 @@ class Bot:
                 status=result.status.value,
                 detail=result.detail,
                 **self._claim_event_context(action),
+            )
+        return False
+
+    @staticmethod
+    def _shop_order_for_action(
+        orders: tuple[ShopOrder, ...], action: ShopAction
+    ) -> ShopOrder | None:
+        return next(
+            (
+                order
+                for order in orders
+                if order.shop_id == action.shop_id and order.recipe_id == action.recipe_id
+            ),
+            None,
+        )
+
+    def _verify_pending_shop_action(
+        self, health: RuntimeHealth, orders: tuple[ShopOrder, ...] | None
+    ) -> bool:
+        pending = self._pending_shop_action
+        if pending is None:
+            return True
+        if orders is None:
+            self._report_wait("authoritative shop-order state unavailable")
+            return False
+        now = time.monotonic()
+        age = now - pending.submitted_at
+        if not health.heartbeat_advancing:
+            if age >= _ACTION_SETTLE_SECONDS:
+                self._report_wait("submitted shop action is pending while the heartbeat is frozen")
+            return False
+        if health.scene_id != pending.scene_id and not pending.scene_change_logged:
+            log_event(
+                logger,
+                logging.WARNING,
+                "shop.pending_scene_changed",
+                "Runtime scene changed from %s to %s while a shop action was pending; "
+                "verifying against the reloaded order state.",
+                pending.scene_id,
+                health.scene_id,
+                previous_scene_id=pending.scene_id,
+                scene_id=health.scene_id,
+                shop_id=pending.action.shop_id,
+                recipe_id=pending.action.recipe_id,
+                action_kind=pending.action.kind.value,
+            )
+            pending.scene_change_logged = True
+        current = self._shop_order_for_action(orders, pending.action)
+        succeeded = (
+            pending.action.kind is ShopActionKind.START
+            and current is not None
+            and current.state is not ShopOrderState.AVAILABLE
+        ) or (
+            pending.action.kind is ShopActionKind.CLAIM
+            and (current is None or current.state is not ShopOrderState.READY)
+        )
+        if succeeded:
+            self._pending_shop_action = None
+            self._last_wait_reason = None
+            self._last_idle_reason = None
+            event = (
+                "shop.order_started"
+                if pending.action.kind is ShopActionKind.START
+                else "shop.order_claimed"
+            )
+            log_event(
+                logger,
+                logging.DEBUG,
+                event,
+                "%s shop order confirmed for %s (%s).",
+                pending.action.kind.value.title(),
+                pending.action.shop_id,
+                pending.action.recipe_id,
+                elapsed_seconds=age,
+                shop_id=pending.action.shop_id,
+                recipe_id=pending.action.recipe_id,
+                action_kind=pending.action.kind.value,
+            )
+            return True
+        if age < _ACTION_MAX_PENDING_SECONDS:
+            if age >= _ACTION_SETTLE_SECONDS:
+                self._report_wait("the submitted shop action is still resolving")
+            return False
+        self._pending_shop_action = None
+        log_event(
+            logger,
+            logging.WARNING,
+            "shop.action_not_accepted",
+            "%s shop action for %s (%s) was not accepted after %.1fs; replanning.",
+            pending.action.kind.value.title(),
+            pending.action.shop_id,
+            pending.action.recipe_id,
+            age,
+            elapsed_seconds=age,
+            shop_id=pending.action.shop_id,
+            recipe_id=pending.action.recipe_id,
+            action_kind=pending.action.kind.value,
+        )
+        return True
+
+    def _submit_shop_action(self, action: ShopAction, health: RuntimeHealth) -> bool:
+        if any((self._pending_action, self._pending_claim, self._pending_shop_action)):
+            return False
+        log_event(
+            logger,
+            logging.DEBUG,
+            "shop.action_planned",
+            "Planned %s for %s (%s).",
+            action.kind.value,
+            action.shop_id,
+            action.recipe_id,
+            shop_id=action.shop_id,
+            recipe_id=action.recipe_id,
+            action_kind=action.kind.value,
+        )
+        result = (
+            self.runtime.start_shop_order(action.shop_id, action.recipe_id)
+            if action.kind is ShopActionKind.START
+            else self.runtime.claim_shop_order(action.shop_id, action.recipe_id)
+        )
+        if result.status is ActionStatus.SUBMITTED:
+            self._pending_shop_action = _PendingShopAction(
+                action, health.scene_id, time.monotonic()
+            )
+            self._last_wait_reason = None
+            log_event(
+                logger,
+                logging.DEBUG,
+                "shop.action_submitted",
+                "Submitted %s for %s (%s); awaiting verification.",
+                action.kind.value,
+                action.shop_id,
+                action.recipe_id,
+                scene_id=health.scene_id,
+                shop_id=action.shop_id,
+                recipe_id=action.recipe_id,
+                action_kind=action.kind.value,
+            )
+            return True
+        if result.status in (ActionStatus.BUSY, ActionStatus.UNAVAILABLE):
+            self._report_wait(result.detail or "shop action capability unavailable")
+        else:
+            log_event(
+                logger,
+                logging.WARNING,
+                "shop.action_rejected",
+                "%s for %s (%s) could not be submitted: %s (%s).",
+                action.kind.value.title(),
+                action.shop_id,
+                action.recipe_id,
+                result.status.value,
+                result.detail or "no detail",
+                status=result.status.value,
+                detail=result.detail,
+                shop_id=action.shop_id,
+                recipe_id=action.recipe_id,
+                action_kind=action.kind.value,
             )
         return False
 
@@ -1029,6 +1230,40 @@ class Bot:
         else:
             self._defer_idle("no item, producer, or crate action is currently available")
 
+    def _step_shops(
+        self,
+        health: RuntimeHealth,
+        orders: tuple[ShopOrder, ...],
+        board_needs_merge: bool,
+    ) -> bool:
+        policy = self._shop_policy()
+        action = plan_shop_action(orders, policy, len(self.board.find_empty()))
+        if action is not None:
+            self._set_phase(Phase.SHOPS)
+            self._submit_shop_action(action, health)
+            return True
+        required_empty_cells = required_shop_claim_empty_cells(orders, policy)
+        if required_empty_cells is not None and len(self.board.find_empty()) < required_empty_cells:
+            self._set_phase(Phase.MERGE)
+            self._step_merge(
+                health,
+                board_needs_merge,
+                required_empty_cells=required_empty_cells,
+            )
+            return True
+        if self.phase is Phase.SHOPS:
+            self._set_phase(Phase.CLAIM_CRATES)
+        return False
+
+    @staticmethod
+    def _shop_policy() -> ShopPolicy:
+        return ShopPolicy(
+            settings.shop_default_enabled,
+            settings.recipe_default_enabled,
+            settings.shop_overrides,
+            settings.recipe_overrides,
+        )
+
     def step(self) -> None:
         """Run one perceive -> plan -> internal action -> verify iteration."""
         try:
@@ -1040,6 +1275,7 @@ class Bot:
                 or (self.phase is Phase.MERGE and not health.item_drop_available)
                 or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
                 or (self.phase is Phase.CLAIM_TILES and not health.claim_available)
+                or (self.phase is Phase.SHOPS and not health.shop_available)
             )
             if capability_missing:
                 now = time.monotonic()
@@ -1052,6 +1288,7 @@ class Bot:
                     or (self.phase is Phase.MERGE and not health.item_drop_available)
                     or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
                     or (self.phase is Phase.CLAIM_TILES and not health.claim_available)
+                    or (self.phase is Phase.SHOPS and not health.shop_available)
                 )
                 if capability_missing:
                     self._capability_retry_at = time.monotonic() + self._capability_retry_delay
@@ -1076,6 +1313,23 @@ class Bot:
         if not self._verify_pending_action(health):
             return
         if not self._verify_pending_claim(health):
+            return
+        shop_policy_enabled = self._shop_policy().may_enable_orders
+        shop_orders: tuple[ShopOrder, ...] | None = ()
+        if self._pending_shop_action is not None:
+            if not health.shop_available:
+                self._report_wait("shop-order capability unavailable")
+                return
+            shop_orders = self.runtime.read_shop_orders()
+            if shop_orders is None:
+                self._report_wait("authoritative shop-order state unavailable")
+                return
+        elif shop_policy_enabled and health.shop_available:
+            shop_orders = self.runtime.read_shop_orders()
+            if shop_orders is None:
+                self._report_wait("authoritative shop-order state unavailable")
+                shop_orders = ()
+        if not self._verify_pending_shop_action(health, shop_orders):
             return
         if not health.available:
             self._report_wait(health.detail or "runtime unavailable")
@@ -1109,6 +1363,9 @@ class Bot:
                 cooling_producers=cooling_producers,
             )
         self._last_cooling_producer_count = cooling_producers or None
+        if shop_policy_enabled and shop_orders is not None:
+            if self._step_shops(health, shop_orders, board_needs_merge):
+                return
         if self.phase is Phase.CLAIM_TILES:
             self._set_phase(Phase.CLAIM_CRATES)
         if self.phase is Phase.CLAIM_CRATES:

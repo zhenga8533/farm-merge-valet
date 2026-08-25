@@ -27,6 +27,7 @@ from farm_merge_valet.core.bot import (
     _PendingAction,
     _PendingClaim,
 )
+from farm_merge_valet.core.shops import ShopAction, ShopActionKind, ShopOrder, ShopOrderState
 
 
 class FakeRuntime:
@@ -34,6 +35,9 @@ class FakeRuntime:
         self.drops: list[tuple[tuple[int, int], tuple[int, int]]] = []
         self.spawn_limits: list[int] = []
         self.claims: list[tuple[tuple[int, int], ClaimTargetKind, str, int | None]] = []
+        self.started_orders: list[tuple[str, str]] = []
+        self.claimed_orders: list[tuple[str, str]] = []
+        self.shop_orders: tuple[ShopOrder, ...] = ()
 
     def submit_item_drop(self, start, end):
         self.drops.append((start, end))
@@ -45,6 +49,17 @@ class FakeRuntime:
 
     def submit_board_claim(self, coord, expected_kind, expected_blueprint_id, expected_object_id):
         self.claims.append((coord, expected_kind, expected_blueprint_id, expected_object_id))
+        return ActionResult(ActionStatus.SUBMITTED)
+
+    def read_shop_orders(self):
+        return self.shop_orders
+
+    def start_shop_order(self, shop_id, recipe_id):
+        self.started_orders.append((shop_id, recipe_id))
+        return ActionResult(ActionStatus.SUBMITTED)
+
+    def claim_shop_order(self, shop_id, recipe_id):
+        self.claimed_orders.append((shop_id, recipe_id))
         return ActionResult(ActionStatus.SUBMITTED)
 
 
@@ -61,6 +76,7 @@ def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
         advancing,
         item_action_busy=item_action_busy,
         claim_available=True,
+        shop_available=True,
     )
 
 
@@ -77,6 +93,7 @@ def bare_bot() -> Bot:
     bot._quit_lock = Lock()
     bot._pending_action = None
     bot._pending_claim = None
+    bot._pending_shop_action = None
     bot._next_claim_action_at = 0.0
     bot._action_failures = {}
     bot._action_retry_at = {}
@@ -120,6 +137,39 @@ def test_phase_transition_is_debug_diagnostic(caplog) -> None:
     record = next(record for record in caplog.records if record.message.startswith("Phase "))
     assert record.levelno == logging.DEBUG
     assert record.message == "Phase CLAIM_CRATES -> MERGE."
+
+
+def test_shop_start_is_submitted_and_verified(caplog) -> None:
+    bot = bare_bot()
+    action = ShopAction(ShopActionKind.START, "market", "recipe_flour")
+
+    with caplog.at_level(logging.DEBUG):
+        assert bot._submit_shop_action(action, health(advancing=True))
+        assert bot.runtime.started_orders == [("market", "recipe_flour")]
+        assert bot._pending_shop_action is not None
+        orders = (
+            ShopOrder(
+                "market",
+                "recipe_flour",
+                ShopOrderState.PRODUCING,
+                (),
+                ("coin_1",),
+                60,
+            ),
+        )
+        assert bot._verify_pending_shop_action(health(advancing=True), orders)
+    assert bot._pending_shop_action is None
+    assert any(record.fmv_event == "shop.order_started" for record in caplog.records)
+
+
+def test_shop_claim_is_submitted_and_verified() -> None:
+    bot = bare_bot()
+    action = ShopAction(ShopActionKind.CLAIM, "bakery", "recipe_bread", 1)
+
+    assert bot._submit_shop_action(action, health(advancing=True))
+    assert bot.runtime.claimed_orders == [("bakery", "recipe_bread")]
+    assert bot._verify_pending_shop_action(health(advancing=True), ())
+    assert bot._pending_shop_action is None
 
 
 def test_offscreen_coordinates_are_submitted_unchanged(caplog) -> None:
@@ -409,6 +459,49 @@ def test_merge_five_policy_does_not_fall_back_while_space_remains(monkeypatch) -
     monkeypatch.setattr("farm_merge_valet.core.bot.settings.prefer_merge_five", True)
 
     assert bot._merge_actions_for_policy() == []
+
+
+def test_item_policy_can_enable_merge_three_for_one_family(monkeypatch) -> None:
+    from farm_merge_valet.config import ItemPolicyOverride
+
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    cow = ItemRef("animals", "cow", 1)
+    bot._max_item_tiers.update({("crops", "wheat"): 4, ("animals", "cow"): 4})
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+        bot.board.set_cell((x, 2), Cell(CellKind.ITEM, cow))
+    bot.board.set_cell((10, 10), Cell(CellKind.EMPTY))
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.settings.item_policy_overrides",
+        {"animals/cow": ItemPolicyOverride(prefer_merge_five=False)},
+    )
+
+    actions = bot._merge_actions_for_policy()
+
+    assert actions
+    assert {action.item for action in actions} == {cow}
+
+
+def test_item_policy_can_disable_one_merge_family(monkeypatch) -> None:
+    from farm_merge_valet.config import ItemPolicyOverride
+
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    cow = ItemRef("animals", "cow", 1)
+    bot._max_item_tiers.update({("crops", "wheat"): 4, ("animals", "cow"): 4})
+    for x in range(5):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+        bot.board.set_cell((x, 2), Cell(CellKind.ITEM, cow))
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.settings.item_policy_overrides",
+        {"crops/wheat": ItemPolicyOverride(enabled=False)},
+    )
+
+    actions = bot._merge_actions_for_policy()
+
+    assert actions
+    assert {action.item for action in actions} == {cow}
 
 
 def test_live_sync_distinguishes_empty_structure_placeholder(monkeypatch) -> None:

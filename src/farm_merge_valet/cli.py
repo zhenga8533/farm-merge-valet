@@ -281,6 +281,7 @@ def diagnose_live_state_cmd(
             else []
         )
         board_state = read_board_state(settings.cdp_port, settings.window_title)
+        shop_orders = adapter.read_shop_orders() if health.shop_available else None
         calibration = read_scene_calibration(settings.cdp_port, settings.window_title)
     except CdpConnectionError as exc:
         rprint(f"[red]{exc}[/red]")
@@ -294,6 +295,7 @@ def diagnose_live_state_cmd(
             "crate_spawn": health.crate_spawn_available,
             "inventory": health.inventory_available,
             "claim": health.claim_available,
+            "shop_orders": health.shop_available,
             "heartbeat": health.heartbeat,
             "heartbeat_age_ms": health.heartbeat_age_ms,
             "heartbeat_advancing": health.heartbeat_advancing,
@@ -320,6 +322,30 @@ def diagnose_live_state_cmd(
                 if value.producer_state is not None
             ),
         },
+        "shop_orders": (
+            [
+                {
+                    "shop_id": order.shop_id,
+                    "recipe_id": order.recipe_id,
+                    "state": order.state.value,
+                    "duration_seconds": order.duration_seconds,
+                    "remaining_seconds": order.remaining_seconds,
+                    "affordable": order.affordable,
+                    "ingredients": [
+                        {
+                            "item_id": ingredient.item_id,
+                            "required": ingredient.required,
+                            "available": ingredient.available,
+                        }
+                        for ingredient in order.ingredients
+                    ],
+                    "reward_ids": list(order.reward_ids),
+                }
+                for order in shop_orders
+            ]
+            if shop_orders is not None
+            else None
+        ),
         "scene": {
             "rendered_cells": len(calibration.rendered_coords) if calibration else 0,
             "origin": calibration.origin if calibration else None,

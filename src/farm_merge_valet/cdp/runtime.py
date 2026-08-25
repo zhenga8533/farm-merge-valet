@@ -16,6 +16,7 @@ from farm_merge_valet.cdp.board_store import arm_board_store
 from farm_merge_valet.cdp.client import apply_background_overrides, evaluate
 from farm_merge_valet.cdp.inventory_store import arm_crate_inventory
 from farm_merge_valet.core.board import ClaimTargetKind, GridCoord
+from farm_merge_valet.core.shops import ShopIngredient, ShopOrder, ShopOrderState
 from farm_merge_valet.logging_setup import log_event
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ class RuntimeHealth:
     detail: str | None = None
     item_action_busy: bool = False
     claim_available: bool = False
+    shop_available: bool = False
 
 
 _DISCOVER_EXPRESSION = r"""
@@ -112,6 +114,12 @@ _DISCOVER_EXPRESSION = r"""
   const crateSubscribers = subscribers(crateSignal);
   const validCrateSignal = typeof crateSignal?.fire === 'function' &&
     crateSubscribers.length > 0 ? crateSignal : null;
+  const orders = services?.ordersService;
+  const validShopOrders = orders?._isActive !== false &&
+    typeof orders?.getCurrentOrders === 'function' &&
+    typeof orders?.getOrderByBuilding === 'function' &&
+    typeof orders?.startOrder === 'function' &&
+    typeof orders?.onOrderRewarded?.fire === 'function';
 
   const screen = services?.hudService?._screen || services?.mapGridView?._view || itemHandler;
   window.__fmvGameplayServices = services;
@@ -119,6 +127,7 @@ _DISCOVER_EXPRESSION = r"""
   window.__fmvItemInteractionHandler = itemHandler;
   window.__fmvClaimInteractionHandler = claimHandler;
   window.__fmvCrateSpawnSignal = validCrateSignal;
+  window.__fmvOrdersService = validShopOrders ? orders : null;
   window.__fmvRuntimeBoard = board;
   window.__fmvRuntimeSceneIds ||= new WeakMap();
   window.__fmvNextRuntimeSceneId ||= 1;
@@ -143,6 +152,7 @@ _DISCOVER_EXPRESSION = r"""
     crateSpawn: Boolean(validCrateSignal),
     crateSubscribers: crateSubscribers.length,
     inventory: Boolean(inventory),
+    shopOrders: Boolean(validShopOrders),
     missing,
   };
   return {
@@ -153,6 +163,7 @@ _DISCOVER_EXPRESSION = r"""
     claim: Boolean(claimHandler),
     crateSpawn: Boolean(validCrateSignal),
     inventory: Boolean(inventory),
+    shopOrders: Boolean(validShopOrders),
     detail: missing.length ? `${missing.join(',')}-not-found` : null,
     discovery: window.__fmvRuntimeDiscovery,
   };
@@ -176,6 +187,7 @@ _DISCOVERY_DIAGNOSTICS_EXPRESSION = r"""
   strategy: 'not-run', services: false, pickSubscribers: 0,
   dropSubscribers: 0, itemDrop: false, crateSpawn: false,
   claim: false,
+  shopOrders: false,
   inventory: Boolean(window.__fmvCrateInventoryItem), missing: ['discovery-not-run'],
 })()
 """
@@ -203,6 +215,7 @@ _HEALTH_EXPRESSION = r"""
   const handler = window.__fmvItemInteractionHandler;
   const claimHandler = window.__fmvClaimInteractionHandler;
   const crateSignal = window.__fmvCrateSpawnSignal;
+  const orders = window.__fmvOrdersService;
   const beat = window.__fmvHeartbeat;
   const services = window.__fmvGameplayServices;
   const scene = window.__fmvGameplayMapScreen;
@@ -223,6 +236,10 @@ _HEALTH_EXPRESSION = r"""
   const currentCrateSignal = currentBoard &&
     services?.hudService?._commonEvents?.spawnCrates === crateSignal &&
     typeof crateSignal?.fire === 'function' && subscribers(crateSignal).length > 0;
+  const currentShopOrders = currentBoard && services?.ordersService === orders &&
+    orders?._isActive !== false && typeof orders?.getCurrentOrders === 'function' &&
+    typeof orders?.startOrder === 'function' &&
+    typeof orders?.onOrderRewarded?.fire === 'function';
   const identity = currentBoard && (services.mapGrid || scene || handler || board);
   const sceneId = identity && window.__fmvRuntimeSceneIds
     ? window.__fmvRuntimeSceneIds.get(identity) : null;
@@ -237,6 +254,7 @@ _HEALTH_EXPRESSION = r"""
     )),
     crateSpawn: Boolean(currentCrateSignal),
     inventory: Boolean(window.__fmvCrateInventoryItem),
+    shopOrders: Boolean(currentShopOrders),
     heartbeat: beat ? beat.frame : null,
     heartbeatAgeMs: beat ? Math.max(0, performance.now() - beat.timestamp) : null,
     heartbeatInstalled: Boolean(window.__fmvHeartbeatInstalled && beat),
@@ -504,6 +522,129 @@ def _claim_expression(
 """
 
 
+_READ_SHOP_ORDERS_EXPRESSION = r"""
+(() => {
+  const board = window.__fmvBoardCells;
+  const services = window.__fmvGameplayServices;
+  const orders = window.__fmvOrdersService;
+  if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
+      services?.ordersService !== orders || orders?._isActive === false)
+    return null;
+  const recipes = orders._recipes;
+  const inventory = orders._inventory;
+  if (typeof recipes?.getRecipe !== 'function' ||
+      typeof inventory?.getAmount !== 'function') return null;
+  const states = {1: 'available', 2: 'producing', 3: 'ready'};
+  const out = [];
+  for (const order of orders.getCurrentOrders()) {
+    const state = states[order?.state];
+    const recipe = recipes.getRecipe(order?.recipe);
+    if (!state || !recipe || recipe.ID !== order.recipe ||
+        !orders._buildings?.isWorkshop?.(order.buildingID)) continue;
+    const timer = order.timerId == null
+      ? null : orders._timerService?.getTimerByID?.(order.timerId);
+    const remainingMs = Number(timer?.remainingTime);
+    out.push({
+      shopID: order.buildingID,
+      recipeID: order.recipe,
+      state,
+      durationSeconds: Number.isFinite(recipe.duration) ? recipe.duration : 0,
+      remainingSeconds: Number.isFinite(remainingMs) ? Math.max(0, remainingMs / 1000) : null,
+      ingredients: Array.isArray(recipe.ingredients) ? recipe.ingredients.map((item) => ({
+        itemID: item.key,
+        required: item.amount,
+        available: inventory.getAmount(item.key),
+      })) : [],
+      rewardIDs: Array.isArray(recipe.reward) ? [...recipe.reward] : [],
+    });
+  }
+  return out;
+})()
+"""
+
+
+def _shop_start_expression(shop_id: str, recipe_id: str, scene_id: int | None) -> str:
+    return f"""
+(() => {{
+  const shopID = {json.dumps(shop_id)};
+  const recipeID = {json.dumps(recipe_id)};
+  const board = window.__fmvBoardCells;
+  const services = window.__fmvGameplayServices;
+  const orders = window.__fmvOrdersService;
+  const identity = services?.mapGrid || window.__fmvGameplayMapScreen ||
+    window.__fmvItemInteractionHandler || board;
+  const currentSceneId = identity && window.__fmvRuntimeSceneIds
+    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
+      services?.ordersService !== orders || currentSceneId !== {json.dumps(scene_id)})
+    return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
+  const order = orders.getOrderByBuilding?.(shopID);
+  if (!order || order.recipe !== recipeID || order.state !== 1)
+    return {{status: 'stale-source', detail: 'shop-order-changed'}};
+  if (!orders._buildings?.isWorkshop?.(shopID) ||
+      !orders._buildings?.isBuildingActive?.(shopID))
+    return {{status: 'invalid-target', detail: 'shop-not-active'}};
+  if (!orders._canAffordOrder?.(order))
+    return {{status: 'rejected', detail: 'insufficient-ingredients'}};
+  try {{
+    orders.startOrder(shopID);
+    const updated = orders.getOrderByBuilding?.(shopID);
+    return updated?.recipe === recipeID && updated?.state === 2
+      ? {{status: 'submitted'}}
+      : {{status: 'rejected', detail: 'order-did-not-start'}};
+  }} catch (error) {{
+    return {{status: 'rejected', detail: String(error?.message || error)}};
+  }}
+}})()
+"""
+
+
+def _shop_claim_expression(shop_id: str, recipe_id: str, scene_id: int | None) -> str:
+    return f"""
+(() => {{
+  const shopID = {json.dumps(shop_id)};
+  const recipeID = {json.dumps(recipe_id)};
+  const board = window.__fmvBoardCells;
+  const services = window.__fmvGameplayServices;
+  const orders = window.__fmvOrdersService;
+  const identity = services?.mapGrid || window.__fmvGameplayMapScreen ||
+    window.__fmvItemInteractionHandler || board;
+  const currentSceneId = identity && window.__fmvRuntimeSceneIds
+    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
+      services?.ordersService !== orders || currentSceneId !== {json.dumps(scene_id)})
+    return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
+  const order = orders.getOrderByBuilding?.(shopID);
+  if (!order || order.recipe !== recipeID || order.state !== 3)
+    return {{status: 'stale-source', detail: 'shop-order-changed'}};
+  if (orders._isClaiming) return {{status: 'busy'}};
+  const recipe = orders._recipes?.getRecipe?.(recipeID);
+  const rewards = recipe?.reward;
+  if (!Array.isArray(rewards))
+    return {{status: 'invalid-target', detail: 'recipe-rewards-unavailable'}};
+  const emptyCount = [...board.values()].filter((cell) => !cell._content).length;
+  if (emptyCount < rewards.length)
+    return {{status: 'rejected', detail: 'insufficient-board-space'}};
+  const rewardSubscribers = Array.isArray(orders.onOrderRewarded?._subscribers)
+    ? orders.onOrderRewarded._subscribers : [];
+  if (!rewardSubscribers.some((entry) =>
+      typeof entry?.context?._spawnOrderReward === 'function'))
+    return {{status: 'unavailable', detail: 'shop-reward-handler-not-found'}};
+  try {{
+    orders.onOrderRewarded.fire(order);
+    services.discovery?.onOrderRewarded?.fire?.(order);
+    services.actions?.emit?.(`order.rewarded.${{shopID}}.${{recipeID}}`);
+    return {{status: 'submitted'}};
+  }} catch (error) {{
+    const current = orders.getOrderByBuilding?.(shopID);
+    return !current || current.recipe !== recipeID
+      ? {{status: 'submitted', detail: String(error?.message || error)}}
+      : {{status: 'rejected', detail: String(error?.message || error)}};
+  }}
+}})()
+"""
+
+
 class GameRuntime(Protocol):
     """Action and health boundary consumed by the automation loop."""
 
@@ -524,6 +665,12 @@ class GameRuntime(Protocol):
     ) -> ActionResult: ...
 
     def spawn_supply_crates(self, limit: int) -> CrateSpawnResult: ...
+
+    def read_shop_orders(self) -> tuple[ShopOrder, ...] | None: ...
+
+    def start_shop_order(self, shop_id: str, recipe_id: str) -> ActionResult: ...
+
+    def claim_shop_order(self, shop_id: str, recipe_id: str) -> ActionResult: ...
 
 
 class GameRuntimeAdapter:
@@ -672,6 +819,7 @@ class GameRuntimeAdapter:
             detail=self._discovery_detail,
             item_action_busy=raw.get("itemActionBusy") is True,
             claim_available=claim,
+            shop_available=raw.get("shopOrders") is True,
         )
 
     def submit_item_drop(self, start: GridCoord, end: GridCoord) -> ActionResult:
@@ -764,3 +912,68 @@ class GameRuntimeAdapter:
             remaining,
             detail,
         )
+
+    def read_shop_orders(self) -> tuple[ShopOrder, ...] | None:
+        raw = self._evaluate(_READ_SHOP_ORDERS_EXPRESSION)
+        if not isinstance(raw, list):
+            return None
+        orders: list[ShopOrder] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            state_value = entry.get("state")
+            if not isinstance(state_value, str):
+                continue
+            try:
+                state = ShopOrderState(state_value)
+            except ValueError:
+                continue
+            shop_id = entry.get("shopID")
+            recipe_id = entry.get("recipeID")
+            if not isinstance(shop_id, str) or not isinstance(recipe_id, str):
+                continue
+            ingredients = tuple(
+                ShopIngredient(item["itemID"], item["required"], item["available"])
+                for item in entry.get("ingredients", [])
+                if isinstance(item, dict)
+                and isinstance(item.get("itemID"), str)
+                and isinstance(item.get("required"), int)
+                and isinstance(item.get("available"), int)
+            )
+            reward_ids = tuple(
+                reward_id for reward_id in entry.get("rewardIDs", []) if isinstance(reward_id, str)
+            )
+            duration = entry.get("durationSeconds")
+            remaining = entry.get("remainingSeconds")
+            orders.append(
+                ShopOrder(
+                    shop_id,
+                    recipe_id,
+                    state,
+                    ingredients,
+                    reward_ids,
+                    duration if isinstance(duration, int) else 0,
+                    float(remaining) if isinstance(remaining, int | float) else None,
+                )
+            )
+        return tuple(orders)
+
+    def start_shop_order(self, shop_id: str, recipe_id: str) -> ActionResult:
+        return self._shop_action_result(_shop_start_expression(shop_id, recipe_id, self._scene_id))
+
+    def claim_shop_order(self, shop_id: str, recipe_id: str) -> ActionResult:
+        return self._shop_action_result(_shop_claim_expression(shop_id, recipe_id, self._scene_id))
+
+    def _shop_action_result(self, expression: str) -> ActionResult:
+        raw = self._evaluate(expression)
+        if not isinstance(raw, dict):
+            return ActionResult(ActionStatus.UNAVAILABLE, "invalid-runtime-response")
+        status_value = raw.get("status")
+        if not isinstance(status_value, str):
+            return ActionResult(ActionStatus.UNAVAILABLE, "invalid-runtime-status")
+        try:
+            status = ActionStatus(status_value)
+        except ValueError:
+            status = ActionStatus.UNAVAILABLE
+        detail = raw.get("detail")
+        return ActionResult(status, detail if isinstance(detail, str) else None)

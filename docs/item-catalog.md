@@ -20,6 +20,8 @@ Each catalog entry keeps these concepts separate:
 - `tier`, `merge_target`, and `mergeable`: graph facts used by automation;
 - `capabilities`: runtime behaviors including `shovelable`, `harvestable`,
   `collectable`, `shop`, and `recipe`.
+- shops also retain `available_recipe_ids`; recipes retain their owner shop,
+  duration, ingredient IDs and amounts, and exact reward IDs.
 
 The current catalog covers all ten crop and ten animal families, fourteen
 shops and their seventy recipes, nineteen repairable buildings, greenhouse
@@ -99,3 +101,17 @@ preference, shovel authorization, and other controls without changing
 recognition or duplicating assets. Any future merge submission mode should
 likewise be a policy/action concern, not a catalog capability inferred from an
 image.
+
+Item automation uses global field defaults plus partial overrides keyed by
+`policy_key`. Automation and merge-5 are enabled by default for every current
+and newly discovered merge family; for example,
+`{"animals/cow":{"prefer_merge_five":false},"crops/wheat":{"enabled":false}}`
+enables merge-3 for cows and excludes wheat from merge planning.
+The `always_remove` field is reserved for a future shovel action and defaults
+to false; configuring it does not currently submit destructive actions.
+
+Shop automation similarly uses global defaults plus per-ID overrides. Shop and
+recipe policies are independent and both are required, allowing a future GUI to
+expose global toggles alongside individual shop and recipe toggles. Enabled
+global defaults include newly discovered content without hardcoding catalog
+entries, while per-ID boolean overrides take precedence.

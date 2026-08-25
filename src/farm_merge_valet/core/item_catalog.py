@@ -10,7 +10,8 @@ from typing import Any
 
 from farm_merge_valet.core.board import ItemRef
 
-CATALOG_SCHEMA_VERSION = 3
+CATALOG_SCHEMA_VERSION = 4
+SUPPORTED_CATALOG_SCHEMA_VERSIONS = frozenset({3, CATALOG_SCHEMA_VERSION})
 
 
 class TileClaimMode(StrEnum):
@@ -29,6 +30,20 @@ class CatalogVariant:
 
 
 @dataclass(frozen=True)
+class RecipeIngredient:
+    item_id: str
+    amount: int
+
+
+@dataclass(frozen=True)
+class RecipeMetadata:
+    shop_id: str
+    duration_seconds: int
+    ingredients: tuple[RecipeIngredient, ...]
+    reward_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class CatalogItem:
     game_id: str
     family_id: str
@@ -41,6 +56,8 @@ class CatalogItem:
     asset_alias: str | None
     asset_path: str | None
     capabilities: frozenset[str]
+    available_recipe_ids: tuple[str, ...] = ()
+    recipe: RecipeMetadata | None = None
 
     @property
     def tile_claim_mode(self) -> TileClaimMode:
@@ -111,6 +128,20 @@ class ItemCatalog:
                     "asset_alias": item.asset_alias,
                     "asset_path": item.asset_path,
                     "capabilities": sorted(item.capabilities),
+                    "available_recipe_ids": list(item.available_recipe_ids),
+                    "recipe": (
+                        {
+                            "shop_id": item.recipe.shop_id,
+                            "duration_seconds": item.recipe.duration_seconds,
+                            "ingredients": [
+                                {"item_id": ingredient.item_id, "amount": ingredient.amount}
+                                for ingredient in item.recipe.ingredients
+                            ],
+                            "reward_ids": list(item.recipe.reward_ids),
+                        }
+                        if item.recipe is not None
+                        else None
+                    ),
                 }
                 for key, item in sorted(self.items.items())
             },
@@ -130,7 +161,10 @@ class ItemCatalog:
 
 def load_item_catalog(path: Path) -> ItemCatalog:
     raw = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict) or raw.get("schema_version") != CATALOG_SCHEMA_VERSION:
+    if (
+        not isinstance(raw, dict)
+        or raw.get("schema_version") not in SUPPORTED_CATALOG_SCHEMA_VERSIONS
+    ):
         raise ValueError(f"Unsupported item catalog schema in {path}")
     raw_items = raw.get("items")
     if not isinstance(raw_items, dict):
@@ -183,6 +217,12 @@ def _parse_catalog_item(blueprint_id: str, value: dict[str, Any], path: Path) ->
         isinstance(capability, str) for capability in capabilities
     ):
         raise ValueError(f"Invalid capabilities for {blueprint_id!r} in {path}")
+    available_recipe_ids = value.get("available_recipe_ids", [])
+    if not isinstance(available_recipe_ids, list) or not all(
+        isinstance(recipe_id, str) for recipe_id in available_recipe_ids
+    ):
+        raise ValueError(f"Invalid available recipes for {blueprint_id!r} in {path}")
+    recipe = _parse_recipe_metadata(blueprint_id, value.get("recipe"), path)
     return CatalogItem(
         game_id=blueprint_id,
         family_id=value["family_id"],
@@ -195,7 +235,40 @@ def _parse_catalog_item(blueprint_id: str, value: dict[str, Any], path: Path) ->
         asset_alias=asset_alias,
         asset_path=asset_path,
         capabilities=frozenset(capabilities),
+        available_recipe_ids=tuple(available_recipe_ids),
+        recipe=recipe,
     )
+
+
+def _parse_recipe_metadata(blueprint_id: str, value: object, path: Path) -> RecipeMetadata | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"Invalid recipe metadata for {blueprint_id!r} in {path}")
+    shop_id = value.get("shop_id")
+    duration = value.get("duration_seconds")
+    ingredients = value.get("ingredients")
+    reward_ids = value.get("reward_ids")
+    if (
+        not isinstance(shop_id, str)
+        or not isinstance(duration, int)
+        or duration < 0
+        or not isinstance(ingredients, list)
+        or not isinstance(reward_ids, list)
+        or not all(isinstance(reward_id, str) for reward_id in reward_ids)
+    ):
+        raise ValueError(f"Invalid recipe metadata for {blueprint_id!r} in {path}")
+    parsed_ingredients: list[RecipeIngredient] = []
+    for ingredient in ingredients:
+        if (
+            not isinstance(ingredient, dict)
+            or not isinstance(ingredient.get("item_id"), str)
+            or not isinstance(ingredient.get("amount"), int)
+            or ingredient["amount"] <= 0
+        ):
+            raise ValueError(f"Invalid recipe ingredient for {blueprint_id!r} in {path}")
+        parsed_ingredients.append(RecipeIngredient(ingredient["item_id"], ingredient["amount"]))
+    return RecipeMetadata(shop_id, duration, tuple(parsed_ingredients), tuple(reward_ids))
 
 
 def _parse_catalog_variant(policy_key: str, value: object, path: Path) -> CatalogVariant:

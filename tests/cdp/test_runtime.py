@@ -3,6 +3,7 @@ from threading import Event
 
 from farm_merge_valet.cdp.runtime import ActionStatus, GameRuntimeAdapter
 from farm_merge_valet.core.board import ClaimTargetKind
+from farm_merge_valet.core.shops import ShopOrderState
 
 
 def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
@@ -161,6 +162,15 @@ def test_discovery_validates_internal_claim_handler() -> None:
     assert "onGestureTap" in _HEALTH_EXPRESSION
 
 
+def test_discovery_validates_shop_order_service() -> None:
+    from farm_merge_valet.cdp.runtime import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+
+    assert "typeof orders?.getCurrentOrders === 'function'" in _DISCOVER_EXPRESSION
+    assert "typeof orders?.startOrder === 'function'" in _DISCOVER_EXPRESSION
+    assert "window.__fmvOrdersService" in _DISCOVER_EXPRESSION
+    assert "services?.ordersService === orders" in _HEALTH_EXPRESSION
+
+
 def test_cached_discovery_is_a_debug_diagnostic(monkeypatch, caplog) -> None:
     responses = iter(
         [
@@ -289,6 +299,70 @@ def test_claim_returns_structured_invalid_target(monkeypatch) -> None:
     )
 
     assert result.status is ActionStatus.INVALID_TARGET
+
+
+def test_shop_orders_are_read_with_inventory_and_timer_state(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.evaluate",
+        lambda *_args, **_kwargs: [
+            {
+                "shopID": "market",
+                "recipeID": "recipe_flour",
+                "state": "producing",
+                "durationSeconds": 60,
+                "remainingSeconds": 42.5,
+                "ingredients": [{"itemID": "wheat", "required": 3, "available": 7}],
+                "rewardIDs": ["coin_1"],
+            }
+        ],
+    )
+
+    orders = GameRuntimeAdapter(9222, "Farm").read_shop_orders()
+
+    assert orders is not None
+    assert len(orders) == 1
+    assert orders[0].state is ShopOrderState.PRODUCING
+    assert orders[0].remaining_seconds == 42.5
+    assert orders[0].ingredients[0].available == 7
+
+
+def test_shop_start_uses_public_order_handler_and_exact_current_order(monkeypatch) -> None:
+    expression = ""
+
+    def capture_expression(_port, value, _title, **_kwargs):
+        nonlocal expression
+        expression = value
+        return {"status": "submitted"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", capture_expression)
+
+    result = GameRuntimeAdapter(9222, "Farm").start_shop_order("market", "recipe_flour")
+
+    assert result.status is ActionStatus.SUBMITTED
+    assert "orders.startOrder(shopID)" in expression
+    assert "order.recipe !== recipeID" in expression
+    assert "orders._canAffordOrder?.(order)" in expression
+    assert "camera" not in expression.lower()
+
+
+def test_shop_claim_uses_reward_signal_without_camera_pan(monkeypatch) -> None:
+    expression = ""
+
+    def capture_expression(_port, value, _title, **_kwargs):
+        nonlocal expression
+        expression = value
+        return {"status": "submitted"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", capture_expression)
+
+    result = GameRuntimeAdapter(9222, "Farm").claim_shop_order("bakery", "recipe_bread")
+
+    assert result.status is ActionStatus.SUBMITTED
+    assert "orders.onOrderRewarded.fire(order)" in expression
+    assert "_spawnOrderReward" in expression
+    assert "emptyCount < rewards.length" in expression
+    assert "rewardOrder(" not in expression
+    assert "camera" not in expression.lower()
 
 
 def test_discovery_rearms_a_stale_cached_board(monkeypatch) -> None:

@@ -56,6 +56,10 @@ class ItemRef:
     name: str  # stable family ID, e.g. "wheat", "upgrade_card", "reward_chest"
     tier: int
 
+    @property
+    def policy_key(self) -> str:
+        return f"{self.category}/{self.name}"
+
 
 @dataclass(frozen=True)
 class Cell:

@@ -72,6 +72,28 @@ def test_catalog_assigns_tile_claim_modes_without_enabling_unsafe_clicks() -> No
     assert catalog.immediate_claim_ids == frozenset({"milk", "ticket", "crate_1"})
 
 
+def test_catalog_preserves_shop_recipe_cost_duration_and_rewards() -> None:
+    market = _metadata(components=["building", "shop"], alias="obj_market")
+    market["availableRecipes"] = ["recipe_flour"]
+    flour = _metadata(components=["recipe"], alias="recipe_flour")
+    flour.update(
+        recipeOwner="market",
+        recipeDurationSeconds=60,
+        recipeIngredients=[{"key": "wheat", "amount": 3}],
+        recipeRewards=["coin_1", "coin_1"],
+    )
+
+    catalog = build_item_catalog({"market": market, "recipe_flour": flour})
+
+    assert catalog.items["market"].available_recipe_ids == ("recipe_flour",)
+    recipe = catalog.items["recipe_flour"].recipe
+    assert recipe is not None
+    assert recipe.shop_id == "market"
+    assert recipe.duration_seconds == 60
+    assert [(item.item_id, item.amount) for item in recipe.ingredients] == [("wheat", 3)]
+    assert recipe.reward_ids == ("coin_1", "coin_1")
+
+
 def test_catalog_uses_runtime_ids_and_links_non_numeric_merge_chain() -> None:
     catalog = build_item_catalog(
         {

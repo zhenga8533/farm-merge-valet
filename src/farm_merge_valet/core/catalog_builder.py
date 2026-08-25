@@ -9,6 +9,8 @@ from typing import Any
 from farm_merge_valet.core.item_catalog import (
     CatalogItem,
     ItemCatalog,
+    RecipeIngredient,
+    RecipeMetadata,
     catalog_asset_path,
     catalog_policy_key,
 )
@@ -163,6 +165,12 @@ def build_item_catalog(metadata: dict[str, dict[str, Any]]) -> ItemCatalog:
         display_name = _display_name(blueprint_id, family_id)
         asset_alias = value.get("assetAlias")
         normalized_alias = asset_alias if isinstance(asset_alias, str) else None
+        available_recipe_ids = tuple(
+            recipe_id
+            for recipe_id in value.get("availableRecipes", [])
+            if isinstance(recipe_id, str)
+        )
+        recipe = _recipe_metadata(value) if "recipe" in component_names else None
         items[blueprint_id] = CatalogItem(
             game_id=blueprint_id,
             family_id=family_id,
@@ -179,6 +187,8 @@ def build_item_catalog(metadata: dict[str, dict[str, Any]]) -> ItemCatalog:
                 else None
             ),
             capabilities=frozenset(capabilities),
+            available_recipe_ids=available_recipe_ids,
+            recipe=recipe,
         )
     for game_id, family_id, alias in (
         ("collection_halloween_event", "halloween_event", "icon_tab_halloween"),
@@ -205,6 +215,25 @@ def build_item_catalog(metadata: dict[str, dict[str, Any]]) -> ItemCatalog:
             ),
         )
     return ItemCatalog(items)
+
+
+def _recipe_metadata(value: dict[str, Any]) -> RecipeMetadata | None:
+    shop_id = value.get("recipeOwner")
+    duration = value.get("recipeDurationSeconds")
+    ingredients = value.get("recipeIngredients")
+    rewards = value.get("recipeRewards")
+    if not isinstance(shop_id, str) or not isinstance(duration, int):
+        return None
+    parsed_ingredients = tuple(
+        RecipeIngredient(entry["key"], entry["amount"])
+        for entry in ingredients or []
+        if isinstance(entry, dict)
+        and isinstance(entry.get("key"), str)
+        and isinstance(entry.get("amount"), int)
+        and entry["amount"] > 0
+    )
+    reward_ids = tuple(reward for reward in rewards or [] if isinstance(reward, str))
+    return RecipeMetadata(shop_id, duration, parsed_ingredients, reward_ids)
 
 
 def _merge_chain_identities(merge_targets: dict[str, str]) -> dict[str, tuple[str, int]]:

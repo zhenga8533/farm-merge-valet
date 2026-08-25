@@ -254,11 +254,18 @@ class DiscordWebhookHandler(logging.Handler):
                 self._status.mode = "Running"
             elif event.startswith("crate."):
                 self._status.phase = "Claim Crates"
+            elif event.startswith("shop."):
+                self._status.phase = "Shops"
             if event == "crate.claim_completed":
                 spawned = context.get("spawned", 0)
                 remaining = context.get("remaining")
                 self._status.last_activity = f"Spawned {spawned} supply crates"
                 self._status.remaining_crates = remaining if isinstance(remaining, int) else None
+                self._status.mode = "Running"
+            if event in {"shop.order_started", "shop.order_claimed"}:
+                recipe_id = str(context.get("recipe_id", "recipe"))
+                activity = "Started" if event.endswith("started") else "Claimed"
+                self._status.last_activity = f"{activity} shop recipe: {recipe_id}"
                 self._status.mode = "Running"
             if record.levelno >= logging.ERROR:
                 self._status.mode = "Error"
@@ -275,6 +282,10 @@ class DiscordWebhookHandler(logging.Handler):
             spawned = context.get("spawned", 0)
             if isinstance(spawned, int):
                 metric_updates["crates"] += spawned
+        elif event == "shop.order_started":
+            metric_updates["shop.started"] += 1
+        elif event == "shop.order_claimed":
+            metric_updates["shop.claimed"] += 1
         if logging.WARNING <= level < logging.ERROR:
             metric_updates["warnings"] += 1
         if level >= logging.ERROR:
@@ -380,6 +391,14 @@ class DiscordWebhookHandler(logging.Handler):
                             ),
                             "inline": False,
                         },
+                        {
+                            "name": "Shop activity",
+                            "value": (
+                                f"Started {metrics['shop.started']} / "
+                                f"Claimed {metrics['shop.claimed']}"
+                            ),
+                            "inline": False,
+                        },
                     ],
                     "footer": {"text": "farm-merge-valet.summary"},
                 }
@@ -435,6 +454,14 @@ class DiscordWebhookHandler(logging.Handler):
                             "name": "Last successful activity",
                             "value": status.last_activity,
                             "inline": False,
+                        },
+                        {
+                            "name": "Shops",
+                            "value": (
+                                f"Started {metrics['shop.started']} / "
+                                f"Claimed {metrics['shop.claimed']}"
+                            ),
+                            "inline": True,
                         },
                     ],
                     "footer": {"text": "farm-merge-valet.status"},

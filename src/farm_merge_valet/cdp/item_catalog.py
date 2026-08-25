@@ -41,6 +41,9 @@ _READ_ITEM_CATALOG_EXPRESSION = r"""
       isHarvestable: node?.isHarvestable === true,
       isCollectable: node?.isCollectable === true,
       inDiscoveryBook: discovery.has(id),
+      availableRecipes: rootServices?.buildings?._buildingConfigs?.get(id)?.isWorkshop === true
+        ? [...(rootServices.buildings._buildingConfigs.get(id)?.availableRecipes || [])]
+        : [],
     };
   }
   const recipeOwners = new Map();
@@ -60,6 +63,11 @@ _READ_ITEM_CATALOG_EXPRESSION = r"""
       isHarvestable: false,
       isCollectable: false,
       inDiscoveryBook: false,
+      recipeOwner: recipeOwners.get(id) || null,
+      recipeDurationSeconds: Number.isFinite(recipe?.duration) ? recipe.duration : null,
+      recipeIngredients: Array.isArray(recipe?.ingredients)
+        ? recipe.ingredients.map((item) => ({key: item?.key, amount: item?.amount})) : [],
+      recipeRewards: Array.isArray(recipe?.reward) ? [...recipe.reward] : [],
     };
   }
   out.inventory_supplies = {
@@ -73,6 +81,7 @@ _READ_ITEM_CATALOG_EXPRESSION = r"""
     isHarvestable: false,
     isCollectable: false,
     inDiscoveryBook: false,
+    availableRecipes: [],
   };
   return out;
 })()

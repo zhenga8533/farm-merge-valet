@@ -90,6 +90,22 @@ def test_webhook_routes_lifecycle_and_summarizes_actions(monkeypatch, tmp_path) 
             claim_kind="immediate",
             blueprint_id="ticket",
         )
+        log_event(
+            event_logger,
+            logging.DEBUG,
+            "shop.order_started",
+            "Shop order started.",
+            shop_id="market",
+            recipe_id="recipe_flour",
+        )
+        log_event(
+            event_logger,
+            logging.DEBUG,
+            "shop.order_claimed",
+            "Shop order claimed.",
+            shop_id="bakery",
+            recipe_id="recipe_bread",
+        )
         log_event(event_logger, logging.INFO, "runtime.ready", "Runtime ready.")
     handler.shutdown()
 
@@ -99,6 +115,15 @@ def test_webhook_routes_lifecycle_and_summarizes_actions(monkeypatch, tmp_path) 
     assert any(
         any(
             field["name"] == "Item actions" and "Merges 1" in field["value"]
+            for field in embed.get("fields", [])
+        )
+        for embed in embeds
+    )
+    assert any(
+        any(
+            field["name"] == "Shop activity"
+            and "Started 1" in field["value"]
+            and "Claimed 1" in field["value"]
             for field in embed.get("fields", [])
         )
         for embed in embeds

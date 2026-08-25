@@ -51,7 +51,81 @@ def test_merge_space_reserve_can_be_disabled() -> None:
 
 
 def test_merge_five_is_enabled_by_default() -> None:
-    assert Settings(_env_file=None).prefer_merge_five
+    settings = Settings(_env_file=None)
+
+    assert settings.item_policy("crops/wheat").enabled
+    assert settings.item_policy("crops/wheat").prefer_merge_five
+    assert not settings.item_policy("crops/wheat").always_remove
+
+
+def test_item_policy_partial_override_inherits_other_defaults() -> None:
+    settings = Settings(
+        _env_file=None,
+        item_policy_overrides={"animals/cow": {"prefer_merge_five": False}},
+    )
+
+    assert not settings.item_policy("animals/cow").prefer_merge_five
+    assert not settings.item_policy("animals/cow").always_remove
+    assert settings.item_policy("crops/wheat").prefer_merge_five
+
+
+def test_item_policy_override_can_reenable_family_when_global_default_is_disabled() -> None:
+    settings = Settings(
+        _env_file=None,
+        item_policy_defaults={"enabled": False},
+        item_policy_overrides={"animals/cow": {"enabled": True}},
+    )
+
+    assert not settings.item_policy("crops/wheat").enabled
+    assert settings.item_policy("animals/cow").enabled
+
+
+def test_legacy_merge_five_switch_remains_a_global_kill_switch() -> None:
+    settings = Settings(
+        _env_file=None,
+        prefer_merge_five=False,
+        item_policy_overrides={"animals/cow": {"prefer_merge_five": True}},
+    )
+
+    assert not settings.item_policy("crops/wheat").prefer_merge_five
+    assert settings.item_policy("animals/cow").prefer_merge_five
+
+
+def test_item_policy_loads_from_json_environment(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "FMV_ITEM_POLICY_DEFAULTS",
+        '{"enabled": true, "prefer_merge_five": true, "always_remove": false}',
+    )
+    monkeypatch.setenv(
+        "FMV_ITEM_POLICY_OVERRIDES",
+        '{"building_resources/stone": {"always_remove": true}}',
+    )
+
+    settings = Settings(_env_file=None)
+
+    assert settings.item_policy("building_resources/stone").always_remove
+
+
+def test_all_shop_automation_is_enabled_by_default() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.shop_default_enabled
+    assert settings.recipe_default_enabled
+    assert settings.shop_overrides == {}
+    assert settings.recipe_overrides == {}
+
+
+def test_shop_policy_overrides_load_from_json_environment_maps(monkeypatch) -> None:
+    monkeypatch.setenv("FMV_SHOP_DEFAULT_ENABLED", "false")
+    monkeypatch.setenv("FMV_SHOP_OVERRIDES", '{"market": true, "bakery": false}')
+    monkeypatch.setenv("FMV_RECIPE_OVERRIDES", '{"recipe_flour": false}')
+
+    settings = Settings(_env_file=None)
+
+    assert not settings.shop_default_enabled
+    assert settings.recipe_default_enabled
+    assert settings.shop_overrides == {"market": True, "bakery": False}
+    assert settings.recipe_overrides == {"recipe_flour": False}
 
 
 def test_producer_claim_reserves_four_cells_by_default() -> None:

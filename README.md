@@ -71,7 +71,8 @@ idempotent across the keyboard and GUI shutdown paths.
 `capture` uses `Page.captureScreenshot` and live DOM geometry to save only the
 game iframe without focusing the browser. `visualize-positions` marks visible cells
 by current classification. `diagnose-live-state` reports board-map candidates,
-runtime capabilities, scene identity, animation-heartbeat state, and whether
+runtime capabilities, live shop orders and affordability, scene identity,
+animation-heartbeat state, and whether
 the browser has the required background flags. The potentially expensive
 heap-wide candidate list is omitted unless `--include-heap-candidates` is used.
 
@@ -82,7 +83,7 @@ not inferred from filenames or bundled game artwork. The catalog keeps three ide
 the runtime game ID (`stone_4`), the atlas alias
 (`obj_nature_brickpile_03`), and the player-facing name (`Stone`). It records
 the game-derived family, globally unique policy key, tier, category, merge
-target, and capabilities such as
+target, shop recipe ownership, ingredient costs, duration, rewards, and capabilities such as
 `shovelable`, `harvestable`, `collectable`, and `mergeable`. This also covers
 non-board content needed by a future GUI, including shops, their recipes,
 repairable buildings, decorations, obstacles, reward chests and keys, event
@@ -112,20 +113,22 @@ The first catalog build requires a loaded game so the compiler can read the
 authoritative blueprint, merge-graph, building, and recipe metadata. A future
 GUI can call the same synchronization service and show application-owned
 placeholders until local images are ready.
-Catalog `policy_key` values are the durable identities for future GUI policy;
-merge chains share a key while independent products and recipes remain
-separately configurable. Controls such as enabled state, merge-5 preference,
-and shovel behavior belong in a separate user-policy layer rather than in
-asset metadata.
+Catalog `policy_key` values are the durable identities for GUI and configuration
+policy; merge chains share a key while independent products and recipes remain
+separately configurable. Item policy uses global defaults plus partial per-key
+overrides. Automation and merge-5 default on for current and future merge
+families, and an individual family can be disabled with an `enabled` override.
+The default-disabled `always_remove` field is reserved for future shovel
+behavior and does not currently trigger removal.
 
 ## How actions work
 
 Each iteration follows a short, fail-closed cycle:
 
 1. Perceive authoritative board, inventory, runtime, and heartbeat state.
-2. Plan with the existing merge and reserve policies.
-3. Submit through the game's click, pick/drag/drop, or live HUD crate event.
-4. Verify against authoritative board state before another action is submitted.
+2. Plan with the existing merge, shop, and reserve policies.
+3. Submit through the game's click, pick/drag/drop, order, or live HUD crate event.
+4. Verify against authoritative board or order state before another action is submitted.
 
 A `requestAnimationFrame` heartbeat must advance before actions are sent. If it
 stalls, the bot observes without queueing or retrying. A submitted item action
@@ -141,6 +144,16 @@ retired only with an open cell available for their two tier-1 replacements. A
 ready tier-4 producer preempts crates and is harvested only after the configured
 minimum number of cells is open. When space is insufficient, the bot merges and
 defers crates; if no merge can help, it waits without repeatedly clicking.
+
+Shop automation reads each active shop's fixed current recipe, live ingredient
+inventory, production timer, and rewards. It can start affordable orders and
+claim completed rewards without opening shop UI or moving the camera. Ingredient
+spending policy uses global `FMV_SHOP_DEFAULT_ENABLED` and
+`FMV_RECIPE_DEFAULT_ENABLED` toggles, both `true` by default. Per-ID JSON maps in
+`FMV_SHOP_OVERRIDES` and `FMV_RECIPE_OVERRIDES` take precedence, so one shop or
+recipe can be disabled without hardcoding the discovered catalog. Completed
+rewards reserve one empty cell per reward object and ask the merge planner to
+create space before claiming when necessary.
 
 Internet or server interruptions are not detected separately yet. The bot keeps
 using passive reconnect behavior whenever the local game loop and live state

@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -22,6 +22,26 @@ def user_cache_root() -> Path:
     if xdg_cache_home := os.environ.get("XDG_CACHE_HOME"):
         return Path(xdg_cache_home) / "farm-merge-valet"
     return Path.home() / ".cache" / "farm-merge-valet"
+
+
+class ItemPolicy(BaseModel):
+    """Effective automation policy for one catalog policy key."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = True
+    prefer_merge_five: bool = True
+    always_remove: bool = False
+
+
+class ItemPolicyOverride(BaseModel):
+    """Optional fields that override the item-policy defaults."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool | None = None
+    prefer_merge_five: bool | None = None
+    always_remove: bool | None = None
 
 
 class Settings(BaseSettings):
@@ -64,9 +84,21 @@ class Settings(BaseSettings):
     # Defer their harvest until this many cells are open.
     producer_claim_min_empty_cells: int = Field(default=4, ge=1)
 
-    # Merging exactly 5 identical items yields 2 of the next tier instead of
-    # 1 from a merge-3 (see docs/game-mechanics.md).
+    # Deprecated compatibility switch. False disables merge-5 globally unless
+    # a policy-key override explicitly enables it.
     prefer_merge_five: bool = True
+
+    # Catalog-backed defaults apply to current and future item families. An
+    # override only replaces fields explicitly supplied for that policy key.
+    item_policy_defaults: ItemPolicy = Field(default_factory=ItemPolicy)
+    item_policy_overrides: dict[str, ItemPolicyOverride] = Field(default_factory=dict)
+
+    # Current and future catalog entries inherit these defaults. Per-ID boolean
+    # overrides support individual toggles before the GUI exists.
+    shop_default_enabled: bool = True
+    recipe_default_enabled: bool = True
+    shop_overrides: dict[str, bool] = Field(default_factory=dict)
+    recipe_overrides: dict[str, bool] = Field(default_factory=dict)
 
     # Seconds between bot loop iterations.
     loop_interval: float = Field(default=1.0, gt=0.0)
@@ -118,6 +150,30 @@ class Settings(BaseSettings):
                 return None
             return SecretStr(value)
         return value
+
+    @field_validator("shop_overrides", "recipe_overrides")
+    @classmethod
+    def validate_game_ids(cls, value: dict[str, bool]) -> dict[str, bool]:
+        if any(not game_id.strip() or game_id != game_id.strip() for game_id in value):
+            raise ValueError("game IDs must be non-empty and have no surrounding whitespace")
+        return value
+
+    @field_validator("item_policy_overrides")
+    @classmethod
+    def validate_policy_keys(
+        cls, value: dict[str, ItemPolicyOverride]
+    ) -> dict[str, ItemPolicyOverride]:
+        if any(not key.strip() or key != key.strip() for key in value):
+            raise ValueError("policy keys must be non-empty and have no surrounding whitespace")
+        return value
+
+    def item_policy(self, policy_key: str) -> ItemPolicy:
+        defaults = self.item_policy_defaults.model_dump()
+        if not self.prefer_merge_five:
+            defaults["prefer_merge_five"] = False
+        if override := self.item_policy_overrides.get(policy_key):
+            defaults.update(override.model_dump(exclude_none=True))
+        return ItemPolicy.model_validate(defaults)
 
     @model_validator(mode="after")
     def validate_timing_ranges(self) -> Self:

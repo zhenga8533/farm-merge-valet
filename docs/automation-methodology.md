@@ -26,7 +26,7 @@ stale connection is closed before target discovery retries once. Temporary
 objects returned by `Runtime.queryObjects` are released after use.
 
 The runtime adapter locates and validates the active gameplay screen, board
-map, item/claim interaction handler, live HUD crate event, and supply inventory. References
+map, item/claim interaction handler, shop-order service, live HUD crate event, and supply inventory. References
 are retained in the page only while their scene identity remains current. A
 runtime update that breaks discovery fails closed with structured health and
 action diagnostics; physical input is never used as a fallback.
@@ -78,6 +78,30 @@ change before another is submitted, so zero inventory, zero space, delayed
 updates, and partial completion are reported exactly. There is no configurable
 click batch size. A short randomized delay between accepted claims preserves
 normal rapid-click cadence without submitting claims concurrently.
+
+## Shop orders
+
+The runtime reads current orders from the game's order service. Each typed order
+contains its stable shop and recipe IDs, state, ingredient requirements and live
+inventory amounts, duration and remaining timer, and exact reward objects.
+Available, producing, and complete orders are observed without opening shop UI.
+
+Shop and recipe policy have separate global defaults and per-ID boolean
+overrides derived from catalog IDs. Both global defaults are enabled, so current
+and newly discovered content is automated without a hardcoded list. An explicit
+shop or recipe override takes precedence, allowing individual entries to be
+disabled. Complete enabled orders take priority over starting enabled affordable
+orders. Claims require one open board cell per reward object; when space is
+insufficient, merge planning preempts the claim and supply crates.
+
+Starting uses the game's public order handler, which revalidates the current
+recipe and affordability before deducting ingredients. The public reward method
+pans the camera, so claiming instead emits its authoritative reward signal after
+validating the scene, exact current order, board capacity, and live reward
+subscriber. This retains the game's reward-spawn, order-consumption, discovery,
+analytics, and action paths without changing the viewport. Every submission is
+held pending until authoritative order state confirms the transition; it is not
+duplicated during a frozen heartbeat or reload.
 
 ## Merge planning and submission
 
