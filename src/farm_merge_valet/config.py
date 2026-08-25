@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # also permits ordinary gather/degroup moves.
     merge_empty_cell_reserve: int = Field(default=1, ge=0)
 
+    # Ready tier-4 crops and animals can place several ingredients at once.
+    # Defer their harvest until this many cells are open.
+    producer_claim_min_empty_cells: int = Field(default=4, ge=1)
+
     # Merging exactly 5 identical items yields 2 of the next tier instead of
     # 1 from a merge-3 (see docs/game-mechanics.md).
     prefer_merge_five: bool = True

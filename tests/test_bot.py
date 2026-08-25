@@ -5,23 +5,35 @@ from threading import Event, Lock, Thread
 
 import pytest
 
+from farm_merge_valet.cdp.board_store import LiveCellState
+from farm_merge_valet.cdp.client import CdpCancelledError
 from farm_merge_valet.cdp.runtime import ActionResult, ActionStatus, CrateSpawnResult, RuntimeHealth
 from farm_merge_valet.core.board import (
     BoardGrid,
     Cell,
     CellKind,
+    ClaimTargetKind,
     ItemRef,
     MergeAction,
     MergeActionKind,
     MoveEffect,
+    ProducerKind,
+    ProducerState,
 )
-from farm_merge_valet.core.bot import Bot, Phase, _PendingAction
+from farm_merge_valet.core.bot import (
+    Bot,
+    Phase,
+    _ClaimAction,
+    _PendingAction,
+    _PendingClaim,
+)
 
 
 class FakeRuntime:
     def __init__(self) -> None:
         self.drops: list[tuple[tuple[int, int], tuple[int, int]]] = []
         self.spawn_limits: list[int] = []
+        self.claims: list[tuple[tuple[int, int], ClaimTargetKind, str, int | None]] = []
 
     def submit_item_drop(self, start, end):
         self.drops.append((start, end))
@@ -30,6 +42,10 @@ class FakeRuntime:
     def spawn_supply_crates(self, limit):
         self.spawn_limits.append(limit)
         return CrateSpawnResult(ActionStatus.SUBMITTED, limit, 0)
+
+    def submit_board_claim(self, coord, expected_kind, expected_blueprint_id, expected_object_id):
+        self.claims.append((coord, expected_kind, expected_blueprint_id, expected_object_id))
+        return ActionResult(ActionStatus.SUBMITTED)
 
 
 def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
@@ -44,6 +60,7 @@ def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
         1.0,
         advancing,
         item_action_busy=item_action_busy,
+        claim_available=True,
     )
 
 
@@ -51,6 +68,7 @@ def bare_bot() -> Bot:
     bot = Bot.__new__(Bot)
     bot.runtime = FakeRuntime()
     bot.board = BoardGrid()
+    bot._live_cells = {}
     bot.phase = Phase.CLAIM_CRATES
     bot.paused = False
     bot._interrupt_event = Event()
@@ -58,6 +76,8 @@ def bare_bot() -> Bot:
     bot._quit_requested = False
     bot._quit_lock = Lock()
     bot._pending_action = None
+    bot._pending_claim = None
+    bot._next_claim_action_at = 0.0
     bot._action_failures = {}
     bot._action_retry_at = {}
     bot._next_item_action_at = 0.0
@@ -67,6 +87,7 @@ def bare_bot() -> Bot:
     bot._last_wait_log_at = 0.0
     bot._last_crate_claim_limit = None
     bot._last_crate_claim_log_at = 0.0
+    bot._last_cooling_producer_count = None
     bot._capability_retry_at = 0.0
     bot._capability_retry_delay = 1.0
     return bot
@@ -371,6 +392,215 @@ def test_live_sync_distinguishes_empty_structure_placeholder(monkeypatch) -> Non
     assert bot.board.get_cell((1, 0)).kind is CellKind.STRUCTURE
 
 
+def test_live_sync_only_classifies_collectable_ingredients_as_products(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._blueprint_items = {}
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.read_board_state",
+        lambda *_, **__: {
+            (0, 0): LiveCellState(True, "milk", collectable_ingredient=True),
+            (1, 0): LiveCellState(True, "upgrade_card_1"),
+        },
+    )
+
+    assert bot._sync_board_from_live_state()
+    assert bot.board.get_cell((0, 0)).kind is CellKind.PRODUCT
+    assert bot.board.get_cell((1, 0)).kind is CellKind.OTHER
+
+
+def test_ground_product_is_claimed_before_ready_producer() -> None:
+    bot = bare_bot()
+    bot._blueprint_items = {
+        "cow_4": ItemRef("animals", "cow", 4),
+    }
+    bot._live_cells = {
+        (2, 0): LiveCellState(
+            True,
+            "cow_4",
+            20,
+            4,
+            producer_kind=ProducerKind.ANIMAL,
+            producer_state=ProducerState.READY,
+        ),
+        (1, 0): LiveCellState(True, "milk", 10, collectable_ingredient=True),
+    }
+    for x in range(4):
+        bot.board.set_cell((x, 1), Cell(CellKind.EMPTY))
+    products, depleted, ready = bot._claim_actions()
+
+    bot._step_claim_produce(health(advancing=True), products, depleted, ready)
+
+    assert bot.runtime.claims == [((1, 0), ClaimTargetKind.PRODUCT, "milk", 10)]
+    assert bot.runtime.spawn_limits == []
+
+
+def test_ready_producer_merges_and_defers_crates_below_space_threshold(monkeypatch) -> None:
+    bot = bare_bot()
+    action = _ClaimAction(
+        ClaimTargetKind.PRODUCER,
+        (4, 4),
+        "cow_4",
+        22,
+        ProducerKind.ANIMAL,
+    )
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
+    calls = []
+    bot._step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.producer_claim_min_empty_cells", 4)
+
+    bot._step_claim_produce(health(advancing=True), [], [], [action])
+
+    assert bot.phase is Phase.MERGE
+    assert calls == [4]
+    assert bot.runtime.claims == []
+    assert bot.runtime.spawn_limits == []
+
+
+def test_ready_producer_is_claimed_with_required_space(monkeypatch) -> None:
+    bot = bare_bot()
+    claim = _ClaimAction(
+        ClaimTargetKind.PRODUCER,
+        (4, 4),
+        "cow_4",
+        22,
+        ProducerKind.ANIMAL,
+    )
+    bot._live_cells[claim.coord] = LiveCellState(
+        True,
+        "cow_4",
+        22,
+        4,
+        producer_kind=ProducerKind.ANIMAL,
+        producer_state=ProducerState.READY,
+    )
+    for x in range(4):
+        bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.producer_claim_min_empty_cells", 4)
+
+    bot._step_claim_produce(health(advancing=True), [], [], [claim])
+
+    assert bot.runtime.claims == [((4, 4), ClaimTargetKind.PRODUCER, "cow_4", 22)]
+    assert bot._pending_claim is not None
+
+
+def test_depleted_animal_can_retire_without_an_empty_cell() -> None:
+    bot = bare_bot()
+    claim = _ClaimAction(
+        ClaimTargetKind.DEPLETED_PRODUCER,
+        (4, 4),
+        "cow_4",
+        22,
+        ProducerKind.ANIMAL,
+    )
+    bot._live_cells[claim.coord] = LiveCellState(
+        True,
+        "cow_4",
+        22,
+        4,
+        producer_kind=ProducerKind.ANIMAL,
+        producer_state=ProducerState.DEPLETED,
+    )
+
+    bot._step_claim_produce(health(advancing=True), [], [claim], [])
+
+    assert bot.runtime.claims
+
+
+def test_depleted_crop_requires_one_empty_cell() -> None:
+    bot = bare_bot()
+    claim = _ClaimAction(
+        ClaimTargetKind.DEPLETED_PRODUCER,
+        (4, 4),
+        "wheat_4",
+        22,
+        ProducerKind.CROP,
+    )
+    calls = []
+    bot._step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
+
+    bot._step_claim_produce(health(advancing=True), [], [claim], [])
+
+    assert calls == [1]
+    assert bot.runtime.claims == []
+
+
+def test_cooling_producer_does_not_create_claim_work() -> None:
+    bot = bare_bot()
+    bot._blueprint_items = {}
+    bot._live_cells = {
+        (4, 4): LiveCellState(
+            True,
+            "cow_4",
+            22,
+            4,
+            producer_kind=ProducerKind.ANIMAL,
+            producer_state=ProducerState.COOLING,
+        )
+    }
+
+    assert bot._claim_actions() == ([], [], [])
+    assert bot._cooling_producer_count() == 1
+
+
+def test_harvestable_non_tier_four_item_is_not_a_producer_claim() -> None:
+    bot = bare_bot()
+    bot._live_cells = {
+        (4, 4): LiveCellState(
+            True,
+            "cow_3",
+            22,
+            3,
+            producer_kind=ProducerKind.ANIMAL,
+            producer_state=ProducerState.READY,
+        )
+    }
+
+    assert bot._claim_actions() == ([], [], [])
+
+
+def test_pending_product_claim_survives_frozen_heartbeat(monkeypatch) -> None:
+    bot = bare_bot()
+    initial = LiveCellState(True, "milk", 10, collectable_ingredient=True)
+    claim = _ClaimAction(ClaimTargetKind.PRODUCT, (1, 2), "milk", 10)
+    bot._live_cells[claim.coord] = initial
+    bot._pending_claim = _PendingClaim(claim, initial, 7, 1.0, initial, 1.0)
+    monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 5.0)
+
+    assert not bot._verify_pending_claim(health(advancing=False))
+    assert bot._pending_claim is not None
+
+
+def test_pending_product_claim_confirms_from_authoritative_source_change(
+    monkeypatch, caplog
+) -> None:
+    bot = bare_bot()
+    initial = LiveCellState(True, "milk", 10, collectable_ingredient=True)
+    claim = _ClaimAction(ClaimTargetKind.PRODUCT, (1, 2), "milk", 10)
+    bot._live_cells[claim.coord] = initial
+    bot._pending_claim = _PendingClaim(claim, initial, 7, 1.0, initial, 1.0)
+    bot._live_cells[claim.coord] = LiveCellState(False, None)
+    monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 2.0)
+
+    with caplog.at_level(logging.INFO):
+        assert bot._verify_pending_claim(health(advancing=True))
+
+    assert bot._pending_claim is None
+    assert any(record.fmv_event == "claim.confirmed" for record in caplog.records)
+
+
+def test_claim_noop_cools_down_before_retry(monkeypatch) -> None:
+    bot = bare_bot()
+    initial = LiveCellState(True, "milk", 10, collectable_ingredient=True)
+    claim = _ClaimAction(ClaimTargetKind.PRODUCT, (1, 2), "milk", 10)
+    bot._live_cells[claim.coord] = initial
+    bot._pending_claim = _PendingClaim(claim, initial, 7, 1.0, initial, 1.0)
+    monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 5.0)
+
+    assert bot._verify_pending_claim(health(advancing=True))
+    assert bot._next_claim_action_at == 15.0
+
+
 def test_hotkey_callbacks_log_and_set_control_flags(caplog) -> None:
     bot = bare_bot()
     bot._interrupt_event = Event()
@@ -466,6 +696,29 @@ def test_unexpected_bot_failure_is_logged_before_propagating(monkeypatch, caplog
 
     events = [record.fmv_event for record in caplog.records if hasattr(record, "fmv_event")]
     assert "bot.unhandled_error" in events
+    assert events[-1] == "bot.stopped"
+
+
+def test_quit_cancellation_is_not_logged_as_an_unexpected_error(monkeypatch, caplog) -> None:
+    bot = bare_bot()
+    bot._resume_cached_runtime = lambda: False
+    bot.initialize = lambda: True
+
+    def cancelled_step() -> None:
+        bot.request_quit()
+        raise CdpCancelledError("expected quit cancellation")
+
+    bot.step = cancelled_step
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.start_paused", False)
+    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.on_press_key", lambda *_, **__: None)
+    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.on_release_key", lambda *_, **__: None)
+    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.unhook_all", lambda: None)
+
+    with caplog.at_level(logging.INFO):
+        bot.run_forever()
+
+    events = [record.fmv_event for record in caplog.records if hasattr(record, "fmv_event")]
+    assert "bot.unhandled_error" not in events
     assert events[-1] == "bot.stopped"
 
 

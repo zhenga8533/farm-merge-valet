@@ -20,7 +20,7 @@ from farm_merge_valet.cdp.client import (
     evaluate,
     run_game_frame_operation,
 )
-from farm_merge_valet.core.board import GridCoord
+from farm_merge_valet.core.board import GridCoord, ProducerKind, ProducerState
 
 # `_content` holds the cell's Pixi display object and `_neighbors` its
 # adjacency links. The size bounds and keys distinguish the cell map from
@@ -164,11 +164,32 @@ _READ_EXPRESSION = """
   if (!cells) return null;
   const out = [];
   for (const cell of cells.values()) {
+    const content = cell._content;
+    const behaviors = content?._behaviors instanceof Map
+      ? Array.from(content._behaviors.keys()) : [];
+    const harvestable = content?.getBehavior?.('harvestable');
+    const harvestableType = harvestable?._data?.harvestableType;
+    const producerKind = harvestableType === 'animal' || harvestableType === 'crop'
+      ? harvestableType : null;
+    let producerState = null;
+    if (producerKind) {
+      if (content.hasBehavior?.('depleted')) producerState = 'depleted';
+      else if (content.hasBehavior?.('cooldown')) producerState = 'cooling';
+      else producerState = 'ready';
+    }
     out.push({
       column: cell.column,
       row: cell.row,
-      hasContent: Boolean(cell._content),
-      blueprintID: cell._content ? cell._content._blueprintID : null,
+      hasContent: Boolean(content),
+      blueprintID: content ? content._blueprintID : null,
+      objectID: Number.isInteger(content?.id) ? content.id : null,
+      tier: Number.isInteger(content?.getTier?.()) ? content.getTier() : null,
+      collectableIngredient: Boolean(
+        content?.hasBehavior?.('collectable') && content.hasBehavior?.('ingredient')
+      ),
+      producerKind,
+      producerState,
+      behaviorNames: behaviors.filter((name) => typeof name === 'string'),
     });
   }
   return out;
@@ -182,6 +203,12 @@ class LiveCellState:
 
     has_content: bool
     blueprint_id: str | None
+    object_id: int | None = None
+    tier: int | None = None
+    collectable_ingredient: bool = False
+    producer_kind: ProducerKind | None = None
+    producer_state: ProducerState | None = None
+    behavior_names: frozenset[str] = frozenset()
 
 
 def _arm_board_store_target(ws_url: str, cancel_event: Event | None) -> str:
@@ -327,8 +354,35 @@ def read_board_state(
         if not isinstance(entry, dict):
             continue
         blueprint_id = entry.get("blueprintID")
+        object_id = entry.get("objectID")
+        tier = entry.get("tier")
+        producer_kind_value = entry.get("producerKind")
+        try:
+            producer_kind = (
+                ProducerKind(producer_kind_value) if isinstance(producer_kind_value, str) else None
+            )
+        except ValueError:
+            producer_kind = None
+        producer_state_value = entry.get("producerState")
+        try:
+            producer_state = (
+                ProducerState(producer_state_value)
+                if isinstance(producer_state_value, str)
+                else None
+            )
+        except ValueError:
+            producer_state = None
+        behavior_names = entry.get("behaviorNames")
         states[(entry["column"], entry["row"])] = LiveCellState(
             has_content=entry.get("hasContent") is True,
             blueprint_id=blueprint_id if isinstance(blueprint_id, str) else None,
+            object_id=object_id if isinstance(object_id, int) else None,
+            tier=tier if isinstance(tier, int) else None,
+            collectable_ingredient=entry.get("collectableIngredient") is True,
+            producer_kind=producer_kind,
+            producer_state=producer_state,
+            behavior_names=frozenset(
+                value for value in behavior_names or [] if isinstance(value, str)
+            ),
         )
     return states

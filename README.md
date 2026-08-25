@@ -3,13 +3,14 @@
 Farm Merge Valet automates Farm Merge Valley through the Chromium DevTools
 Protocol (CDP) and the game's own interaction systems. It reads authoritative board and
 inventory state, preserves the merge-5 planner and board-space policy, and
-submits item drops and supply claims without moving the mouse or typing into the
-game.
+submits item drops, product/producer claims, and supply claims without moving
+the mouse or typing into the game.
 
-The current loop claims supply crates, plans merge-3/merge-5 actions (including
-swaps), and verifies every submitted action against the next authoritative board
-state. Order fulfillment, product collection, obstacle clearing, and visits are
-not implemented yet.
+The current loop collects ground ingredients, harvests and retires tier-4 crop
+and animal producers, claims supply crates, plans merge-3/merge-5 actions
+(including swaps), and verifies every submitted action against authoritative
+board state. Order fulfillment, obstacle clearing, and visits are not
+implemented yet.
 
 ## Setup
 
@@ -80,7 +81,7 @@ Each iteration follows a short, fail-closed cycle:
 
 1. Perceive authoritative board, inventory, runtime, and heartbeat state.
 2. Plan with the existing merge and reserve policies.
-3. Submit through the game's pick/drag/drop or crate-spawn handler.
+3. Submit through the game's click, pick/drag/drop, or live HUD crate event.
 4. Verify against authoritative board state before another action is submitted.
 
 A `requestAnimationFrame` heartbeat must advance before actions are sent. If it
@@ -89,6 +90,13 @@ remains pending until active, settled board state confirms success, a different
 change, or a genuine no-op. Genuine no-ops cool down before retry, and three
 failures of the same action pause the bot. Runtime incompatibility reports an
 unavailable capability; there is no mouse-input fallback.
+
+Collectible ground ingredients are claimed before any producer or supply
+crate. Exhausted animals are retired into coins, while exhausted crops are
+retired only with an open cell available for their two tier-1 replacements. A
+ready tier-4 producer preempts crates and is harvested only after the configured
+minimum number of cells is open. When space is insufficient, the bot merges and
+defers crates; if no merge can help, it waits without repeatedly clicking.
 
 Internet or server interruptions are not detected separately yet. The bot keeps
 using passive reconnect behavior whenever the local game loop and live state
@@ -107,16 +115,17 @@ See [`.env.example`](.env.example). Browser settings include `FMV_BROWSER`,
 `FMV_BROWSER_EXECUTABLE`, `FMV_BROWSER_PROFILE_DIR`, `FMV_BROWSER_AUTO_LAUNCH`,
 and `FMV_GAME_URL`. Other important settings are `FMV_CDP_PORT`,
 `FMV_WINDOW_TITLE` (a Reddit page-title or URL substring),
-`FMV_PREFER_MERGE_FIVE`, `FMV_MERGE_EMPTY_CELL_RESERVE`, and the item-action
-and crate-delay ranges. Pause/quit hotkeys, GUI options, and log
+`FMV_PREFER_MERGE_FIVE`, `FMV_MERGE_EMPTY_CELL_RESERVE`,
+`FMV_PRODUCER_CLAIM_MIN_EMPTY_CELLS`, and the item-action and crate-delay
+ranges. Pause/quit hotkeys, GUI options, and log
 level are also configurable. Physical-input timing, viewport, dead-zone, pan,
 and template-confidence settings no longer exist.
 
 ## Logging
 
 The default `INFO` level reports controls, runtime readiness, accepted action
-submissions, authoritative confirmations, crate-claim batches, and rate-limited
-waiting conditions. `WARNING` identifies recoverable failures or unusually
+submissions, authoritative confirmations, product/producer claims, crate-claim
+batches, and rate-limited waiting conditions. `WARNING` identifies recoverable failures or unusually
 slow operations; `ERROR` identifies a condition that pauses or prevents safe
 operation. Set `FMV_LOG_LEVEL=DEBUG` for the planner's selected action, target
 refreshes, cached discovery, and planner phase transitions.

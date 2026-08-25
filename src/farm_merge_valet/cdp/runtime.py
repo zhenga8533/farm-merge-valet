@@ -15,7 +15,7 @@ from typing import Protocol
 from farm_merge_valet.cdp.board_store import arm_board_store
 from farm_merge_valet.cdp.client import apply_background_overrides, evaluate
 from farm_merge_valet.cdp.inventory_store import arm_crate_inventory
-from farm_merge_valet.core.board import GridCoord
+from farm_merge_valet.core.board import ClaimTargetKind, GridCoord
 from farm_merge_valet.logging_setup import log_event
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,7 @@ class ActionStatus(StrEnum):
     REJECTED = "rejected"
     STALE_SOURCE = "stale-source"
     INVALID_DESTINATION = "invalid-destination"
+    INVALID_TARGET = "invalid-target"
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,7 @@ class RuntimeHealth:
     heartbeat_installed: bool = False
     detail: str | None = None
     item_action_busy: bool = False
+    claim_available: bool = False
 
 
 _DISCOVER_EXPRESSION = r"""
@@ -75,6 +77,8 @@ _DISCOVER_EXPRESSION = r"""
     typeof value._onGesturePick === 'function' &&
     typeof value._onGestureDrop === 'function' &&
     value._services?.mapGrid && value._services?.interactionService;
+  const validClaimHandler = (value) => validItemHandler(value) &&
+    typeof value._simulateClick === 'function';
 
   // Board-cell signals are owned by the active map-grid service. This is a
   // bounded path into the scene's service container and does not walk the heap.
@@ -99,24 +103,22 @@ _DISCOVER_EXPRESSION = r"""
   const dropContexts = new Set(subscribers(interaction?.onGestureDrop)
     .map((subscriber) => subscriber?.context));
   const itemHandler = pickContexts.find((candidate) => dropContexts.has(candidate)) || null;
+  const claimHandler = pickContexts.find(validClaimHandler) || null;
 
-  // The crate HUD state subscribes directly to the inventory animation signal.
-  // Its _onClick method fires the state machine's spawnCrates event. The visual
-  // button's onClick only handles pointer events and does not submit a claim.
-  let crateHandler = null;
-  for (const subscriber of subscribers(inventory?.onAnimateChanges)) {
-    const context = subscriber?.context;
-    if (context?._stateMachine && typeof context._onClick === 'function') {
-      crateHandler = context;
-      break;
-    }
-  }
+  // The gameplay HUD owns the authoritative crate event. Visual button states
+  // can remain subscribed to inventory updates after their private event set
+  // has been disconnected, so require a live gameplay subscriber here.
+  const crateSignal = services?.hudService?._commonEvents?.spawnCrates;
+  const crateSubscribers = subscribers(crateSignal);
+  const validCrateSignal = typeof crateSignal?.fire === 'function' &&
+    crateSubscribers.length > 0 ? crateSignal : null;
 
   const screen = services?.hudService?._screen || services?.mapGridView?._view || itemHandler;
   window.__fmvGameplayServices = services;
   window.__fmvGameplayMapScreen = screen;
   window.__fmvItemInteractionHandler = itemHandler;
-  window.__fmvCrateSpawnHandler = crateHandler;
+  window.__fmvClaimInteractionHandler = claimHandler;
+  window.__fmvCrateSpawnSignal = validCrateSignal;
   window.__fmvRuntimeBoard = board;
   window.__fmvRuntimeSceneIds ||= new WeakMap();
   window.__fmvNextRuntimeSceneId ||= 1;
@@ -128,7 +130,8 @@ _DISCOVER_EXPRESSION = r"""
   const missing = [];
   if (!services) missing.push('gameplay-services');
   if (!itemHandler) missing.push('item-interaction-handler');
-  if (!crateHandler) missing.push('crate-spawn-handler');
+  if (!claimHandler) missing.push('claim-interaction-handler');
+  if (!validCrateSignal) missing.push('crate-spawn-signal');
   if (!inventory) missing.push('crate-inventory');
   window.__fmvRuntimeDiscovery = {
     strategy: 'bounded-signal-anchors',
@@ -136,7 +139,9 @@ _DISCOVER_EXPRESSION = r"""
     pickSubscribers: subscribers(interaction?.onGesturePick).length,
     dropSubscribers: subscribers(interaction?.onGestureDrop).length,
     itemDrop: Boolean(itemHandler),
-    crateSpawn: Boolean(crateHandler),
+    claim: Boolean(claimHandler),
+    crateSpawn: Boolean(validCrateSignal),
+    crateSubscribers: crateSubscribers.length,
     inventory: Boolean(inventory),
     missing,
   };
@@ -145,7 +150,8 @@ _DISCOVER_EXPRESSION = r"""
     sceneId: window.__fmvRuntimeSceneIdentity,
     board: true,
     itemDrop: Boolean(itemHandler),
-    crateSpawn: Boolean(crateHandler),
+    claim: Boolean(claimHandler),
+    crateSpawn: Boolean(validCrateSignal),
     inventory: Boolean(inventory),
     detail: missing.length ? `${missing.join(',')}-not-found` : null,
     discovery: window.__fmvRuntimeDiscovery,
@@ -169,6 +175,7 @@ _DISCOVERY_DIAGNOSTICS_EXPRESSION = r"""
 (() => window.__fmvRuntimeDiscovery || {
   strategy: 'not-run', services: false, pickSubscribers: 0,
   dropSubscribers: 0, itemDrop: false, crateSpawn: false,
+  claim: false,
   inventory: Boolean(window.__fmvCrateInventoryItem), missing: ['discovery-not-run'],
 })()
 """
@@ -194,7 +201,8 @@ _HEALTH_EXPRESSION = r"""
 (() => {
   const board = window.__fmvBoardCells;
   const handler = window.__fmvItemInteractionHandler;
-  const crate = window.__fmvCrateSpawnHandler;
+  const claimHandler = window.__fmvClaimInteractionHandler;
+  const crateSignal = window.__fmvCrateSpawnSignal;
   const beat = window.__fmvHeartbeat;
   const services = window.__fmvGameplayServices;
   const scene = window.__fmvGameplayMapScreen;
@@ -209,13 +217,12 @@ _HEALTH_EXPRESSION = r"""
   const currentItemHandler = currentBoard && handler?._services === services &&
     subscribers(interaction?.onGesturePick).some((entry) => entry?.context === handler) &&
     subscribers(interaction?.onGestureDrop).some((entry) => entry?.context === handler);
-  const currentCrateHandler = currentBoard && subscribers(
-    window.__fmvCrateInventoryItem?.onAnimateChanges
-  ).some((entry) => {
-    const context = entry?.context;
-    return context === crate && context?._stateMachine &&
-      typeof context._onClick === 'function';
-  });
+  const currentClaimHandler = currentBoard && claimHandler?._services === services &&
+    typeof claimHandler._simulateClick === 'function' &&
+    subscribers(interaction?.onGestureTap).some((entry) => entry?.context === claimHandler);
+  const currentCrateSignal = currentBoard &&
+    services?.hudService?._commonEvents?.spawnCrates === crateSignal &&
+    typeof crateSignal?.fire === 'function' && subscribers(crateSignal).length > 0;
   const identity = currentBoard && (services.mapGrid || scene || handler || board);
   const sceneId = identity && window.__fmvRuntimeSceneIds
     ? window.__fmvRuntimeSceneIds.get(identity) : null;
@@ -223,11 +230,12 @@ _HEALTH_EXPRESSION = r"""
     sceneId,
     board: board instanceof Map && currentBoard,
     itemDrop: Boolean(currentItemHandler),
+    claim: Boolean(currentClaimHandler),
     itemActionBusy: Boolean(currentItemHandler && (
       handler.busy || handler.isBusy?.() || handler.dragging || handler._dragging ||
       handler._currentObject || handler._originCell
     )),
-    crateSpawn: Boolean(currentCrateHandler),
+    crateSpawn: Boolean(currentCrateSignal),
     inventory: Boolean(window.__fmvCrateInventoryItem),
     heartbeat: beat ? beat.frame : null,
     heartbeatAgeMs: beat ? Math.max(0, performance.now() - beat.timestamp) : null,
@@ -378,21 +386,26 @@ def _crate_expression(limit: int, scene_id: int | None) -> str:
     return f"""
 (async () => {{
   const board = window.__fmvBoardCells;
-  const handler = window.__fmvCrateSpawnHandler;
+  const signal = window.__fmvCrateSpawnSignal;
   const inventory = window.__fmvCrateInventoryItem;
   const identity = window.__fmvGameplayServices?.mapGrid ||
     window.__fmvGameplayMapScreen || window.__fmvItemInteractionHandler || board;
   const currentSceneId = identity && window.__fmvRuntimeSceneIds
     ? window.__fmvRuntimeSceneIds.get(identity) : null;
-  if (!board || window.__fmvRuntimeBoard !== board || !handler || !inventory ||
+  if (!board || window.__fmvRuntimeBoard !== board || !signal || !inventory ||
       currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', spawned: 0, detail: 'runtime-scene-changed'}};
-  if (handler.busy || handler.isBusy?.())
+  if (window.__fmvGameplayServices?.hudService?._commonEvents?.spawnCrates !== signal)
+    return {{status: 'unavailable', spawned: 0, remaining: inventory.amount,
+      detail: 'crate-signal-not-current'}};
+  const subscribers = Array.isArray(signal._subscribers) ? signal._subscribers : [];
+  if (!subscribers.length)
+    return {{status: 'unavailable', spawned: 0, remaining: inventory.amount,
+      detail: 'crate-signal-has-no-subscribers'}};
+  if (subscribers.some((entry) => entry?.context?._executing))
     return {{status: 'busy', spawned: 0, remaining: inventory.amount}};
-  const methods = ['_onClick', 'spawnSupplyCrate', 'spawnCrate', 'claimCrate',
-    'handleCrateClick'];
-  const method = methods.find((name) => typeof handler[name] === 'function');
-  if (!method) return {{status: 'unavailable', spawned: 0, detail: 'crate-handler-not-found'}};
+  if (typeof signal.fire !== 'function')
+    return {{status: 'unavailable', spawned: 0, detail: 'crate-signal-not-found'}};
   let spawned = 0;
   const countEmpty = () => {{
     let count = 0;
@@ -400,7 +413,7 @@ def _crate_expression(limit: int, scene_id: int | None) -> str:
     return count;
   }};
   const waitForChange = (beforeAmount, beforeEmpty) => new Promise((resolve) => {{
-    const deadline = performance.now() + 2000;
+    const deadline = performance.now() + 4000;
     const check = () => {{
       const empty = countEmpty();
       if (inventory.amount < beforeAmount || empty < beforeEmpty) return resolve(true);
@@ -413,16 +426,79 @@ def _crate_expression(limit: int, scene_id: int | None) -> str:
     while (spawned < {max(0, int(limit))}) {{
       const amount = inventory.amount;
       const empty = countEmpty();
-      if (!(amount > 0) || empty === 0) break;
-      const accepted = await handler[method]();
-      if (accepted === false) break;
-      if (!await waitForChange(amount, empty)) break;
+      if (!(amount > 0))
+        return {{status: 'rejected', spawned, remaining: amount,
+          detail: 'no-supply-crates'}};
+      if (empty === 0)
+        return {{status: 'rejected', spawned, remaining: amount,
+          detail: 'no-open-cells'}};
+      signal.fire({{}});
+      if (!await waitForChange(amount, empty))
+        return {{status: 'rejected', spawned, remaining: inventory.amount,
+          detail: 'no-authoritative-crate-change'}};
       spawned += 1;
     }}
     return {{status: spawned ? 'submitted' : 'rejected', spawned, remaining: inventory.amount}};
   }} catch (error) {{
     return {{status: 'rejected', spawned, remaining: inventory.amount,
       detail: String(error?.message || error)}};
+  }}
+}})()
+"""
+
+
+def _claim_expression(
+    coord: GridCoord,
+    expected_kind: ClaimTargetKind,
+    expected_blueprint_id: str,
+    expected_object_id: int | None,
+    scene_id: int | None,
+) -> str:
+    return f"""
+(() => {{
+  const coord = {_coord(coord)};
+  const expectedKind = {json.dumps(expected_kind.value)};
+  const expectedBlueprintID = {json.dumps(expected_blueprint_id)};
+  const expectedObjectID = {json.dumps(expected_object_id)};
+  const board = window.__fmvBoardCells;
+  const handler = window.__fmvClaimInteractionHandler;
+  const identity = window.__fmvGameplayServices?.mapGrid ||
+    window.__fmvGameplayMapScreen || handler || board;
+  const currentSceneId = identity && window.__fmvRuntimeSceneIds
+    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  if (!board || window.__fmvRuntimeBoard !== board || !handler ||
+      currentSceneId !== {json.dumps(scene_id)})
+    return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
+  let cell = null;
+  for (const candidate of board.values()) {{
+    if (candidate.column === coord[0] && candidate.row === coord[1]) {{
+      cell = candidate;
+      break;
+    }}
+  }}
+  const content = cell?._content;
+  if (!content || content._blueprintID !== expectedBlueprintID ||
+      (expectedObjectID !== null && content.id !== expectedObjectID))
+    return {{status: 'stale-source'}};
+  const producer = content.hasBehavior?.('harvestable') &&
+    ['animal', 'crop'].includes(content.getBehavior?.('harvestable')?._data?.harvestableType);
+  const valid = expectedKind === 'product'
+    ? content.hasBehavior?.('collectable') && content.hasBehavior?.('ingredient')
+    : expectedKind === 'producer'
+      ? producer && !content.hasBehavior?.('cooldown') &&
+        !content.hasBehavior?.('depleted')
+      : expectedKind === 'depleted-producer'
+        ? producer && content.hasBehavior?.('depleted')
+        : false;
+  if (!valid) return {{status: 'invalid-target'}};
+  if (handler.busy || handler.isBusy?.() || handler.dragging || handler._dragging ||
+      handler._currentObject || handler._originCell)
+    return {{status: 'busy'}};
+  try {{
+    handler._simulateClick(content);
+    return {{status: 'submitted'}};
+  }} catch (error) {{
+    return {{status: 'rejected', detail: String(error?.message || error)}};
   }}
 }})()
 """
@@ -438,6 +514,14 @@ class GameRuntime(Protocol):
     def read_runtime_health(self) -> RuntimeHealth: ...
 
     def submit_item_drop(self, start: GridCoord, end: GridCoord) -> ActionResult: ...
+
+    def submit_board_claim(
+        self,
+        coord: GridCoord,
+        expected_kind: ClaimTargetKind,
+        expected_blueprint_id: str,
+        expected_object_id: int | None,
+    ) -> ActionResult: ...
 
     def spawn_supply_crates(self, limit: int) -> CrateSpawnResult: ...
 
@@ -567,10 +651,11 @@ class GameRuntimeAdapter:
             self._scene_id = None
             self._discovery_detail = "runtime-scene-changed"
         item_drop = raw.get("itemDrop") is True
+        claim = raw.get("claim") is True
         crate_spawn = raw.get("crateSpawn") is True
         board = raw.get("board") is True
         return RuntimeHealth(
-            available=board and (item_drop or crate_spawn) and scene_id is not None,
+            available=board and (item_drop or claim or crate_spawn) and scene_id is not None,
             scene_id=scene_id,
             board_available=board,
             item_drop_available=item_drop,
@@ -586,10 +671,42 @@ class GameRuntimeAdapter:
             heartbeat_installed=raw.get("heartbeatInstalled") is True,
             detail=self._discovery_detail,
             item_action_busy=raw.get("itemActionBusy") is True,
+            claim_available=claim,
         )
 
     def submit_item_drop(self, start: GridCoord, end: GridCoord) -> ActionResult:
         raw = self._evaluate(_drop_expression(start, end, self._scene_id))
+        if not isinstance(raw, dict):
+            return ActionResult(ActionStatus.UNAVAILABLE, "invalid-runtime-response")
+        status_value = raw.get("status")
+        try:
+            status = (
+                ActionStatus(status_value)
+                if isinstance(status_value, str)
+                else ActionStatus.UNAVAILABLE
+            )
+        except ValueError:
+            status = ActionStatus.UNAVAILABLE
+        return ActionResult(
+            status, raw.get("detail") if isinstance(raw.get("detail"), str) else None
+        )
+
+    def submit_board_claim(
+        self,
+        coord: GridCoord,
+        expected_kind: ClaimTargetKind,
+        expected_blueprint_id: str,
+        expected_object_id: int | None,
+    ) -> ActionResult:
+        raw = self._evaluate(
+            _claim_expression(
+                coord,
+                expected_kind,
+                expected_blueprint_id,
+                expected_object_id,
+                self._scene_id,
+            )
+        )
         if not isinstance(raw, dict):
             return ActionResult(ActionStatus.UNAVAILABLE, "invalid-runtime-response")
         status_value = raw.get("status")

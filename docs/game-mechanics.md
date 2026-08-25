@@ -95,6 +95,20 @@ Facebook/TikTok community posts, and direct in-app observation (marked
   new farm land.
 - Unwanted orders can be discarded, but discarding has a time delay/cost.
 
+## Tier-4 Producers
+
+- Tier-4 crops and animals become harvestable immediately after their merge
+  and can be harvested twice. The second harvest becomes available after a
+  cooldown. This lifecycle is directly observed in the live game state.
+- Harvested ingredients appear as collectible board objects and occupy cells
+  until collected. An observed ingredient click can collect multiple matching
+  products from the board at once.
+- After the final harvest, animals retire into coins. Crops retire into two
+  tier-1 items of the same crop, requiring one additional open cell.
+- The current live runtime reports a 3600-second regeneration duration. Yield
+  can vary and may be affected by upgrade cards, so automation should preserve
+  several open cells rather than assuming one fixed output count.
+
 ## Train Tickets & Visiting
 
 - Train tickets cap at **3** held at once; supply crates stop dropping new

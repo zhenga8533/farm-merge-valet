@@ -31,11 +31,14 @@ from farm_merge_valet.core.board import (
     BoardGrid,
     Cell,
     CellKind,
+    ClaimTargetKind,
     GridCoord,
     ItemRef,
     MergeAction,
     MergeActionKind,
     MoveEffect,
+    ProducerKind,
+    ProducerState,
     plan_merge_actions,
 )
 from farm_merge_valet.core.board_scan import discover_blueprint_items
@@ -66,6 +69,7 @@ _STRUCTURE_BLUEPRINTS = frozenset(
 
 
 class Phase(Enum):
+    CLAIM_PRODUCE = auto()
     CLAIM_CRATES = auto()
     MERGE = auto()
 
@@ -78,6 +82,26 @@ class _PendingAction:
     submitted_at: float = 0.0
     last_signature: tuple[tuple[GridCoord, Cell | None], ...] | None = None
     last_change_at: float = 0.0
+    scene_change_logged: bool = False
+
+
+@dataclass(frozen=True)
+class _ClaimAction:
+    kind: ClaimTargetKind
+    coord: GridCoord
+    blueprint_id: str
+    object_id: int | None
+    producer_kind: ProducerKind | None = None
+
+
+@dataclass
+class _PendingClaim:
+    action: _ClaimAction
+    initial_state: LiveCellState
+    scene_id: int | None
+    submitted_at: float
+    last_state: LiveCellState | None
+    last_change_at: float
     scene_change_logged: bool = False
 
 
@@ -103,7 +127,10 @@ class Bot:
             key = (item.category, item.name)
             self._max_item_tiers[key] = max(item.tier, self._max_item_tiers.get(key, 0))
         self.board = BoardGrid()
+        self._live_cells: dict[GridCoord, LiveCellState] = {}
         self._pending_action: _PendingAction | None = None
+        self._pending_claim: _PendingClaim | None = None
+        self._next_claim_action_at = 0.0
         self._action_failures: dict[tuple, int] = {}
         self._action_retry_at: dict[tuple, float] = {}
         self._next_item_action_at = 0.0
@@ -112,6 +139,7 @@ class Bot:
         self._last_wait_log_at = 0.0
         self._last_crate_claim_limit: int | None = None
         self._last_crate_claim_log_at = 0.0
+        self._last_cooling_producer_count: int | None = None
         self._capability_retry_at = 0.0
         self._capability_retry_delay = settings.loop_interval
 
@@ -165,10 +193,11 @@ class Bot:
                 logging.WARNING,
                 "runtime.unavailable",
                 "Game target found, but action runtime is unavailable: %s "
-                "(board=%s, item actions=%s, crate claims=%s, inventory=%s).",
+                "(board=%s, item actions=%s, board claims=%s, crate claims=%s, inventory=%s).",
                 self._last_health.detail or "no diagnostic detail",
                 self._last_health.board_available,
                 self._last_health.item_drop_available,
+                self._last_health.claim_available,
                 self._last_health.crate_spawn_available,
                 self._last_health.inventory_available,
                 scene_id=self._last_health.scene_id,
@@ -180,9 +209,11 @@ class Bot:
                 logger,
                 logging.WARNING,
                 "runtime.partially_ready",
-                "Game runtime is partially ready: %s (item actions=%s, crate claims=%s).",
+                "Game runtime is partially ready: %s "
+                "(item actions=%s, board claims=%s, crate claims=%s).",
                 self._last_health.detail,
                 self._last_health.item_drop_available,
+                self._last_health.claim_available,
                 self._last_health.crate_spawn_available,
                 scene_id=self._last_health.scene_id,
                 detail=self._last_health.detail,
@@ -261,6 +292,7 @@ class Bot:
         for coord, state in raw.items():
             self._set_live_cell(board, coord, state)
         self.board = board
+        self._live_cells = raw
         return True
 
     def _set_live_cell(self, board: BoardGrid, coord: GridCoord, state: LiveCellState) -> None:
@@ -275,8 +307,10 @@ class Bot:
             board.set_cell(coord, Cell(_LIVE_STATE_CELL_KIND[blueprint_id]))
         elif blueprint_id in _STRUCTURE_BLUEPRINTS:
             board.set_cell(coord, Cell(CellKind.STRUCTURE))
-        else:
+        elif state.collectable_ingredient:
             board.set_cell(coord, Cell(CellKind.PRODUCT))
+        else:
+            board.set_cell(coord, Cell(CellKind.OTHER))
 
     _MERGE_ACTION_PRIORITY = {
         MergeActionKind.TRIGGER: 0,
@@ -393,6 +427,231 @@ class Bot:
             "start": action.start,
             "end": action.end,
         }
+
+    @staticmethod
+    def _claim_event_context(action: _ClaimAction) -> dict[str, object]:
+        return {
+            "claim_kind": action.kind.value,
+            "coord": action.coord,
+            "blueprint_id": action.blueprint_id,
+            "object_id": action.object_id,
+            "producer_kind": action.producer_kind.value if action.producer_kind else None,
+        }
+
+    def _is_recognized_tier_four_producer(self, state: LiveCellState) -> bool:
+        return bool(
+            state.blueprint_id is not None and state.producer_kind is not None and state.tier == 4
+        )
+
+    def _claim_actions(self) -> tuple[list[_ClaimAction], list[_ClaimAction], list[_ClaimAction]]:
+        products: list[_ClaimAction] = []
+        depleted: list[_ClaimAction] = []
+        ready: list[_ClaimAction] = []
+        for coord, state in sorted(self._live_cells.items()):
+            if state.blueprint_id is None:
+                continue
+            if state.collectable_ingredient:
+                products.append(
+                    _ClaimAction(
+                        ClaimTargetKind.PRODUCT,
+                        coord,
+                        state.blueprint_id,
+                        state.object_id,
+                    )
+                )
+                continue
+            if not self._is_recognized_tier_four_producer(state):
+                continue
+            if state.producer_state is ProducerState.DEPLETED:
+                depleted.append(
+                    _ClaimAction(
+                        ClaimTargetKind.DEPLETED_PRODUCER,
+                        coord,
+                        state.blueprint_id,
+                        state.object_id,
+                        state.producer_kind,
+                    )
+                )
+            elif state.producer_state is ProducerState.READY:
+                ready.append(
+                    _ClaimAction(
+                        ClaimTargetKind.PRODUCER,
+                        coord,
+                        state.blueprint_id,
+                        state.object_id,
+                        state.producer_kind,
+                    )
+                )
+        producer_order = {ProducerKind.ANIMAL: 0, ProducerKind.CROP: 1, None: 2}
+        depleted.sort(key=lambda action: (producer_order[action.producer_kind], action.coord))
+        ready.sort(key=lambda action: (producer_order[action.producer_kind], action.coord))
+        return products, depleted, ready
+
+    def _cooling_producer_count(self) -> int:
+        return sum(
+            self._is_recognized_tier_four_producer(state)
+            and state.producer_state is ProducerState.COOLING
+            for state in self._live_cells.values()
+        )
+
+    def _claim_succeeded(self, pending: _PendingClaim) -> bool:
+        current = self._live_cells.get(pending.action.coord)
+        if pending.action.kind is ClaimTargetKind.PRODUCT:
+            return current is None or current.object_id != pending.action.object_id
+        if pending.action.kind is ClaimTargetKind.PRODUCER:
+            return (
+                current is None
+                or current.object_id != pending.action.object_id
+                or current.producer_state is not ProducerState.READY
+            )
+        return (
+            current is None
+            or current.object_id != pending.action.object_id
+            or current.producer_state is not ProducerState.DEPLETED
+        )
+
+    def _verify_pending_claim(self, health: RuntimeHealth) -> bool:
+        pending = self._pending_claim
+        if pending is None:
+            return True
+        now = time.monotonic()
+        age = now - pending.submitted_at
+        if not health.heartbeat_advancing:
+            if age >= _ACTION_SETTLE_SECONDS:
+                self._report_wait(
+                    "submitted board claim is pending while the game heartbeat is frozen",
+                    **self._claim_event_context(pending.action),
+                )
+            return False
+        if health.scene_id != pending.scene_id and not pending.scene_change_logged:
+            log_event(
+                logger,
+                logging.WARNING,
+                "claim.pending_scene_changed",
+                "Runtime scene changed from %s to %s while a board claim was pending; "
+                "verifying against the reloaded board.",
+                pending.scene_id,
+                health.scene_id,
+                previous_scene_id=pending.scene_id,
+                scene_id=health.scene_id,
+                **self._claim_event_context(pending.action),
+            )
+            pending.scene_change_logged = True
+        if self._claim_succeeded(pending):
+            self._pending_claim = None
+            self._last_wait_reason = None
+            log_event(
+                logger,
+                logging.INFO,
+                "claim.confirmed",
+                "%s claim confirmed at %s.",
+                pending.action.kind.value.replace("-", " ").title(),
+                pending.action.coord,
+                elapsed_seconds=age,
+                **self._claim_event_context(pending.action),
+            )
+            return True
+        current = self._live_cells.get(pending.action.coord)
+        if pending.last_state is None or current != pending.last_state:
+            pending.last_state = current
+            pending.last_change_at = now
+        stable_for = now - pending.last_change_at
+        settled = age >= _ACTION_SETTLE_SECONDS and stable_for >= _ACTION_STABLE_SECONDS
+        if health.item_action_busy or (not settled and age < _ACTION_MAX_PENDING_SECONDS):
+            if age >= _ACTION_SETTLE_SECONDS:
+                self._report_wait(
+                    "the submitted board claim is still resolving",
+                    **self._claim_event_context(pending.action),
+                )
+            return False
+        self._pending_claim = None
+        self._next_claim_action_at = now + _ACTION_RETRY_SECONDS
+        log_event(
+            logger,
+            logging.WARNING,
+            "claim.not_accepted",
+            "%s claim at %s was not accepted after %.1fs; replanning.",
+            pending.action.kind.value.replace("-", " ").title(),
+            pending.action.coord,
+            age,
+            elapsed_seconds=age,
+            **self._claim_event_context(pending.action),
+        )
+        return True
+
+    def _submit_claim(self, action: _ClaimAction, health: RuntimeHealth) -> bool:
+        if self._pending_action is not None or self._pending_claim is not None:
+            return False
+        log_event(
+            logger,
+            logging.DEBUG,
+            "claim.planned",
+            "Planned %s claim for %s at %s.",
+            action.kind.value.replace("-", " "),
+            action.blueprint_id,
+            action.coord,
+            empty_cells=len(self.board.find_empty()),
+            **self._claim_event_context(action),
+        )
+        result = self.runtime.submit_board_claim(
+            action.coord,
+            action.kind,
+            action.blueprint_id,
+            action.object_id,
+        )
+        if result.status is ActionStatus.SUBMITTED:
+            submitted_at = time.monotonic()
+            initial_state = self._live_cells[action.coord]
+            self._pending_claim = _PendingClaim(
+                action,
+                initial_state,
+                health.scene_id,
+                submitted_at,
+                initial_state,
+                submitted_at,
+            )
+            self._last_wait_reason = None
+            log_event(
+                logger,
+                logging.INFO,
+                "claim.submitted",
+                "Submitted %s claim for %s at %s; awaiting verification.",
+                action.kind.value.replace("-", " "),
+                action.blueprint_id,
+                action.coord,
+                scene_id=health.scene_id,
+                **self._claim_event_context(action),
+            )
+            return True
+        if result.status is ActionStatus.BUSY:
+            self._report_wait(
+                "the game is finishing another board interaction",
+                status=result.status.value,
+                **self._claim_event_context(action),
+            )
+        elif result.status is ActionStatus.UNAVAILABLE:
+            self._report_wait(
+                result.detail or "board claim handler unavailable",
+                status=result.status.value,
+                **self._claim_event_context(action),
+            )
+        else:
+            self._next_claim_action_at = time.monotonic() + _ACTION_RETRY_SECONDS
+            log_event(
+                logger,
+                logging.WARNING,
+                "claim.rejected",
+                "%s claim for %s at %s could not be submitted: %s (%s).",
+                action.kind.value.replace("-", " ").title(),
+                action.blueprint_id,
+                action.coord,
+                result.status.value,
+                result.detail or "no detail",
+                status=result.status.value,
+                detail=result.detail,
+                **self._claim_event_context(action),
+            )
+        return False
 
     def _merge_action_succeeded(self, action: MergeAction) -> bool:
         def has_item(coord: GridCoord, item: ItemRef) -> bool:
@@ -534,6 +793,8 @@ class Bot:
         return True
 
     def _submit_merge(self, action: MergeAction, health: RuntimeHealth) -> bool:
+        if self._pending_action is not None or self._pending_claim is not None:
+            return False
         result = self.runtime.submit_item_drop(action.start, action.end)
         if result.status is ActionStatus.SUBMITTED:
             submitted_at = time.monotonic()
@@ -593,6 +854,48 @@ class Bot:
             )
         return False
 
+    def _step_claim_produce(
+        self,
+        health: RuntimeHealth,
+        products: list[_ClaimAction],
+        depleted: list[_ClaimAction],
+        ready: list[_ClaimAction],
+    ) -> None:
+        if time.monotonic() < self._next_claim_action_at:
+            return
+        if products:
+            self._submit_claim(products[0], health)
+            return
+        empty_count = len(self.board.find_empty())
+        for action in depleted:
+            required = 1 if action.producer_kind is ProducerKind.CROP else 0
+            if empty_count >= required:
+                self._submit_claim(action, health)
+                return
+        if depleted:
+            self._set_phase(Phase.MERGE)
+            if health.item_drop_available:
+                self._step_merge(health, True, required_empty_cells=1)
+            else:
+                self._report_wait("one open cell is required to retire a depleted crop")
+            return
+        if ready and empty_count >= settings.producer_claim_min_empty_cells:
+            self._submit_claim(ready[0], health)
+            return
+        if ready:
+            required = settings.producer_claim_min_empty_cells
+            self._set_phase(Phase.MERGE)
+            if health.item_drop_available:
+                self._step_merge(health, True, required_empty_cells=required)
+            else:
+                self._report_wait(
+                    f"a producer is ready but {required} open cells are required",
+                    empty_cells=empty_count,
+                    required_empty_cells=required,
+                )
+            return
+        self._set_phase(Phase.CLAIM_CRATES)
+
     def _step_claim_crates(self, board_needs_merge: bool) -> None:
         if board_needs_merge:
             self._set_phase(Phase.MERGE)
@@ -633,9 +936,9 @@ class Bot:
                 status=result.status.value,
             )
         elif result.status is ActionStatus.BUSY:
-            self._report_wait("crate handler is busy")
+            self._report_wait("the game is finishing another crate claim")
         elif result.status is ActionStatus.UNAVAILABLE:
-            self._report_wait(result.detail or "crate handler unavailable")
+            self._report_wait(result.detail or "crate claim capability unavailable")
         elif result.remaining == 0:
             self._report_wait("no supply crates are available")
         elif result.status is ActionStatus.REJECTED:
@@ -643,7 +946,13 @@ class Bot:
         if result.remaining == 0 and self._merge_actions_for_policy():
             self._set_phase(Phase.MERGE)
 
-    def _step_merge(self, health: RuntimeHealth, board_needs_merge: bool) -> None:
+    def _step_merge(
+        self,
+        health: RuntimeHealth,
+        board_needs_merge: bool,
+        *,
+        required_empty_cells: int | None = None,
+    ) -> None:
         if time.monotonic() < self._next_item_action_at:
             return
         actions = self._merge_actions_for_policy()
@@ -671,6 +980,15 @@ class Bot:
             self._submit_merge(selected, health)
         elif actions:
             self._report_wait("failed item actions are cooling down before retry")
+        elif (
+            required_empty_cells is not None and len(self.board.find_empty()) < required_empty_cells
+        ):
+            self._report_wait(
+                f"a producer claim needs {required_empty_cells} open cells and no merge "
+                "can currently create more space",
+                empty_cells=len(self.board.find_empty()),
+                required_empty_cells=required_empty_cells,
+            )
         elif not board_needs_merge:
             self._set_phase(Phase.CLAIM_CRATES)
         elif not self.board.find_empty():
@@ -693,6 +1011,7 @@ class Bot:
                 not health.available
                 or (self.phase is Phase.MERGE and not health.item_drop_available)
                 or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
+                or (self.phase is Phase.CLAIM_PRODUCE and not health.claim_available)
             )
             if capability_missing:
                 now = time.monotonic()
@@ -704,6 +1023,7 @@ class Bot:
                     not health.available
                     or (self.phase is Phase.MERGE and not health.item_drop_available)
                     or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
+                    or (self.phase is Phase.CLAIM_PRODUCE and not health.claim_available)
                 )
                 if capability_missing:
                     self._capability_retry_at = time.monotonic() + self._capability_retry_delay
@@ -727,6 +1047,8 @@ class Bot:
             return
         if not self._verify_pending_action(health):
             return
+        if not self._verify_pending_claim(health):
+            return
         if not health.available:
             self._report_wait(health.detail or "runtime unavailable")
             return
@@ -739,6 +1061,28 @@ class Bot:
             self._report_wait(f"game heartbeat is not advancing{age}")
             return
         board_needs_merge = self._board_needs_merge()
+        products, depleted, ready = self._claim_actions()
+        if products or depleted or ready:
+            self._last_cooling_producer_count = None
+            self._set_phase(Phase.CLAIM_PRODUCE)
+            if not health.claim_available:
+                self._report_wait("board claim capability unavailable")
+                return
+            self._step_claim_produce(health, products, depleted, ready)
+            return
+        cooling_producers = self._cooling_producer_count()
+        if cooling_producers and cooling_producers != self._last_cooling_producer_count:
+            log_event(
+                logger,
+                logging.INFO,
+                "producer.cooling",
+                "%d tier-4 producer(s) are cooling; continuing to supply crates.",
+                cooling_producers,
+                cooling_producers=cooling_producers,
+            )
+        self._last_cooling_producer_count = cooling_producers or None
+        if self.phase is Phase.CLAIM_PRODUCE:
+            self._set_phase(Phase.CLAIM_CRATES)
         if self.phase is Phase.CLAIM_CRATES:
             self._step_claim_crates(board_needs_merge)
         else:
@@ -919,7 +1263,12 @@ class Bot:
                         continue
                     needs_initialization = False
                     retry_delay = settings.loop_interval
-                self.step()
+                try:
+                    self.step()
+                except CdpCancelledError:
+                    if not self._interrupt_event.is_set():
+                        raise
+                    continue
                 self._interrupt_event.wait(settings.loop_interval)
         except KeyboardInterrupt:
             log_event(logger, logging.INFO, "bot.interrupted", "Stopped by user.")

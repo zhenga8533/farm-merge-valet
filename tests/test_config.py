@@ -11,6 +11,7 @@ from farm_merge_valet.config import Settings
     [
         ("cdp_port", 0),
         ("merge_empty_cell_reserve", -1),
+        ("producer_claim_min_empty_cells", 0),
         ("loop_interval", 0),
         ("crate_delay_max", 5.1),
         ("gui_opacity", 1.1),
@@ -48,6 +49,10 @@ def test_merge_space_reserve_can_be_disabled() -> None:
 
 def test_merge_five_is_enabled_by_default() -> None:
     assert Settings(_env_file=None).prefer_merge_five
+
+
+def test_producer_claim_reserves_four_cells_by_default() -> None:
+    assert Settings(_env_file=None).producer_claim_min_empty_cells == 4
 
 
 def test_managed_browser_defaults_to_auto_launch() -> None:

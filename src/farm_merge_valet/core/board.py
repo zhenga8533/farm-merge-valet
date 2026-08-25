@@ -8,7 +8,7 @@ missing or partial live-state read is never mistaken for usable board space.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 from typing import Literal
 
 GridCoord = tuple[int, int]
@@ -24,10 +24,30 @@ class CellKind(Enum):
     # board state (see cdp/board_store.py): distinct from ITEM since
     # products have no tier/merge identity of their own.
     PRODUCT = auto()
+    # Occupied content that is not recognized as a merge item, structure, or
+    # collectible ingredient. It must remain non-actionable.
+    OTHER = auto()
     # A placed building/decoration or one of its unavailable footprint cells.
     # The game labels footprint placeholders "empty", but genuinely open
     # cells have no content object at all.
     STRUCTURE = auto()
+
+
+class ClaimTargetKind(StrEnum):
+    PRODUCT = "product"
+    PRODUCER = "producer"
+    DEPLETED_PRODUCER = "depleted-producer"
+
+
+class ProducerKind(StrEnum):
+    ANIMAL = "animal"
+    CROP = "crop"
+
+
+class ProducerState(StrEnum):
+    READY = "ready"
+    COOLING = "cooling"
+    DEPLETED = "depleted"
 
 
 @dataclass(frozen=True)

@@ -26,7 +26,7 @@ stale connection is closed before target discovery retries once. Temporary
 objects returned by `Runtime.queryObjects` are released after use.
 
 The runtime adapter locates and validates the active gameplay screen, board
-map, item interaction handler, crate handler, and supply inventory. References
+map, item/claim interaction handler, live HUD crate event, and supply inventory. References
 are retained in the page only while their scene identity remains current. A
 runtime update that breaks discovery fails closed with structured health and
 action diagnostics; physical input is never used as a fallback.
@@ -36,10 +36,38 @@ loop is advancing. The bot may continue observing while it is frozen, but sends
 no actions and queues no retries. This prevents a background-tab suspension
 from being mistaken for an action failure.
 
+## Claim products and producers
+
+The live cell read includes semantic behaviors as well as blueprint identity.
+An occupied object is actionable as a ground product only when it has both the
+game's `ingredient` and `collectable` behaviors. Recognized tier-4 crop and
+animal items are ready when they are harvestable without an active `cooldown`
+or `depleted` behavior, cooling while `cooldown` is present, and ready for
+retirement when depleted. The visual `cooldownPreview` behavior is not used as
+authoritative state because it persists after the timer for a second harvest
+has completed.
+
+The claim phase collects ground ingredients first, then retires depleted
+producers, then harvests ready producers. Depleted animals convert in place;
+depleted crops require one open cell for their two tier-1 replacements. A ready
+producer requires `FMV_PRODUCER_CLAIM_MIN_EMPTY_CELLS` open cells (four by
+default). If the requirement is not met, merge work preempts claims and supply
+crates. With no productive merge available, the bot waits and keeps observing.
+
+Claims use the active interaction handler's internal object-click pipeline.
+The adapter validates the scene, coordinate, object identity, blueprint, and
+expected behaviors immediately before submission. Product collection is
+confirmed when the source object leaves; harvesting is confirmed by a producer
+lifecycle transition; retirement is confirmed when the tier-4 producer is
+replaced. A pending claim follows the same heartbeat and no-duplicate rules as
+an item drop. The game may collect several matching ingredient objects from one
+accepted click; the next authoritative read discards the stale candidates and
+replans from the resulting board.
+
 ## Claim crates
 
 The bot derives a claim limit from live inventory, empty board cells, and the
-configured merge-space reserve. It calls the HUD's internal crate handler
+configured merge-space reserve. It fires the HUD's live internal crate event
 sequentially up to that limit. Inventory and empty space are rechecked after
 every accepted spawn. Each claim waits for an authoritative inventory or board
 change before another is submitted, so zero inventory, zero space, delayed
@@ -70,7 +98,7 @@ move the camera between coordinate resolution and submission. Resolved item
 actions are separated by a configurable randomized delay.
 
 Submissions return one of `submitted`, `busy`, `unavailable`, `rejected`,
-`stale-source`, or `invalid-destination`. A submitted action stays pending while
+`stale-source`, `invalid-target`, or `invalid-destination`. A submitted action stays pending while
 the heartbeat is frozen, the interaction handler is busy, or the target reloads.
 Once the game is active, it waits for board state to settle before confirming
 the intended result, recognizing a different board change, or recording an
@@ -87,7 +115,8 @@ capture. `visualize-positions` marks currently rendered cells by classification
 with a compact legend; there are no dead zones, actionable regions, crate
 exclusions, or pan anchors. `diagnose-live-state` includes runtime capability,
 scene identity, bounded handler-discovery stages, browser background-flag status,
-and heartbeat status. Heap-wide board-map candidates are collected only when
+heartbeat status, claim capability, and counts of collectible, ready, cooling,
+and depleted objects. Heap-wide board-map candidates are collected only when
 `--include-heap-candidates` is explicitly requested.
 
 The active loop rate-limits repeated capability discovery and periodically logs
@@ -113,6 +142,6 @@ network or server-side interruption, and backend connectivity is not detected
 separately yet. Global pause/quit hotkeys and Ctrl+C remain available as inbound
 controls without being part of game interaction.
 
-Future phases may collect products, retire exhausted producers, fulfill orders,
-clear obstacles, visit friends, and handle expansions/events. Network-dependent
+Future phases may fulfill orders, clear obstacles, visit friends, and handle
+expansions/events. Network-dependent
 phases should add explicit backend-connectivity monitoring when implemented.

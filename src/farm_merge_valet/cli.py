@@ -216,11 +216,12 @@ def visualize_positions_cmd(
         CellKind.CLOUD: (200, 200, 200),
         CellKind.STRUCTURE: (180, 80, 220),
         CellKind.PRODUCT: (40, 160, 255),
+        CellKind.OTHER: (100, 100, 160),
     }
     counts: Counter[str] = Counter()
     for coord in sorted(calibration.rendered_coords):
         cell = bot.board.get_cell(coord)
-        kind = cell.kind if cell is not None else CellKind.PRODUCT
+        kind = cell.kind if cell is not None else CellKind.OTHER
         x, y = calibration.to_pixel(coord)
         if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
             cv2.circle(frame, (x, y), 8, colors[kind], 2)
@@ -267,6 +268,7 @@ def diagnose_live_state_cmd(
             "item_drop": health.item_drop_available,
             "crate_spawn": health.crate_spawn_available,
             "inventory": health.inventory_available,
+            "claim": health.claim_available,
             "heartbeat": health.heartbeat,
             "heartbeat_age_ms": health.heartbeat_age_ms,
             "heartbeat_advancing": health.heartbeat_advancing,
@@ -283,6 +285,14 @@ def diagnose_live_state_cmd(
             "common_blueprints": Counter(
                 value.blueprint_id for value in (board_state or {}).values() if value.blueprint_id
             ).most_common(20),
+            "collectible_products": sum(
+                value.collectable_ingredient for value in (board_state or {}).values()
+            ),
+            "producers": Counter(
+                value.producer_state.value
+                for value in (board_state or {}).values()
+                if value.producer_state is not None
+            ),
         },
         "scene": {
             "rendered_cells": len(calibration.rendered_coords) if calibration else 0,
