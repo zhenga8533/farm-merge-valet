@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     # Seconds between bot loop iterations.
     loop_interval: float = Field(default=1.0, gt=0.0)
 
+    # Back off when the planner can find no action at all. Set to 0 to keep
+    # checking at the normal loop interval.
+    idle_wait_seconds: float = Field(default=30.0, ge=0.0, le=3600.0)
+
     # Delay after a resolved item action and between accepted crate claims.
     item_action_delay_min: float = Field(default=1.5, ge=0.0, le=60.0)
     item_action_delay_max: float = Field(default=3.5, ge=0.0, le=60.0)
@@ -79,6 +83,12 @@ class Settings(BaseSettings):
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
+    # Optional Discord notifications. The URL is secret so settings dumps and
+    # validation errors do not expose the webhook token.
+    discord_webhook_url: SecretStr | None = None
+    webhook_summary_interval: float = Field(default=3600.0, ge=60.0, le=86400.0)
+    webhook_status_interval: float = Field(default=60.0, ge=0.0, le=3600.0)
+
     # Overlay GUI (see gui/overlay.py) -- off by default so `run` keeps its
     # existing terminal-only behavior unless explicitly opted into.
     gui_enabled: bool = False
@@ -90,6 +100,15 @@ class Settings(BaseSettings):
     # the log) until it loses focus again. Disable for a plain window
     # instead -- see gui/overlay.py.
     gui_overlay_mode: bool = True
+
+    @field_validator("discord_webhook_url", mode="before")
+    @classmethod
+    def empty_webhook_url_is_disabled(cls, value: object) -> object:
+        if isinstance(value, str):
+            if not value.strip():
+                return None
+            return SecretStr(value)
+        return value
 
     @model_validator(mode="after")
     def validate_timing_ranges(self) -> Self:

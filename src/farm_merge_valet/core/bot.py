@@ -137,6 +137,9 @@ class Bot:
         self._last_health: RuntimeHealth | None = None
         self._last_wait_reason: str | None = None
         self._last_wait_log_at = 0.0
+        self._last_idle_reason: str | None = None
+        self._last_idle_log_at = 0.0
+        self._next_loop_delay = settings.loop_interval
         self._last_crate_claim_limit: int | None = None
         self._last_crate_claim_log_at = 0.0
         self._last_cooling_producer_count: int | None = None
@@ -540,9 +543,10 @@ class Bot:
         if self._claim_succeeded(pending):
             self._pending_claim = None
             self._last_wait_reason = None
+            self._last_idle_reason = None
             log_event(
                 logger,
-                logging.INFO,
+                logging.DEBUG,
                 "claim.confirmed",
                 "%s claim confirmed at %s.",
                 pending.action.kind.value.replace("-", " ").title(),
@@ -613,7 +617,7 @@ class Bot:
             self._last_wait_reason = None
             log_event(
                 logger,
-                logging.INFO,
+                logging.DEBUG,
                 "claim.submitted",
                 "Submitted %s claim for %s at %s; awaiting verification.",
                 action.kind.value.replace("-", " "),
@@ -703,9 +707,10 @@ class Bot:
             self._action_retry_at.pop(action_key, None)
             self._schedule_next_item_action(now)
             self._last_wait_reason = None
+            self._last_idle_reason = None
             log_event(
                 logger,
-                logging.INFO,
+                logging.DEBUG,
                 "action.confirmed",
                 "%s confirmed: %s -> %s.",
                 pending.action.effect.name.title(),
@@ -738,7 +743,7 @@ class Bot:
         if current_signature != pending.signature:
             log_event(
                 logger,
-                logging.WARNING,
+                logging.DEBUG,
                 "action.unexpected_board_state",
                 "%s %s -> %s produced an unexpected board state after %.1fs "
                 "(source: %s; destination: %s); replanning.",
@@ -760,7 +765,7 @@ class Bot:
             self._action_retry_at[action_key] = now + _ACTION_RETRY_SECONDS
             log_event(
                 logger,
-                logging.WARNING,
+                logging.DEBUG,
                 "action.not_accepted",
                 "%s %s -> %s was not accepted after %.1fs (attempt %d/%d); replanning.",
                 action.effect.name.title(),
@@ -810,7 +815,7 @@ class Bot:
             self._last_wait_reason = None
             log_event(
                 logger,
-                logging.INFO,
+                logging.DEBUG,
                 "action.submitted",
                 "Submitted %s for %s tier %d: %s -> %s; awaiting verification.",
                 action.effect.name.title(),
@@ -900,7 +905,8 @@ class Bot:
         if board_needs_merge:
             self._set_phase(Phase.MERGE)
             return
-        reserve = settings.merge_empty_cell_reserve if self._merge_actions_for_policy() else 0
+        merge_actions_available = bool(self._merge_actions_for_policy())
+        reserve = settings.merge_empty_cell_reserve if merge_actions_available else 0
         limit = max(0, len(self.board.find_empty()) - reserve)
         if limit == 0:
             self._set_phase(Phase.MERGE)
@@ -909,7 +915,7 @@ class Bot:
         if limit != self._last_crate_claim_limit or now - self._last_crate_claim_log_at >= 15:
             log_event(
                 logger,
-                logging.INFO,
+                logging.DEBUG,
                 "crate.claim_started",
                 "Claiming up to %d supply crate(s).",
                 limit,
@@ -922,6 +928,7 @@ class Bot:
         result = self.runtime.spawn_supply_crates(limit)
         if result.spawned:
             self._last_wait_reason = None
+            self._last_idle_reason = None
             self._last_crate_claim_limit = None
             log_event(
                 logger,
@@ -939,11 +946,11 @@ class Bot:
             self._report_wait("the game is finishing another crate claim")
         elif result.status is ActionStatus.UNAVAILABLE:
             self._report_wait(result.detail or "crate claim capability unavailable")
-        elif result.remaining == 0:
-            self._report_wait("no supply crates are available")
+        elif result.remaining == 0 and not merge_actions_available:
+            self._defer_idle("no supply crates or merge actions are currently available")
         elif result.status is ActionStatus.REJECTED:
             self._report_wait(result.detail or "crate spawn was not accepted")
-        if result.remaining == 0 and self._merge_actions_for_policy():
+        if result.remaining == 0 and merge_actions_available:
             self._set_phase(Phase.MERGE)
 
     def _step_merge(
@@ -1000,6 +1007,8 @@ class Bot:
             )
             self.paused = True
             self._interrupt_event.set()
+        else:
+            self._defer_idle("no item, producer, or crate action is currently available")
 
     def step(self) -> None:
         """Run one perceive -> plan -> internal action -> verify iteration."""
@@ -1074,7 +1083,7 @@ class Bot:
         if cooling_producers and cooling_producers != self._last_cooling_producer_count:
             log_event(
                 logger,
-                logging.INFO,
+                logging.DEBUG,
                 "producer.cooling",
                 "%d tier-4 producer(s) are cooling; continuing to supply crates.",
                 cooling_producers,
@@ -1122,7 +1131,7 @@ class Bot:
         if elapsed >= 1.0:
             log_event(
                 logger,
-                logging.WARNING,
+                logging.DEBUG,
                 "operation.slow",
                 "Slow %s: %.1fs.",
                 stage,
@@ -1137,7 +1146,7 @@ class Bot:
             normalized_reason = reason.rstrip(".")
             log_event(
                 logger,
-                logging.INFO,
+                logging.DEBUG,
                 "bot.waiting",
                 "Waiting: %s.",
                 normalized_reason,
@@ -1146,6 +1155,26 @@ class Bot:
             )
             self._last_wait_reason = reason
             self._last_wait_log_at = now
+
+    def _defer_idle(self, reason: str, **context: object) -> None:
+        now = time.monotonic()
+        delay = max(settings.loop_interval, settings.idle_wait_seconds)
+        self._next_loop_delay = delay
+        if reason != self._last_idle_reason or now - self._last_idle_log_at >= 900:
+            normalized_reason = reason.rstrip(".")
+            log_event(
+                logger,
+                logging.INFO,
+                "bot.idle",
+                "Idle: %s; polling every %.0fs until state changes.",
+                normalized_reason,
+                delay,
+                reason=normalized_reason,
+                poll_interval_seconds=delay,
+                **context,
+            )
+            self._last_idle_reason = reason
+            self._last_idle_log_at = now
 
     @staticmethod
     def _register_hotkey(hotkey: str, callback: Callable[[], None]) -> None:
@@ -1211,7 +1240,7 @@ class Bot:
             self._interrupt_event.set()
             log_event(
                 logger,
-                logging.WARNING,
+                logging.INFO,
                 "bot.started_paused",
                 "Starting paused; press %s to begin.",
                 settings.pause_hotkey,
@@ -1269,7 +1298,9 @@ class Bot:
                     if not self._interrupt_event.is_set():
                         raise
                     continue
-                self._interrupt_event.wait(settings.loop_interval)
+                delay = self._next_loop_delay
+                self._next_loop_delay = settings.loop_interval
+                self._interrupt_event.wait(delay)
         except KeyboardInterrupt:
             log_event(logger, logging.INFO, "bot.interrupted", "Stopped by user.")
         except Exception:

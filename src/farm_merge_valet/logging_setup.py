@@ -17,15 +17,20 @@ _console_handler: RichHandler | None = None
 
 
 def configure_logging(level: str = "INFO") -> None:
-    """Configure the process-wide console sink without duplicating handlers."""
+    """Configure the process-wide console sink without duplicating handlers.
+
+    The root accepts diagnostic events so non-console sinks can aggregate them;
+    each presentation sink applies its own display threshold.
+    """
     global _console_handler
 
     root_logger = logging.getLogger()
     with _configuration_lock:
-        root_logger.setLevel(level)
+        root_logger.setLevel(logging.DEBUG)
         if _console_handler is None:
             _console_handler = RichHandler(rich_tracebacks=True, show_path=False)
             _console_handler.setFormatter(logging.Formatter("%(message)s", datefmt="[%X]"))
+        _console_handler.setLevel(level)
         if _console_handler not in root_logger.handlers:
             root_logger.addHandler(_console_handler)
 

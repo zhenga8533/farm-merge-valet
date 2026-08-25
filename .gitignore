@@ -34,3 +34,4 @@ logs/
 captures/
 .atlas_cache/
 .browser-profile/
+.fmv-state/

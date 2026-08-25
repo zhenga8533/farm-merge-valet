@@ -116,28 +116,46 @@ See [`.env.example`](.env.example). Browser settings include `FMV_BROWSER`,
 and `FMV_GAME_URL`. Other important settings are `FMV_CDP_PORT`,
 `FMV_WINDOW_TITLE` (a Reddit page-title or URL substring),
 `FMV_PREFER_MERGE_FIVE`, `FMV_MERGE_EMPTY_CELL_RESERVE`,
-`FMV_PRODUCER_CLAIM_MIN_EMPTY_CELLS`, and the item-action and crate-delay
-ranges. Pause/quit hotkeys, GUI options, and log
-level are also configurable. Physical-input timing, viewport, dead-zone, pan,
-and template-confidence settings no longer exist.
+`FMV_PRODUCER_CLAIM_MIN_EMPTY_CELLS`, `FMV_IDLE_WAIT_SECONDS`, and the
+item-action and crate-delay ranges. Pause/quit hotkeys, GUI options, logging,
+and Discord notifications are also configurable. Physical-input timing,
+viewport, dead-zone, pan, and template-confidence settings no longer exist.
 
 ## Logging
 
-The default `INFO` level reports controls, runtime readiness, accepted action
-submissions, authoritative confirmations, product/producer claims, crate-claim
-batches, and rate-limited waiting conditions. `WARNING` identifies recoverable failures or unusually
-slow operations; `ERROR` identifies a condition that pauses or prevents safe
-operation. Set `FMV_LOG_LEVEL=DEBUG` for the planner's selected action, target
-refreshes, cached discovery, and planner phase transitions.
+The default `INFO` level reports controls, runtime readiness, completed crate
+batches, and transitions into a genuinely idle state. Individual plans,
+submissions, confirmations, routine waits, target refreshes, slow-operation
+timings, cached discovery, and planner phase transitions are `DEBUG` details.
+`WARNING` identifies recoverable failures; `ERROR` identifies a condition that
+pauses or prevents safe operation. While idle, the bot polls at
+`FMV_IDLE_WAIT_SECONDS` but suppresses repeated logs until the state changes or
+the idle log's longer reminder interval elapses.
 
 All long-running operational records use one Python logging pipeline. The
 console and optional GUI are independent sinks attached to that pipeline, so
 enabling the GUI does not replace or duplicate console emission. Application
 records also carry a stable `fmv_event` name and an `fmv_context` dictionary;
 for example, action records include their planner action, effect, item, source,
-and destination. This is the integration boundary for future monitoring such
-as a Discord webhook. Network-backed sinks must consume records asynchronously
-and apply their own event/severity filters so they never block the bot loop.
+and destination.
+
+Set `FMV_DISCORD_WEBHOOK_URL` to enable the asynchronous Discord sink. Browser,
+runtime, pause/resume, quit, and stop events are sent immediately, as are
+warnings and errors; duplicate warning messages are rate-limited. Messages use
+compact embeds with severity colors, readable titles, timestamps, and stable
+event identifiers. Routine actions are not sent individually. Instead,
+`FMV_WEBHOOK_SUMMARY_INTERVAL`
+(one hour by default) reports move, swap, merge, board-claim, crate, warning,
+and error totals. A final partial summary is sent during a clean shutdown.
+The webhook also maintains one current-status embed. It is edited every
+`FMV_WEBHOOK_STATUS_INTERVAL` seconds (60 by default) and immediately on major
+state changes. After an alert or summary is posted, the previous status is
+deleted and recreated so the refreshed status remains the channel's latest
+message; ordinary interval updates edit it in place. Its message ID is stored
+under `.fmv-state/` and reused across runs. Set the interval to `0` to disable
+periodic edits without disabling event-driven updates. Webhook failures are
+logged locally and never block the bot loop. Charts and diagnostic screenshots
+are reserved for a future summary enhancement.
 One-shot diagnostic and browser-management commands continue writing their
 requested results directly to the terminal or output file.
 

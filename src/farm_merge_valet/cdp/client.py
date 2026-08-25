@@ -477,7 +477,7 @@ def run_game_frame_operation(
                 raise
             log_event(
                 logger,
-                logging.INFO,
+                logging.DEBUG,
                 "cdp.game_target_refresh",
                 "CDP game target changed; refreshing browser targets.",
                 attempt=attempt + 1,
@@ -501,7 +501,7 @@ def _run_top_page_operation(
                 raise
             log_event(
                 logger,
-                logging.INFO,
+                logging.DEBUG,
                 "cdp.page_target_refresh",
                 "CDP page target changed; refreshing browser targets.",
                 attempt=attempt + 1,

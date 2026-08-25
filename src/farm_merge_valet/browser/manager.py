@@ -395,7 +395,7 @@ class BrowserManager:
             if attempt + 1 < _LAUNCH_ATTEMPTS and process.poll() is not None:
                 log_event(
                     logger,
-                    logging.INFO,
+                    logging.DEBUG,
                     "browser.profile_handoff_retry",
                     "Browser exited during profile handoff; retrying launch.",
                     attempt=attempt + 1,

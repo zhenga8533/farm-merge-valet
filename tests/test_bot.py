@@ -85,6 +85,9 @@ def bare_bot() -> Bot:
     bot._last_health = None
     bot._last_wait_reason = None
     bot._last_wait_log_at = 0.0
+    bot._last_idle_reason = None
+    bot._last_idle_log_at = 0.0
+    bot._next_loop_delay = 1.0
     bot._last_crate_claim_limit = None
     bot._last_crate_claim_log_at = 0.0
     bot._last_cooling_producer_count = None
@@ -117,12 +120,13 @@ def test_offscreen_coordinates_are_submitted_unchanged(caplog) -> None:
     bot.board.set_cell(move.start, Cell(CellKind.ITEM, item))
     bot.board.set_cell(move.end, Cell(CellKind.EMPTY))
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         assert bot._submit_merge(move, health(advancing=True))
 
     assert bot.runtime.drops == [((0, 0), (1, 0))]
     assert bot._pending_action is not None
     record = next(record for record in caplog.records if record.fmv_event == "action.submitted")
+    assert record.levelno == logging.DEBUG
     assert record.fmv_context["item_name"] == "wheat"
     assert record.fmv_context["start"] == (0, 0)
 
@@ -162,10 +166,12 @@ def test_busy_action_reports_why_bot_is_waiting(caplog) -> None:
     item = ItemRef("crops", "wheat", 1)
     bot.runtime.submit_item_drop = lambda *_: ActionResult(ActionStatus.BUSY)
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         assert not bot._submit_merge(action(item), health(advancing=True))
 
     assert "Waiting: the game is finishing another item action." in caplog.messages
+    record = next(record for record in caplog.records if record.fmv_event == "bot.waiting")
+    assert record.levelno == logging.DEBUG
 
 
 def test_pending_action_survives_frozen_heartbeat() -> None:
@@ -188,7 +194,7 @@ def test_frozen_heartbeat_reports_pending_action_after_settle_window(monkeypatch
     bot._pending_action = _PendingAction(move, (), 7, submitted_at=1.0)
     monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 5.0)
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         assert not bot._verify_pending_action(health(advancing=False))
 
     assert any("heartbeat is frozen" in message for message in caplog.messages)
@@ -240,7 +246,7 @@ def test_pending_noop_waits_for_authoritative_settle(monkeypatch, caplog) -> Non
     assert bot._pending_action is not None
 
     monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 13.1)
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         assert bot._verify_pending_action(health(advancing=True))
 
     assert bot._pending_action is None
@@ -354,12 +360,34 @@ def test_crate_limit_preserves_policy_reserve(monkeypatch, caplog) -> None:
     bot._merge_actions_for_policy = lambda: [object()]
     monkeypatch.setattr("farm_merge_valet.core.bot.settings.merge_empty_cell_reserve", 1)
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         bot._step_claim_crates(False)
 
     assert bot.runtime.spawn_limits == [3]
     events = [record.fmv_event for record in caplog.records if hasattr(record, "fmv_event")]
-    assert events == ["crate.claim_started", "crate.claim_completed"]
+    assert events[:2] == ["crate.claim_started", "crate.claim_completed"]
+    records = {
+        record.fmv_event: record for record in caplog.records if hasattr(record, "fmv_event")
+    }
+    assert records["crate.claim_started"].levelno == logging.DEBUG
+    assert records["crate.claim_completed"].levelno == logging.INFO
+
+
+def test_exhausted_crates_use_configured_idle_delay(monkeypatch, caplog) -> None:
+    bot = bare_bot()
+    bot.board.set_cell((0, 0), Cell(CellKind.EMPTY))
+    bot._merge_actions_for_policy = lambda: []
+    bot.runtime.spawn_supply_crates = lambda _limit: CrateSpawnResult(ActionStatus.REJECTED, 0, 0)
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.idle_wait_seconds", 30.0)
+    monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 10.0)
+
+    with caplog.at_level(logging.INFO):
+        bot._step_claim_crates(False)
+
+    assert bot._next_loop_delay == 30.0
+    record = next(record for record in caplog.records if record.fmv_event == "bot.idle")
+    assert record.message.endswith("polling every 30s until state changes.")
+    assert record.fmv_context["poll_interval_seconds"] == 30.0
 
 
 def test_merge_five_policy_does_not_fall_back_while_space_remains(monkeypatch) -> None:
@@ -582,7 +610,7 @@ def test_pending_product_claim_confirms_from_authoritative_source_change(
     bot._live_cells[claim.coord] = LiveCellState(False, None)
     monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 2.0)
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         assert bot._verify_pending_claim(health(advancing=True))
 
     assert bot._pending_claim is None
@@ -801,7 +829,7 @@ def test_frozen_heartbeat_reports_wait_reason(caplog) -> None:
     bot.runtime = FrozenRuntime()
     bot._sync_board_from_live_state = lambda: True
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         bot.step()
 
     assert any("heartbeat is not advancing" in message for message in caplog.messages)

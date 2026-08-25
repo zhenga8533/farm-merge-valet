@@ -25,6 +25,11 @@ class _CollectingHandler(logging.Handler):
 def test_configure_logging_quiets_routine_transport_messages() -> None:
     configure_logging()
 
+    assert logging.getLogger().level == logging.DEBUG
+    rich_handler = next(
+        handler for handler in logging.getLogger().handlers if isinstance(handler, RichHandler)
+    )
+    assert rich_handler.level == logging.INFO
     assert logging.getLogger("httpcore").level == logging.WARNING
     assert logging.getLogger("httpx").level == logging.WARNING
     assert logging.getLogger("websockets").level == logging.WARNING

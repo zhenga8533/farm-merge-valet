@@ -79,6 +79,9 @@ def test_run_overlay_keeps_qt_in_caller_and_bot_in_worker(monkeypatch) -> None:
         def setFormatter(self, _formatter) -> None:
             pass
 
+        def setLevel(self, _level) -> None:
+            pass
+
     class FakeThread:
         def __init__(self, *, target, daemon: bool, name: str) -> None:
             assert daemon

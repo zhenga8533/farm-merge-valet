@@ -28,6 +28,7 @@ from farm_merge_valet.config import settings
 from farm_merge_valet.core.board import CellKind
 from farm_merge_valet.core.bot import Bot
 from farm_merge_valet.logging_setup import configure_logging, log_event
+from farm_merge_valet.observability.discord import discord_webhook_sink
 from farm_merge_valet.tools.template_extraction import extract_templates
 
 app = typer.Typer(help="Automation tool for Farm Merge Valley.")
@@ -59,6 +60,26 @@ def _capture_image() -> np.ndarray:
 
 @app.command()
 def run() -> None:
+    webhook_url = (
+        settings.discord_webhook_url.get_secret_value() if settings.discord_webhook_url else None
+    )
+    if webhook_url is not None and not webhook_url.startswith("https://"):
+        log_event(
+            logger,
+            logging.ERROR,
+            "webhook.invalid_url",
+            "Discord webhook URL must use HTTPS; refusing to start.",
+        )
+        raise typer.Exit(code=2)
+    with discord_webhook_sink(
+        webhook_url,
+        settings.webhook_summary_interval,
+        settings.webhook_status_interval,
+    ):
+        _run_bot()
+
+
+def _run_bot() -> None:
     if settings.browser_auto_launch:
         try:
             status = BrowserManager(settings).ensure_running()

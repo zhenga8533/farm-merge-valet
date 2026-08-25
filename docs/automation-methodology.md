@@ -119,20 +119,27 @@ heartbeat status, claim capability, and counts of collectible, ready, cooling,
 and depleted objects. Heap-wide board-map candidates are collected only when
 `--include-heap-candidates` is explicitly requested.
 
-The active loop rate-limits repeated capability discovery and periodically logs
-stable waiting conditions such as a frozen heartbeat, unavailable board state,
-busy handler, or exhausted supply. Operations taking at least one second emit a
-stage-duration warning. Routine readiness, accepted submissions, authoritative
-action results, and user controls use `INFO`; recoverable failures use
-`WARNING`; unsafe terminal conditions use `ERROR`; selected planner actions,
-cached discovery, and planner transitions use `DEBUG`.
+The active loop rate-limits repeated capability discovery. Temporary waits,
+individual plans, submissions, confirmations, slow-stage timings, cached
+discovery, and planner transitions are `DEBUG` diagnostics. Runtime readiness,
+user controls, crate-batch results, and transitions into a genuinely idle state
+use `INFO`; recoverable failures use `WARNING`; unsafe terminal conditions use
+`ERROR`. When no claim, crate, or item action can be planned, the loop uses the
+configured idle delay before checking authoritative state again.
 
 Operational records are emitted once with readable text, a stable `fmv_event`
 identifier, and structured `fmv_context`. The console and GUI subscribe as
-separate sinks through the central logging configuration. A future remote sink
-can therefore filter events without parsing prose. Remote delivery must run
-behind a queue rather than performing network I/O on the automation or GUI
-thread; webhook retries and rate limits belong to that sink, not the bot loop.
+separate sinks through the central logging configuration. Each sink filters
+independently, so the Discord sink can count diagnostic action events without
+delivering each one. Its bounded worker queue sends selected lifecycle/failure
+events as severity-colored embeds and aggregated activity on the configured
+summary interval; network work never runs on the automation or GUI thread.
+It also reduces structured events into a current-status embed. Periodic status
+refreshes edit the existing message, while a newly posted alert or summary is
+followed by deleting and recreating the status so it remains last in the
+channel. The message ID is persisted without storing the webhook URL or token.
+Charts and screenshots can later be attached by the summary renderer without
+changing bot action code.
 
 ## Operational boundaries
 

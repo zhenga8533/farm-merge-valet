@@ -13,7 +13,10 @@ from farm_merge_valet.config import Settings
         ("merge_empty_cell_reserve", -1),
         ("producer_claim_min_empty_cells", 0),
         ("loop_interval", 0),
+        ("idle_wait_seconds", -0.1),
         ("crate_delay_max", 5.1),
+        ("webhook_summary_interval", 59),
+        ("webhook_status_interval", -0.1),
         ("gui_opacity", 1.1),
         ("log_level", "VERBOSE"),
         ("browser", "firefox"),
@@ -80,3 +83,25 @@ def test_action_cadence_defaults_keep_crates_fast() -> None:
 
     assert (settings.item_action_delay_min, settings.item_action_delay_max) == (1.5, 3.5)
     assert (settings.crate_delay_min, settings.crate_delay_max) == (0.05, 0.2)
+
+
+def test_idle_and_webhook_summary_defaults() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.idle_wait_seconds == 30.0
+    assert settings.webhook_summary_interval == 3600.0
+    assert settings.webhook_status_interval == 60.0
+
+
+def test_empty_webhook_url_disables_notifications() -> None:
+    assert Settings(_env_file=None, discord_webhook_url="").discord_webhook_url is None
+
+
+def test_webhook_url_is_stored_as_a_secret() -> None:
+    settings = Settings(
+        _env_file=None,
+        discord_webhook_url="https://example.test/private-token",
+    )
+
+    assert settings.discord_webhook_url is not None
+    assert "private-token" not in repr(settings.discord_webhook_url)

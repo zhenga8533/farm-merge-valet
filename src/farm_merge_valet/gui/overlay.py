@@ -219,6 +219,7 @@ def run_overlay(run_bot: Callable[[], None], stop_bot: Callable[[], None]) -> in
     log_bridge.new_record.connect(window.append_log)
     handler = QtLogHandler(log_bridge)
     handler.setFormatter(logging.Formatter("%(message)s"))
+    handler.setLevel(settings.log_level)
 
     app_bridge = _AppBridge()
     app_bridge.bot_finished.connect(app.quit)
