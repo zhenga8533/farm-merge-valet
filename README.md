@@ -134,8 +134,9 @@ change, or a genuine no-op. Genuine no-ops cool down before retry, and three
 failures of the same action pause the bot. Runtime incompatibility reports an
 unavailable capability; there is no mouse-input fallback.
 
-Collectible ground ingredients are claimed before any producer or supply
-crate. Exhausted animals are retired into coins, while exhausted crops are
+Immediate one-click tiles—currently ground ingredients, train tickets, and
+ordinary supply crates—are claimed before any producer or HUD supply claim.
+Exhausted animals are retired into coins, while exhausted crops are
 retired only with an open cell available for their two tier-1 replacements. A
 ready tier-4 producer preempts crates and is harvested only after the configured
 minimum number of cells is open. When space is insufficient, the bot merges and

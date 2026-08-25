@@ -41,8 +41,7 @@ from farm_merge_valet.core.board import (
     ProducerState,
     plan_merge_actions,
 )
-from farm_merge_valet.core.board_scan import refresh_blueprint_items
-from farm_merge_valet.core.catalog_store import CatalogUnavailableError
+from farm_merge_valet.core.catalog_store import CatalogUnavailableError, load_or_refresh_catalog
 from farm_merge_valet.logging_setup import log_event
 
 logger = logging.getLogger(__name__)
@@ -70,7 +69,7 @@ _STRUCTURE_BLUEPRINTS = frozenset(
 
 
 class Phase(Enum):
-    CLAIM_PRODUCE = auto()
+    CLAIM_TILES = auto()
     CLAIM_CRATES = auto()
     MERGE = auto()
 
@@ -123,6 +122,7 @@ class Bot:
         self._quit_lock = Lock()
         self.phase = Phase.CLAIM_CRATES
         self._blueprint_items: dict[str, ItemRef] = {}
+        self._immediate_claim_ids: frozenset[str] = frozenset()
         self._max_item_tiers: dict[tuple[str, str], int] = {}
         self.board = BoardGrid()
         self._live_cells: dict[GridCoord, LiveCellState] = {}
@@ -220,9 +220,11 @@ class Bot:
                 detail=self._last_health.detail,
             )
         try:
-            self._blueprint_items = refresh_blueprint_items(
+            catalog = load_or_refresh_catalog(
                 settings.catalog_dir, settings.cdp_port, settings.window_title
             )
+            self._blueprint_items = catalog.automation_items
+            self._immediate_claim_ids = catalog.immediate_claim_ids
         except (CatalogUnavailableError, OSError, ValueError) as exc:
             log_event(
                 logger,
@@ -326,8 +328,8 @@ class Bot:
             board.set_cell(coord, Cell(_LIVE_STATE_CELL_KIND[blueprint_id]))
         elif blueprint_id in _STRUCTURE_BLUEPRINTS:
             board.set_cell(coord, Cell(CellKind.STRUCTURE))
-        elif state.collectable_ingredient:
-            board.set_cell(coord, Cell(CellKind.PRODUCT))
+        elif blueprint_id in self._immediate_claim_ids and state.collectable:
+            board.set_cell(coord, Cell(CellKind.CLAIMABLE))
         else:
             board.set_cell(coord, Cell(CellKind.OTHER))
 
@@ -464,16 +466,16 @@ class Bot:
         )
 
     def _claim_actions(self) -> tuple[list[_ClaimAction], list[_ClaimAction], list[_ClaimAction]]:
-        products: list[_ClaimAction] = []
+        immediate: list[_ClaimAction] = []
         depleted: list[_ClaimAction] = []
         ready: list[_ClaimAction] = []
         for coord, state in sorted(self._live_cells.items()):
             if state.blueprint_id is None:
                 continue
-            if state.collectable_ingredient:
-                products.append(
+            if state.collectable and state.blueprint_id in self._immediate_claim_ids:
+                immediate.append(
                     _ClaimAction(
-                        ClaimTargetKind.PRODUCT,
+                        ClaimTargetKind.IMMEDIATE,
                         coord,
                         state.blueprint_id,
                         state.object_id,
@@ -505,7 +507,7 @@ class Bot:
         producer_order = {ProducerKind.ANIMAL: 0, ProducerKind.CROP: 1, None: 2}
         depleted.sort(key=lambda action: (producer_order[action.producer_kind], action.coord))
         ready.sort(key=lambda action: (producer_order[action.producer_kind], action.coord))
-        return products, depleted, ready
+        return immediate, depleted, ready
 
     def _cooling_producer_count(self) -> int:
         return sum(
@@ -516,7 +518,7 @@ class Bot:
 
     def _claim_succeeded(self, pending: _PendingClaim) -> bool:
         current = self._live_cells.get(pending.action.coord)
-        if pending.action.kind is ClaimTargetKind.PRODUCT:
+        if pending.action.kind is ClaimTargetKind.IMMEDIATE:
             return current is None or current.object_id != pending.action.object_id
         if pending.action.kind is ClaimTargetKind.PRODUCER:
             return (
@@ -876,17 +878,17 @@ class Bot:
             )
         return False
 
-    def _step_claim_produce(
+    def _step_claim_tiles(
         self,
         health: RuntimeHealth,
-        products: list[_ClaimAction],
+        immediate: list[_ClaimAction],
         depleted: list[_ClaimAction],
         ready: list[_ClaimAction],
     ) -> None:
         if time.monotonic() < self._next_claim_action_at:
             return
-        if products:
-            self._submit_claim(products[0], health)
+        if immediate:
+            self._submit_claim(immediate[0], health)
             return
         empty_count = len(self.board.find_empty())
         for action in depleted:
@@ -1037,7 +1039,7 @@ class Bot:
                 not health.available
                 or (self.phase is Phase.MERGE and not health.item_drop_available)
                 or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
-                or (self.phase is Phase.CLAIM_PRODUCE and not health.claim_available)
+                or (self.phase is Phase.CLAIM_TILES and not health.claim_available)
             )
             if capability_missing:
                 now = time.monotonic()
@@ -1049,7 +1051,7 @@ class Bot:
                     not health.available
                     or (self.phase is Phase.MERGE and not health.item_drop_available)
                     or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
-                    or (self.phase is Phase.CLAIM_PRODUCE and not health.claim_available)
+                    or (self.phase is Phase.CLAIM_TILES and not health.claim_available)
                 )
                 if capability_missing:
                     self._capability_retry_at = time.monotonic() + self._capability_retry_delay
@@ -1087,14 +1089,14 @@ class Bot:
             self._report_wait(f"game heartbeat is not advancing{age}")
             return
         board_needs_merge = self._board_needs_merge()
-        products, depleted, ready = self._claim_actions()
-        if products or depleted or ready:
+        immediate, depleted, ready = self._claim_actions()
+        if immediate or depleted or ready:
             self._last_cooling_producer_count = None
-            self._set_phase(Phase.CLAIM_PRODUCE)
+            self._set_phase(Phase.CLAIM_TILES)
             if not health.claim_available:
                 self._report_wait("board claim capability unavailable")
                 return
-            self._step_claim_produce(health, products, depleted, ready)
+            self._step_claim_tiles(health, immediate, depleted, ready)
             return
         cooling_producers = self._cooling_producer_count()
         if cooling_producers and cooling_producers != self._last_cooling_producer_count:
@@ -1107,7 +1109,7 @@ class Bot:
                 cooling_producers=cooling_producers,
             )
         self._last_cooling_producer_count = cooling_producers or None
-        if self.phase is Phase.CLAIM_PRODUCE:
+        if self.phase is Phase.CLAIM_TILES:
             self._set_phase(Phase.CLAIM_CRATES)
         if self.phase is Phase.CLAIM_CRATES:
             self._step_claim_crates(board_needs_merge)

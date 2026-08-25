@@ -244,7 +244,7 @@ class DiscordWebhookHandler(logging.Handler):
                 self._status.last_activity = f"{effect}: {item} tier {tier}"
                 self._status.mode = "Running"
             elif event.startswith("claim."):
-                self._status.phase = "Claim Produce"
+                self._status.phase = "Claim Tiles"
                 if event in {"claim.planned", "claim.submitted"}:
                     self._status.mode = "Running"
             if event == "claim.confirmed":
@@ -340,7 +340,7 @@ class DiscordWebhookHandler(logging.Handler):
         elapsed = max(0.0, now - self._started_at)
         period = "Final" if final else "Hourly"
         actions = sum(metrics[f"action.{effect}"] for effect in ("move", "swap", "merge"))
-        products = metrics["claim.product"]
+        immediate_claims = metrics["claim.immediate"]
         producers = metrics["claim.producer"] + metrics["claim.depleted-producer"]
         hours, remainder = divmod(int(elapsed), 3600)
         minutes = remainder // 60
@@ -368,7 +368,7 @@ class DiscordWebhookHandler(logging.Handler):
                         {
                             "name": "Board activity",
                             "value": (
-                                f"Products {products} · Producers {producers} · "
+                                f"Tile claims {immediate_claims} · Producers {producers} · "
                                 f"Crates {metrics['crates']}"
                             ),
                             "inline": False,
@@ -406,7 +406,7 @@ class DiscordWebhookHandler(logging.Handler):
         uptime = f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
         actions = sum(metrics[f"action.{effect}"] for effect in ("move", "swap", "merge"))
         claims = (
-            metrics["claim.product"]
+            metrics["claim.immediate"]
             + metrics["claim.producer"]
             + metrics["claim.depleted-producer"]
         )

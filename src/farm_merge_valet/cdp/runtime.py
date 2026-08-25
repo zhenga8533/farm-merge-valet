@@ -482,8 +482,8 @@ def _claim_expression(
     return {{status: 'stale-source'}};
   const producer = content.hasBehavior?.('harvestable') &&
     ['animal', 'crop'].includes(content.getBehavior?.('harvestable')?._data?.harvestableType);
-  const valid = expectedKind === 'product'
-    ? content.hasBehavior?.('collectable') && content.hasBehavior?.('ingredient')
+  const valid = expectedKind === 'immediate'
+    ? content.hasBehavior?.('collectable')
     : expectedKind === 'producer'
       ? producer && !content.hasBehavior?.('cooldown') &&
         !content.hasBehavior?.('depleted')

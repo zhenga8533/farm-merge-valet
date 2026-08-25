@@ -83,6 +83,12 @@ in addition to the core game taxonomy. Exact runtime IDs, family IDs, and
 aliases retain any spelling used by the game; player-facing spelling belongs in
 `display_name`.
 
+Each catalog item also derives a tile-claim mode from semantic runtime metadata.
+The modes distinguish immediate one-click claims from upgrade prompts,
+confirmation dialogs, requirement-based rewards, and non-claimable content.
+This classification is fail-closed: only immediate claims are automated, while
+the other modes preserve intent for later policy and GUI work.
+
 ## Future GUI policy
 
 The catalog describes what an item is and what the game permits. User choices

@@ -19,13 +19,11 @@ class CellKind(Enum):
     ITEM = auto()
     CLOUD = auto()  # level-locked land; can never hold an item
     PURCHASABLE = auto()  # gem-purchasable plot; can sit inside open land
-    # A harvested product (e.g. an egg dropped by a chicken) sitting on the
-    # board waiting to be collected -- confirmed live via the game's own
-    # board state (see cdp/board_store.py): distinct from ITEM since
-    # products have no tier/merge identity of their own.
-    PRODUCT = auto()
+    # One-click content that leaves the board when selected, such as a
+    # harvested ingredient, train ticket, or supply-crate tile.
+    CLAIMABLE = auto()
     # Occupied content that is not recognized as a merge item, structure, or
-    # collectible ingredient. It must remain non-actionable.
+    # enabled immediate claim. It must remain non-actionable.
     OTHER = auto()
     # A placed building/decoration or one of its unavailable footprint cells.
     # The game labels footprint placeholders "empty", but genuinely open
@@ -34,7 +32,7 @@ class CellKind(Enum):
 
 
 class ClaimTargetKind(StrEnum):
-    PRODUCT = "product"
+    IMMEDIATE = "immediate"
     PRODUCER = "producer"
     DEPLETED_PRODUCER = "depleted-producer"
 

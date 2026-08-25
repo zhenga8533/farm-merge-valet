@@ -240,7 +240,7 @@ def visualize_positions_cmd(
         CellKind.EMPTY: (220, 180, 40),
         CellKind.CLOUD: (200, 200, 200),
         CellKind.STRUCTURE: (180, 80, 220),
-        CellKind.PRODUCT: (40, 160, 255),
+        CellKind.CLAIMABLE: (40, 160, 255),
         CellKind.OTHER: (100, 100, 160),
     }
     counts: Counter[str] = Counter()
@@ -313,6 +313,7 @@ def diagnose_live_state_cmd(
             "collectible_products": sum(
                 value.collectable_ingredient for value in (board_state or {}).values()
             ),
+            "collectable_tiles": sum(value.collectable for value in (board_state or {}).values()),
             "producers": Counter(
                 value.producer_state.value
                 for value in (board_state or {}).values()

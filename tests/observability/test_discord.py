@@ -82,6 +82,14 @@ def test_webhook_routes_lifecycle_and_summarizes_actions(monkeypatch, tmp_path) 
             "Spawned 2 crates.",
             spawned=2,
         )
+        log_event(
+            event_logger,
+            logging.DEBUG,
+            "claim.confirmed",
+            "Immediate claim confirmed.",
+            claim_kind="immediate",
+            blueprint_id="ticket",
+        )
         log_event(event_logger, logging.INFO, "runtime.ready", "Runtime ready.")
     handler.shutdown()
 
@@ -97,7 +105,9 @@ def test_webhook_routes_lifecycle_and_summarizes_actions(monkeypatch, tmp_path) 
     )
     assert any(
         any(
-            field["name"] == "Board activity" and "Crates 2" in field["value"]
+            field["name"] == "Board activity"
+            and "Tile claims 1" in field["value"]
+            and "Crates 2" in field["value"]
             for field in embed.get("fields", [])
         )
         for embed in embeds

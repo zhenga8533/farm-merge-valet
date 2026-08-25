@@ -184,6 +184,7 @@ _READ_EXPRESSION = """
       blueprintID: content ? content._blueprintID : null,
       objectID: Number.isInteger(content?.id) ? content.id : null,
       tier: Number.isInteger(content?.getTier?.()) ? content.getTier() : null,
+      collectable: Boolean(content?.hasBehavior?.('collectable')),
       collectableIngredient: Boolean(
         content?.hasBehavior?.('collectable') && content.hasBehavior?.('ingredient')
       ),
@@ -205,6 +206,7 @@ class LiveCellState:
     blueprint_id: str | None
     object_id: int | None = None
     tier: int | None = None
+    collectable: bool = False
     collectable_ingredient: bool = False
     producer_kind: ProducerKind | None = None
     producer_state: ProducerState | None = None
@@ -378,6 +380,7 @@ def read_board_state(
             blueprint_id=blueprint_id if isinstance(blueprint_id, str) else None,
             object_id=object_id if isinstance(object_id, int) else None,
             tier=tier if isinstance(tier, int) else None,
+            collectable=entry.get("collectable") is True,
             collectable_ingredient=entry.get("collectableIngredient") is True,
             producer_kind=producer_kind,
             producer_state=producer_state,

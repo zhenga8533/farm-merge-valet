@@ -65,6 +65,7 @@ def test_read_board_state_preserves_claim_semantics(monkeypatch) -> None:
                 "hasContent": True,
                 "blueprintID": "milk",
                 "objectID": 31,
+                "collectable": True,
                 "collectableIngredient": True,
                 "behaviorNames": ["clickable", "ingredient", "collectable"],
             },
@@ -85,6 +86,7 @@ def test_read_board_state_preserves_claim_semantics(monkeypatch) -> None:
     state = read_board_state(9222, "Farm")
 
     assert state is not None
+    assert state[(4, 5)].collectable
     assert state[(4, 5)].collectable_ingredient
     assert state[(4, 5)].object_id == 31
     assert state[(6, 7)].producer_kind is ProducerKind.ANIMAL

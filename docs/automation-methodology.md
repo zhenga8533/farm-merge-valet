@@ -36,18 +36,22 @@ loop is advancing. The bot may continue observing while it is frozen, but sends
 no actions and queues no retries. This prevents a background-tab suspension
 from being mistaken for an action failure.
 
-## Claim products and producers
+## Claim tiles and producers
 
 The live cell read includes semantic behaviors as well as blueprint identity.
-An occupied object is actionable as a ground product only when it has both the
-game's `ingredient` and `collectable` behaviors. Recognized tier-4 crop and
-animal items are ready when they are harvestable without an active `cooldown`
-or `depleted` behavior, cooling while `cooldown` is present, and ready for
-retirement when depleted. The visual `cooldownPreview` behavior is not used as
-authoritative state because it persists after the timer for a second harvest
-has completed.
+Catalog metadata assigns tile interactions to explicit modes: immediate,
+upgrade prompt, confirmation, requirement, or none. Only immediate claims are
+enabled. They currently include collectable ingredients, train tickets, and
+ordinary supply-crate tiles. Coins, energy, crystals, upgrade cards, and reward
+containers remain recognized but cannot enter the generic click pipeline.
 
-The claim phase collects ground ingredients first, then retires depleted
+Recognized tier-4 crop and animal items are ready when they are harvestable
+without an active `cooldown` or `depleted` behavior, cooling while `cooldown`
+is present, and ready for retirement when depleted. The visual
+`cooldownPreview` behavior is not used as authoritative state because it
+persists after the timer for a second harvest has completed.
+
+The claim phase collects immediate tiles first, then retires depleted
 producers, then harvests ready producers. Depleted animals convert in place;
 depleted crops require one open cell for their two tier-1 replacements. A ready
 producer requires `FMV_PRODUCER_CLAIM_MIN_EMPTY_CELLS` open cells (four by
@@ -56,13 +60,13 @@ crates. With no productive merge available, the bot waits and keeps observing.
 
 Claims use the active interaction handler's internal object-click pipeline.
 The adapter validates the scene, coordinate, object identity, blueprint, and
-expected behaviors immediately before submission. Product collection is
+expected behaviors immediately before submission. An immediate claim is
 confirmed when the source object leaves; harvesting is confirmed by a producer
 lifecycle transition; retirement is confirmed when the tier-4 producer is
 replaced. A pending claim follows the same heartbeat and no-duplicate rules as
-an item drop. The game may collect several matching ingredient objects from one
-accepted click; the next authoritative read discards the stale candidates and
-replans from the resulting board.
+an item drop. The game may collect several matching objects from one accepted
+click; the next authoritative read discards stale candidates and replans from
+the resulting board.
 
 ## Claim crates
 

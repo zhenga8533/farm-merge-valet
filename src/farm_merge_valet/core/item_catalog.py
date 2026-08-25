@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from farm_merge_valet.core.board import ItemRef
 
 CATALOG_SCHEMA_VERSION = 3
+
+
+class TileClaimMode(StrEnum):
+    NONE = "none"
+    IMMEDIATE = "immediate"
+    UPGRADE_PROMPT = "upgrade-prompt"
+    CONFIRMATION = "confirmation"
+    REQUIREMENT = "requirement"
 
 
 @dataclass(frozen=True)
@@ -34,6 +43,24 @@ class CatalogItem:
     capabilities: frozenset[str]
 
     @property
+    def tile_claim_mode(self) -> TileClaimMode:
+        if self.category == "upgrade_cards":
+            return TileClaimMode.UPGRADE_PROMPT
+        if "crateReward" in self.capabilities:
+            return TileClaimMode.REQUIREMENT
+        if "collectable" not in self.capabilities:
+            return TileClaimMode.NONE
+        if (
+            "ingredient" in self.capabilities
+            or "ticketAnimation" in self.capabilities
+            or self.category == "supply_crates"
+        ):
+            return TileClaimMode.IMMEDIATE
+        if self.category == "currencies":
+            return TileClaimMode.CONFIRMATION
+        return TileClaimMode.NONE
+
+    @property
     def automation_item(self) -> ItemRef | None:
         if self.tier is None or not ({"mergeable", "merge-result"} & self.capabilities):
             return None
@@ -52,6 +79,14 @@ class ItemCatalog:
             for blueprint_id, entry in self.items.items()
             if (item := entry.automation_item) is not None
         }
+
+    @property
+    def immediate_claim_ids(self) -> frozenset[str]:
+        return frozenset(
+            game_id
+            for game_id, item in self.items.items()
+            if item.tile_claim_mode is TileClaimMode.IMMEDIATE
+        )
 
     @property
     def uncategorized_ids(self) -> tuple[str, ...]:

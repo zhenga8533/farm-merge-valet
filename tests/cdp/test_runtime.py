@@ -264,13 +264,14 @@ def test_claim_uses_internal_click_pipeline_without_screen_coordinates(monkeypat
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", capture_expression)
 
     result = GameRuntimeAdapter(9222, "Farm").submit_board_claim(
-        (69, 67), ClaimTargetKind.PRODUCT, "milk", 3832
+        (69, 67), ClaimTargetKind.IMMEDIATE, "milk", 3832
     )
 
     assert result.status is ActionStatus.SUBMITTED
     assert "handler._simulateClick(content)" in expression
     assert "collectable" in expression
-    assert "ingredient" in expression
+    assert "expectedKind === 'immediate'" in expression
+    assert "hasBehavior?.('ingredient')" not in expression
     assert "hasBehavior?.('cooldown')" in expression
     assert "hasBehavior?.('cooldownPreview')" not in expression
     assert "3832" in expression
