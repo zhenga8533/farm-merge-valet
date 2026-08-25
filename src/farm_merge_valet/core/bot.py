@@ -41,7 +41,8 @@ from farm_merge_valet.core.board import (
     ProducerState,
     plan_merge_actions,
 )
-from farm_merge_valet.core.board_scan import discover_blueprint_items
+from farm_merge_valet.core.board_scan import refresh_blueprint_items
+from farm_merge_valet.core.catalog_store import CatalogUnavailableError
 from farm_merge_valet.logging_setup import log_event
 
 logger = logging.getLogger(__name__)
@@ -121,11 +122,8 @@ class Bot:
         self._quit_requested = False
         self._quit_lock = Lock()
         self.phase = Phase.CLAIM_CRATES
-        self._blueprint_items = discover_blueprint_items(settings.templates_dir / "items")
+        self._blueprint_items: dict[str, ItemRef] = {}
         self._max_item_tiers: dict[tuple[str, str], int] = {}
-        for item in self._blueprint_items.values():
-            key = (item.category, item.name)
-            self._max_item_tiers[key] = max(item.tier, self._max_item_tiers.get(key, 0))
         self.board = BoardGrid()
         self._live_cells: dict[GridCoord, LiveCellState] = {}
         self._pending_action: _PendingAction | None = None
@@ -221,6 +219,24 @@ class Bot:
                 scene_id=self._last_health.scene_id,
                 detail=self._last_health.detail,
             )
+        try:
+            self._blueprint_items = refresh_blueprint_items(
+                settings.catalog_dir, settings.cdp_port, settings.window_title
+            )
+        except (CatalogUnavailableError, OSError, ValueError) as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "catalog.unavailable",
+                "Game runtime is ready, but item metadata is unavailable: %s",
+                exc,
+                detail=str(exc),
+            )
+            return False
+        self._max_item_tiers = {}
+        for item in self._blueprint_items.values():
+            key = (item.category, item.name)
+            self._max_item_tiers[key] = max(item.tier, self._max_item_tiers.get(key, 0))
         if not self._sync_board_from_live_state():
             log_event(
                 logger,
@@ -323,8 +339,9 @@ class Bot:
     _ITEM_PRIORITY = {
         ("animals", None): 0,
         ("crops", None): 0,
-        ("resources", "brick"): 1,
-        ("resources", "wood"): 1,
+        ("building_resources", "stone"): 1,
+        ("building_resources", "wood"): 1,
+        ("building_resources", "tool"): 1,
         ("currencies", "coin"): 2,
         ("currencies", "gem"): 3,
     }

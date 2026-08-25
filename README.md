@@ -75,6 +75,49 @@ runtime capabilities, scene identity, animation-heartbeat state, and whether
 the browser has the required background flags. The potentially expensive
 heap-wide candidate list is omitted unless `--include-heap-candidates` is used.
 
+## Item catalog and assets
+
+Item recognition is driven by a local catalog derived from the loaded game,
+not inferred from filenames or bundled game artwork. The catalog keeps three identities separate:
+the runtime game ID (`stone_4`), the atlas alias
+(`obj_nature_brickpile_03`), and the player-facing name (`Stone`). It records
+the game-derived family, globally unique policy key, tier, category, merge
+target, and capabilities such as
+`shovelable`, `harvestable`, `collectable`, and `mergeable`. This also covers
+non-board content needed by a future GUI, including shops, their recipes,
+repairable buildings, decorations, obstacles, reward chests and keys, event
+items, and upgrade cards.
+
+The bot refreshes semantic metadata automatically after runtime discovery. On
+Windows, generated metadata and sprites default to
+`%LOCALAPPDATA%\FarmMergeValet\Cache`; other platforms use their standard
+per-user cache location. Nothing under that cache is included in source
+control, wheels, installers, or releases.
+
+To discover the currently loaded game's atlases through CDP and build the
+categorized local sprite cache, use:
+
+```powershell
+farm-merge-valet sync-assets
+```
+
+To rebuild from the existing local atlas cache, use:
+
+```powershell
+farm-merge-valet compile-assets
+```
+
+`extract-templates <capture.har>` remains available as a diagnostic fallback.
+The first catalog build requires a loaded game so the compiler can read the
+authoritative blueprint, merge-graph, building, and recipe metadata. A future
+GUI can call the same synchronization service and show application-owned
+placeholders until local images are ready.
+Catalog `policy_key` values are the durable identities for future GUI policy;
+merge chains share a key while independent products and recipes remain
+separately configurable. Controls such as enabled state, merge-5 preference,
+and shovel behavior belong in a separate user-policy layer rather than in
+asset metadata.
+
 ## How actions work
 
 Each iteration follows a short, fail-closed cycle:
@@ -169,4 +212,6 @@ mypy src
 ```
 
 See [Automation Methodology](docs/automation-methodology.md) and
-[Game Mechanics](docs/game-mechanics.md) for additional context.
+[Game Mechanics](docs/game-mechanics.md) for additional context. The generated
+taxonomy and asset workflow are documented in
+[Item Catalog and Compiled Assets](docs/item-catalog.md).

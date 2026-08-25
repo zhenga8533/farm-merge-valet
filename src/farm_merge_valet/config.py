@@ -6,6 +6,7 @@ defaults for local development. See `.env.example` for available options.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal, Self
 
@@ -13,6 +14,14 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def user_cache_root() -> Path:
+    if local_app_data := os.environ.get("LOCALAPPDATA"):
+        return Path(local_app_data) / "FarmMergeValet" / "Cache"
+    if xdg_cache_home := os.environ.get("XDG_CACHE_HOME"):
+        return Path(xdg_cache_home) / "farm-merge-valet"
+    return Path.home() / ".cache" / "farm-merge-valet"
 
 
 class Settings(BaseSettings):
@@ -38,13 +47,13 @@ class Settings(BaseSettings):
     # against a normal, already-open browser window.
     cdp_port: int = Field(default=9222, ge=1, le=65535)
 
-    # Where blueprint reference assets used to identify game items live.
-    templates_dir: Path = PROJECT_ROOT / "assets" / "templates"
+    # Locally derived semantic catalog and GUI-ready game assets. Third-party
+    # game artwork is never bundled with the package or repository.
+    catalog_dir: Path = Field(default_factory=lambda: user_cache_root() / "catalog")
 
-    # Where downloaded game atlas PNGs/manifests are cached between
-    # `extract-templates` runs, so re-running without --force doesn't
-    # re-fetch everything.
-    atlas_cache_dir: Path = PROJECT_ROOT / ".atlas_cache"
+    # Where browser-derived game atlas PNGs/manifests are cached between
+    # synchronizations. HAR extraction uses the same local cache.
+    atlas_cache_dir: Path = Field(default_factory=lambda: user_cache_root() / "atlases")
 
     # Stop claiming before the board is completely full when productive merge
     # work exists. Swaps can recover a full board, while one reserved empty cell

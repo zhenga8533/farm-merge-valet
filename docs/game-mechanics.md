@@ -31,11 +31,15 @@ Facebook/TikTok community posts, and direct in-app observation (marked
   tier (rather than the 1 you'd get from a merge-3), effectively costing
   2.5 items per upgrade instead of 3 — the community's standard efficiency
   tip, and it also grants more XP per action than repeated merge-3s.
-- Mergeable item categories: animals, crops, coins, energy, gems, keys,
-  tools, greenhouse parts, gazebo parts, wood logs, bricks — plus reward
-  chests and reward keys (see below), which follow the same merge-5 rule.
+- Mergeable item categories include animals, crops, coins, energy, crystals,
+  upgrade cards, tools, greenhouse parts, gazebo parts/tokens, wood, stone,
+  and some event chains. Reward chests and reward keys (see below) follow the
+  same merge-5 rule.
 - **Cannot be merged**: toolboxes, trees, rocks, buildings, daily-reward
-  gift boxes, decorative buildings.
+  gift boxes, decorative buildings, ordinary supply crates, and final event
+  collectibles. The current runtime also marks the numbered `flower_*` and
+  placed `gazebo_decoration_*` series as non-mergeable; numeric tiers alone do
+  not imply merge capability.
 
 ## Supplies (Crates)
 

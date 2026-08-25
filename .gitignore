@@ -33,5 +33,6 @@ logs/
 *.log
 captures/
 .atlas_cache/
+assets/catalog/
 .browser-profile/
 .fmv-state/

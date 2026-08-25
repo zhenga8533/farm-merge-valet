@@ -1,38 +1,62 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from farm_merge_valet.core.board import ItemRef
-from farm_merge_valet.core.board_scan import discover_blueprint_items
+from farm_merge_valet.core.board_scan import load_blueprint_items
 
 
-def _add_template(dst: Path) -> None:
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.touch()
+def test_load_blueprint_items_uses_catalog_metadata(tmp_path: Path) -> None:
+    (tmp_path / "catalog.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "items": {
+                    "upgrade_card_1": {
+                        "family_id": "upgrade_card",
+                        "policy_key": "upgrade_cards/upgrade_card",
+                        "category": "upgrade_cards",
+                        "display_name": "Upgrade Card",
+                        "tier": 1,
+                        "mergeable": True,
+                        "merge_target": "upgrade_card_2",
+                        "asset_alias": "obj_upgradecard_bg01",
+                        "asset_path": "upgrade_cards/upgrade_card/upgrade_card_1.png",
+                        "capabilities": ["mergeable", "shovelable"],
+                    },
+                    "upgrade_card_2": {
+                        "family_id": "upgrade_card",
+                        "policy_key": "upgrade_cards/upgrade_card",
+                        "category": "upgrade_cards",
+                        "display_name": "Upgrade Card",
+                        "tier": 2,
+                        "mergeable": False,
+                        "merge_target": None,
+                        "asset_alias": "obj_upgradecard_bg02",
+                        "asset_path": "upgrade_cards/upgrade_card/upgrade_card_2.png",
+                        "capabilities": ["merge-result", "shovelable"],
+                    },
+                    "decorative_well": {
+                        "family_id": "decorative_well",
+                        "policy_key": "repairable_buildings/decorative_well",
+                        "category": "repairable_buildings",
+                        "display_name": "Well",
+                        "tier": None,
+                        "mergeable": False,
+                        "merge_target": None,
+                        "asset_alias": "obj_decorateive_well_broken",
+                        "asset_path": ("repairable_buildings/decorative_well/decorative_well.png"),
+                        "capabilities": ["building"],
+                    },
+                },
+                "variants": {},
+            }
+        ),
+        encoding="utf-8",
+    )
 
-
-def test_discover_blueprint_items_reads_uniform_category_name_tier_layout(tmp_path: Path) -> None:
-    _add_template(tmp_path / "crops" / "wheat" / "tier_1.png")
-    _add_template(tmp_path / "crops" / "wheat" / "tier_2.png")
-    _add_template(tmp_path / "animals" / "chicken" / "tier_1.png")
-    # non-tier files (product/regenerating/depleted) must be skipped
-    _add_template(tmp_path / "crops" / "wheat" / "product.png")
-
-    blueprints = discover_blueprint_items(tmp_path)
-
-    assert blueprints == {
-        "wheat_1": ItemRef(category="crops", name="wheat", tier=1),
-        "wheat_2": ItemRef(category="crops", name="wheat", tier=2),
-        "chicken_1": ItemRef(category="animals", name="chicken", tier=1),
-    }
-
-
-def test_discover_blueprint_items_maps_game_naming_convention(tmp_path: Path) -> None:
-    _add_template(tmp_path / "crops" / "wheat" / "tier_1.png")
-    _add_template(tmp_path / "animals" / "chicken" / "tier_3.png")
-    blueprints = discover_blueprint_items(tmp_path)
-
-    assert blueprints == {
-        "wheat_1": ItemRef(category="crops", name="wheat", tier=1),
-        "chicken_3": ItemRef(category="animals", name="chicken", tier=3),
+    assert load_blueprint_items(tmp_path) == {
+        "upgrade_card_1": ItemRef("upgrade_cards", "upgrade_card", 1),
+        "upgrade_card_2": ItemRef("upgrade_cards", "upgrade_card", 2),
     }

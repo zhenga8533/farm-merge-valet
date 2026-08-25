@@ -77,6 +77,21 @@ normal rapid-click cadence without submitting claims concurrently.
 
 ## Merge planning and submission
 
+Board recognition uses a versioned item catalog generated from the game's
+blueprint collection and merge graph. Runtime IDs, atlas aliases, and display
+labels remain separate because they are not reliably interchangeable: for
+example, the runtime `stone_*` family is rendered by `brickpile` atlas aliases.
+The catalog records merge targets and terminal results directly, so numeric
+suffixes and folder names are not treated as proof that an object is mergeable.
+This correctly distinguishes ordinary supply crates from mergeable reward
+chests and distinguishes numbered, placed flowers/decorations from active
+merge chains.
+
+Catalog capabilities are descriptive facts from the game. User policy is a
+separate concern keyed by stable family ID, allowing future GUI controls to
+toggle families, select merge-5 behavior, or authorize shovel-based deadlock
+recovery without changing recognition or duplicating asset metadata.
+
 The existing board planner remains coordinate-based and viewport-neutral. It
 prioritizes trigger, degroup, and gather actions; prefers exact merge-5 work;
 uses merge-3 only for the configured policy/deadlock fallback; excludes the

@@ -96,6 +96,14 @@ def bare_bot() -> Bot:
     return bot
 
 
+def test_bot_construction_does_not_require_a_bundled_catalog(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.catalog_dir", tmp_path / "missing")
+
+    bot = Bot(runtime=FakeRuntime())
+
+    assert bot._blueprint_items == {}
+
+
 def action(item: ItemRef) -> MergeAction:
     return MergeAction(
         MergeActionKind.GATHER, item, (0, 0), (1, 0), frozenset({(1, 0)}), 5, MoveEffect.MOVE

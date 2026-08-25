@@ -66,6 +66,15 @@ def test_managed_browser_defaults_to_auto_launch() -> None:
     assert settings.browser_profile_dir is None
 
 
+def test_generated_assets_default_to_the_per_user_cache(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    settings = Settings(_env_file=None)
+
+    assert settings.catalog_dir == tmp_path / "FarmMergeValet" / "Cache" / "catalog"
+    assert settings.atlas_cache_dir == tmp_path / "FarmMergeValet" / "Cache" / "atlases"
+
+
 @pytest.mark.parametrize(
     ("minimum", "maximum"),
     [

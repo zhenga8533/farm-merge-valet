@@ -52,10 +52,10 @@ class ProducerState(StrEnum):
 
 @dataclass(frozen=True)
 class ItemRef:
-    """Identifies an item type/tier, matching the assets/templates/items/ layout."""
+    """Identifies one tier in a cataloged merge family."""
 
-    category: str  # "crops", "animals", "currencies", "resources"
-    name: str  # e.g. "wheat", "chicken", "gem"
+    category: str  # e.g. "crops", "animals", "currencies", "rewards"
+    name: str  # stable family ID, e.g. "wheat", "upgrade_card", "reward_chest"
     tier: int
 
 

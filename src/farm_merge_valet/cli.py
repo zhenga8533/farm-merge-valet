@@ -29,7 +29,11 @@ from farm_merge_valet.core.board import CellKind
 from farm_merge_valet.core.bot import Bot
 from farm_merge_valet.logging_setup import configure_logging, log_event
 from farm_merge_valet.observability.discord import discord_webhook_sink
-from farm_merge_valet.tools.template_extraction import extract_templates
+from farm_merge_valet.tools.template_extraction import (
+    compile_cached_assets,
+    extract_templates,
+    sync_runtime_assets,
+)
 
 app = typer.Typer(help="Automation tool for Farm Merge Valley.")
 browser_app = typer.Typer(help="Manage the dedicated Chromium-family browser.")
@@ -337,6 +341,26 @@ def extract_templates_cmd(
 ) -> None:
     try:
         extract_templates(har, force=force)
+    except RuntimeError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("compile-assets")
+def compile_assets_cmd() -> None:
+    """Rebuild the item catalog and assets from the cached game atlases."""
+    try:
+        compile_cached_assets()
+    except RuntimeError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("sync-assets")
+def sync_assets_cmd(force: bool = False) -> None:
+    """Discover and compile current game assets into the per-user cache."""
+    try:
+        sync_runtime_assets(force=force)
     except RuntimeError as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
