@@ -2,78 +2,56 @@
 
 from __future__ import annotations
 
-import logging
 import signal
 import sys
-from collections import defaultdict
-from pathlib import Path
 
 from pydantic import ValidationError
-from PySide6.QtCore import QEvent, QModelIndex, QPersistentModelIndex, QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QCloseEvent, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
-    QComboBox,
-    QDoubleSpinBox,
-    QFormLayout,
-    QFrame,
-    QGroupBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
-    QLineEdit,
     QListWidget,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
-    QSlider,
-    QSpinBox,
     QStackedWidget,
-    QStyledItemDelegate,
-    QStyleOptionViewItem,
     QSystemTrayIcon,
-    QTableWidget,
-    QTableWidgetItem,
-    QTreeWidget,
-    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from farm_merge_valet.config import AppConfig, ConfigStore, ItemPolicyOverride
-from farm_merge_valet.core.item_catalog import (
-    CatalogItem,
-    ItemCatalog,
-    TileClaimMode,
-    load_item_catalog,
+from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.gui.controller import (
+    ApplicationController,
+    ApplicationState,
+    ApplicationStatus,
 )
-from farm_merge_valet.gui.assets import CatalogIconLoader
-from farm_merge_valet.gui.controller import ApplicationController, ApplicationStatus
+from farm_merge_valet.gui.pages import (
+    BrowserPage,
+    ConfigEdit,
+    DashboardPage,
+    ItemsPage,
+    LogsPage,
+    SettingsPage,
+    ShopsPage,
+    secondary_button,
+)
 from farm_merge_valet.gui.theme import apply_theme
 from farm_merge_valet.logging_setup import configure_logging, logging_sink
 
-logger = logging.getLogger(__name__)
-
-_ITEM_ICON_SIZE = QSize(40, 40)
-_SHOP_TREE_ICON_SIZE = QSize(100, 54)
-
-
-class _ShopIconDelegate(QStyledItemDelegate):
-    def initStyleOption(
-        self,
-        option: QStyleOptionViewItem,
-        index: QModelIndex | QPersistentModelIndex,
-    ) -> None:
-        super().initStyleOption(option, index)
-        identity = index.data(Qt.ItemDataRole.UserRole)
-        option.decorationSize = (
-            _SHOP_TREE_ICON_SIZE
-            if isinstance(identity, tuple) and identity and identity[0] == "shop"
-            else _ITEM_ICON_SIZE
-        )
+_APPEARANCE_FIELDS = {
+    "theme",
+    "main_always_on_top",
+    "main_focused_opacity",
+    "main_unfocused_opacity",
+    "overlay_always_on_top",
+    "overlay_click_through",
+    "overlay_focused_opacity",
+    "overlay_unfocused_opacity",
+}
 
 
 def _app_icon() -> QIcon:
@@ -91,42 +69,41 @@ def _app_icon() -> QIcon:
     return QIcon(pixmap)
 
 
-def _secondary(button: QPushButton) -> QPushButton:
-    button.setProperty("secondary", True)
-    return button
-
-
-def _page(title: str, subtitle: str = "") -> tuple[QWidget, QVBoxLayout]:
-    page = QWidget()
-    layout = QVBoxLayout(page)
-    heading = QLabel(title)
-    heading.setFont(QFont("Segoe UI", 20, QFont.Weight.DemiBold))
-    layout.addWidget(heading)
-    if subtitle:
-        description = QLabel(subtitle)
-        description.setWordWrap(True)
-        description.setStyleSheet("color: #8b949e; margin-bottom: 8px;")
-        layout.addWidget(description)
-    return page, layout
-
-
 class CompactOverlay(QMainWindow):
+    start_requested = Signal()
+    pause_requested = Signal()
+    stop_requested = Signal()
+    close_requested = Signal()
+
     def __init__(self, config: AppConfig) -> None:
         super().__init__()
         self._config = config
         self.setWindowTitle("Farm Merge Valet · Compact")
         self.status = QLabel("Stopped")
-        self.status.setFont(QFont("Segoe UI", 13, QFont.Weight.DemiBold))
+        self.status.setObjectName("overlayStatus")
         self.logs = QPlainTextEdit()
         self.logs.setReadOnly(True)
         self.logs.setMaximumBlockCount(30)
-        self.logs.setMinimumSize(440, 160)
+        self.logs.setAccessibleName("Recent application activity")
+        self.start_button = QPushButton("Start")
+        self.pause_button = secondary_button("Pause")
+        self.stop_button = secondary_button("Stop")
+        self.start_button.clicked.connect(self.start_requested)
+        self.pause_button.clicked.connect(self.pause_requested)
+        self.stop_button.clicked.connect(self.stop_requested)
         root = QWidget()
         layout = QVBoxLayout(root)
         layout.addWidget(self.status)
-        layout.addWidget(self.logs)
+        layout.addWidget(self.logs, 1)
+        controls = QHBoxLayout()
+        controls.addWidget(self.start_button)
+        controls.addWidget(self.pause_button)
+        controls.addWidget(self.stop_button)
+        controls.addStretch()
+        layout.addLayout(controls)
         self.setCentralWidget(root)
-        self.resize(480, 220)
+        self.resize(480, 260)
+        self.set_status(ApplicationStatus())
         self.apply_config(config)
 
     def apply_config(self, config: AppConfig) -> None:
@@ -138,6 +115,19 @@ class CompactOverlay(QMainWindow):
             if visible:
                 self.show()
         self._apply_focus_state()
+
+    def set_status(self, status: ApplicationStatus) -> None:
+        self.status.setText(f"{status.mode} · {status.phase}")
+        active = status.state.active
+        enabled = active and status.state is not ApplicationState.STOPPING
+        self.start_button.setEnabled(not active)
+        self.pause_button.setEnabled(enabled)
+        self.stop_button.setEnabled(enabled)
+        self.pause_button.setText(
+            "Resume"
+            if status.state in {ApplicationState.PAUSED, ApplicationState.RESUMING}
+            else "Pause"
+        )
 
     def _apply_focus_state(self) -> None:
         self.setWindowOpacity(
@@ -158,6 +148,11 @@ class CompactOverlay(QMainWindow):
         if event.type() == QEvent.Type.ActivationChange:
             self._apply_focus_state()
 
+    def closeEvent(self, event: QCloseEvent) -> None:
+        event.ignore()
+        self.hide()
+        self.close_requested.emit()
+
     def append_log(self, timestamp: str, level: str, message: str, _levelno: int) -> None:
         self.logs.appendPlainText(f"[{timestamp}] {level:<8} {message}")
 
@@ -176,236 +171,124 @@ class MainWindow(QMainWindow):
         self._save_timer.timeout.connect(self._flush_config)
         self.setWindowTitle("Farm Merge Valet")
         self.setWindowIcon(_app_icon())
-        self.resize(1080, 700)
+        self.setMinimumSize(820, 560)
+        self.resize(1100, 740)
 
         root = QWidget()
         shell = QHBoxLayout(root)
         shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
         self.navigation = QListWidget()
-        self.navigation.setFixedWidth(170)
+        self.navigation.setObjectName("navigation")
+        self.navigation.setFixedWidth(176)
         self.navigation.addItems(self._NAVIGATION)
+        self.navigation.setAccessibleName("Application sections")
         self.pages = QStackedWidget()
         shell.addWidget(self.navigation)
         shell.addWidget(self.pages, 1)
         self.setCentralWidget(root)
 
-        self.pages.addWidget(self._build_dashboard())
-        self.pages.addWidget(self._build_items())
-        self.pages.addWidget(self._build_shops())
-        self.pages.addWidget(self._build_browser())
-        self.pages.addWidget(self._build_settings())
-        self.pages.addWidget(self._build_logs())
+        self.dashboard_page = DashboardPage()
+        self.items_page = ItemsPage(self._draft)
+        self.shops_page = ShopsPage(self._draft)
+        self.browser_page = BrowserPage(self._draft)
+        self.settings_page = SettingsPage(self._draft)
+        self.logs_page = LogsPage(self._draft.log_level)
+        for page in (
+            self.dashboard_page,
+            self.items_page,
+            self.shops_page,
+            self.browser_page,
+            self.settings_page,
+            self.logs_page,
+        ):
+            self.pages.addWidget(page)
         self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.navigation.setCurrentRow(0)
+        self._publish_compatibility_handles()
 
         self.overlay = CompactOverlay(self._draft)
+        self._connect_pages()
         self._setup_tray()
         controller.status_changed.connect(self._status_changed)
-        controller.running_changed.connect(self._running_changed)
         controller.log_received.connect(self._append_log)
         controller.config_changed.connect(self._config_changed)
         controller.error.connect(self._show_error)
         controller.application_quit_requested.connect(self.quit_application)
+        controller.browser_operation_changed.connect(self._browser_operation_changed)
+        controller.browser_status_changed.connect(self.browser_status_label.setText)
+        controller.shutdown_complete.connect(self._finish_quit)
+        self._status_changed(controller.status)
+        self.dashboard_page.set_overlay_visible(self._draft.overlay_visible)
         self._apply_appearance()
 
-    def _build_dashboard(self) -> QWidget:
-        page, layout = _page("Dashboard", "Control automation and review live state.")
-        card = QFrame()
-        card.setObjectName("card")
-        form = QFormLayout(card)
-        self.mode_value = QLabel("Stopped")
-        self.browser_value = QLabel("Not checked")
-        self.runtime_value = QLabel("Waiting")
-        self.phase_value = QLabel("—")
-        self.activity_value = QLabel("No activity yet")
-        self.activity_value.setWordWrap(True)
-        for label, widget in (
-            ("Mode", self.mode_value),
-            ("Browser", self.browser_value),
-            ("Runtime", self.runtime_value),
-            ("Phase", self.phase_value),
-            ("Last activity", self.activity_value),
+    def _publish_compatibility_handles(self) -> None:
+        self.item_table = self.items_page.table
+        self.item_search = self.items_page.search
+        self.shop_tree = self.shops_page.tree
+        self.browser_status_label = self.browser_page.status_label
+        self.browser_choice = self.browser_page.browser_choice
+        self.saved_label = self.settings_page.saved_label
+        self.log_view = self.logs_page.view
+        self.log_filter = self.logs_page.filter
+        self.start_button = self.dashboard_page.start_button
+        self.pause_button = self.dashboard_page.pause_button
+        self.stop_button = self.dashboard_page.stop_button
+        self.overlay_button = self.dashboard_page.overlay_button
+        self.mode_value = self.dashboard_page.mode_value
+        self.browser_value = self.dashboard_page.browser_value
+        self.runtime_value = self.dashboard_page.runtime_value
+        self.phase_value = self.dashboard_page.phase_value
+        self.activity_value = self.dashboard_page.activity_value
+
+    def _connect_pages(self) -> None:
+        self.dashboard_page.start_requested.connect(self.controller.start_bot)
+        self.dashboard_page.pause_requested.connect(self.controller.toggle_pause)
+        self.dashboard_page.stop_requested.connect(self.controller.stop_bot)
+        self.dashboard_page.overlay_requested.connect(self._toggle_overlay)
+        self.overlay.start_requested.connect(self.controller.start_bot)
+        self.overlay.pause_requested.connect(self.controller.toggle_pause)
+        self.overlay.stop_requested.connect(self.controller.stop_bot)
+        self.overlay.close_requested.connect(lambda: self._set_overlay_visible(False))
+        self.items_page.config_edited.connect(self._queue_edit)
+        self.items_page.reset_requested.connect(self._reset_item_policies)
+        self.shops_page.config_edited.connect(self._queue_edit)
+        self.shops_page.reset_requested.connect(self._reset_shop_policies)
+        self.browser_page.config_edited.connect(self._queue_edit)
+        self.browser_page.refresh_requested.connect(self.controller.refresh_browser)
+        self.browser_page.restart_requested.connect(self._confirm_browser_restart)
+        self.settings_page.config_edited.connect(self._queue_edit)
+        self.settings_page.reset_requested.connect(self._reset_general_settings)
+        self.settings_page.reset_all_requested.connect(self._reset_all_settings)
+        self.logs_page.log_level_changed.connect(lambda value: self._queue_config(log_level=value))
+
+    def _confirm_browser_restart(self) -> None:
+        if (
+            QMessageBox.question(
+                self,
+                "Restart managed browser?",
+                "This closes only the verified Farm Merge Valet browser profile. Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            is QMessageBox.StandardButton.Yes
         ):
-            form.addRow(label, widget)
-        layout.addWidget(card)
-        controls = QHBoxLayout()
-        self.start_button = QPushButton("Start")
-        self.pause_button = _secondary(QPushButton("Pause / Resume"))
-        self.stop_button = _secondary(QPushButton("Stop"))
-        self.overlay_button = _secondary(QPushButton("Show compact overlay"))
-        self.start_button.clicked.connect(self.controller.start_bot)
-        self.pause_button.clicked.connect(self.controller.toggle_pause)
-        self.stop_button.clicked.connect(self.controller.stop_bot)
-        self.overlay_button.clicked.connect(self._toggle_overlay)
-        self.pause_button.setEnabled(False)
-        self.stop_button.setEnabled(False)
-        for button in (self.start_button, self.pause_button, self.stop_button):
-            controls.addWidget(button)
-        controls.addStretch()
-        controls.addWidget(self.overlay_button)
-        layout.addLayout(controls)
-        layout.addStretch()
-        return page
+            self.controller.restart_browser()
 
-    def _load_catalog(self) -> ItemCatalog | None:
-        path = self._draft.catalog_dir / "catalog.json"
-        try:
-            return load_item_catalog(path) if path.is_file() else None
-        except (OSError, ValueError) as exc:
-            logger.warning("Could not load the GUI item catalog: %s", exc)
-            return None
+    def _refresh_browser(self) -> None:
+        self.controller.refresh_browser()
 
-    def _build_items(self) -> QWidget:
-        page, layout = _page(
-            "Item policies",
-            "Controls inherit global, category, and item defaults. Ingredient and train-ticket "
-            "claims are enabled by default.",
+    def _confirm_reset(self, title: str, message: str) -> bool:
+        return (
+            QMessageBox.question(
+                self,
+                title,
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            is QMessageBox.StandardButton.Yes
         )
-        defaults = QHBoxLayout()
-        for field, label in (
-            ("enabled", "Automation"),
-            ("merge", "Merge"),
-            ("prefer_merge_five", "Merge five"),
-            ("claim", "Claim"),
-        ):
-            checkbox = QCheckBox(f"Default {label}")
-            checkbox.setChecked(getattr(self._draft.item_policy_defaults, field))
-            checkbox.toggled.connect(lambda value, name=field: self._set_item_default(name, value))
-            defaults.addWidget(checkbox)
-        defaults.addStretch()
-        reset = _secondary(QPushButton("Reset item policies"))
-        reset.clicked.connect(self._reset_item_policies)
-        defaults.addWidget(reset)
-        layout.addLayout(defaults)
-        self.item_search = QLineEdit()
-        self.item_search.setPlaceholderText("Search item families…")
-        layout.addWidget(self.item_search)
-        self.item_table = QTableWidget(0, 7)
-        self.item_table.setHorizontalHeaderLabels(
-            ("Item family", "Category", "Enabled", "Merge", "Merge five", "Claim", "Override")
-        )
-        self.item_table.setIconSize(_ITEM_ICON_SIZE)
-        self.item_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.item_table.setAlternatingRowColors(True)
-        layout.addWidget(self.item_table, 1)
-        self.item_search.textChanged.connect(self._filter_items)
-        self._populate_items()
-        return page
-
-    def _populate_items(self) -> None:
-        self.item_table.clearContents()
-        self.item_table.clearSpans()
-        self._item_reset_buttons: dict[str, QPushButton] = {}
-        catalog = self._load_catalog()
-        if catalog is None:
-            self.item_table.setRowCount(1)
-            self.item_table.setItem(
-                0,
-                0,
-                QTableWidgetItem("Catalog unavailable — load the game and sync assets"),
-            )
-            self.item_table.setSpan(0, 0, 1, 7)
-            return
-        grouped: dict[str, list[CatalogItem]] = defaultdict(list)
-        for item in catalog.items.values():
-            grouped[item.policy_key].append(item)
-        rows = []
-        for key, items in grouped.items():
-            supports_merge = any(item.automation_item is not None for item in items)
-            supports_claim = any(
-                item.tile_claim_mode is TileClaimMode.IMMEDIATE
-                or (item.category in {"animals", "crops"} and item.tier == 4)
-                for item in items
-            )
-            if not (supports_merge or supports_claim):
-                continue
-            representative = min(items, key=lambda item: item.tier or 0)
-            rows.append(
-                (
-                    key,
-                    representative.display_name,
-                    representative.category,
-                    supports_merge,
-                    supports_claim,
-                )
-            )
-        rows.sort(key=lambda row: (row[2], row[1].casefold()))
-        icons = CatalogIconLoader(self._draft.catalog_dir)
-        self.item_table.setRowCount(len(rows))
-        for row, (key, name, category, supports_merge, supports_claim) in enumerate(rows):
-            representative = min(grouped[key], key=lambda item: item.tier or 0)
-            name_item = QTableWidgetItem(name)
-            name_item.setData(Qt.ItemDataRole.UserRole, key)
-            name_item.setIcon(icons.icon_for(representative))
-            self.item_table.setItem(row, 0, name_item)
-            self.item_table.setRowHeight(row, 48)
-            self.item_table.setItem(row, 1, QTableWidgetItem(category.replace("_", " ").title()))
-            policy = self._draft.item_policy(key)
-            for column, field, applicable in (
-                (2, "enabled", True),
-                (3, "merge", supports_merge),
-                (4, "prefer_merge_five", supports_merge),
-                (5, "claim", supports_claim),
-            ):
-                checkbox = QCheckBox()
-                checkbox.setChecked(getattr(policy, field))
-                checkbox.setEnabled(applicable)
-                checkbox.setToolTip(
-                    "Not applicable to this item"
-                    if not applicable
-                    else "Uses the effective default unless this item has an override"
-                )
-                checkbox.toggled.connect(
-                    lambda value, policy_key=key, name=field: self._set_item_override(
-                        policy_key, name, value
-                    )
-                )
-                container = QWidget()
-                cell_layout = QHBoxLayout(container)
-                cell_layout.setContentsMargins(0, 0, 0, 0)
-                cell_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                cell_layout.addWidget(checkbox)
-                self.item_table.setCellWidget(row, column, container)
-            reset = _secondary(QPushButton("Use default"))
-            reset.setEnabled(key in self._draft.item_policy_overrides)
-            reset.clicked.connect(
-                lambda _checked=False, policy_key=key: self._reset_item(policy_key)
-            )
-            self._item_reset_buttons[key] = reset
-            self.item_table.setCellWidget(row, 6, reset)
-
-    def _filter_items(self, text: str) -> None:
-        needle = text.casefold().strip()
-        for row in range(self.item_table.rowCount()):
-            cells = [self.item_table.item(row, column) for column in (0, 1)]
-            content = " ".join(cell.text() for cell in cells if cell is not None)
-            self.item_table.setRowHidden(row, needle not in content.casefold())
-
-    def _set_item_default(self, field: str, value: bool) -> None:
-        defaults = self._draft.item_policy_defaults.model_copy(update={field: value})
-        self._queue_config(item_policy_defaults=defaults)
-        self._populate_items()
-
-    def _set_item_override(self, key: str, field: str, value: bool) -> None:
-        overrides = dict(self._draft.item_policy_overrides)
-        values = overrides.get(key, ItemPolicyOverride()).model_dump(exclude_none=True)
-        default_value = getattr(self._draft.item_policy_default(key), field)
-        if value == default_value:
-            values.pop(field, None)
-        else:
-            values[field] = value
-        if values:
-            overrides[key] = ItemPolicyOverride.model_validate(values)
-        else:
-            overrides.pop(key, None)
-        self._queue_config(item_policy_overrides=overrides)
-        self._item_reset_buttons[key].setEnabled(key in overrides)
-
-    def _reset_item(self, key: str) -> None:
-        overrides = dict(self._draft.item_policy_overrides)
-        overrides.pop(key, None)
-        self._queue_config(item_policy_overrides=overrides)
-        self._populate_items()
 
     def _reset_item_policies(self) -> None:
         if not self._confirm_reset(
@@ -422,127 +305,8 @@ class MainWindow(QMainWindow):
                     "item_default_overrides": defaults.item_default_overrides,
                     "item_policy_overrides": {},
                 }
-            ),
-            {"Items"},
-        )
-
-    def _build_shops(self) -> QWidget:
-        page, layout = _page("Shops", "Configure discovered shops and recipes independently.")
-        defaults = QHBoxLayout()
-        self.shop_default = QCheckBox("Enable shops by default")
-        self.recipe_default = QCheckBox("Enable recipes by default")
-        self.shop_default.setChecked(self._draft.shop_default_enabled)
-        self.recipe_default.setChecked(self._draft.recipe_default_enabled)
-        self.shop_default.toggled.connect(lambda value: self._set_shop_default("shop", value))
-        self.recipe_default.toggled.connect(lambda value: self._set_shop_default("recipe", value))
-        defaults.addWidget(self.shop_default)
-        defaults.addWidget(self.recipe_default)
-        defaults.addStretch()
-        reset = _secondary(QPushButton("Reset shop policies"))
-        reset.clicked.connect(self._reset_shop_policies)
-        defaults.addWidget(reset)
-        layout.addLayout(defaults)
-        self.shop_tree = QTreeWidget()
-        self.shop_tree.setHeaderLabels(("Shop / recipe", "Type", "Override"))
-        self.shop_tree.setIconSize(_SHOP_TREE_ICON_SIZE)
-        self.shop_tree.setItemDelegate(_ShopIconDelegate(self.shop_tree))
-        self.shop_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self.shop_tree, 1)
-        self._populate_shops()
-        self.shop_tree.itemChanged.connect(self._shop_changed)
-        return page
-
-    def _populate_shops(self) -> None:
-        self.shop_tree.clear()
-        self._shop_reset_buttons: dict[tuple[str, str], QPushButton] = {}
-        catalog = self._load_catalog()
-        if catalog is None:
-            return
-        recipes: dict[str, list[CatalogItem]] = defaultdict(list)
-        for item in catalog.items.values():
-            if item.recipe is not None:
-                recipes[item.recipe.shop_id].append(item)
-        icons = CatalogIconLoader(self._draft.catalog_dir)
-        self.shop_tree.blockSignals(True)
-        for shop_id in sorted(recipes):
-            shop = catalog.items.get(shop_id)
-            parent = QTreeWidgetItem((shop.display_name if shop else shop_id, "Shop"))
-            parent.setIcon(0, icons.icon_for(shop))
-            parent.setData(0, Qt.ItemDataRole.UserRole, ("shop", shop_id))
-            parent.setFlags(parent.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            parent.setCheckState(
-                0,
-                (
-                    Qt.CheckState.Checked
-                    if self._draft.shop_overrides.get(shop_id, self._draft.shop_default_enabled)
-                    else Qt.CheckState.Unchecked
-                ),
-            )
-            self.shop_tree.addTopLevelItem(parent)
-            self._add_shop_reset_button(parent, "shop", shop_id)
-            for recipe in sorted(recipes[shop_id], key=lambda item: item.display_name):
-                child = QTreeWidgetItem((recipe.display_name, "Recipe"))
-                child.setIcon(0, icons.icon_for(recipe))
-                child.setData(0, Qt.ItemDataRole.UserRole, ("recipe", recipe.game_id))
-                child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                child.setCheckState(
-                    0,
-                    (
-                        Qt.CheckState.Checked
-                        if self._draft.recipe_overrides.get(
-                            recipe.game_id, self._draft.recipe_default_enabled
-                        )
-                        else Qt.CheckState.Unchecked
-                    ),
-                )
-                parent.addChild(child)
-                self._add_shop_reset_button(child, "recipe", recipe.game_id)
-        self.shop_tree.blockSignals(False)
-
-    def _add_shop_reset_button(self, item: QTreeWidgetItem, kind: str, key: str) -> None:
-        overrides = self._draft.shop_overrides if kind == "shop" else self._draft.recipe_overrides
-        reset = _secondary(QPushButton("Use default"))
-        reset.setEnabled(key in overrides)
-        reset.clicked.connect(
-            lambda _checked=False, item_kind=kind, item_key=key: self._reset_shop_item(
-                item_kind, item_key
             )
         )
-        self._shop_reset_buttons[(kind, key)] = reset
-        self.shop_tree.setItemWidget(item, 2, reset)
-
-    def _shop_changed(self, item: QTreeWidgetItem, _column: int) -> None:
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not data:
-            return
-        kind, key = data
-        enabled = item.checkState(0) is Qt.CheckState.Checked
-        if kind == "shop":
-            values = dict(self._draft.shop_overrides)
-            default = self._draft.shop_default_enabled
-            field = "shop_overrides"
-        else:
-            values = dict(self._draft.recipe_overrides)
-            default = self._draft.recipe_default_enabled
-            field = "recipe_overrides"
-        if enabled == default:
-            values.pop(key, None)
-        else:
-            values[key] = enabled
-        self._queue_config(**{field: values})
-        self._shop_reset_buttons[(kind, key)].setEnabled(key in values)
-
-    def _set_shop_default(self, kind: str, value: bool) -> None:
-        field = "shop_default_enabled" if kind == "shop" else "recipe_default_enabled"
-        self._queue_config(**{field: value})
-        self._populate_shops()
-
-    def _reset_shop_item(self, kind: str, key: str) -> None:
-        field = "shop_overrides" if kind == "shop" else "recipe_overrides"
-        values = dict(getattr(self._draft, field))
-        values.pop(key, None)
-        self._queue_config(**{field: values})
-        self._populate_shops()
 
     def _reset_shop_policies(self) -> None:
         if not self._confirm_reset(
@@ -559,264 +323,7 @@ class MainWindow(QMainWindow):
                     "shop_overrides": {},
                     "recipe_overrides": {},
                 }
-            ),
-            {"Shops"},
-        )
-
-    def _build_browser(self) -> QWidget:
-        page, layout = _page(
-            "Managed browser",
-            "The bot only restarts a managed profile after confirmation.",
-        )
-        card = QFrame()
-        card.setObjectName("card")
-        form = QFormLayout(card)
-        self.browser_status_label = QLabel("Not checked")
-        self.browser_choice = QComboBox()
-        self.browser_choice.addItems(("auto", "chrome", "edge", "brave", "chromium"))
-        self.browser_choice.setCurrentText(self._draft.browser)
-        self.browser_choice.currentTextChanged.connect(
-            lambda value: self._queue_config(browser=value)
-        )
-        form.addRow("Status", self.browser_status_label)
-        form.addRow("Preferred browser", self.browser_choice)
-        layout.addWidget(card)
-        buttons = QHBoxLayout()
-        check = _secondary(QPushButton("Refresh status"))
-        restart = QPushButton("Restart managed browser")
-        check.clicked.connect(self._refresh_browser)
-        restart.clicked.connect(self._confirm_browser_restart)
-        buttons.addWidget(check)
-        buttons.addWidget(restart)
-        buttons.addStretch()
-        layout.addLayout(buttons)
-        layout.addStretch()
-        return page
-
-    def _refresh_browser(self) -> None:
-        try:
-            self.browser_status_label.setText(self.controller.browser_status())
-        except Exception as exc:
-            self.browser_status_label.setText(str(exc))
-
-    def _confirm_browser_restart(self) -> None:
-        if (
-            QMessageBox.question(
-                self,
-                "Restart managed browser?",
-                "This closes only the verified Farm Merge Valet browser profile. Continue?",
             )
-            is QMessageBox.StandardButton.Yes
-        ):
-            self.controller.restart_browser()
-            self._refresh_browser()
-
-    def _build_settings(self) -> QWidget:
-        page, page_layout = _page("Settings", "Changes validate and autosave automatically.")
-        reset_controls = QHBoxLayout()
-        reset_controls.addWidget(QLabel("Configuration"))
-        self.saved_label = QLabel("Saved")
-        self.saved_label.setObjectName("saveStatus")
-        reset_controls.addWidget(self.saved_label)
-        reset_controls.addStretch()
-        reset_settings = _secondary(QPushButton("Reset settings"))
-        reset_all = _secondary(QPushButton("Reset everything"))
-        reset_settings.clicked.connect(self._reset_general_settings)
-        reset_all.clicked.connect(self._reset_all_settings)
-        reset_controls.addWidget(reset_settings)
-        reset_controls.addWidget(reset_all)
-        page_layout.addLayout(reset_controls)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        content = QWidget()
-        sections = QVBoxLayout(content)
-        sections.setContentsMargins(4, 4, 4, 4)
-        sections.setSpacing(14)
-
-        automation, automation_form = self._settings_section("Automation")
-        self._add_int(automation_form, "Reserved empty cells", "merge_empty_cell_reserve", 0, 50)
-        self._add_int(
-            automation_form,
-            "Producer claim open cells",
-            "producer_claim_min_empty_cells",
-            1,
-            50,
-        )
-        self._add_float(automation_form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600)
-        self._add_float(automation_form, "Loop interval (seconds)", "loop_interval", 0.1, 60)
-        self._add_float(automation_form, "Item delay minimum", "item_action_delay_min", 0, 60)
-        self._add_float(automation_form, "Item delay maximum", "item_action_delay_max", 0, 60)
-        self._add_float(automation_form, "Crate delay minimum", "crate_delay_min", 0, 5)
-        self._add_float(automation_form, "Crate delay maximum", "crate_delay_max", 0, 5)
-        sections.addWidget(automation)
-
-        controls, controls_form = self._settings_section("Controls & startup")
-        self._add_text(controls_form, "Pause / resume hotkey", "pause_hotkey")
-        self._add_text(controls_form, "Quit hotkey", "quit_hotkey")
-        for field, label in (
-            ("browser_auto_launch", "Launch managed browser when needed"),
-            ("start_paused", "Start automation paused"),
-            ("start_minimized", "Start minimized to tray"),
-            ("bot_autostart", "Start bot with application"),
-            ("close_to_tray", "Close window to tray"),
-        ):
-            self._add_checkbox(controls_form, label, field)
-        sections.addWidget(controls)
-
-        browser, browser_form = self._settings_section("Browser & assets")
-        self._add_text(browser_form, "Game URL", "game_url")
-        self._add_text(browser_form, "Page target", "window_title")
-        self._add_int(browser_form, "CDP port", "cdp_port", 1, 65535)
-        self._add_path(browser_form, "Browser executable", "browser_executable")
-        self._add_path(browser_form, "Browser profile directory", "browser_profile_dir")
-        self._add_path(browser_form, "Catalog directory", "catalog_dir", optional=False)
-        self._add_path(browser_form, "Atlas cache directory", "atlas_cache_dir", optional=False)
-        sections.addWidget(browser)
-
-        notifications, notifications_form = self._settings_section("Notifications")
-        webhook = QLineEdit()
-        webhook.setEchoMode(QLineEdit.EchoMode.Password)
-        webhook.setPlaceholderText("Optional Discord webhook URL")
-        if self._draft.discord_webhook_url:
-            webhook.setText(self._draft.discord_webhook_url.get_secret_value())
-        webhook.editingFinished.connect(
-            lambda: self._queue_config(discord_webhook_url=webhook.text().strip() or None)
-        )
-        notifications_form.addRow("Discord webhook", webhook)
-        self._add_float(
-            notifications_form, "Webhook status interval", "webhook_status_interval", 0, 3600
-        )
-        self._add_float(
-            notifications_form,
-            "Webhook summary interval",
-            "webhook_summary_interval",
-            60,
-            86400,
-        )
-        sections.addWidget(notifications)
-
-        appearance, appearance_form = self._settings_section("Appearance")
-        theme = QComboBox()
-        theme.addItems(("system", "dark", "light"))
-        theme.setCurrentText(self._draft.theme)
-        theme.currentTextChanged.connect(lambda value: self._queue_config(theme=value))
-        appearance_form.addRow("Theme", theme)
-        for field, label in (
-            ("main_always_on_top", "Dashboard always on top"),
-            ("overlay_always_on_top", "Overlay always on top"),
-            ("overlay_click_through", "Overlay click-through while inactive"),
-        ):
-            self._add_checkbox(appearance_form, label, field)
-        self._add_opacity(appearance_form, "Dashboard inactive opacity", "main_unfocused_opacity")
-        self._add_opacity(appearance_form, "Dashboard focused opacity", "main_focused_opacity")
-        self._add_opacity(appearance_form, "Overlay inactive opacity", "overlay_unfocused_opacity")
-        self._add_opacity(appearance_form, "Overlay focused opacity", "overlay_focused_opacity")
-        sections.addWidget(appearance)
-        sections.addStretch()
-
-        scroll.setWidget(content)
-        page_layout.addWidget(scroll, 1)
-        return page
-
-    @staticmethod
-    def _settings_section(title: str) -> tuple[QGroupBox, QFormLayout]:
-        section = QGroupBox(title)
-        form = QFormLayout(section)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        form.setContentsMargins(14, 18, 14, 14)
-        form.setSpacing(10)
-        return section, form
-
-    def _add_checkbox(self, form: QFormLayout, label: str, field: str) -> None:
-        checkbox = QCheckBox()
-        checkbox.setChecked(getattr(self._draft, field))
-        checkbox.toggled.connect(lambda value, name=field: self._queue_config(**{name: value}))
-        form.addRow(label, checkbox)
-
-    def _add_int(
-        self, form: QFormLayout, label: str, field: str, minimum: int, maximum: int
-    ) -> None:
-        control = QSpinBox()
-        control.setRange(minimum, maximum)
-        control.setValue(getattr(self._draft, field))
-        control.valueChanged.connect(lambda value, name=field: self._queue_config(**{name: value}))
-        form.addRow(label, control)
-
-    def _add_float(
-        self, form: QFormLayout, label: str, field: str, minimum: float, maximum: float
-    ) -> None:
-        control = QDoubleSpinBox()
-        control.setRange(minimum, maximum)
-        control.setDecimals(2)
-        control.setValue(getattr(self._draft, field))
-        control.valueChanged.connect(lambda value, name=field: self._queue_config(**{name: value}))
-        form.addRow(label, control)
-
-    def _add_text(self, form: QFormLayout, label: str, field: str) -> None:
-        control = QLineEdit(str(getattr(self._draft, field)))
-        control.editingFinished.connect(
-            lambda widget=control, name=field: self._queue_config(**{name: widget.text().strip()})
-        )
-        form.addRow(label, control)
-
-    def _add_path(
-        self, form: QFormLayout, label: str, field: str, *, optional: bool = True
-    ) -> None:
-        value = getattr(self._draft, field)
-        control = QLineEdit(str(value) if value is not None else "")
-
-        def update() -> None:
-            text = control.text().strip()
-            self._queue_config(**{field: Path(text) if text else (None if optional else value)})
-
-        control.editingFinished.connect(update)
-        form.addRow(label, control)
-
-    def _add_opacity(self, form: QFormLayout, label: str, field: str) -> None:
-        control = QSlider(Qt.Orientation.Horizontal)
-        control.setRange(25, 100)
-        control.setValue(round(getattr(self._draft, field) * 100))
-        control.valueChanged.connect(
-            lambda value, name=field: self._queue_config(**{name: value / 100})
-        )
-        form.addRow(label, control)
-
-    def _build_logs(self) -> QWidget:
-        page, layout = _page(
-            "Logs", "Structured application events from the shared logging pipeline."
-        )
-        toolbar = QHBoxLayout()
-        self.log_view = QPlainTextEdit()
-        self.log_view.setReadOnly(True)
-        self.log_view.setMaximumBlockCount(2000)
-        self.log_view.setFont(QFont("Cascadia Mono", 10))
-        self.log_filter = QComboBox()
-        self.log_filter.addItems(("DEBUG", "INFO", "WARNING", "ERROR"))
-        self.log_filter.setCurrentText(self._draft.log_level)
-        self.log_filter.currentTextChanged.connect(
-            lambda value: self._queue_config(log_level=value)
-        )
-        clear = _secondary(QPushButton("Clear"))
-        clear.clicked.connect(lambda: self.log_view.clear())
-        toolbar.addWidget(QLabel("Minimum level"))
-        toolbar.addWidget(self.log_filter)
-        toolbar.addStretch()
-        toolbar.addWidget(clear)
-        layout.addLayout(toolbar)
-        layout.addWidget(self.log_view, 1)
-        return page
-
-    def _confirm_reset(self, title: str, message: str) -> bool:
-        return (
-            QMessageBox.question(
-                self,
-                title,
-                message,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel,
-            )
-            is QMessageBox.StandardButton.Yes
         )
 
     def _reset_general_settings(self) -> None:
@@ -842,61 +349,49 @@ class MainWindow(QMainWindow):
             for field in AppConfig.model_fields
             if field != "schema_version" and field not in policy_fields
         }
-        self._replace_config(self._draft.model_copy(update=changes), {"Browser", "Settings"})
+        self._replace_config(self._draft.model_copy(update=changes))
 
     def _reset_all_settings(self) -> None:
-        if not self._confirm_reset(
+        if self._confirm_reset(
             "Reset everything?",
             "Restore every Farm Merge Valet setting and remove all item, shop, and recipe "
             "overrides?",
         ):
-            return
-        self._replace_config(AppConfig(), {"Items", "Shops", "Browser", "Settings"})
+            self._replace_config(AppConfig())
 
-    def _replace_config(self, config: AppConfig, page_names: set[str]) -> None:
+    def _replace_config(self, config: AppConfig, _page_names: set[str] | None = None) -> None:
         self._save_timer.stop()
         try:
             self.controller.store.replace(config)
         except (OSError, ValueError) as exc:
             self._show_error(f"Could not reset settings: {exc}")
-            return
-        configure_logging(config.log_level)
-        self.overlay.setVisible(config.overlay_visible)
-        self.overlay_button.setText(
-            "Hide compact overlay" if config.overlay_visible else "Show compact overlay"
-        )
-        self._rebuild_pages(page_names)
 
-    def _rebuild_pages(self, page_names: set[str]) -> None:
-        builders = {
-            "Items": self._build_items,
-            "Shops": self._build_shops,
-            "Browser": self._build_browser,
-            "Settings": self._build_settings,
-        }
-        current = self.navigation.currentRow()
-        for name in self._NAVIGATION:
-            if name not in page_names:
-                continue
-            index = self._NAVIGATION.index(name)
-            old_page = self.pages.widget(index)
-            if old_page is None:
-                continue
-            self.pages.removeWidget(old_page)
-            self.pages.insertWidget(index, builders[name]())
-            old_page.deleteLater()
-        self.navigation.setCurrentRow(current)
+    def _reset_item(self, key: str) -> None:
+        self.items_page.reset_item(key)
 
-    def _queue_config(self, **changes: object) -> None:
+    def _reset_shop_item(self, kind: str, key: str) -> None:
+        self.shops_page.reset_item(kind, key)
+
+    def _queue_edit(self, edit: ConfigEdit) -> None:
         try:
-            candidate = self._draft.model_copy(update=changes)
+            candidate = self._draft.model_copy(update=edit.changes)
             self._draft = AppConfig.model_validate(candidate.model_dump())
         except ValidationError as exc:
-            self.saved_label.setText(f"Invalid: {exc.errors()[0]['msg']}")
+            self.settings_page.show_validation_error(
+                edit.field,
+                exc.errors()[0]["msg"],
+                self._draft,
+            )
             return
-        self.saved_label.setText("Saving…")
+        self.settings_page.mark_saving(edit.field)
         self._save_timer.start()
-        self._apply_appearance()
+        if _APPEARANCE_FIELDS.intersection(edit.changes):
+            self.overlay.apply_config(self._draft)
+            self._apply_appearance()
+
+    def _queue_config(self, **changes: object) -> None:
+        field = next(iter(changes)) if len(changes) == 1 else None
+        self._queue_edit(ConfigEdit(changes, field))
 
     def _flush_config(self) -> None:
         try:
@@ -905,11 +400,39 @@ class MainWindow(QMainWindow):
             self.saved_label.setText("Save failed")
             self._show_error(f"Could not save settings: {exc}")
             return
-        self.saved_label.setText("Saved")
         configure_logging(self._draft.log_level)
 
     def _config_changed(self, config: AppConfig) -> None:
+        previous = self._draft
         self._draft = config
+        item_fields = (
+            "catalog_dir",
+            "item_policy_defaults",
+            "item_category_defaults",
+            "item_default_overrides",
+            "item_policy_overrides",
+            "prefer_merge_five",
+        )
+        shop_fields = (
+            "catalog_dir",
+            "shop_default_enabled",
+            "recipe_default_enabled",
+            "shop_overrides",
+            "recipe_overrides",
+        )
+        self.items_page.apply_config(
+            config,
+            refresh=any(
+                getattr(previous, field) != getattr(config, field) for field in item_fields
+            ),
+        )
+        self.shops_page.apply_config(
+            config,
+            refresh=any(
+                getattr(previous, field) != getattr(config, field) for field in shop_fields
+            ),
+        )
+        self.settings_page.apply_config(config)
         self.overlay.apply_config(config)
         self._apply_appearance()
 
@@ -938,56 +461,75 @@ class MainWindow(QMainWindow):
             self._apply_main_opacity()
 
     def _status_changed(self, status: ApplicationStatus) -> None:
-        self.mode_value.setText(status.mode)
-        self.browser_value.setText(status.browser)
-        self.runtime_value.setText(status.runtime)
-        self.phase_value.setText(status.phase)
-        self.activity_value.setText(status.last_activity)
-        self.overlay.status.setText(f"{status.mode} · {status.phase}")
+        self.dashboard_page.set_status(status)
+        self.overlay.set_status(status)
         if hasattr(self, "tray"):
             self.tray.setToolTip(f"Farm Merge Valet — {status.mode}")
+        if hasattr(self, "start_action"):
+            active = status.state.active
+            enabled = active and status.state is not ApplicationState.STOPPING
+            self.start_action.setEnabled(not active)
+            self.pause_action.setEnabled(enabled)
+            self.pause_action.setText(
+                "Resume bot"
+                if status.state in {ApplicationState.PAUSED, ApplicationState.RESUMING}
+                else "Pause bot"
+            )
+            self.stop_action.setEnabled(enabled)
+            self.browser_page.set_runtime_active(active)
 
-    def _running_changed(self, running: bool, _paused: bool) -> None:
-        self.start_button.setEnabled(not running)
-        self.pause_button.setEnabled(running)
-        self.stop_button.setEnabled(running)
+    def _running_changed(self, _running: bool, _paused: bool) -> None:
+        self._status_changed(self.controller.status)
 
     def _append_log(self, timestamp: str, level: str, message: str, levelno: int) -> None:
-        minimum = getattr(logging, self.log_filter.currentText(), logging.INFO)
-        if levelno >= minimum:
-            self.log_view.appendPlainText(f"[{timestamp}] {level:<8} {message}")
+        self.logs_page.append(timestamp, level, message, levelno)
         self.overlay.append_log(timestamp, level, message, levelno)
 
-    def _toggle_overlay(self) -> None:
-        visible = not self.overlay.isVisible()
+    def _set_overlay_visible(self, visible: bool) -> None:
         self.overlay.setVisible(visible)
-        self.overlay_button.setText("Hide compact overlay" if visible else "Show compact overlay")
+        self.dashboard_page.set_overlay_visible(visible)
         self._queue_config(overlay_visible=visible)
+
+    def _toggle_overlay(self) -> None:
+        self._set_overlay_visible(not self.overlay.isVisible())
 
     def _setup_tray(self) -> None:
         self.tray = QSystemTrayIcon(_app_icon(), self)
-        menu = self.tray.contextMenu()
-        if menu is None:
-            from PySide6.QtWidgets import QMenu
+        from PySide6.QtWidgets import QMenu
 
-            menu = QMenu(self)
-            self.tray.setContextMenu(menu)
+        menu = QMenu(self)
+        self.tray.setContextMenu(menu)
         show_action = QAction("Show dashboard", self)
-        start_action = QAction("Start bot", self)
-        pause_action = QAction("Pause / resume", self)
+        self.start_action = QAction("Start bot", self)
+        self.pause_action = QAction("Pause bot", self)
+        self.stop_action = QAction("Stop bot", self)
         overlay_action = QAction("Toggle compact overlay", self)
         quit_action = QAction("Quit", self)
         show_action.triggered.connect(self._show_dashboard)
-        start_action.triggered.connect(self.controller.start_bot)
-        pause_action.triggered.connect(self.controller.toggle_pause)
+        self.start_action.triggered.connect(self.controller.start_bot)
+        self.pause_action.triggered.connect(self.controller.toggle_pause)
+        self.stop_action.triggered.connect(self.controller.stop_bot)
         overlay_action.triggered.connect(self._toggle_overlay)
         quit_action.triggered.connect(self.quit_application)
-        menu.addActions((show_action, start_action, pause_action, overlay_action))
+        menu.addActions(
+            (show_action, self.start_action, self.pause_action, self.stop_action, overlay_action)
+        )
         menu.addSeparator()
         menu.addAction(quit_action)
-        self.tray.activated.connect(lambda _reason: self._show_dashboard())
+        self.tray.activated.connect(self._tray_activated)
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray.show()
+
+    def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason in {
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        }:
+            self._show_dashboard()
+
+    def _browser_operation_changed(self, busy: bool) -> None:
+        self.browser_page.set_busy(busy)
+        self.browser_page.set_runtime_active(self.controller.status.state.active)
 
     def _show_dashboard(self) -> None:
         self.showNormal()
@@ -998,16 +540,30 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "Farm Merge Valet", message)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if not self._really_quit and self._draft.close_to_tray and self.tray.isVisible():
+        if self._really_quit:
+            event.accept()
+            return
+        if self._draft.close_to_tray and self.tray.isVisible():
             event.ignore()
             self.hide()
             return
-        self.controller.shutdown()
-        event.accept()
+        event.ignore()
+        self.quit_application()
 
     def quit_application(self) -> None:
+        if self._really_quit:
+            return
         self._really_quit = True
+        if self._save_timer.isActive():
+            self._save_timer.stop()
+            self._flush_config()
+        self.setEnabled(False)
+        self.overlay.setEnabled(False)
+        self.tray.setToolTip("Farm Merge Valet — Shutting down")
         self.controller.shutdown()
+
+    def _finish_quit(self) -> None:
+        self.tray.hide()
         QApplication.quit()
 
 

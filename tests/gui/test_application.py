@@ -13,7 +13,11 @@ from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.core.catalog_store import write_item_catalog
 from farm_merge_valet.core.item_catalog import CatalogItem, ItemCatalog, RecipeMetadata
 from farm_merge_valet.gui.application import MainWindow
-from farm_merge_valet.gui.controller import ApplicationController
+from farm_merge_valet.gui.controller import (
+    ApplicationController,
+    ApplicationState,
+    ApplicationStatus,
+)
 
 
 def _catalog() -> ItemCatalog:
@@ -301,4 +305,60 @@ def test_individual_item_reset_returns_to_category_default(tmp_path) -> None:
     assert saved.item_policy("ingredients/milk").claim
 
     window.quit_application()
+    app.processEvents()
+
+
+def test_runtime_state_updates_dashboard_overlay_and_tray_controls(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+
+    window._status_changed(ApplicationStatus(state=ApplicationState.PAUSED))
+
+    assert window.mode_value.text() == "Paused"
+    assert window.pause_button.text() == "Resume"
+    assert window.overlay.pause_button.text() == "Resume"
+    assert window.pause_action.text() == "Resume bot"
+    assert not window.start_action.isEnabled()
+    assert window.stop_action.isEnabled()
+    assert not window.browser_page.restart_button.isEnabled()
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_invalid_coupled_setting_reverts_the_edited_control(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    minimum = window.settings_page.controls["item_action_delay_min"]
+
+    minimum.setValue(10.0)
+
+    assert minimum.value() == AppConfig().item_action_delay_min
+    assert minimum.property("invalid") is True
+    assert window.saved_label.text().startswith("Invalid:")
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_close_without_close_to_tray_requests_a_real_quit(tmp_path, monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    controller = ApplicationController(store)
+    window = MainWindow(controller)
+    shutdown_requested: list[bool] = []
+    real_shutdown = controller.shutdown
+    monkeypatch.setattr(controller, "shutdown", lambda: shutdown_requested.append(True))
+
+    window.close()
+    app.processEvents()
+
+    assert window._really_quit
+    assert shutdown_requested == [True]
+    real_shutdown()
     app.processEvents()

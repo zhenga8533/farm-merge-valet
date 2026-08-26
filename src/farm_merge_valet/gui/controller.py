@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
+from enum import StrEnum
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 from farm_merge_valet.browser import BrowserManager, BrowserManagerError
 from farm_merge_valet.config import AppConfig, ConfigStore, settings
@@ -17,13 +19,32 @@ from farm_merge_valet.observability.discord import discord_webhook_sink
 logger = logging.getLogger(__name__)
 
 
+class ApplicationState(StrEnum):
+    STOPPED = "Stopped"
+    STARTING = "Starting"
+    RUNNING = "Running"
+    IDLE = "Idle"
+    PAUSED = "Paused"
+    RESUMING = "Resuming"
+    STOPPING = "Stopping"
+    ERROR = "Error"
+
+    @property
+    def active(self) -> bool:
+        return self not in {ApplicationState.STOPPED, ApplicationState.ERROR}
+
+
 @dataclass(frozen=True)
 class ApplicationStatus:
-    mode: str = "Stopped"
+    state: ApplicationState = ApplicationState.STOPPED
     browser: str = "Not checked"
     runtime: str = "Waiting"
     phase: str = "—"
     last_activity: str = "No activity yet"
+
+    @property
+    def mode(self) -> str:
+        return self.state.value
 
 
 class _LogBridge(QObject):
@@ -46,6 +67,11 @@ class ApplicationController(QObject):
     log_received = Signal(str, str, str, int)
     error = Signal(str)
     application_quit_requested = Signal()
+    browser_operation_changed = Signal(bool)
+    browser_status_changed = Signal(str)
+    shutdown_complete = Signal()
+    _browser_operation_finished = Signal(str, object)
+    _bot_finished = Signal(object, bool)
 
     def __init__(self, store: ConfigStore) -> None:
         super().__init__()
@@ -55,11 +81,21 @@ class ApplicationController(QObject):
         self.status = ApplicationStatus()
         self._bot: Bot | None = None
         self._worker: threading.Thread | None = None
+        self._browser_worker: threading.Thread | None = None
         self._stopping = False
+        self._shutting_down = False
+        self._shutdown_deadline: float | None = None
+        self._unsubscribed = False
         self._bridge = _LogBridge()
         self._bridge.record_received.connect(self._on_record)
         self.log_handler = GuiEventHandler(self._bridge)
         self._unsubscribe = store.subscribe(self._config_updated)
+        self._browser_operation_finished.connect(self._finish_browser_operation)
+        self._bot_finished.connect(self._finish_bot)
+        self._state_timer = QTimer(self)
+        self._state_timer.setInterval(100)
+        self._state_timer.timeout.connect(self._poll_workers)
+        self._state_timer.start()
 
     def _config_updated(self, config: AppConfig) -> None:
         previous = self.config
@@ -102,17 +138,20 @@ class ApplicationController(QObject):
             self.error.emit(f"Could not save settings: {exc}")
 
     def start_bot(self) -> None:
-        if self._worker is not None and self._worker.is_alive():
+        if self._shutting_down or (self._worker is not None and self._worker.is_alive()):
             return
         self._stopping = False
-        self._set_status(mode="Starting", last_activity="Starting managed browser")
-        self.running_changed.emit(True, False)
+        self._set_status(
+            state=ApplicationState.STARTING,
+            last_activity="Starting managed browser",
+        )
         self._worker = threading.Thread(target=self._run_bot, daemon=True, name="fmv-bot")
         self._worker.start()
 
     def _run_bot(self) -> None:
         config = self.store.current
         settings.replace(config)
+        failure: str | None = None
         try:
             manager = BrowserManager(config)
             browser_status = (
@@ -140,6 +179,8 @@ class ApplicationController(QObject):
                 else None
             )
             self._bot = Bot()
+            if self._shutting_down:
+                self._bot.request_quit()
             with discord_webhook_sink(
                 webhook,
                 config.webhook_summary_interval,
@@ -147,6 +188,7 @@ class ApplicationController(QObject):
             ):
                 self._bot.run_forever()
         except BrowserManagerError as exc:
+            failure = str(exc)
             log_event(
                 logger,
                 logging.ERROR,
@@ -156,6 +198,7 @@ class ApplicationController(QObject):
                 detail=str(exc),
             )
         except Exception as exc:
+            failure = str(exc)
             log_event(
                 logger,
                 logging.ERROR,
@@ -170,30 +213,45 @@ class ApplicationController(QObject):
                 self._bot is not None and self._bot.quit_requested and not self._stopping
             )
             self._bot = None
-            self._stopping = False
-            self._set_status(mode="Stopped", phase="—")
-            self.running_changed.emit(False, False)
-            if quit_from_inbound_control:
-                self.application_quit_requested.emit()
+            self._bot_finished.emit(failure, quit_from_inbound_control)
 
     def toggle_pause(self) -> None:
         if self._bot is None:
             return
+        was_paused = self._bot.paused
         self._bot.toggle_pause()
+        if not was_paused:
+            self._set_status(state=ApplicationState.PAUSED)
+        elif self.status.state is ApplicationState.RESUMING:
+            self._set_status(state=ApplicationState.PAUSED)
+        else:
+            self._set_status(state=ApplicationState.RESUMING)
 
     def stop_bot(self) -> None:
         if self._bot is None or self._stopping:
             return
         self._stopping = True
-        self._set_status(mode="Stopping")
+        self._set_status(state=ApplicationState.STOPPING)
         self._bot.request_quit()
 
     def shutdown(self) -> None:
-        self.stop_bot()
-        worker = self._worker
-        if worker is not None and worker.is_alive():
-            worker.join(timeout=5)
-        self._unsubscribe()
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        self._shutdown_deadline = time.monotonic() + 5.0
+        if self._bot is None and self._worker is not None and self._worker.is_alive():
+            self._stopping = True
+            self._set_status(state=ApplicationState.STOPPING)
+        else:
+            self.stop_bot()
+        self._poll_workers()
+
+    def _finish_bot(self, failure: object, quit_from_inbound_control: bool) -> None:
+        self._stopping = False
+        state = ApplicationState.ERROR if failure is not None else ApplicationState.STOPPED
+        self._set_status(state=state, phase="—")
+        if quit_from_inbound_control:
+            self.application_quit_requested.emit()
 
     def browser_status(self) -> str:
         status = BrowserManager(self.store.current).status()
@@ -202,19 +260,58 @@ class ApplicationController(QObject):
         loaded = "game loaded" if status.game_loaded else "waiting for game"
         return f"{status.kind.value if status.kind else 'Browser'} ready · {loaded}"
 
+    def refresh_browser(self) -> None:
+        self._run_browser_operation("refresh")
+
     def restart_browser(self) -> None:
         if self._bot is not None:
             self.error.emit("Stop the bot before restarting the managed browser.")
             return
-        try:
-            status = BrowserManager(self.store.current).restart()
-        except BrowserManagerError as exc:
-            self.error.emit(str(exc))
+        self._run_browser_operation("restart")
+
+    def _run_browser_operation(self, operation: str) -> None:
+        if self._shutting_down:
             return
-        self._set_status(
-            browser=f"{status.kind.value if status.kind else 'Browser'} ready",
-            last_activity="Managed browser restarted",
+        if self._browser_worker is not None and self._browser_worker.is_alive():
+            return
+        self.browser_operation_changed.emit(True)
+        self.browser_status_changed.emit(
+            "Restarting managed browser…" if operation == "restart" else "Checking browser…"
         )
+
+        def run() -> None:
+            try:
+                manager = BrowserManager(self.store.current)
+                if operation == "restart":
+                    status = manager.restart()
+                    loaded = "game loaded" if status.game_loaded else "waiting for game"
+                    browser_name = status.kind.value.title() if status.kind else "Browser"
+                    result = f"{browser_name} ready · {loaded}"
+                else:
+                    result = self.browser_status()
+                self._browser_operation_finished.emit(operation, result)
+            except Exception as exc:
+                self._browser_operation_finished.emit(operation, exc)
+
+        self._browser_worker = threading.Thread(
+            target=run,
+            daemon=True,
+            name=f"fmv-browser-{operation}",
+        )
+        self._browser_worker.start()
+
+    def _finish_browser_operation(self, operation: str, result: object) -> None:
+        self.browser_operation_changed.emit(False)
+        if isinstance(result, Exception):
+            message = str(result)
+            self.browser_status_changed.emit(message)
+            if not self._shutting_down:
+                self.error.emit(message)
+            return
+        message = str(result)
+        self.browser_status_changed.emit(message)
+        if operation == "restart":
+            self._set_status(browser=message, last_activity="Managed browser restarted")
 
     def _on_record(self, record: logging.LogRecord) -> None:
         formatter = self.log_handler.formatter or logging.Formatter()
@@ -227,23 +324,52 @@ class ApplicationController(QObject):
         if event == "browser.ready":
             updates["browser"] = f"{context.get('browser', 'Browser')} ready"
         elif event == "runtime.ready":
-            updates.update(mode="Running", runtime=f"Scene {context.get('scene_id', '—')} ready")
-        elif event in {"bot.paused", "bot.started_paused", "bot.resume_cancelled"}:
-            updates["mode"] = "Paused"
-        elif event == "bot.resume_requested":
-            updates["mode"] = "Resuming"
+            updates["runtime"] = f"Scene {context.get('scene_id', '—')} ready"
         elif event == "bot.idle":
-            updates.update(mode="Idle", last_activity=message)
+            updates["last_activity"] = message
         elif event == "planner.phase_changed":
             updates["phase"] = str(context.get("phase", "—")).replace("_", " ").title()
         elif event in {"item_action.confirmed", "claim.confirmed", "crate.claim_completed"}:
-            updates.update(mode="Running", last_activity=message)
+            updates["last_activity"] = message
         elif record.levelno >= logging.ERROR:
-            updates.update(mode="Error", last_activity=message)
+            updates["last_activity"] = message
         if updates:
             self._set_status(**updates)
 
-    def _set_status(self, **changes: str) -> None:
+    def _poll_workers(self) -> None:
+        bot = self._bot
+        if bot is not None and not self._stopping:
+            if bot.paused and self.status.state not in {
+                ApplicationState.PAUSED,
+                ApplicationState.RESUMING,
+            }:
+                self._set_status(state=ApplicationState.PAUSED)
+            elif not bot.paused and self.status.state is ApplicationState.PAUSED:
+                self._set_status(state=ApplicationState.RESUMING)
+            elif not bot.paused and self.status.state in {
+                ApplicationState.STARTING,
+                ApplicationState.RESUMING,
+            }:
+                self._set_status(state=ApplicationState.RUNNING)
+        if not self._shutting_down:
+            return
+        bot_running = self._worker is not None and self._worker.is_alive()
+        browser_running = self._browser_worker is not None and self._browser_worker.is_alive()
+        deadline_reached = (
+            self._shutdown_deadline is not None
+            and time.monotonic() >= self._shutdown_deadline
+        )
+        if (bot_running or browser_running) and not deadline_reached:
+            return
+        self._state_timer.stop()
+        if not self._unsubscribed:
+            self._unsubscribe()
+            self._unsubscribed = True
+        self.shutdown_complete.emit()
+
+    def _set_status(self, **changes: object) -> None:
         values = vars(self.status) | changes
         self.status = ApplicationStatus(**values)
         self.status_changed.emit(self.status)
+        state = self.status.state
+        self.running_changed.emit(state.active, state is ApplicationState.PAUSED)
