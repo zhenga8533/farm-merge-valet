@@ -829,27 +829,6 @@ def test_hotkey_callbacks_log_and_set_control_flags(caplog) -> None:
     assert bot._quit_requested
 
 
-def test_single_key_hotkey_fires_once_until_released(monkeypatch) -> None:
-    handlers = {}
-    calls = []
-    monkeypatch.setattr(
-        "farm_merge_valet.core.bot.keyboard.on_press_key",
-        lambda key, callback: handlers.setdefault((key, "press"), callback),
-    )
-    monkeypatch.setattr(
-        "farm_merge_valet.core.bot.keyboard.on_release_key",
-        lambda key, callback: handlers.setdefault((key, "release"), callback),
-    )
-
-    Bot._register_hotkey("f9", lambda: calls.append("toggle"))
-    handlers[("f9", "press")](object())
-    handlers[("f9", "press")](object())
-    handlers[("f9", "release")](object())
-    handlers[("f9", "press")](object())
-
-    assert calls == ["toggle", "toggle"]
-
-
 def test_quit_is_responsive_while_runtime_discovery_is_blocked(monkeypatch) -> None:
     entered = Event()
     release = Event()
@@ -866,9 +845,6 @@ def test_quit_is_responsive_while_runtime_discovery_is_blocked(monkeypatch) -> N
         "farm_merge_valet.core.bot.read_background_flag_status",
         lambda *_args, **_kwargs: {"available": True, "all_present": True},
     )
-    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.on_press_key", lambda *_, **__: None)
-    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.on_release_key", lambda *_, **__: None)
-    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.unhook_all", lambda: None)
     runner = Thread(target=bot.run_forever)
     runner.start()
     assert entered.wait(1)
@@ -890,9 +866,6 @@ def test_unexpected_bot_failure_is_logged_before_propagating(monkeypatch, caplog
 
     bot.step = fail_step
     monkeypatch.setattr("farm_merge_valet.core.bot.settings.start_paused", False)
-    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.on_press_key", lambda *_, **__: None)
-    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.on_release_key", lambda *_, **__: None)
-    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.unhook_all", lambda: None)
 
     with (
         caplog.at_level(logging.INFO),
@@ -916,9 +889,6 @@ def test_quit_cancellation_is_not_logged_as_an_unexpected_error(monkeypatch, cap
 
     bot.step = cancelled_step
     monkeypatch.setattr("farm_merge_valet.core.bot.settings.start_paused", False)
-    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.on_press_key", lambda *_, **__: None)
-    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.on_release_key", lambda *_, **__: None)
-    monkeypatch.setattr("farm_merge_valet.core.bot.keyboard.unhook_all", lambda: None)
 
     with caplog.at_level(logging.INFO):
         bot.run_forever()

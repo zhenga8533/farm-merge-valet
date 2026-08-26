@@ -13,6 +13,8 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from farm_merge_valet.browser import BrowserManager, BrowserManagerError
 from farm_merge_valet.config import AppConfig, ConfigStore, settings
 from farm_merge_valet.core.bot import Bot
+from farm_merge_valet.gui.hotkeys import HotkeyManager
+from farm_merge_valet.hotkeys import HotkeyBindings
 from farm_merge_valet.logging_setup import FMV_CONTEXT_ATTRIBUTE, FMV_EVENT_ATTRIBUTE, log_event
 from farm_merge_valet.observability.discord import discord_webhook_sink
 
@@ -86,6 +88,11 @@ class ApplicationController(QObject):
         self._shutting_down = False
         self._shutdown_deadline: float | None = None
         self._unsubscribed = False
+        self.hotkeys = HotkeyManager()
+        self.hotkeys.start_stop_requested.connect(self.toggle_running)
+        self.hotkeys.pause_resume_requested.connect(self.toggle_pause)
+        self.hotkeys.quit_requested.connect(self.application_quit_requested)
+        self.hotkeys.registration_failed.connect(self._hotkey_registration_failed)
         self._bridge = _LogBridge()
         self._bridge.record_received.connect(self._on_record)
         self.log_handler = GuiEventHandler(self._bridge)
@@ -121,15 +128,54 @@ class ApplicationController(QObject):
             if callable(configure_delays):
                 configure_delays(config.crate_delay_min, config.crate_delay_max)
             restart_fields = (
-                previous.pause_hotkey != config.pause_hotkey,
-                previous.quit_hotkey != config.quit_hotkey,
                 previous.discord_webhook_url != config.discord_webhook_url,
                 previous.webhook_summary_interval != config.webhook_summary_interval,
                 previous.webhook_status_interval != config.webhook_status_interval,
             )
             if any(restart_fields):
                 self._set_status(last_activity="Settings saved · restart bot to apply controls")
+        hotkeys_changed = any(
+            (
+                previous.start_stop_hotkey != config.start_stop_hotkey,
+                previous.pause_hotkey != config.pause_hotkey,
+                previous.quit_hotkey != config.quit_hotkey,
+            )
+        )
+        if hotkeys_changed and self.hotkeys.active:
+            self._rebind_hotkeys(config)
         self.config_changed.emit(config)
+
+    def start_hotkeys(self) -> None:
+        try:
+            bindings = HotkeyBindings.from_values(
+                self.config.start_stop_hotkey,
+                self.config.pause_hotkey,
+                self.config.quit_hotkey,
+            )
+        except ValueError as exc:
+            self._hotkey_registration_failed(f"Invalid global hotkey configuration: {exc}")
+            return
+        self.hotkeys.start(bindings)
+
+    def set_hotkey_recording(self, recording: bool) -> None:
+        self.hotkeys.set_suspended(recording)
+
+    def _rebind_hotkeys(self, config: AppConfig) -> None:
+        try:
+            bindings = HotkeyBindings.from_values(
+                config.start_stop_hotkey,
+                config.pause_hotkey,
+                config.quit_hotkey,
+            )
+        except ValueError as exc:
+            self._hotkey_registration_failed(f"Invalid global hotkey configuration: {exc}")
+            return
+        self.hotkeys.rebind(bindings)
+
+    def _hotkey_registration_failed(self, message: str) -> None:
+        logger.error(message)
+        self._set_status(last_activity=message)
+        self.error.emit(message)
 
     def update_config(self, **changes: object) -> None:
         try:
@@ -173,13 +219,15 @@ class ApplicationController(QObject):
                 game_loaded=browser_status.game_loaded,
                 managed=browser_status.managed,
             )
+            if self._stopping:
+                return
             webhook = (
                 config.discord_webhook_url.get_secret_value()
                 if config.discord_webhook_url is not None
                 else None
             )
             self._bot = Bot()
-            if self._shutting_down:
+            if self._shutting_down or self._stopping:
                 self._bot.request_quit()
             with discord_webhook_sink(
                 webhook,
@@ -227,17 +275,34 @@ class ApplicationController(QObject):
         else:
             self._set_status(state=ApplicationState.RESUMING)
 
+    def toggle_running(self) -> None:
+        if self.status.state in {ApplicationState.STOPPED, ApplicationState.ERROR}:
+            self.start_bot()
+        elif self.status.state in {
+            ApplicationState.STARTING,
+            ApplicationState.RUNNING,
+            ApplicationState.IDLE,
+            ApplicationState.PAUSED,
+            ApplicationState.RESUMING,
+        }:
+            self.stop_bot()
+
     def stop_bot(self) -> None:
-        if self._bot is None or self._stopping:
+        if self._stopping:
             return
         self._stopping = True
         self._set_status(state=ApplicationState.STOPPING)
-        self._bot.request_quit()
+        if self._bot is not None:
+            self._bot.request_quit()
+        elif self._worker is None or not self._worker.is_alive():
+            self._stopping = False
+            self._set_status(state=ApplicationState.STOPPED)
 
     def shutdown(self) -> None:
         if self._shutting_down:
             return
         self._shutting_down = True
+        self.hotkeys.stop()
         self._shutdown_deadline = time.monotonic() + 5.0
         if self._bot is None and self._worker is not None and self._worker.is_alive():
             self._stopping = True
@@ -356,8 +421,7 @@ class ApplicationController(QObject):
         bot_running = self._worker is not None and self._worker.is_alive()
         browser_running = self._browser_worker is not None and self._browser_worker.is_alive()
         deadline_reached = (
-            self._shutdown_deadline is not None
-            and time.monotonic() >= self._shutdown_deadline
+            self._shutdown_deadline is not None and time.monotonic() >= self._shutdown_deadline
         )
         if (bot_running or browser_running) and not deadline_reached:
             return

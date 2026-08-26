@@ -13,6 +13,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
+from farm_merge_valet.hotkeys import normalize_hotkey
+
 CONFIG_SCHEMA_VERSION = 1
 
 
@@ -102,8 +104,9 @@ class AppConfig(BaseModel):
     item_action_delay_max: float = Field(default=3.5, ge=0.0, le=60.0)
     crate_delay_min: float = Field(default=0.05, ge=0.0, le=5.0)
     crate_delay_max: float = Field(default=0.2, ge=0.0, le=5.0)
-    pause_hotkey: str = "f9"
-    quit_hotkey: str = "f10"
+    start_stop_hotkey: str | None = "f8"
+    pause_hotkey: str | None = "f9"
+    quit_hotkey: str | None = "f10"
     start_paused: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
@@ -170,11 +173,31 @@ class AppConfig(BaseModel):
             raise ValueError("item categories must be non-empty single path segments")
         return value
 
+    @field_validator("start_stop_hotkey", "pause_hotkey", "quit_hotkey", mode="before")
+    @classmethod
+    def normalize_hotkeys(cls, value: object) -> object:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("hotkeys must be non-empty strings or null")
+        return normalize_hotkey(value)
+
     @model_validator(mode="after")
     def validate_ranges(self) -> Self:
         for name in ("item_action_delay", "crate_delay"):
             if getattr(self, f"{name}_min") > getattr(self, f"{name}_max"):
                 raise ValueError(f"{name}_min must be less than or equal to {name}_max")
+        normalized_hotkeys = tuple(
+            hotkey
+            for hotkey in (
+                self.start_stop_hotkey,
+                self.pause_hotkey,
+                self.quit_hotkey,
+            )
+            if hotkey is not None
+        )
+        if len(set(normalized_hotkeys)) != len(normalized_hotkeys):
+            raise ValueError("start/stop, pause/resume, and quit hotkeys must be different")
         return self
 
     def item_policy_default(self, policy_key: str, category: str | None = None) -> ItemPolicy:

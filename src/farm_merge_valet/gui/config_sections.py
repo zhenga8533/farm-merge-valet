@@ -48,6 +48,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "item_action_delay_max",
         "crate_delay_min",
         "crate_delay_max",
+        "start_stop_hotkey",
         "pause_hotkey",
         "quit_hotkey",
         "start_paused",

@@ -45,8 +45,10 @@ from farm_merge_valet.core.item_catalog import (
     TileClaimMode,
     load_item_catalog,
 )
+from farm_merge_valet.gui.action_button import ActionButton
 from farm_merge_valet.gui.assets import CatalogIconLoader
 from farm_merge_valet.gui.controller import ApplicationState, ApplicationStatus
+from farm_merge_valet.gui.hotkey_edit import HotkeyEdit
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +96,8 @@ class AppPage(QWidget):
 
 
 class DashboardPage(AppPage):
-    start_requested = Signal()
+    run_requested = Signal()
     pause_requested = Signal()
-    stop_requested = Signal()
     overlay_requested = Signal()
 
     def __init__(self) -> None:
@@ -121,26 +122,25 @@ class DashboardPage(AppPage):
         self.page_layout.addWidget(activity)
 
         controls = QHBoxLayout()
-        self.start_button = QPushButton("Start")
-        self.pause_button = secondary_button("Pause")
-        self.stop_button = secondary_button("Stop")
+        self.run_button = ActionButton("Start")
+        self.pause_button = ActionButton("Pause", secondary=True)
         self.overlay_button = secondary_button("Show compact overlay")
-        self.start_button.clicked.connect(self.start_requested)
+        self.run_button.clicked.connect(self.run_requested)
         self.pause_button.clicked.connect(self.pause_requested)
-        self.stop_button.clicked.connect(self.stop_requested)
         self.overlay_button.clicked.connect(self.overlay_requested)
-        for button in (self.start_button, self.pause_button, self.stop_button):
+        for button in (self.run_button, self.pause_button):
             controls.addWidget(button)
         controls.addStretch()
         controls.addWidget(self.overlay_button)
         self.page_layout.addLayout(controls)
         self.page_layout.addStretch()
+        self._start_stop_hotkey: str | None = None
+        self._pause_hotkey: str | None = None
+        self._status = ApplicationStatus()
         self.set_status(ApplicationStatus())
 
     @staticmethod
-    def _metric(
-        layout: QGridLayout, row: int, column: int, title: str, value: str
-    ) -> QLabel:
+    def _metric(layout: QGridLayout, row: int, column: int, title: str, value: str) -> QLabel:
         card = QFrame()
         card.setObjectName("metricCard")
         card_layout = QVBoxLayout(card)
@@ -155,29 +155,31 @@ class DashboardPage(AppPage):
         return output
 
     def set_status(self, status: ApplicationStatus) -> None:
+        self._status = status
         self.mode_value.setText(status.mode)
         self.browser_value.setText(status.browser)
         self.runtime_value.setText(status.runtime)
         self.phase_value.setText(status.phase)
         self.activity_value.setText(status.last_activity)
         active = status.state.active
-        self.start_button.setEnabled(not active)
-        self.pause_button.setEnabled(
-            active and status.state is not ApplicationState.STOPPING
-        )
-        self.stop_button.setEnabled(
-            active and status.state is not ApplicationState.STOPPING
-        )
-        self.pause_button.setText(
+        self.run_button.setEnabled(status.state is not ApplicationState.STOPPING)
+        self.pause_button.setEnabled(active and status.state is not ApplicationState.STOPPING)
+        run_label = "Stop" if active else "Start"
+        pause_label = (
             "Resume"
             if status.state in {ApplicationState.PAUSED, ApplicationState.RESUMING}
             else "Pause"
         )
+        self.run_button.set_action(run_label, self._start_stop_hotkey, danger=active)
+        self.pause_button.set_action(pause_label, self._pause_hotkey)
+
+    def set_hotkeys(self, start_stop: str | None, pause_resume: str | None) -> None:
+        self._start_stop_hotkey = start_stop
+        self._pause_hotkey = pause_resume
+        self.set_status(self._status)
 
     def set_overlay_visible(self, visible: bool) -> None:
-        self.overlay_button.setText(
-            "Hide compact overlay" if visible else "Show compact overlay"
-        )
+        self.overlay_button.setText("Hide compact overlay" if visible else "Show compact overlay")
 
 
 class _ShopIconDelegate(QStyledItemDelegate):
@@ -225,9 +227,7 @@ class ItemsPage(AppPage):
         ):
             checkbox = QCheckBox(f"Default {label}")
             checkbox.setChecked(getattr(config.item_policy_defaults, field))
-            checkbox.toggled.connect(
-                lambda value, name=field: self._set_default(name, value)
-            )
+            checkbox.toggled.connect(lambda value, name=field: self._set_default(name, value))
             self.default_controls[field] = checkbox
             defaults.addWidget(checkbox)
         defaults.addStretch()
@@ -254,9 +254,7 @@ class ItemsPage(AppPage):
             )
         )
         self.table.setIconSize(_ITEM_ICON_SIZE)
-        self.table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
-        )
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(True)
         self.table.setAccessibleName("Item automation policies")
@@ -321,18 +319,14 @@ class ItemsPage(AppPage):
         rows.sort(key=lambda row: (row[2], row[1].casefold()))
         icons = CatalogIconLoader(self._config.catalog_dir)
         self.table.setRowCount(len(rows))
-        for row, (key, name, category, supports_merge, supports_claim) in enumerate(
-            rows
-        ):
+        for row, (key, name, category, supports_merge, supports_claim) in enumerate(rows):
             representative = min(grouped[key], key=lambda item: item.tier or 0)
             name_item = QTableWidgetItem(name)
             name_item.setData(Qt.ItemDataRole.UserRole, key)
             name_item.setIcon(icons.icon_for(representative))
             self.table.setItem(row, 0, name_item)
             self.table.setRowHeight(row, 48)
-            self.table.setItem(
-                row, 1, QTableWidgetItem(category.replace("_", " ").title())
-            )
+            self.table.setItem(row, 1, QTableWidgetItem(category.replace("_", " ").title()))
             policy = self._config.item_policy(key)
             for column, field, applicable in (
                 (2, "enabled", True),
@@ -409,21 +403,15 @@ class ShopsPage(AppPage):
     reset_requested = Signal()
 
     def __init__(self, config: AppConfig) -> None:
-        super().__init__(
-            "Shops", "Configure discovered shops and recipes independently."
-        )
+        super().__init__("Shops", "Configure discovered shops and recipes independently.")
         self._config = config
         defaults = QHBoxLayout()
         self.shop_default = QCheckBox("Enable shops by default")
         self.recipe_default = QCheckBox("Enable recipes by default")
         self.shop_default.setChecked(config.shop_default_enabled)
         self.recipe_default.setChecked(config.recipe_default_enabled)
-        self.shop_default.toggled.connect(
-            lambda value: self._set_default("shop", value)
-        )
-        self.recipe_default.toggled.connect(
-            lambda value: self._set_default("recipe", value)
-        )
+        self.shop_default.toggled.connect(lambda value: self._set_default("shop", value))
+        self.recipe_default.toggled.connect(lambda value: self._set_default("recipe", value))
         defaults.addWidget(self.shop_default)
         defaults.addWidget(self.recipe_default)
         defaults.addStretch()
@@ -485,9 +473,7 @@ class ShopsPage(AppPage):
                 0,
                 (
                     Qt.CheckState.Checked
-                    if self._config.shop_overrides.get(
-                        shop_id, self._config.shop_default_enabled
-                    )
+                    if self._config.shop_overrides.get(shop_id, self._config.shop_default_enabled)
                     else Qt.CheckState.Unchecked
                 ),
             )
@@ -514,11 +500,7 @@ class ShopsPage(AppPage):
         self.tree.blockSignals(False)
 
     def _add_reset(self, item: QTreeWidgetItem, kind: str, key: str) -> None:
-        overrides = (
-            self._config.shop_overrides
-            if kind == "shop"
-            else self._config.recipe_overrides
-        )
+        overrides = self._config.shop_overrides if kind == "shop" else self._config.recipe_overrides
         reset = secondary_button("Use default")
         reset.setEnabled(key in overrides)
         reset.clicked.connect(
@@ -607,9 +589,7 @@ class BrowserPage(AppPage):
         self.controls["browser"] = self.browser_choice
         form.addRow("Status", self.status_label)
         form.addRow("Preferred browser", self.browser_choice)
-        self._add_checkbox(
-            form, "Launch managed browser when needed", "browser_auto_launch"
-        )
+        self._add_checkbox(form, "Launch managed browser when needed", "browser_auto_launch")
         self._add_path(form, "Browser executable", "browser_executable")
         self._add_path(form, "Browser profile directory", "browser_profile_dir")
         buttons = QHBoxLayout()
@@ -645,9 +625,7 @@ class BrowserPage(AppPage):
     def _add_text(self, form: QFormLayout, label: str, field: str) -> None:
         control = QLineEdit(str(getattr(self._config, field)))
         control.editingFinished.connect(
-            lambda widget=control, name=field: self._request(
-                name, widget.text().strip()
-            )
+            lambda widget=control, name=field: self._request(name, widget.text().strip())
         )
         self.controls[field] = control
         form.addRow(label, control)
@@ -671,9 +649,7 @@ class BrowserPage(AppPage):
         control = QSpinBox()
         control.setRange(minimum, maximum)
         control.setValue(getattr(self._config, field))
-        control.valueChanged.connect(
-            lambda value, name=field: self._request(name, value)
-        )
+        control.valueChanged.connect(lambda value, name=field: self._request(name, value))
         self.controls[field] = control
         form.addRow(label, control)
 
@@ -696,13 +672,9 @@ class BrowserPage(AppPage):
         def choose() -> None:
             current = control.text().strip()
             if field == "browser_executable":
-                selected, _ = QFileDialog.getOpenFileName(
-                    self, f"Choose {label}", current
-                )
+                selected, _ = QFileDialog.getOpenFileName(self, f"Choose {label}", current)
             else:
-                selected = QFileDialog.getExistingDirectory(
-                    self, f"Choose {label}", current
-                )
+                selected = QFileDialog.getExistingDirectory(self, f"Choose {label}", current)
             if selected:
                 control.setText(selected)
                 update()
@@ -733,9 +705,7 @@ class BrowserPage(AppPage):
         if field is not None and field in self.controls:
             self._set_invalid(self.controls[field], False, "")
 
-    def show_validation_error(
-        self, field: str | None, message: str, config: AppConfig
-    ) -> None:
+    def show_validation_error(self, field: str | None, message: str, config: AppConfig) -> None:
         self.saved_label.setText(f"Invalid: {message}")
         if field is None or field not in self.controls:
             return
@@ -767,6 +737,7 @@ class SettingsPage(AppPage):
     config_edited = Signal(object)
     reset_requested = Signal()
     reset_all_requested = Signal()
+    hotkey_recording_changed = Signal(bool)
 
     def __init__(self, config: AppConfig) -> None:
         super().__init__("Settings", "Changes validate and autosave automatically.")
@@ -798,9 +769,7 @@ class SettingsPage(AppPage):
 
         automation, form = _settings_section("Automation")
         self._add_int(form, "Reserved empty cells", "merge_empty_cell_reserve", 0, 50)
-        self._add_int(
-            form, "Producer claim open cells", "producer_claim_min_empty_cells", 1, 50
-        )
+        self._add_int(form, "Producer claim open cells", "producer_claim_min_empty_cells", 1, 50)
         self._add_float(form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600)
         self._add_float(form, "Loop interval (seconds)", "loop_interval", 0.1, 60)
         self._add_float(form, "Item delay minimum", "item_action_delay_min", 0, 60)
@@ -810,8 +779,9 @@ class SettingsPage(AppPage):
         sections.addWidget(automation)
 
         controls, form = _settings_section("Controls and startup")
-        self._add_text(form, "Pause / resume hotkey", "pause_hotkey")
-        self._add_text(form, "Quit hotkey", "quit_hotkey")
+        self._add_hotkey(form, "Start / stop", "start_stop_hotkey")
+        self._add_hotkey(form, "Pause / resume", "pause_hotkey")
+        self._add_hotkey(form, "Quit application", "quit_hotkey")
         for field, label in (
             ("start_paused", "Start automation paused"),
             ("start_minimized", "Start minimized to tray"),
@@ -832,12 +802,8 @@ class SettingsPage(AppPage):
         )
         self.controls["discord_webhook_url"] = webhook
         form.addRow("Discord webhook", webhook)
-        self._add_float(
-            form, "Webhook status interval", "webhook_status_interval", 0, 3600
-        )
-        self._add_float(
-            form, "Webhook summary interval", "webhook_summary_interval", 60, 86400
-        )
+        self._add_float(form, "Webhook status interval", "webhook_status_interval", 0, 3600)
+        self._add_float(form, "Webhook summary interval", "webhook_summary_interval", 60, 86400)
         sections.addWidget(notifications)
 
         appearance, form = _settings_section("Appearance")
@@ -884,9 +850,7 @@ class SettingsPage(AppPage):
         control = QSpinBox()
         control.setRange(minimum, maximum)
         control.setValue(getattr(self._config, field))
-        control.valueChanged.connect(
-            lambda value, name=field: self._request(name, value)
-        )
+        control.valueChanged.connect(lambda value, name=field: self._request(name, value))
         self.controls[field] = control
         form.addRow(label, control)
 
@@ -897,19 +861,23 @@ class SettingsPage(AppPage):
         control.setRange(minimum, maximum)
         control.setDecimals(2)
         control.setValue(getattr(self._config, field))
-        control.valueChanged.connect(
-            lambda value, name=field: self._request(name, value)
-        )
+        control.valueChanged.connect(lambda value, name=field: self._request(name, value))
         self.controls[field] = control
         form.addRow(label, control)
 
     def _add_text(self, form: QFormLayout, label: str, field: str) -> None:
         control = QLineEdit(str(getattr(self._config, field)))
         control.editingFinished.connect(
-            lambda widget=control, name=field: self._request(
-                name, widget.text().strip()
-            )
+            lambda widget=control, name=field: self._request(name, widget.text().strip())
         )
+        self.controls[field] = control
+        form.addRow(label, control)
+
+    def _add_hotkey(self, form: QFormLayout, label: str, field: str) -> None:
+        value = getattr(self._config, field)
+        control = HotkeyEdit(value if isinstance(value, str) else None, f"{label} global hotkey")
+        control.value_changed.connect(lambda hotkey, name=field: self._request(name, hotkey))
+        control.recording_changed.connect(self.hotkey_recording_changed)
         self.controls[field] = control
         form.addRow(label, control)
 
@@ -934,14 +902,16 @@ class SettingsPage(AppPage):
         self.opacity_labels[field] = value_label
         form.addRow(label, row)
 
-    def show_validation_error(
-        self, field: str | None, message: str, config: AppConfig
-    ) -> None:
+    def show_validation_error(self, field: str | None, message: str, config: AppConfig) -> None:
         self.saved_label.setText(f"Invalid: {message}")
         if field is None or field not in self.controls:
             return
         control = self.controls[field]
         self._set_control_value(field, control, getattr(config, field))
+        if isinstance(control, HotkeyEdit):
+            control.show_error(message)
+            control.setFocus()
+            return
         control.setProperty("invalid", True)
         control.setToolTip(message)
         control.setAccessibleDescription(message)
@@ -953,6 +923,8 @@ class SettingsPage(AppPage):
         self.saved_label.setText("Saving…")
         if field is not None and field in self.controls:
             control = self.controls[field]
+            if isinstance(control, HotkeyEdit):
+                control.show_error("")
             control.setProperty("invalid", False)
             control.setToolTip("")
             control.setAccessibleDescription("")
@@ -967,7 +939,9 @@ class SettingsPage(AppPage):
 
     def _set_control_value(self, field: str, control: QWidget, value: object) -> None:
         control.blockSignals(True)
-        if isinstance(control, QCheckBox):
+        if isinstance(control, HotkeyEdit):
+            control.set_value(value if isinstance(value, str) else None)
+        elif isinstance(control, QCheckBox):
             control.setChecked(bool(value))
         elif isinstance(control, (QSpinBox, QDoubleSpinBox)):
             control.setValue(value)  # type: ignore[arg-type]
@@ -988,9 +962,7 @@ class LogsPage(AppPage):
     log_level_changed = Signal(str)
 
     def __init__(self, log_level: str) -> None:
-        super().__init__(
-            "Logs", "Structured application events from the shared logging pipeline."
-        )
+        super().__init__("Logs", "Structured application events from the shared logging pipeline.")
         toolbar = QHBoxLayout()
         self.filter = QComboBox()
         self.filter.addItems(("DEBUG", "INFO", "WARNING", "ERROR"))

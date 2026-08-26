@@ -25,6 +25,7 @@ from farm_merge_valet.gui.controller import (
     ApplicationState,
     ApplicationStatus,
 )
+from farm_merge_valet.gui.hotkey_edit import HotkeyEdit
 
 
 def _catalog() -> ItemCatalog:
@@ -373,11 +374,20 @@ def test_runtime_state_updates_dashboard_overlay_and_tray_controls(tmp_path) -> 
     window._status_changed(ApplicationStatus(state=ApplicationState.PAUSED))
 
     assert window.mode_value.text() == "Paused"
-    assert window.pause_button.text() == "Resume"
-    assert window.overlay.pause_button.text() == "Resume"
-    assert window.pause_action.text() == "Resume bot"
-    assert not window.start_action.isEnabled()
-    assert window.stop_action.isEnabled()
+    assert window.run_button.action_text == "Stop"
+    assert window.run_button.shortcut_label.text() == "F8"
+    assert window.run_button.property("danger") is True
+    assert window.run_button.shortcut_label.objectName() == "shortcutKeycap"
+    assert window.overlay.run_button.action_text == "Stop"
+    assert window.overlay.run_button.shortcut_label.text() == "F8"
+    assert window.overlay.run_button.property("danger") is True
+    assert window.pause_button.action_text == "Resume"
+    assert window.pause_button.shortcut_label.text() == "F9"
+    assert window.overlay.pause_button.action_text == "Resume"
+    assert window.overlay.pause_button.shortcut_label.text() == "F9"
+    assert window.pause_action.text() == "Resume bot\tF9"
+    assert window.run_action.isEnabled()
+    assert window.run_action.text() == "Stop bot\tF8"
     assert not window.browser_page.restart_button.isEnabled()
 
     window.quit_application()
@@ -396,6 +406,33 @@ def test_invalid_coupled_setting_reverts_the_edited_control(tmp_path) -> None:
     assert minimum.value() == AppConfig().item_action_delay_min
     assert minimum.property("invalid") is True
     assert window.saved_label.text().startswith("Invalid:")
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_hotkey_recorders_validate_conflicts_and_update_action_hints(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    controller = ApplicationController(store)
+    window = MainWindow(controller)
+    pause = window.settings_page.controls["pause_hotkey"]
+    assert isinstance(pause, HotkeyEdit)
+
+    pause.value_changed.emit("f8")
+
+    assert pause.value == "f9"
+    assert pause.display.property("invalid") is True
+    assert window.saved_label.text().startswith("Invalid:")
+
+    pause.value_changed.emit("ctrl+shift+p")
+    window._flush_config()
+
+    assert ConfigStore(store.path).load().pause_hotkey == "ctrl+shift+p"
+    assert window.pause_button.action_text == "Pause"
+    assert window.pause_button.shortcut_label.text() == "Ctrl+Shift+P"
+    assert window.pause_action.text() == "Pause bot\tCtrl+Shift+P"
 
     window.quit_application()
     app.processEvents()

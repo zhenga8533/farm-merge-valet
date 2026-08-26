@@ -5,14 +5,11 @@ from __future__ import annotations
 import logging
 import random
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
 from queue import Empty, Queue
 from threading import Event, Lock, Thread
 from typing import Literal
-
-import keyboard
 
 from farm_merge_valet.cdp.board_store import LiveCellState, read_board_state
 from farm_merge_valet.cdp.client import (
@@ -1476,53 +1473,7 @@ class Bot:
             self._last_idle_reason = reason
             self._last_idle_log_at = now
 
-    @staticmethod
-    def _register_hotkey(hotkey: str, callback: Callable[[], None]) -> None:
-        if "+" in hotkey:
-            keyboard.add_hotkey(hotkey, callback)
-            return
-
-        latch_lock = Lock()
-        held = False
-
-        def press(_event: object) -> None:
-            nonlocal held
-            with latch_lock:
-                if held:
-                    return
-                held = True
-            callback()
-
-        def release(_event: object) -> None:
-            nonlocal held
-            with latch_lock:
-                held = False
-
-        keyboard.on_press_key(hotkey, press)
-        keyboard.on_release_key(hotkey, release)
-
     def run_forever(self) -> None:
-        try:
-            self._register_hotkey(settings.pause_hotkey, self._toggle_pause)
-            self._register_hotkey(settings.quit_hotkey, self.request_quit)
-            log_event(
-                logger,
-                logging.INFO,
-                "bot.hotkeys_registered",
-                "Global hotkeys registered: %s pause/resume, %s quit.",
-                settings.pause_hotkey,
-                settings.quit_hotkey,
-                pause_hotkey=settings.pause_hotkey,
-                quit_hotkey=settings.quit_hotkey,
-            )
-        except Exception:
-            log_event(
-                logger,
-                logging.ERROR,
-                "bot.hotkey_registration_failed",
-                "Could not register global hotkeys; Ctrl+C remains available.",
-                _exc_info=True,
-            )
         needs_initialization = not settings.start_paused
         discovery_thread: Thread | None = None
         discovery_results: Queue[tuple[bool | None, BaseException | None]] = Queue(maxsize=1)
@@ -1542,8 +1493,7 @@ class Bot:
                 logger,
                 logging.INFO,
                 "bot.started_paused",
-                "Starting paused; press %s to begin.",
-                settings.pause_hotkey,
+                "Starting paused; use the Pause / Resume control to begin.",
                 pause_hotkey=settings.pause_hotkey,
             )
         try:
@@ -1613,5 +1563,4 @@ class Bot:
             )
             raise
         finally:
-            keyboard.unhook_all()
             log_event(logger, logging.INFO, "bot.stopped", "Bot stopped.")

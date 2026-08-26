@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
-    QPushButton,
     QStackedWidget,
     QSystemTrayIcon,
     QVBoxLayout,
@@ -24,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.gui.action_button import ActionButton
 from farm_merge_valet.gui.config_sections import ConfigSection, reset_config_section
 from farm_merge_valet.gui.controller import (
     ApplicationController,
@@ -38,9 +38,9 @@ from farm_merge_valet.gui.pages import (
     LogsPage,
     SettingsPage,
     ShopsPage,
-    secondary_button,
 )
 from farm_merge_valet.gui.theme import apply_theme
+from farm_merge_valet.hotkeys import display_hotkey
 from farm_merge_valet.logging_setup import configure_logging, logging_sink
 
 _APPEARANCE_FIELDS = {
@@ -70,10 +70,15 @@ def _app_icon() -> QIcon:
     return QIcon(pixmap)
 
 
+def _menu_action_text(label: str, hotkey: str | None) -> str:
+    if hotkey is None:
+        return label
+    return f"{label}\t{display_hotkey(hotkey)}"
+
+
 class CompactOverlay(QMainWindow):
-    start_requested = Signal()
+    run_requested = Signal()
     pause_requested = Signal()
-    stop_requested = Signal()
     close_requested = Signal()
 
     def __init__(self, config: AppConfig) -> None:
@@ -86,24 +91,24 @@ class CompactOverlay(QMainWindow):
         self.logs.setReadOnly(True)
         self.logs.setMaximumBlockCount(30)
         self.logs.setAccessibleName("Recent application activity")
-        self.start_button = QPushButton("Start")
-        self.pause_button = secondary_button("Pause")
-        self.stop_button = secondary_button("Stop")
-        self.start_button.clicked.connect(self.start_requested)
+        self.run_button = ActionButton("Start")
+        self.pause_button = ActionButton("Pause", secondary=True)
+        self.run_button.clicked.connect(self.run_requested)
         self.pause_button.clicked.connect(self.pause_requested)
-        self.stop_button.clicked.connect(self.stop_requested)
         root = QWidget()
         layout = QVBoxLayout(root)
         layout.addWidget(self.status)
         layout.addWidget(self.logs, 1)
         controls = QHBoxLayout()
-        controls.addWidget(self.start_button)
+        controls.addWidget(self.run_button)
         controls.addWidget(self.pause_button)
-        controls.addWidget(self.stop_button)
         controls.addStretch()
         layout.addLayout(controls)
         self.setCentralWidget(root)
         self.resize(480, 260)
+        self._start_stop_hotkey: str | None = None
+        self._pause_hotkey: str | None = None
+        self._status = ApplicationStatus()
         self.set_status(ApplicationStatus())
         self.apply_config(config)
 
@@ -118,17 +123,25 @@ class CompactOverlay(QMainWindow):
         self._apply_focus_state()
 
     def set_status(self, status: ApplicationStatus) -> None:
+        self._status = status
         self.status.setText(f"{status.mode} · {status.phase}")
         active = status.state.active
         enabled = active and status.state is not ApplicationState.STOPPING
-        self.start_button.setEnabled(not active)
+        self.run_button.setEnabled(status.state is not ApplicationState.STOPPING)
         self.pause_button.setEnabled(enabled)
-        self.stop_button.setEnabled(enabled)
-        self.pause_button.setText(
+        run_label = "Stop" if active else "Start"
+        pause_label = (
             "Resume"
             if status.state in {ApplicationState.PAUSED, ApplicationState.RESUMING}
             else "Pause"
         )
+        self.run_button.set_action(run_label, self._start_stop_hotkey, danger=active)
+        self.pause_button.set_action(pause_label, self._pause_hotkey)
+
+    def set_hotkeys(self, start_stop: str | None, pause_resume: str | None) -> None:
+        self._start_stop_hotkey = start_stop
+        self._pause_hotkey = pause_resume
+        self.set_status(self._status)
 
     def _apply_focus_state(self) -> None:
         self.setWindowOpacity(
@@ -222,6 +235,7 @@ class MainWindow(QMainWindow):
         controller.shutdown_complete.connect(self._finish_quit)
         self._status_changed(controller.status)
         self.dashboard_page.set_overlay_visible(self._draft.overlay_visible)
+        self._apply_hotkey_hints(self._draft)
         self._apply_appearance()
 
     def _publish_compatibility_handles(self) -> None:
@@ -233,9 +247,8 @@ class MainWindow(QMainWindow):
         self.saved_label = self.settings_page.saved_label
         self.log_view = self.logs_page.view
         self.log_filter = self.logs_page.filter
-        self.start_button = self.dashboard_page.start_button
+        self.run_button = self.dashboard_page.run_button
         self.pause_button = self.dashboard_page.pause_button
-        self.stop_button = self.dashboard_page.stop_button
         self.overlay_button = self.dashboard_page.overlay_button
         self.mode_value = self.dashboard_page.mode_value
         self.browser_value = self.dashboard_page.browser_value
@@ -244,13 +257,11 @@ class MainWindow(QMainWindow):
         self.activity_value = self.dashboard_page.activity_value
 
     def _connect_pages(self) -> None:
-        self.dashboard_page.start_requested.connect(self.controller.start_bot)
+        self.dashboard_page.run_requested.connect(self.controller.toggle_running)
         self.dashboard_page.pause_requested.connect(self.controller.toggle_pause)
-        self.dashboard_page.stop_requested.connect(self.controller.stop_bot)
         self.dashboard_page.overlay_requested.connect(self._toggle_overlay)
-        self.overlay.start_requested.connect(self.controller.start_bot)
+        self.overlay.run_requested.connect(self.controller.toggle_running)
         self.overlay.pause_requested.connect(self.controller.toggle_pause)
-        self.overlay.stop_requested.connect(self.controller.stop_bot)
         self.overlay.close_requested.connect(lambda: self._set_overlay_visible(False))
         self.items_page.config_edited.connect(self._queue_edit)
         self.items_page.reset_requested.connect(self._reset_item_policies)
@@ -261,6 +272,7 @@ class MainWindow(QMainWindow):
         self.browser_page.restart_requested.connect(self._confirm_browser_restart)
         self.browser_page.reset_requested.connect(self._reset_browser_configuration)
         self.settings_page.config_edited.connect(self._queue_edit)
+        self.settings_page.hotkey_recording_changed.connect(self.controller.set_hotkey_recording)
         self.settings_page.reset_requested.connect(self._reset_general_settings)
         self.settings_page.reset_all_requested.connect(self._reset_all_settings)
         self.logs_page.log_level_changed.connect(lambda value: self._queue_config(log_level=value))
@@ -318,8 +330,8 @@ class MainWindow(QMainWindow):
         self._reset_section(
             ConfigSection.SETTINGS,
             "Reset settings?",
-            "Restore automation, startup, notification, and appearance settings? Browser, item, "
-            "and shop configuration will be preserved.",
+            "Restore automation, shortcut, startup, notification, and appearance settings? "
+            "Browser, item, and shop configuration will be preserved.",
         )
 
     def _reset_section(self, section: ConfigSection, title: str, message: str) -> None:
@@ -412,7 +424,18 @@ class MainWindow(QMainWindow):
         self.settings_page.apply_config(config)
         self.browser_page.apply_config(config)
         self.overlay.apply_config(config)
+        self._apply_hotkey_hints(config)
         self._apply_appearance()
+
+    def _apply_hotkey_hints(self, config: AppConfig) -> None:
+        self.dashboard_page.set_hotkeys(config.start_stop_hotkey, config.pause_hotkey)
+        self.overlay.set_hotkeys(config.start_stop_hotkey, config.pause_hotkey)
+        if hasattr(self, "run_action"):
+            self.run_action.setText(
+                _menu_action_text("Start bot", config.start_stop_hotkey)
+            )
+            self.quit_action.setText(_menu_action_text("Quit", config.quit_hotkey))
+            self._status_changed(self.controller.status)
 
     def _apply_appearance(self) -> None:
         app = QApplication.instance()
@@ -443,17 +466,23 @@ class MainWindow(QMainWindow):
         self.overlay.set_status(status)
         if hasattr(self, "tray"):
             self.tray.setToolTip(f"Farm Merge Valet — {status.mode}")
-        if hasattr(self, "start_action"):
+        if hasattr(self, "run_action"):
             active = status.state.active
             enabled = active and status.state is not ApplicationState.STOPPING
-            self.start_action.setEnabled(not active)
+            run_label = "Stop bot" if active else "Start bot"
+            self.run_action.setText(
+                _menu_action_text(run_label, self._draft.start_stop_hotkey)
+            )
+            self.run_action.setEnabled(status.state is not ApplicationState.STOPPING)
             self.pause_action.setEnabled(enabled)
-            self.pause_action.setText(
+            pause_label = (
                 "Resume bot"
                 if status.state in {ApplicationState.PAUSED, ApplicationState.RESUMING}
                 else "Pause bot"
             )
-            self.stop_action.setEnabled(enabled)
+            self.pause_action.setText(
+                _menu_action_text(pause_label, self._draft.pause_hotkey)
+            )
             self.browser_page.set_runtime_active(active)
 
     def _running_changed(self, _running: bool, _paused: bool) -> None:
@@ -478,22 +507,20 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         self.tray.setContextMenu(menu)
         show_action = QAction("Show dashboard", self)
-        self.start_action = QAction("Start bot", self)
+        self.run_action = QAction("Start bot", self)
         self.pause_action = QAction("Pause bot", self)
-        self.stop_action = QAction("Stop bot", self)
         overlay_action = QAction("Toggle compact overlay", self)
-        quit_action = QAction("Quit", self)
+        self.quit_action = QAction("Quit", self)
         show_action.triggered.connect(self._show_dashboard)
-        self.start_action.triggered.connect(self.controller.start_bot)
+        self.run_action.triggered.connect(self.controller.toggle_running)
         self.pause_action.triggered.connect(self.controller.toggle_pause)
-        self.stop_action.triggered.connect(self.controller.stop_bot)
         overlay_action.triggered.connect(self._toggle_overlay)
-        quit_action.triggered.connect(self.quit_application)
+        self.quit_action.triggered.connect(self.quit_application)
         menu.addActions(
-            (show_action, self.start_action, self.pause_action, self.stop_action, overlay_action)
+            (show_action, self.run_action, self.pause_action, overlay_action)
         )
         menu.addSeparator()
-        menu.addAction(quit_action)
+        menu.addAction(self.quit_action)
         self.tray.activated.connect(self._tray_activated)
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray.show()
@@ -582,6 +609,7 @@ def run_application(store: ConfigStore | None = None) -> int:
             window.show()
         if config.overlay_visible:
             window.overlay.show()
+        controller.start_hotkeys()
         if config.bot_autostart:
             controller.start_bot()
         return app.exec()

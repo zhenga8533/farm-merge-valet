@@ -57,14 +57,20 @@ farm-merge-valet diagnose-live-state
 ```
 
 The command without a subcommand opens the desktop dashboard. Start launches or
-reuses the managed browser and begins automation; Pause/Resume and Stop remain
-available from the dashboard, compact overlay, tray, and global hotkeys. `run`
-is retained as a GUI-launching compatibility alias. The browser manager refuses
+reuses the managed browser and begins automation; Start/Stop and Pause/Resume
+remain available from the dashboard, compact overlay, tray, and global
+shortcuts. `run` is retained as a GUI-launching compatibility alias. The browser
+manager refuses
 an occupied endpoint with the wrong profile, executable, or switches.
 An ordinary resume validates and reuses the cached scene; heap discovery runs
 again only when the iframe, gameplay services, or active board identity changed.
-Single-key hotkeys fire once on key-down and latch until release; quit is
-idempotent across the keyboard and GUI shutdown paths.
+Global shortcuts are owned by the desktop application and remain active whether
+automation is running or stopped. The defaults are F8 for Start/Stop, F9 for
+Pause/Resume, and F10 for Quit. Settings record single keys or modifier
+combinations and can disable individual shortcuts; laptop Fn behavior remains a
+hardware/firmware concern, so the recorded key is typically F9 rather than
+Fn+F9. Shortcuts fire once per physical key press and re-arm when the key is
+released. Quit is idempotent across keyboard and GUI shutdown paths.
 
 `capture` uses `Page.captureScreenshot` and live DOM geometry to save only the
 game iframe without focusing the browser. `visualize-positions` marks visible cells

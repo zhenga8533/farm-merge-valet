@@ -27,6 +27,28 @@ def test_settings_reject_invalid_runtime_values(field: str, value: object) -> No
         Settings(_env_file=None, **{field: value})
 
 
+def test_hotkey_commands_have_distinct_defaults_and_allow_disabling() -> None:
+    config = AppConfig()
+
+    assert (config.start_stop_hotkey, config.pause_hotkey, config.quit_hotkey) == (
+        "f8",
+        "f9",
+        "f10",
+    )
+    assert AppConfig(start_stop_hotkey=None).start_stop_hotkey is None
+
+
+def test_duplicate_hotkeys_are_rejected() -> None:
+    with pytest.raises(ValidationError, match="hotkeys must be different"):
+        AppConfig(start_stop_hotkey="Ctrl + X", pause_hotkey="ctrl+x")
+
+
+def test_hotkeys_are_canonicalized_before_persistence() -> None:
+    config = AppConfig(start_stop_hotkey="Shift + Ctrl + X")
+
+    assert config.start_stop_hotkey == "ctrl+shift+x"
+
+
 @pytest.mark.parametrize(
     "field",
     [

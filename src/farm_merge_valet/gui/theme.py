@@ -20,6 +20,8 @@ class _Colors:
     border: str
     primary: str
     primary_hover: str
+    danger: str
+    danger_hover: str
     selected: str
     disabled: str
     disabled_text: str
@@ -38,6 +40,8 @@ _DARK = _Colors(
     border="#30363d",
     primary="#238636",
     primary_hover="#2ea043",
+    danger="#da3633",
+    danger_hover="#f85149",
     selected="#1f6feb",
     disabled="#30363d",
     disabled_text="#8b949e",
@@ -56,6 +60,8 @@ _LIGHT = _Colors(
     border="#d0d7de",
     primary="#1f883d",
     primary_hover="#1a7f37",
+    danger="#cf222e",
+    danger_hover="#a40e26",
     selected="#0969da",
     disabled="#d0d7de",
     disabled_text="#57606a",
@@ -74,6 +80,8 @@ _SYSTEM = _Colors(
     border="palette(mid)",
     primary="palette(highlight)",
     primary_hover="palette(highlight)",
+    danger="#cf222e",
+    danger_hover="#a40e26",
     selected="palette(highlight)",
     disabled="palette(midlight)",
     disabled_text="palette(mid)",
@@ -118,6 +126,10 @@ QPushButton {{
     border-radius: 6px; padding: 7px 14px; font-weight: 600;
 }}
 QPushButton:hover {{ background: {colors.primary_hover}; }}
+QPushButton[danger="true"] {{
+    background: {colors.danger}; border-color: {colors.danger};
+}}
+QPushButton[danger="true"]:hover {{ background: {colors.danger_hover}; }}
 QPushButton:disabled {{
     background: {colors.disabled}; color: {colors.disabled_text}; border-color: {colors.disabled};
 }}
@@ -125,6 +137,25 @@ QPushButton[secondary="true"] {{
     background: {colors.surface}; color: {colors.text}; border: 1px solid {colors.border};
 }}
 QPushButton[secondary="true"]:hover {{ background: {colors.surface_subtle}; }}
+QPushButton[shortcutButton="true"] {{ padding: 0; }}
+QPushButton QLabel#actionButtonLabel {{
+    background: transparent; color: white; font-weight: 600;
+}}
+QPushButton[secondary="true"] QLabel#actionButtonLabel {{ color: {colors.text}; }}
+QPushButton QLabel#shortcutKeycap {{
+    background: rgba(255, 255, 255, 38); color: white;
+    border: 1px solid rgba(255, 255, 255, 90); border-radius: 4px;
+    padding: 1px 5px; font-family: "Cascadia Mono", Consolas, monospace;
+    font-size: 11px; font-weight: 600;
+}}
+QPushButton[secondary="true"] QLabel#shortcutKeycap {{
+    background: {colors.surface_subtle}; color: {colors.muted}; border-color: {colors.border};
+}}
+QPushButton:disabled QLabel#actionButtonLabel,
+QPushButton:disabled QLabel#shortcutKeycap {{ color: {colors.disabled_text}; }}
+QPushButton:disabled QLabel#shortcutKeycap {{
+    background: transparent; border-color: {colors.disabled_text};
+}}
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
     background: {colors.input}; border: 1px solid {colors.border}; border-radius: 6px; padding: 6px;
 }}
