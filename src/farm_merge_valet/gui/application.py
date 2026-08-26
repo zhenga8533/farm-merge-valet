@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.gui.config_sections import ConfigSection, reset_config_section
 from farm_merge_valet.gui.controller import (
     ApplicationController,
     ApplicationState,
@@ -164,6 +165,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.controller = controller
         self._draft = controller.config
+        self._persisted_config = controller.config
         self._really_quit = False
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
@@ -257,6 +259,7 @@ class MainWindow(QMainWindow):
         self.browser_page.config_edited.connect(self._queue_edit)
         self.browser_page.refresh_requested.connect(self.controller.refresh_browser)
         self.browser_page.restart_requested.connect(self._confirm_browser_restart)
+        self.browser_page.reset_requested.connect(self._reset_browser_configuration)
         self.settings_page.config_edited.connect(self._queue_edit)
         self.settings_page.reset_requested.connect(self._reset_general_settings)
         self.settings_page.reset_all_requested.connect(self._reset_all_settings)
@@ -291,65 +294,37 @@ class MainWindow(QMainWindow):
         )
 
     def _reset_item_policies(self) -> None:
-        if not self._confirm_reset(
+        self._reset_section(
+            ConfigSection.ITEMS,
             "Reset item policies?",
             "Restore item, category, and global item defaults and remove all item overrides?",
-        ):
-            return
-        defaults = AppConfig()
-        self._replace_config(
-            self._draft.model_copy(
-                update={
-                    "item_policy_defaults": defaults.item_policy_defaults,
-                    "item_category_defaults": defaults.item_category_defaults,
-                    "item_default_overrides": defaults.item_default_overrides,
-                    "item_policy_overrides": {},
-                }
-            )
         )
 
     def _reset_shop_policies(self) -> None:
-        if not self._confirm_reset(
+        self._reset_section(
+            ConfigSection.SHOPS,
             "Reset shop policies?",
             "Restore shop and recipe defaults and remove all shop and recipe overrides?",
-        ):
-            return
-        defaults = AppConfig()
-        self._replace_config(
-            self._draft.model_copy(
-                update={
-                    "shop_default_enabled": defaults.shop_default_enabled,
-                    "recipe_default_enabled": defaults.recipe_default_enabled,
-                    "shop_overrides": {},
-                    "recipe_overrides": {},
-                }
-            )
+        )
+
+    def _reset_browser_configuration(self) -> None:
+        self._reset_section(
+            ConfigSection.BROWSER,
+            "Reset browser configuration?",
+            "Restore browser, game connection, and asset-cache configuration?",
         )
 
     def _reset_general_settings(self) -> None:
-        if not self._confirm_reset(
+        self._reset_section(
+            ConfigSection.SETTINGS,
             "Reset settings?",
-            "Restore browser, automation timing, notification, and appearance settings? "
-            "Item and shop policies will be preserved.",
-        ):
-            return
-        policy_fields = {
-            "item_policy_defaults",
-            "item_category_defaults",
-            "item_default_overrides",
-            "item_policy_overrides",
-            "shop_default_enabled",
-            "recipe_default_enabled",
-            "shop_overrides",
-            "recipe_overrides",
-        }
-        defaults = AppConfig()
-        changes = {
-            field: getattr(defaults, field)
-            for field in AppConfig.model_fields
-            if field != "schema_version" and field not in policy_fields
-        }
-        self._replace_config(self._draft.model_copy(update=changes))
+            "Restore automation, startup, notification, and appearance settings? Browser, item, "
+            "and shop configuration will be preserved.",
+        )
+
+    def _reset_section(self, section: ConfigSection, title: str, message: str) -> None:
+        if self._confirm_reset(title, message):
+            self._replace_config(reset_config_section(self._draft, section))
 
     def _reset_all_settings(self) -> None:
         if self._confirm_reset(
@@ -373,17 +348,18 @@ class MainWindow(QMainWindow):
         self.shops_page.reset_item(kind, key)
 
     def _queue_edit(self, edit: ConfigEdit) -> None:
+        editor = self.browser_page if edit.source == "browser" else self.settings_page
         try:
             candidate = self._draft.model_copy(update=edit.changes)
             self._draft = AppConfig.model_validate(candidate.model_dump())
         except ValidationError as exc:
-            self.settings_page.show_validation_error(
+            editor.show_validation_error(
                 edit.field,
                 exc.errors()[0]["msg"],
                 self._draft,
             )
             return
-        self.settings_page.mark_saving(edit.field)
+        editor.mark_saving(edit.field)
         self._save_timer.start()
         if _APPEARANCE_FIELDS.intersection(edit.changes):
             self.overlay.apply_config(self._draft)
@@ -403,7 +379,8 @@ class MainWindow(QMainWindow):
         configure_logging(self._draft.log_level)
 
     def _config_changed(self, config: AppConfig) -> None:
-        previous = self._draft
+        previous = self._persisted_config
+        self._persisted_config = config
         self._draft = config
         item_fields = (
             "catalog_dir",
@@ -433,6 +410,7 @@ class MainWindow(QMainWindow):
             ),
         )
         self.settings_page.apply_config(config)
+        self.browser_page.apply_config(config)
         self.overlay.apply_config(config)
         self._apply_appearance()
 

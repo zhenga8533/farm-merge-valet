@@ -58,12 +58,23 @@ _SHOP_TREE_ICON_SIZE = QSize(100, 54)
 class ConfigEdit:
     changes: dict[str, object]
     field: str | None = None
+    source: str = "settings"
 
 
 def secondary_button(text: str) -> QPushButton:
     button = QPushButton(text)
     button.setProperty("secondary", True)
     return button
+
+
+def _settings_section(title: str) -> tuple[QGroupBox, QFormLayout]:
+    section = QGroupBox(title)
+    section.setMaximumWidth(900)
+    form = QFormLayout(section)
+    form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+    form.setContentsMargins(14, 18, 14, 14)
+    form.setSpacing(10)
+    return section, form
 
 
 class AppPage(QWidget):
@@ -127,7 +138,9 @@ class DashboardPage(AppPage):
         self.set_status(ApplicationStatus())
 
     @staticmethod
-    def _metric(layout: QGridLayout, row: int, column: int, title: str, value: str) -> QLabel:
+    def _metric(
+        layout: QGridLayout, row: int, column: int, title: str, value: str
+    ) -> QLabel:
         card = QFrame()
         card.setObjectName("metricCard")
         card_layout = QVBoxLayout(card)
@@ -149,8 +162,12 @@ class DashboardPage(AppPage):
         self.activity_value.setText(status.last_activity)
         active = status.state.active
         self.start_button.setEnabled(not active)
-        self.pause_button.setEnabled(active and status.state is not ApplicationState.STOPPING)
-        self.stop_button.setEnabled(active and status.state is not ApplicationState.STOPPING)
+        self.pause_button.setEnabled(
+            active and status.state is not ApplicationState.STOPPING
+        )
+        self.stop_button.setEnabled(
+            active and status.state is not ApplicationState.STOPPING
+        )
         self.pause_button.setText(
             "Resume"
             if status.state in {ApplicationState.PAUSED, ApplicationState.RESUMING}
@@ -158,7 +175,9 @@ class DashboardPage(AppPage):
         )
 
     def set_overlay_visible(self, visible: bool) -> None:
-        self.overlay_button.setText("Hide compact overlay" if visible else "Show compact overlay")
+        self.overlay_button.setText(
+            "Hide compact overlay" if visible else "Show compact overlay"
+        )
 
 
 class _ShopIconDelegate(QStyledItemDelegate):
@@ -206,7 +225,9 @@ class ItemsPage(AppPage):
         ):
             checkbox = QCheckBox(f"Default {label}")
             checkbox.setChecked(getattr(config.item_policy_defaults, field))
-            checkbox.toggled.connect(lambda value, name=field: self._set_default(name, value))
+            checkbox.toggled.connect(
+                lambda value, name=field: self._set_default(name, value)
+            )
             self.default_controls[field] = checkbox
             defaults.addWidget(checkbox)
         defaults.addStretch()
@@ -222,10 +243,20 @@ class ItemsPage(AppPage):
         self.page_layout.addWidget(self.search)
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
-            ("Item family", "Category", "Enabled", "Merge", "Merge five", "Claim", "Override")
+            (
+                "Item family",
+                "Category",
+                "Enabled",
+                "Merge",
+                "Merge five",
+                "Claim",
+                "Override",
+            )
         )
         self.table.setIconSize(_ITEM_ICON_SIZE)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(True)
         self.table.setAccessibleName("Item automation policies")
@@ -290,14 +321,18 @@ class ItemsPage(AppPage):
         rows.sort(key=lambda row: (row[2], row[1].casefold()))
         icons = CatalogIconLoader(self._config.catalog_dir)
         self.table.setRowCount(len(rows))
-        for row, (key, name, category, supports_merge, supports_claim) in enumerate(rows):
+        for row, (key, name, category, supports_merge, supports_claim) in enumerate(
+            rows
+        ):
             representative = min(grouped[key], key=lambda item: item.tier or 0)
             name_item = QTableWidgetItem(name)
             name_item.setData(Qt.ItemDataRole.UserRole, key)
             name_item.setIcon(icons.icon_for(representative))
             self.table.setItem(row, 0, name_item)
             self.table.setRowHeight(row, 48)
-            self.table.setItem(row, 1, QTableWidgetItem(category.replace("_", " ").title()))
+            self.table.setItem(
+                row, 1, QTableWidgetItem(category.replace("_", " ").title())
+            )
             policy = self._config.item_policy(key)
             for column, field, applicable in (
                 (2, "enabled", True),
@@ -374,15 +409,21 @@ class ShopsPage(AppPage):
     reset_requested = Signal()
 
     def __init__(self, config: AppConfig) -> None:
-        super().__init__("Shops", "Configure discovered shops and recipes independently.")
+        super().__init__(
+            "Shops", "Configure discovered shops and recipes independently."
+        )
         self._config = config
         defaults = QHBoxLayout()
         self.shop_default = QCheckBox("Enable shops by default")
         self.recipe_default = QCheckBox("Enable recipes by default")
         self.shop_default.setChecked(config.shop_default_enabled)
         self.recipe_default.setChecked(config.recipe_default_enabled)
-        self.shop_default.toggled.connect(lambda value: self._set_default("shop", value))
-        self.recipe_default.toggled.connect(lambda value: self._set_default("recipe", value))
+        self.shop_default.toggled.connect(
+            lambda value: self._set_default("shop", value)
+        )
+        self.recipe_default.toggled.connect(
+            lambda value: self._set_default("recipe", value)
+        )
         defaults.addWidget(self.shop_default)
         defaults.addWidget(self.recipe_default)
         defaults.addStretch()
@@ -442,9 +483,13 @@ class ShopsPage(AppPage):
             parent.setFlags(parent.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             parent.setCheckState(
                 0,
-                Qt.CheckState.Checked
-                if self._config.shop_overrides.get(shop_id, self._config.shop_default_enabled)
-                else Qt.CheckState.Unchecked,
+                (
+                    Qt.CheckState.Checked
+                    if self._config.shop_overrides.get(
+                        shop_id, self._config.shop_default_enabled
+                    )
+                    else Qt.CheckState.Unchecked
+                ),
             )
             self.tree.addTopLevelItem(parent)
             self._add_reset(parent, "shop", shop_id)
@@ -455,11 +500,13 @@ class ShopsPage(AppPage):
                 child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 child.setCheckState(
                     0,
-                    Qt.CheckState.Checked
-                    if self._config.recipe_overrides.get(
-                        recipe.game_id, self._config.recipe_default_enabled
-                    )
-                    else Qt.CheckState.Unchecked,
+                    (
+                        Qt.CheckState.Checked
+                        if self._config.recipe_overrides.get(
+                            recipe.game_id, self._config.recipe_default_enabled
+                        )
+                        else Qt.CheckState.Unchecked
+                    ),
                 )
                 parent.addChild(child)
                 self._add_reset(child, "recipe", recipe.game_id)
@@ -467,7 +514,11 @@ class ShopsPage(AppPage):
         self.tree.blockSignals(False)
 
     def _add_reset(self, item: QTreeWidgetItem, kind: str, key: str) -> None:
-        overrides = self._config.shop_overrides if kind == "shop" else self._config.recipe_overrides
+        overrides = (
+            self._config.shop_overrides
+            if kind == "shop"
+            else self._config.recipe_overrides
+        )
         reset = secondary_button("Use default")
         reset.setEnabled(key in overrides)
         reset.clicked.connect(
@@ -515,26 +566,52 @@ class BrowserPage(AppPage):
     config_edited = Signal(object)
     refresh_requested = Signal()
     restart_requested = Signal()
+    reset_requested = Signal()
 
     def __init__(self, config: AppConfig) -> None:
         super().__init__(
             "Managed browser",
-            "The bot only restarts a managed profile after confirmation.",
+            "Manage the dedicated browser, game connection, and local asset cache.",
         )
-        card = QFrame()
-        card.setObjectName("card")
-        form = QFormLayout(card)
+        self._config = config
+        self.controls: dict[str, QWidget] = {}
+        status_row = QHBoxLayout()
+        status_row.addWidget(QLabel("Configuration"))
+        self.saved_label = QLabel("Saved")
+        self.saved_label.setObjectName("saveStatus")
+        status_row.addWidget(self.saved_label)
+        status_row.addStretch()
+        reset = secondary_button("Reset browser configuration")
+        reset.clicked.connect(self.reset_requested)
+        status_row.addWidget(reset)
+        self.page_layout.addLayout(status_row)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        sections = QVBoxLayout(content)
+        sections.setContentsMargins(4, 4, 4, 4)
+        sections.setSpacing(14)
+
+        managed, form = _settings_section("Managed browser")
         self.status_label = QLabel("Not checked")
         self.status_label.setWordWrap(True)
         self.browser_choice = QComboBox()
         self.browser_choice.addItems(("auto", "chrome", "edge", "brave", "chromium"))
         self.browser_choice.setCurrentText(config.browser)
         self.browser_choice.currentTextChanged.connect(
-            lambda value: self.config_edited.emit(ConfigEdit({"browser": value}, "browser"))
+            lambda value: self._request("browser", value)
         )
+        self.controls["browser"] = self.browser_choice
         form.addRow("Status", self.status_label)
         form.addRow("Preferred browser", self.browser_choice)
-        self.page_layout.addWidget(card)
+        self._add_checkbox(
+            form, "Launch managed browser when needed", "browser_auto_launch"
+        )
+        self._add_path(form, "Browser executable", "browser_executable")
+        self._add_path(form, "Browser profile directory", "browser_profile_dir")
         buttons = QHBoxLayout()
         self.refresh_button = secondary_button("Refresh status")
         self.restart_button = QPushButton("Restart managed browser")
@@ -543,10 +620,138 @@ class BrowserPage(AppPage):
         buttons.addWidget(self.refresh_button)
         buttons.addWidget(self.restart_button)
         buttons.addStretch()
-        self.page_layout.addLayout(buttons)
-        self.page_layout.addStretch()
+        form.addRow("Actions", buttons)
+        sections.addWidget(managed)
+
+        connection, form = _settings_section("Game connection")
+        self._add_text(form, "Game URL", "game_url")
+        self._add_text(form, "Page target", "window_title")
+        self._add_int(form, "CDP port", "cdp_port", 1, 65535)
+        sections.addWidget(connection)
+
+        assets, form = _settings_section("Assets and cache")
+        self._add_path(form, "Catalog directory", "catalog_dir", optional=False)
+        self._add_path(form, "Atlas cache directory", "atlas_cache_dir", optional=False)
+        sections.addWidget(assets)
+        sections.addStretch()
+        scroll.setWidget(content)
+        self.page_layout.addWidget(scroll, 1)
         self._busy = False
         self._runtime_active = False
+
+    def _request(self, field: str, value: object) -> None:
+        self.config_edited.emit(ConfigEdit({field: value}, field, "browser"))
+
+    def _add_text(self, form: QFormLayout, label: str, field: str) -> None:
+        control = QLineEdit(str(getattr(self._config, field)))
+        control.editingFinished.connect(
+            lambda widget=control, name=field: self._request(
+                name, widget.text().strip()
+            )
+        )
+        self.controls[field] = control
+        form.addRow(label, control)
+
+    def _add_checkbox(self, form: QFormLayout, label: str, field: str) -> None:
+        control = QCheckBox()
+        control.setChecked(bool(getattr(self._config, field)))
+        control.setAccessibleName(label)
+        control.toggled.connect(lambda value, name=field: self._request(name, value))
+        self.controls[field] = control
+        form.addRow(label, control)
+
+    def _add_int(
+        self,
+        form: QFormLayout,
+        label: str,
+        field: str,
+        minimum: int,
+        maximum: int,
+    ) -> None:
+        control = QSpinBox()
+        control.setRange(minimum, maximum)
+        control.setValue(getattr(self._config, field))
+        control.valueChanged.connect(
+            lambda value, name=field: self._request(name, value)
+        )
+        self.controls[field] = control
+        form.addRow(label, control)
+
+    def _add_path(
+        self, form: QFormLayout, label: str, field: str, *, optional: bool = True
+    ) -> None:
+        value = getattr(self._config, field)
+        control = QLineEdit(str(value) if value is not None else "")
+        browse = secondary_button("Browse…")
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(control, 1)
+        layout.addWidget(browse)
+
+        def update() -> None:
+            text = control.text().strip()
+            self._request(field, Path(text) if text else (None if optional else value))
+
+        def choose() -> None:
+            current = control.text().strip()
+            if field == "browser_executable":
+                selected, _ = QFileDialog.getOpenFileName(
+                    self, f"Choose {label}", current
+                )
+            else:
+                selected = QFileDialog.getExistingDirectory(
+                    self, f"Choose {label}", current
+                )
+            if selected:
+                control.setText(selected)
+                update()
+
+        control.editingFinished.connect(update)
+        browse.clicked.connect(choose)
+        self.controls[field] = control
+        form.addRow(label, row)
+
+    def apply_config(self, config: AppConfig) -> None:
+        self._config = config
+        for field, control in self.controls.items():
+            control.blockSignals(True)
+            value = getattr(config, field)
+            if isinstance(control, QComboBox):
+                control.setCurrentText(str(value))
+            elif isinstance(control, QCheckBox):
+                control.setChecked(bool(value))
+            elif isinstance(control, QSpinBox):
+                control.setValue(int(value))
+            elif isinstance(control, QLineEdit):
+                control.setText(str(value) if value is not None else "")
+            control.blockSignals(False)
+        self.saved_label.setText("Saved")
+
+    def mark_saving(self, field: str | None = None) -> None:
+        self.saved_label.setText("Saving…")
+        if field is not None and field in self.controls:
+            self._set_invalid(self.controls[field], False, "")
+
+    def show_validation_error(
+        self, field: str | None, message: str, config: AppConfig
+    ) -> None:
+        self.saved_label.setText(f"Invalid: {message}")
+        if field is None or field not in self.controls:
+            return
+        self.apply_config(config)
+        self.saved_label.setText(f"Invalid: {message}")
+        control = self.controls[field]
+        self._set_invalid(control, True, message)
+        control.setFocus()
+
+    @staticmethod
+    def _set_invalid(control: QWidget, invalid: bool, message: str) -> None:
+        control.setProperty("invalid", invalid)
+        control.setToolTip(message)
+        control.setAccessibleDescription(message)
+        control.style().unpolish(control)
+        control.style().polish(control)
 
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
@@ -585,14 +790,17 @@ class SettingsPage(AppPage):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         content = QWidget()
         sections = QVBoxLayout(content)
         sections.setContentsMargins(4, 4, 4, 4)
         sections.setSpacing(14)
 
-        automation, form = self._section("Automation")
+        automation, form = _settings_section("Automation")
         self._add_int(form, "Reserved empty cells", "merge_empty_cell_reserve", 0, 50)
-        self._add_int(form, "Producer claim open cells", "producer_claim_min_empty_cells", 1, 50)
+        self._add_int(
+            form, "Producer claim open cells", "producer_claim_min_empty_cells", 1, 50
+        )
         self._add_float(form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600)
         self._add_float(form, "Loop interval (seconds)", "loop_interval", 0.1, 60)
         self._add_float(form, "Item delay minimum", "item_action_delay_min", 0, 60)
@@ -601,11 +809,10 @@ class SettingsPage(AppPage):
         self._add_float(form, "Crate delay maximum", "crate_delay_max", 0, 5)
         sections.addWidget(automation)
 
-        controls, form = self._section("Controls & startup")
+        controls, form = _settings_section("Controls and startup")
         self._add_text(form, "Pause / resume hotkey", "pause_hotkey")
         self._add_text(form, "Quit hotkey", "quit_hotkey")
         for field, label in (
-            ("browser_auto_launch", "Launch managed browser when needed"),
             ("start_paused", "Start automation paused"),
             ("start_minimized", "Start minimized to tray"),
             ("bot_autostart", "Start bot with application"),
@@ -614,17 +821,7 @@ class SettingsPage(AppPage):
             self._add_checkbox(form, label, field)
         sections.addWidget(controls)
 
-        browser, form = self._section("Browser & assets")
-        self._add_text(form, "Game URL", "game_url")
-        self._add_text(form, "Page target", "window_title")
-        self._add_int(form, "CDP port", "cdp_port", 1, 65535)
-        self._add_path(form, "Browser executable", "browser_executable")
-        self._add_path(form, "Browser profile directory", "browser_profile_dir")
-        self._add_path(form, "Catalog directory", "catalog_dir", optional=False)
-        self._add_path(form, "Atlas cache directory", "atlas_cache_dir", optional=False)
-        sections.addWidget(browser)
-
-        notifications, form = self._section("Notifications")
+        notifications, form = _settings_section("Notifications")
         webhook = QLineEdit()
         webhook.setEchoMode(QLineEdit.EchoMode.Password)
         webhook.setPlaceholderText("Optional Discord webhook URL")
@@ -635,11 +832,15 @@ class SettingsPage(AppPage):
         )
         self.controls["discord_webhook_url"] = webhook
         form.addRow("Discord webhook", webhook)
-        self._add_float(form, "Webhook status interval", "webhook_status_interval", 0, 3600)
-        self._add_float(form, "Webhook summary interval", "webhook_summary_interval", 60, 86400)
+        self._add_float(
+            form, "Webhook status interval", "webhook_status_interval", 0, 3600
+        )
+        self._add_float(
+            form, "Webhook summary interval", "webhook_summary_interval", 60, 86400
+        )
         sections.addWidget(notifications)
 
-        appearance, form = self._section("Appearance")
+        appearance, form = _settings_section("Appearance")
         theme = QComboBox()
         theme.addItems(("system", "dark", "light"))
         theme.setCurrentText(config.theme)
@@ -660,16 +861,6 @@ class SettingsPage(AppPage):
         sections.addStretch()
         scroll.setWidget(content)
         self.page_layout.addWidget(scroll, 1)
-
-    @staticmethod
-    def _section(title: str) -> tuple[QGroupBox, QFormLayout]:
-        section = QGroupBox(title)
-        section.setMaximumWidth(900)
-        form = QFormLayout(section)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        form.setContentsMargins(14, 18, 14, 14)
-        form.setSpacing(10)
-        return section, form
 
     def _request(self, field: str, value: object) -> None:
         self.config_edited.emit(ConfigEdit({field: value}, field))
@@ -693,7 +884,9 @@ class SettingsPage(AppPage):
         control = QSpinBox()
         control.setRange(minimum, maximum)
         control.setValue(getattr(self._config, field))
-        control.valueChanged.connect(lambda value, name=field: self._request(name, value))
+        control.valueChanged.connect(
+            lambda value, name=field: self._request(name, value)
+        )
         self.controls[field] = control
         form.addRow(label, control)
 
@@ -704,48 +897,21 @@ class SettingsPage(AppPage):
         control.setRange(minimum, maximum)
         control.setDecimals(2)
         control.setValue(getattr(self._config, field))
-        control.valueChanged.connect(lambda value, name=field: self._request(name, value))
+        control.valueChanged.connect(
+            lambda value, name=field: self._request(name, value)
+        )
         self.controls[field] = control
         form.addRow(label, control)
 
     def _add_text(self, form: QFormLayout, label: str, field: str) -> None:
         control = QLineEdit(str(getattr(self._config, field)))
         control.editingFinished.connect(
-            lambda widget=control, name=field: self._request(name, widget.text().strip())
+            lambda widget=control, name=field: self._request(
+                name, widget.text().strip()
+            )
         )
         self.controls[field] = control
         form.addRow(label, control)
-
-    def _add_path(
-        self, form: QFormLayout, label: str, field: str, *, optional: bool = True
-    ) -> None:
-        value = getattr(self._config, field)
-        control = QLineEdit(str(value) if value is not None else "")
-        browse = secondary_button("Browse…")
-        row = QWidget()
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(control, 1)
-        layout.addWidget(browse)
-
-        def update() -> None:
-            text = control.text().strip()
-            self._request(field, Path(text) if text else (None if optional else value))
-
-        def choose() -> None:
-            current = control.text().strip()
-            if field == "browser_executable":
-                selected, _ = QFileDialog.getOpenFileName(self, f"Choose {label}", current)
-            else:
-                selected = QFileDialog.getExistingDirectory(self, f"Choose {label}", current)
-            if selected:
-                control.setText(selected)
-                update()
-
-        control.editingFinished.connect(update)
-        browse.clicked.connect(choose)
-        self.controls[field] = control
-        form.addRow(label, row)
 
     def _add_opacity(self, form: QFormLayout, label: str, field: str) -> None:
         control = QSlider(Qt.Orientation.Horizontal)
@@ -768,7 +934,9 @@ class SettingsPage(AppPage):
         self.opacity_labels[field] = value_label
         form.addRow(label, row)
 
-    def show_validation_error(self, field: str | None, message: str, config: AppConfig) -> None:
+    def show_validation_error(
+        self, field: str | None, message: str, config: AppConfig
+    ) -> None:
         self.saved_label.setText(f"Invalid: {message}")
         if field is None or field not in self.controls:
             return
@@ -820,7 +988,9 @@ class LogsPage(AppPage):
     log_level_changed = Signal(str)
 
     def __init__(self, log_level: str) -> None:
-        super().__init__("Logs", "Structured application events from the shared logging pipeline.")
+        super().__init__(
+            "Logs", "Structured application events from the shared logging pipeline."
+        )
         toolbar = QHBoxLayout()
         self.filter = QComboBox()
         self.filter.addItems(("DEBUG", "INFO", "WARNING", "ERROR"))

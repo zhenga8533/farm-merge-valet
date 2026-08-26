@@ -7,7 +7,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QSize
 from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtWidgets import QApplication, QCheckBox, QGroupBox, QLabel, QStyleOptionViewItem
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QGroupBox,
+    QLabel,
+    QPushButton,
+    QStyleOptionViewItem,
+)
 
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.core.catalog_store import write_item_catalog
@@ -124,12 +131,47 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
 
     assert section_titles == {
         "Automation",
-        "Controls & startup",
-        "Browser & assets",
+        "Controls and startup",
         "Notifications",
         "Appearance",
     }
     assert "Start automation paused" in labels
+    assert all("_" not in title and "&" not in title for title in section_titles)
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    settings_page = window.pages.widget(window._NAVIGATION.index("Settings"))
+
+    assert set(window.browser_page.controls) == {
+        "browser",
+        "browser_auto_launch",
+        "browser_executable",
+        "browser_profile_dir",
+        "game_url",
+        "window_title",
+        "cdp_port",
+        "catalog_dir",
+        "atlas_cache_dir",
+    }
+    assert settings_page is not None
+    assert "Reset browser configuration" in {
+        button.text() for button in window.browser_page.findChildren(QPushButton)
+    }
+    assert "Browser and assets" not in {
+        group.title() for group in settings_page.findChildren(QGroupBox)
+    }
+
+    window.browser_page._request("cdp_port", 9333)
+    window._flush_config()
+
+    assert ConfigStore(store.path).load().cdp_port == 9333
 
     window.quit_application()
     app.processEvents()
@@ -248,6 +290,8 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
         AppConfig(
             close_to_tray=False,
             theme="dark",
+            browser="edge",
+            cdp_port=9333,
             item_policy_defaults={"claim": True},
             item_policy_overrides={"ingredients/milk": {"claim": False}},
             shop_default_enabled=False,
@@ -278,6 +322,18 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
     assert after_settings.theme == AppConfig().theme
     assert after_settings.item_category_defaults == AppConfig().item_category_defaults
     assert after_settings.shop_default_enabled
+    assert after_settings.browser == "edge"
+    assert after_settings.cdp_port == 9333
+
+    window._queue_config(theme="dark")
+    window._flush_config()
+    window._reset_browser_configuration()
+    after_browser = ConfigStore(store.path).load()
+    assert after_browser.browser == AppConfig().browser
+    assert after_browser.cdp_port == AppConfig().cdp_port
+    assert after_browser.theme == "dark"
+    assert after_browser.item_category_defaults == AppConfig().item_category_defaults
+    assert after_browser.shop_default_enabled
 
     window.quit_application()
     app.processEvents()
