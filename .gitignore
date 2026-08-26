@@ -22,6 +22,7 @@ env/
 Thumbs.db
 
 # Testing / coverage
+.tmp/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

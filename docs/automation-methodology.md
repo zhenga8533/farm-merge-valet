@@ -41,7 +41,8 @@ from being mistaken for an action failure.
 The live cell read includes semantic behaviors as well as blueprint identity.
 Catalog metadata assigns tile interactions to explicit modes: immediate,
 upgrade prompt, confirmation, requirement, or none. Only immediate claims are
-enabled. They currently include collectable ingredients, train tickets, and
+eligible for generic automation, and the policy key must also have Claim
+enabled in the GUI. Eligible content includes collectable ingredients, train tickets, and
 ordinary supply-crate tiles. Coins, energy, crystals, upgrade cards, and reward
 containers remain recognized but cannot enter the generic click pipeline.
 
@@ -54,8 +55,8 @@ persists after the timer for a second harvest has completed.
 The claim phase collects immediate tiles first, then retires depleted
 producers, then harvests ready producers. Depleted animals convert in place;
 depleted crops require one open cell for their two tier-1 replacements. A ready
-producer requires `FMV_PRODUCER_CLAIM_MIN_EMPTY_CELLS` open cells (four by
-default). If the requirement is not met, merge work preempts claims and supply
+producer requires the configured minimum open-cell count (four by default).
+If the requirement is not met, merge work preempts claims and supply
 crates. With no productive merge available, the bot waits and keeps observing.
 
 Claims use the active interaction handler's internal object-click pipeline.
@@ -86,8 +87,8 @@ contains its stable shop and recipe IDs, state, ingredient requirements and live
 inventory amounts, duration and remaining timer, and exact reward objects.
 Available, producing, and complete orders are observed without opening shop UI.
 
-Shop and recipe policy have separate global defaults and per-ID boolean
-overrides derived from catalog IDs. Both global defaults are enabled, so current
+Shop and recipe policy have separate GUI defaults and per-ID boolean overrides
+derived from catalog IDs. Both global defaults are enabled, so current
 and newly discovered content is automated without a hardcoded list. An explicit
 shop or recipe override takes precedence, allowing individual entries to be
 disabled. Complete enabled orders take priority over starting enabled affordable

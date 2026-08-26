@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from farm_merge_valet.config import Settings
+from farm_merge_valet.config import AppConfig, ConfigStore, Settings
 
 
 @pytest.mark.parametrize(
@@ -54,8 +54,20 @@ def test_merge_five_is_enabled_by_default() -> None:
     settings = Settings(_env_file=None)
 
     assert settings.item_policy("crops/wheat").enabled
+    assert settings.item_policy("crops/wheat").merge
     assert settings.item_policy("crops/wheat").prefer_merge_five
+    assert not settings.item_policy("crops/wheat").claim
     assert not settings.item_policy("crops/wheat").always_remove
+
+
+def test_claim_defaults_support_category_and_item_specific_policies() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.item_policy("ingredients/milk").claim
+    assert settings.item_policy("ingredients/egg").claim
+    assert settings.item_policy("currencies/ticket").claim
+    assert not settings.item_policy("currencies/coin").claim
+    assert not settings.item_policy("crops/wheat").claim
 
 
 def test_item_policy_partial_override_inherits_other_defaults() -> None:
@@ -91,10 +103,11 @@ def test_legacy_merge_five_switch_remains_a_global_kill_switch() -> None:
     assert settings.item_policy("animals/cow").prefer_merge_five
 
 
-def test_item_policy_loads_from_json_environment(monkeypatch) -> None:
+def test_item_policy_environment_variables_are_ignored(monkeypatch) -> None:
     monkeypatch.setenv(
         "FMV_ITEM_POLICY_DEFAULTS",
-        '{"enabled": true, "prefer_merge_five": true, "always_remove": false}',
+        '{"enabled": true, "merge": true, "prefer_merge_five": true, '
+        '"claim": false, "always_remove": false}',
     )
     monkeypatch.setenv(
         "FMV_ITEM_POLICY_OVERRIDES",
@@ -103,7 +116,17 @@ def test_item_policy_loads_from_json_environment(monkeypatch) -> None:
 
     settings = Settings(_env_file=None)
 
-    assert settings.item_policy("building_resources/stone").always_remove
+    assert not settings.item_policy("building_resources/stone").always_remove
+
+
+def test_item_claim_override_can_disable_one_category_default() -> None:
+    settings = Settings(
+        _env_file=None,
+        item_policy_overrides={"ingredients/milk": {"claim": False}},
+    )
+
+    assert not settings.item_policy("ingredients/milk").claim
+    assert settings.item_policy("ingredients/egg").claim
 
 
 def test_all_shop_automation_is_enabled_by_default() -> None:
@@ -115,17 +138,17 @@ def test_all_shop_automation_is_enabled_by_default() -> None:
     assert settings.recipe_overrides == {}
 
 
-def test_shop_policy_overrides_load_from_json_environment_maps(monkeypatch) -> None:
+def test_shop_policy_environment_variables_are_ignored(monkeypatch) -> None:
     monkeypatch.setenv("FMV_SHOP_DEFAULT_ENABLED", "false")
     monkeypatch.setenv("FMV_SHOP_OVERRIDES", '{"market": true, "bakery": false}')
     monkeypatch.setenv("FMV_RECIPE_OVERRIDES", '{"recipe_flour": false}')
 
     settings = Settings(_env_file=None)
 
-    assert not settings.shop_default_enabled
+    assert settings.shop_default_enabled
     assert settings.recipe_default_enabled
-    assert settings.shop_overrides == {"market": True, "bakery": False}
-    assert settings.recipe_overrides == {"recipe_flour": False}
+    assert settings.shop_overrides == {}
+    assert settings.recipe_overrides == {}
 
 
 def test_producer_claim_reserves_four_cells_by_default() -> None:
@@ -188,3 +211,40 @@ def test_webhook_url_is_stored_as_a_secret() -> None:
 
     assert settings.discord_webhook_url is not None
     assert "private-token" not in repr(settings.discord_webhook_url)
+
+
+def test_config_store_round_trips_atomically_and_notifies(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    store = ConfigStore(path)
+    received = []
+    unsubscribe = store.subscribe(received.append)
+
+    initial = store.load()
+    updated = store.update(
+        theme="dark",
+        item_policy_overrides={"animals/cow": {"claim": True}},
+        discord_webhook_url="https://example.test/private-token",
+    )
+    unsubscribe()
+
+    assert initial == AppConfig()
+    assert updated.theme == "dark"
+    assert received == [updated]
+    assert ConfigStore(path).load() == updated
+    assert "private-token" in path.read_text(encoding="utf-8")
+    assert not list(path.parent.glob(".config.json.*.tmp"))
+
+
+def test_config_store_rejects_malformed_files_without_overwriting(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text("not-json", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        ConfigStore(path).load()
+
+    assert path.read_text(encoding="utf-8") == "not-json"
+
+
+def test_webhook_requires_https() -> None:
+    with pytest.raises(ValidationError):
+        AppConfig(discord_webhook_url="http://example.test/token")

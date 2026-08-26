@@ -24,30 +24,38 @@ from farm_merge_valet.cdp.client import (
 )
 from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
 from farm_merge_valet.cdp.scene_geometry import read_scene_calibration
-from farm_merge_valet.config import settings
+from farm_merge_valet.config import ConfigStore, settings
 from farm_merge_valet.core.board import CellKind
 from farm_merge_valet.core.bot import Bot
-from farm_merge_valet.logging_setup import configure_logging, log_event
-from farm_merge_valet.observability.discord import discord_webhook_sink
+from farm_merge_valet.logging_setup import configure_logging
 from farm_merge_valet.tools.template_extraction import (
     compile_cached_assets,
     extract_templates,
     sync_runtime_assets,
 )
 
-app = typer.Typer(help="Automation tool for Farm Merge Valley.")
+app = typer.Typer(help="Automation tool for Farm Merge Valley.", invoke_without_command=True)
 browser_app = typer.Typer(help="Manage the dedicated Chromium-family browser.")
 app.add_typer(browser_app, name="browser")
 
 logger = logging.getLogger(__name__)
+_config_store = ConfigStore()
 
 
 @app.callback()
-def main() -> None:
+def main(ctx: typer.Context) -> None:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
-    configure_logging(settings.log_level)
+    if ctx.invoked_subcommand is None:
+        from farm_merge_valet.gui.application import run_application
+
+        raise typer.Exit(run_application(_config_store))
+    if any(argument in {"--help", "-h"} for argument in sys.argv[1:]):
+        return
+    config = _config_store.load()
+    settings.replace(config)
+    configure_logging(config.log_level)
 
 
 def _default_output(suffix: str) -> Path:
@@ -64,63 +72,15 @@ def _capture_image() -> np.ndarray:
 
 @app.command()
 def run() -> None:
-    webhook_url = (
-        settings.discord_webhook_url.get_secret_value() if settings.discord_webhook_url else None
-    )
-    if webhook_url is not None and not webhook_url.startswith("https://"):
-        log_event(
-            logger,
-            logging.ERROR,
-            "webhook.invalid_url",
-            "Discord webhook URL must use HTTPS; refusing to start.",
-        )
-        raise typer.Exit(code=2)
-    with discord_webhook_sink(
-        webhook_url,
-        settings.webhook_summary_interval,
-        settings.webhook_status_interval,
-    ):
-        _run_bot()
+    """Launch the desktop application (compatibility alias)."""
+    from farm_merge_valet.gui.application import run_application
 
-
-def _run_bot() -> None:
-    if settings.browser_auto_launch:
-        try:
-            status = BrowserManager(settings).ensure_running()
-        except BrowserManagerError as exc:
-            log_event(
-                logger,
-                logging.ERROR,
-                "browser.startup_failed",
-                "Managed browser startup failed: %s",
-                exc,
-                detail=str(exc),
-            )
-            raise typer.Exit(code=1) from exc
-        browser_name = status.kind.value if status.kind else "browser"
-        log_event(
-            logger,
-            logging.INFO,
-            "browser.ready",
-            "Managed browser ready: %s (game_loaded=%s).",
-            browser_name,
-            status.game_loaded,
-            browser=browser_name,
-            game_loaded=status.game_loaded,
-            managed=status.managed,
-        )
-    bot = Bot()
-    if settings.gui_enabled:
-        from farm_merge_valet.gui.overlay import run_overlay
-
-        run_overlay(bot.run_forever, bot.request_quit)
-    else:
-        bot.run_forever()
+    raise typer.Exit(run_application(_config_store))
 
 
 def _browser_manager(browser: str | None) -> BrowserManager:
     try:
-        return BrowserManager(settings, BrowserKind(browser) if browser else None)
+        return BrowserManager(settings.snapshot(), BrowserKind(browser) if browser else None)
     except (ValueError, BrowserManagerError) as exc:
         raise typer.BadParameter(str(exc), param_hint="--browser") from exc
 
@@ -132,7 +92,7 @@ def _print_browser_status(manager: BrowserManager) -> None:
 @browser_app.command("list")
 def browser_list_cmd() -> None:
     """List installed supported and experimental browser candidates."""
-    installations = BrowserManager(settings).installations()
+    installations = BrowserManager(settings.snapshot()).installations()
     if not installations:
         typer.echo("No compatible Chromium-family browser was detected.")
         return

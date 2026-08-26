@@ -18,7 +18,7 @@ from typing import Literal
 
 import httpx
 
-from farm_merge_valet.config import PROJECT_ROOT
+from farm_merge_valet.config import user_data_root
 from farm_merge_valet.logging_setup import (
     FMV_CONTEXT_ATTRIBUTE,
     FMV_EVENT_ATTRIBUTE,
@@ -32,7 +32,7 @@ _QUEUE_CAPACITY = 256
 _DELIVERY_TIMEOUT_SECONDS = 10.0
 _WARNING_REPEAT_SECONDS = 900.0
 _STOP = object()
-_DEFAULT_STATUS_STATE_PATH = PROJECT_ROOT / ".fmv-state" / "discord-status.json"
+_DEFAULT_STATUS_STATE_PATH = user_data_root() / "state" / "discord-status.json"
 
 _INFO_COLOR = 0x3498DB
 _WARNING_COLOR = 0xF39C12

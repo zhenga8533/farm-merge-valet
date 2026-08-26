@@ -410,14 +410,14 @@ def _select_target_pair(
         return pairs[0]
     if len(pairs) > 1:
         raise CdpConnectionError(
-            "Multiple matching Farm Merge Valley tabs are open. Narrow FMV_WINDOW_TITLE "
+            "Multiple matching Farm Merge Valley tabs are open. Narrow the page target setting "
             "or close the extra game tabs so board state and screen geometry are unambiguous."
         )
 
     raise CdpConnectionError(
         "The browser's remote debugging endpoint is reachable, but no Farm Merge Valley iframe "
         "paired with a matching Reddit page is open. Has the game been loaded (clicked "
-        "'Play'), and does FMV_WINDOW_TITLE match that tab?"
+        "'Play'), and does the configured page target match that tab?"
     )
 
 

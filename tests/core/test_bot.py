@@ -8,6 +8,7 @@ import pytest
 from farm_merge_valet.cdp.board_store import LiveCellState
 from farm_merge_valet.cdp.client import CdpCancelledError
 from farm_merge_valet.cdp.runtime import ActionResult, ActionStatus, CrateSpawnResult, RuntimeHealth
+from farm_merge_valet.config import ItemPolicyOverride
 from farm_merge_valet.core.board import (
     BoardGrid,
     Cell,
@@ -99,6 +100,7 @@ def bare_bot() -> Bot:
     bot._action_retry_at = {}
     bot._next_item_action_at = 0.0
     bot._max_item_tiers = {}
+    bot._blueprint_policy_keys = {"milk": "ingredients/milk"}
     bot._immediate_claim_ids = frozenset({"milk"})
     bot._last_health = None
     bot._last_wait_reason = None
@@ -483,9 +485,7 @@ def test_item_policy_can_enable_merge_three_for_one_family(monkeypatch) -> None:
     assert {action.item for action in actions} == {cow}
 
 
-def test_item_policy_can_disable_one_merge_family(monkeypatch) -> None:
-    from farm_merge_valet.config import ItemPolicyOverride
-
+def test_item_policy_can_disable_merging_for_one_family(monkeypatch) -> None:
     bot = bare_bot()
     wheat = ItemRef("crops", "wheat", 1)
     cow = ItemRef("animals", "cow", 1)
@@ -495,7 +495,7 @@ def test_item_policy_can_disable_one_merge_family(monkeypatch) -> None:
         bot.board.set_cell((x, 2), Cell(CellKind.ITEM, cow))
     monkeypatch.setattr(
         "farm_merge_valet.core.bot.settings.item_policy_overrides",
-        {"crops/wheat": ItemPolicyOverride(enabled=False)},
+        {"crops/wheat": ItemPolicyOverride(merge=False)},
     )
 
     actions = bot._merge_actions_for_policy()
@@ -541,11 +541,19 @@ def test_live_sync_classifies_only_catalogued_immediate_claims(monkeypatch) -> N
     assert bot.board.get_cell((2, 0)).kind is CellKind.OTHER
 
 
-def test_ground_product_is_claimed_before_ready_producer() -> None:
+def test_ground_product_is_claimed_before_ready_producer(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_items = {
         "cow_4": ItemRef("animals", "cow", 4),
     }
+    bot._blueprint_policy_keys.update({"cow_4": "animals/cow", "milk": "ingredients/milk"})
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.settings.item_policy_overrides",
+        {
+            "animals/cow": ItemPolicyOverride(claim=True),
+            "ingredients/milk": ItemPolicyOverride(claim=True),
+        },
+    )
     bot._live_cells = {
         (2, 0): LiveCellState(
             True,
@@ -567,9 +575,23 @@ def test_ground_product_is_claimed_before_ready_producer() -> None:
     assert bot.runtime.spawn_limits == []
 
 
-def test_only_immediate_catalog_items_become_tile_claim_actions() -> None:
+def test_only_enabled_immediate_catalog_items_become_tile_claim_actions(monkeypatch) -> None:
     bot = bare_bot()
     bot._immediate_claim_ids = frozenset({"ticket", "crate_1"})
+    bot._blueprint_policy_keys = {
+        "ticket": "deliveries/ticket",
+        "crate_1": "supply_crates/crate",
+        "coin_1": "currencies/coin",
+        "upgrade_card_1": "upgrade_cards/upgrade_card",
+        "reward_crate_bronze": "reward_chests/reward_crate_bronze",
+    }
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.settings.item_policy_overrides",
+        {
+            "deliveries/ticket": ItemPolicyOverride(claim=True),
+            "supply_crates/crate": ItemPolicyOverride(claim=True),
+        },
+    )
     bot._live_cells = {
         (1, 0): LiveCellState(True, "ticket", 10, collectable=True),
         (2, 0): LiveCellState(True, "crate_1", 11, collectable=True),
@@ -582,6 +604,28 @@ def test_only_immediate_catalog_items_become_tile_claim_actions() -> None:
 
     assert [action.blueprint_id for action in immediate] == ["ticket", "crate_1"]
     assert all(action.kind is ClaimTargetKind.IMMEDIATE for action in immediate)
+    assert depleted == []
+    assert ready == []
+
+
+def test_ingredient_claims_default_on_while_producer_claims_default_off() -> None:
+    bot = bare_bot()
+    bot._blueprint_policy_keys.update({"cow_4": "animals/cow"})
+    bot._live_cells = {
+        (1, 0): LiveCellState(True, "milk", 10, collectable=True),
+        (2, 0): LiveCellState(
+            True,
+            "cow_4",
+            20,
+            4,
+            producer_kind=ProducerKind.ANIMAL,
+            producer_state=ProducerState.READY,
+        ),
+    }
+
+    immediate, depleted, ready = bot._claim_actions()
+
+    assert [action.blueprint_id for action in immediate] == ["milk"]
     assert depleted == []
     assert ready == []
 
@@ -677,9 +721,14 @@ def test_depleted_crop_requires_one_empty_cell() -> None:
     assert bot.runtime.claims == []
 
 
-def test_cooling_producer_does_not_create_claim_work() -> None:
+def test_cooling_producer_does_not_create_claim_work(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_items = {}
+    bot._blueprint_policy_keys = {"cow_4": "animals/cow"}
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.settings.item_policy_overrides",
+        {"animals/cow": ItemPolicyOverride(claim=True)},
+    )
     bot._live_cells = {
         (4, 4): LiveCellState(
             True,
@@ -695,8 +744,13 @@ def test_cooling_producer_does_not_create_claim_work() -> None:
     assert bot._cooling_producer_count() == 1
 
 
-def test_harvestable_non_tier_four_item_is_not_a_producer_claim() -> None:
+def test_harvestable_non_tier_four_item_is_not_a_producer_claim(monkeypatch) -> None:
     bot = bare_bot()
+    bot._blueprint_policy_keys = {"cow_3": "animals/cow"}
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.settings.item_policy_overrides",
+        {"animals/cow": ItemPolicyOverride(claim=True)},
+    )
     bot._live_cells = {
         (4, 4): LiveCellState(
             True,

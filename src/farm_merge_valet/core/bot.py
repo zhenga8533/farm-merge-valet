@@ -140,6 +140,7 @@ class Bot:
         self._quit_lock = Lock()
         self.phase = Phase.CLAIM_CRATES
         self._blueprint_items: dict[str, ItemRef] = {}
+        self._blueprint_policy_keys: dict[str, str] = {}
         self._immediate_claim_ids: frozenset[str] = frozenset()
         self._max_item_tiers: dict[tuple[str, str], int] = {}
         self.board = BoardGrid()
@@ -246,6 +247,9 @@ class Bot:
                 settings.catalog_dir, settings.cdp_port, settings.window_title
             )
             self._blueprint_items = catalog.automation_items
+            self._blueprint_policy_keys = {
+                game_id: item.policy_key for game_id, item in catalog.items.items()
+            }
             self._immediate_claim_ids = catalog.immediate_claim_ids
         except (CatalogUnavailableError, OSError, ValueError) as exc:
             log_event(
@@ -410,6 +414,7 @@ class Bot:
             for item in sorted(self.board.items_present(), key=self._item_sort_key)
             if item.tier < self._max_item_tiers.get((item.category, item.name), item.tier + 1)
             and settings.item_policy(item.policy_key).enabled
+            and settings.item_policy(item.policy_key).merge
             and (
                 prefer_merge_five is None
                 or settings.item_policy(item.policy_key).prefer_merge_five is prefer_merge_five
@@ -509,12 +514,21 @@ class Bot:
             state.blueprint_id is not None and state.producer_kind is not None and state.tier == 4
         )
 
+    def _claim_enabled(self, blueprint_id: str) -> bool:
+        policy_key = self._blueprint_policy_keys.get(blueprint_id)
+        if policy_key is None:
+            return False
+        policy = settings.item_policy(policy_key)
+        return policy.enabled and policy.claim
+
     def _claim_actions(self) -> tuple[list[_ClaimAction], list[_ClaimAction], list[_ClaimAction]]:
         immediate: list[_ClaimAction] = []
         depleted: list[_ClaimAction] = []
         ready: list[_ClaimAction] = []
         for coord, state in sorted(self._live_cells.items()):
             if state.blueprint_id is None:
+                continue
+            if not self._claim_enabled(state.blueprint_id):
                 continue
             if state.collectable and state.blueprint_id in self._immediate_claim_ids:
                 immediate.append(
@@ -556,6 +570,8 @@ class Bot:
     def _cooling_producer_count(self) -> int:
         return sum(
             self._is_recognized_tier_four_producer(state)
+            and state.blueprint_id is not None
+            and self._claim_enabled(state.blueprint_id)
             and state.producer_state is ProducerState.COOLING
             for state in self._live_cells.values()
         )
@@ -1391,6 +1407,14 @@ class Bot:
             self._interrupt_event.set()
             self._resume_requested.clear()
             log_event(logger, logging.INFO, "bot.paused", "Paused.")
+
+    def toggle_pause(self) -> None:
+        """Request a pause or resume from an inbound controller."""
+        self._toggle_pause()
+
+    @property
+    def quit_requested(self) -> bool:
+        return self._quit_requested
 
     def request_quit(self) -> None:
         with self._quit_lock:

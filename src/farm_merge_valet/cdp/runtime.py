@@ -696,6 +696,12 @@ class GameRuntimeAdapter:
     def set_cancel_event(self, cancel_event: Event) -> None:
         self._cancel_event = cancel_event
 
+    def configure_crate_delays(self, minimum: float, maximum: float) -> None:
+        if minimum < 0 or maximum < minimum:
+            raise ValueError("crate delay range is invalid")
+        self._crate_delay_min = minimum
+        self._crate_delay_max = maximum
+
     def _evaluate(self, expression: str, *, timeout: float = 5.0) -> object:
         return evaluate(
             self.port,

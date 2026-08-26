@@ -6,10 +6,9 @@ inventory state, preserves the merge-5 planner and board-space policy, and
 submits item drops, product/producer claims, and supply claims without moving
 the mouse or typing into the game.
 
-The current loop collects ground ingredients, harvests and retires tier-4 crop
-and animal producers, claims supply crates, plans merge-3/merge-5 actions
-(including swaps), and verifies every submitted action against authoritative
-board state. Order fulfillment, obstacle clearing, and visits are not
+The current loop can collect enabled ground items, harvest and retire enabled
+tier-4 producers, fulfill shop orders, claim supply crates, and plan
+merge-3/merge-5 actions including swaps. Obstacle clearing and visits are not
 implemented yet.
 
 ## Setup
@@ -22,7 +21,6 @@ Firefox is not supported because this implementation requires Chromium CDP.
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-copy .env.example .env
 ```
 
 The project creates and launches a dedicated browser profile with its required
@@ -51,18 +49,18 @@ the foreground application, and it does not intentionally pan the game camera.
 ## Usage
 
 ```powershell
+farm-merge-valet
 farm-merge-valet list-targets
 farm-merge-valet capture
 farm-merge-valet visualize-positions
 farm-merge-valet diagnose-live-state
-farm-merge-valet run
 ```
 
-`run` reuses a healthy browser on the configured port or launches the managed
-profile when the endpoint is absent. It refuses an occupied endpoint with the
-wrong profile, executable, or switches. The bot starts paused by default. `F9`
-pauses/resumes and `F10` quits; Ctrl+C is also supported. These are inbound
-controls only and never drive game actions.
+The command without a subcommand opens the desktop dashboard. Start launches or
+reuses the managed browser and begins automation; Pause/Resume and Stop remain
+available from the dashboard, compact overlay, tray, and global hotkeys. `run`
+is retained as a GUI-launching compatibility alias. The browser manager refuses
+an occupied endpoint with the wrong profile, executable, or switches.
 An ordinary resume validates and reuses the cached scene; heap discovery runs
 again only when the iframe, gameplay services, or active board identity changed.
 Single-key hotkeys fire once on key-down and latch until release; quit is
@@ -85,7 +83,7 @@ the runtime game ID (`stone_4`), the atlas alias
 the game-derived family, globally unique policy key, tier, category, merge
 target, shop recipe ownership, ingredient costs, duration, rewards, and capabilities such as
 `shovelable`, `harvestable`, `collectable`, and `mergeable`. This also covers
-non-board content needed by a future GUI, including shops, their recipes,
+non-board content used by the GUI, including shops, their recipes,
 repairable buildings, decorations, obstacles, reward chests and keys, event
 items, and upgrade cards.
 
@@ -110,16 +108,27 @@ farm-merge-valet compile-assets
 
 `extract-templates <capture.har>` remains available as a diagnostic fallback.
 The first catalog build requires a loaded game so the compiler can read the
-authoritative blueprint, merge-graph, building, and recipe metadata. A future
-GUI can call the same synchronization service and show application-owned
-placeholders until local images are ready.
+authoritative blueprint, merge-graph, building, and recipe metadata. The GUI
+shows compiled sprites beside item families, shops, and recipes when the local
+asset cache is available, and remains usable with text-only rows before assets
+are synchronized.
 Catalog `policy_key` values are the durable identities for GUI and configuration
 policy; merge chains share a key while independent products and recipes remain
-separately configurable. Item policy uses global defaults plus partial per-key
-overrides. Automation and merge-5 default on for current and future merge
-families, and an individual family can be disabled with an `enabled` override.
+separately configurable. Item policy resolves global defaults, category
+defaults, item-specific defaults, and finally partial per-key user overrides.
+Automation, merging, and merge-5 default on for current and future merge
+families. `enabled` controls all supported automation for a key, while `merge`
+can exclude an individual family from merge planning only. Immediate ingredient
+and train-ticket claims default on; other board-item and tier-4 producer claims
+remain opt-in. HUD supply crates and shop rewards are governed separately.
+Fields that do not match an item's catalog capabilities are ignored, allowing
+the GUI to expose only relevant controls without separate schemas.
 The default-disabled `always_remove` field is reserved for future shovel
 behavior and does not currently trigger removal.
+
+The GUI provides per-item, per-shop, and per-recipe “Use default” controls,
+separate item/shop/settings section resets, and a confirmed full reset. Scoped
+resets preserve configuration owned by other sections.
 
 ## How actions work
 
@@ -148,10 +157,9 @@ defers crates; if no merge can help, it waits without repeatedly clicking.
 Shop automation reads each active shop's fixed current recipe, live ingredient
 inventory, production timer, and rewards. It can start affordable orders and
 claim completed rewards without opening shop UI or moving the camera. Ingredient
-spending policy uses global `FMV_SHOP_DEFAULT_ENABLED` and
-`FMV_RECIPE_DEFAULT_ENABLED` toggles, both `true` by default. Per-ID JSON maps in
-`FMV_SHOP_OVERRIDES` and `FMV_RECIPE_OVERRIDES` take precedence, so one shop or
-recipe can be disabled without hardcoding the discovered catalog. Completed
+spending policy uses global shop and recipe defaults, both enabled by default.
+Per-ID GUI overrides take precedence, so one shop or recipe can be disabled
+without hardcoding the discovered catalog. Completed
 rewards reserve one empty cell per reward object and ask the merge planner to
 create space before claiming when necessary.
 
@@ -168,15 +176,13 @@ startup pauses without taking actions.
 
 ## Configuration
 
-See [`.env.example`](.env.example). Browser settings include `FMV_BROWSER`,
-`FMV_BROWSER_EXECUTABLE`, `FMV_BROWSER_PROFILE_DIR`, `FMV_BROWSER_AUTO_LAUNCH`,
-and `FMV_GAME_URL`. Other important settings are `FMV_CDP_PORT`,
-`FMV_WINDOW_TITLE` (a Reddit page-title or URL substring),
-`FMV_PREFER_MERGE_FIVE`, `FMV_MERGE_EMPTY_CELL_RESERVE`,
-`FMV_PRODUCER_CLAIM_MIN_EMPTY_CELLS`, `FMV_IDLE_WAIT_SECONDS`, and the
-item-action and crate-delay ranges. Pause/quit hotkeys, GUI options, logging,
-and Discord notifications are also configurable. Physical-input timing,
-viewport, dead-zone, pan, and template-confidence settings no longer exist.
+All end-user configuration lives in the desktop application. Changes validate
+and autosave atomically to `%LOCALAPPDATA%\FarmMergeValet\config.json` on
+Windows (or the platform user-data directory elsewhere). The dashboard exposes
+browser, automation, item/shop policy, timing, hotkey, Discord, logging, theme,
+tray, opacity, and compact-overlay controls. `.env` and `FMV_*` variables are
+not read. Invalid configuration is never silently overwritten; startup offers
+an explicit reset to safe defaults.
 
 ## Logging
 
@@ -185,31 +191,31 @@ batches, and transitions into a genuinely idle state. Individual plans,
 submissions, confirmations, routine waits, target refreshes, slow-operation
 timings, cached discovery, and planner phase transitions are `DEBUG` details.
 `WARNING` identifies recoverable failures; `ERROR` identifies a condition that
-pauses or prevents safe operation. While idle, the bot polls at
-`FMV_IDLE_WAIT_SECONDS` but suppresses repeated logs until the state changes or
+pauses or prevents safe operation. While idle, the bot uses the configured
+polling interval but suppresses repeated logs until the state changes or
 the idle log's longer reminder interval elapses.
 
 All long-running operational records use one Python logging pipeline. The
-console and optional GUI are independent sinks attached to that pipeline, so
-enabling the GUI does not replace or duplicate console emission. Application
+console, dashboard, compact overlay, and webhook are independent sinks attached
+to that pipeline, so presentation does not duplicate event emission. Application
 records also carry a stable `fmv_event` name and an `fmv_context` dictionary;
 for example, action records include their planner action, effect, item, source,
 and destination.
 
-Set `FMV_DISCORD_WEBHOOK_URL` to enable the asynchronous Discord sink. Browser,
+Enter an HTTPS Discord webhook in Settings to enable the asynchronous sink. Browser,
 runtime, pause/resume, quit, and stop events are sent immediately, as are
 warnings and errors; duplicate warning messages are rate-limited. Messages use
 compact embeds with severity colors, readable titles, timestamps, and stable
 event identifiers. Routine actions are not sent individually. Instead,
-`FMV_WEBHOOK_SUMMARY_INTERVAL`
-(one hour by default) reports move, swap, merge, board-claim, crate, warning,
+The summary interval (one hour by default) reports move, swap, merge,
+board-claim, crate, warning,
 and error totals. A final partial summary is sent during a clean shutdown.
 The webhook also maintains one current-status embed. It is edited every
-`FMV_WEBHOOK_STATUS_INTERVAL` seconds (60 by default) and immediately on major
+60 seconds by default and immediately on major
 state changes. After an alert or summary is posted, the previous status is
 deleted and recreated so the refreshed status remains the channel's latest
 message; ordinary interval updates edit it in place. Its message ID is stored
-under `.fmv-state/` and reused across runs. Set the interval to `0` to disable
+under the per-user application-data directory and reused across runs. Set the interval to `0` to disable
 periodic edits without disabling event-driven updates. Webhook failures are
 logged locally and never block the bot loop. Charts and diagnostic screenshots
 are reserved for a future summary enhancement.

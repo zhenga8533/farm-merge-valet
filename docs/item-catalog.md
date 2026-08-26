@@ -1,7 +1,7 @@
 # Item Catalog and Compiled Assets
 
 The checked-in item catalog is the semantic source for board recognition and
-future GUI presentation. It is generated from the running game's blueprint
+GUI presentation. It is generated from the running game's blueprint
 collection, blueprint graph, building configuration, recipe configuration, and
 sprite atlases.
 
@@ -57,8 +57,8 @@ is required to refresh semantic metadata; an existing local catalog can be
 reused when only recompiling cached images.
 
 The catalog and images share a per-user cache root. On Windows the default is
-`%LOCALAPPDATA%\FarmMergeValet\Cache\catalog`; it can be overridden with
-`FMV_CATALOG_DIR`. Primary images use stable runtime IDs and are grouped by category and family, for example
+`%LOCALAPPDATA%\FarmMergeValet\Cache\catalog`. Primary images use stable runtime
+IDs and are grouped by category and family, for example
 `crops/wheat/wheat_1.png`. Shops keep their building and recipes together under
 `shops/<shop>/building` and `shops/<shop>/recipes`. Related visual states such
 as producer cooldown/depleted frames and broken/repaired building frames live
@@ -71,9 +71,10 @@ Compilation fails if a declared alias is missing and removes stale PNGs.
 
 Generated game metadata, downloaded atlases, and compiled sprites are ignored
 and excluded from packages and releases. The repository contains only the
-discovery/compiler implementation and synthetic test fixtures. GUI consumers
-must read the local catalog and use an application-owned placeholder when an
-image has not yet been synchronized.
+discovery/compiler implementation and synthetic test fixtures. The desktop GUI
+resolves icons directly from each catalog entry's `asset_path` for item
+families, shops, and recipes; missing or unreadable images degrade to text-only
+rows.
 
 Categories are derived from runtime capabilities before falling back to an
 explicit `uncategorized` bucket. A small centralized compatibility table covers
@@ -91,27 +92,44 @@ confirmation dialogs, requirement-based rewards, and non-claimable content.
 This classification is fail-closed: only immediate claims are automated, while
 the other modes preserve intent for later policy and GUI work.
 
-## Future GUI policy
+## GUI policy
 
 The catalog describes what an item is and what the game permits. User choices
 should be stored separately by `policy_key`. Mergeable tiers intentionally
 share a key, while non-chain products and recipes remain independently
-configurable. That policy layer can later hold an enabled toggle, merge-5
-preference, shovel authorization, and other controls without changing
+configurable. The GUI policy layer holds enabled, merge, merge-5, and claim
+toggles without changing
 recognition or duplicating assets. Any future merge submission mode should
 likewise be a policy/action concern, not a catalog capability inferred from an
 image.
 
-Item automation uses global field defaults plus partial overrides keyed by
-`policy_key`. Automation and merge-5 are enabled by default for every current
-and newly discovered merge family; for example,
-`{"animals/cow":{"prefer_merge_five":false},"crops/wheat":{"enabled":false}}`
-enables merge-3 for cows and excludes wheat from merge planning.
+Item automation resolves global field defaults, partial category defaults,
+item-specific defaults, and finally user overrides keyed by `policy_key`.
+Automation and merge-5 are enabled by default for every current and newly
+discovered merge family; for example,
+`{"animals/cow":{"prefer_merge_five":false},"crops/wheat":{"merge":false}}`
+enables merge-3 for cows and excludes wheat from merge planning. The overall
+`enabled` field can suppress every supported automation behavior for a key,
+while `merge` controls merge planning specifically.
+Board-item and tier-4 producer claims additionally require `claim: true`.
+Immediate ingredients and `currencies/ticket` default on; other current and
+future items default off. Producer and product keys remain independent—for
+example, `animals/cow` controls harvesting the producer while
+`ingredients/milk` controls collecting milk from the board. HUD supply claims
+and shop rewards use their own policies rather than this item field.
+Policy fields are consumed only by applicable capabilities: non-mergeable
+items ignore `merge` and `prefer_merge_five`, while non-claimable items ignore
+`claim`. The GUI uses these facts to disable controls that are not relevant to
+an item.
 The `always_remove` field is reserved for a future shovel action and defaults
 to false; configuring it does not currently submit destructive actions.
 
 Shop automation similarly uses global defaults plus per-ID overrides. Shop and
-recipe policies are independent and both are required, allowing a future GUI to
+recipe policies are independent and both are required, allowing the GUI to
 expose global toggles alongside individual shop and recipe toggles. Enabled
 global defaults include newly discovered content without hardcoding catalog
 entries, while per-ID boolean overrides take precedence.
+
+The GUI removes an individual override with “Use default.” Item and shop section
+resets restore their factory policy layers without affecting other settings;
+the Settings page separately offers general and full resets with confirmation.

@@ -131,14 +131,14 @@ class OverlayWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Farm Merge Valet")
-        self._apply_overlay_mode(settings.gui_overlay_mode)
+        self._apply_overlay_mode(settings.overlay_always_on_top)
         # Per-pixel alpha (not just the whole-window `setWindowOpacity`
         # below) needs this attribute explicitly -- without it, a
         # frameless window's "transparent" areas render as an opaque
         # placeholder color instead of actually compositing through to
         # the desktop, confirmed live.
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setWindowOpacity(settings.gui_opacity)
+        self.setWindowOpacity(settings.overlay_unfocused_opacity)
 
         tabs = QTabWidget()
         tabs.setStyleSheet(
@@ -163,7 +163,7 @@ class OverlayWindow(QMainWindow):
         tabs.addTab(self.log_view, "Logs")
 
         self.resize(640, 360)
-        self._overlay_mode = settings.gui_overlay_mode
+        self._overlay_mode = settings.overlay_always_on_top
 
     def _apply_overlay_mode(self, enabled: bool) -> None:
         """`enabled` keeps the window always-on-top. The window otherwise

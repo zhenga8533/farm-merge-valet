@@ -1,19 +1,33 @@
-"""Application configuration.
-
-Settings are loaded from environment variables / a `.env` file, with sane
-defaults for local development. See `.env.example` for available options.
-"""
+"""Versioned application configuration and atomic per-user persistence."""
 
 from __future__ import annotations
 
+import json
 import os
+import sys
+import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Literal, Self
+from threading import RLock
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CONFIG_SCHEMA_VERSION = 1
+
+
+def user_data_root() -> Path:
+    if local_app_data := os.environ.get("LOCALAPPDATA"):
+        return Path(local_app_data) / "FarmMergeValet"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "FarmMergeValet"
+    if xdg_data_home := os.environ.get("XDG_DATA_HOME"):
+        return Path(xdg_data_home) / "farm-merge-valet"
+    return Path.home() / ".local" / "share" / "farm-merge-valet"
+
+
+def user_config_path() -> Path:
+    return user_data_root() / "config.json"
 
 
 def user_cache_root() -> Path:
@@ -25,130 +39,107 @@ def user_cache_root() -> Path:
 
 
 class ItemPolicy(BaseModel):
-    """Effective automation policy for one catalog policy key."""
-
     model_config = ConfigDict(extra="forbid", frozen=True)
-
     enabled: bool = True
+    merge: bool = True
     prefer_merge_five: bool = True
+    claim: bool = False
     always_remove: bool = False
 
 
 class ItemPolicyOverride(BaseModel):
-    """Optional fields that override the item-policy defaults."""
-
     model_config = ConfigDict(extra="forbid", frozen=True)
-
     enabled: bool | None = None
+    merge: bool | None = None
     prefer_merge_five: bool | None = None
+    claim: bool | None = None
     always_remove: bool | None = None
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_prefix="FMV_",
-        extra="forbid",
-    )
+def _item_category_defaults() -> dict[str, ItemPolicyOverride]:
+    return {"ingredients": ItemPolicyOverride(claim=True)}
 
-    # CDP page targeting: substring match against Reddit page titles or URLs.
+
+def _item_specific_defaults() -> dict[str, ItemPolicyOverride]:
+    return {"currencies/ticket": ItemPolicyOverride(claim=True)}
+
+
+class AppConfig(BaseModel):
+    """Complete validated configuration snapshot used by the GUI and runtime."""
+
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    schema_version: Literal[1] = 1
     window_title: str = "r/FarmMergeValley"
-
-    # Dedicated Chromium-family browser managed by the CLI. Chrome and Edge
-    # are supported; Brave and Chromium can be selected for experimental use.
     browser: Literal["auto", "chrome", "edge", "brave", "chromium"] = "auto"
     browser_executable: Path | None = None
     browser_profile_dir: Path | None = None
     browser_auto_launch: bool = True
     game_url: str = "https://www.reddit.com/r/FarmMergeValley/"
-
-    # Port the managed browser's remote debugging endpoint is expected on -- see
-    # cdp/client.py for why the bot needs this rather than just working
-    # against a normal, already-open browser window.
     cdp_port: int = Field(default=9222, ge=1, le=65535)
-
-    # Locally derived semantic catalog and GUI-ready game assets. Third-party
-    # game artwork is never bundled with the package or repository.
     catalog_dir: Path = Field(default_factory=lambda: user_cache_root() / "catalog")
-
-    # Where browser-derived game atlas PNGs/manifests are cached between
-    # synchronizations. HAR extraction uses the same local cache.
     atlas_cache_dir: Path = Field(default_factory=lambda: user_cache_root() / "atlases")
 
-    # Stop claiming before the board is completely full when productive merge
-    # work exists. Swaps can recover a full board, while one reserved empty cell
-    # also permits ordinary gather/degroup moves.
     merge_empty_cell_reserve: int = Field(default=1, ge=0)
-
-    # Ready tier-4 crops and animals can place several ingredients at once.
-    # Defer their harvest until this many cells are open.
     producer_claim_min_empty_cells: int = Field(default=4, ge=1)
-
-    # Deprecated compatibility switch. False disables merge-5 globally unless
-    # a policy-key override explicitly enables it.
     prefer_merge_five: bool = True
-
-    # Catalog-backed defaults apply to current and future item families. An
-    # override only replaces fields explicitly supplied for that policy key.
     item_policy_defaults: ItemPolicy = Field(default_factory=ItemPolicy)
+    item_category_defaults: dict[str, ItemPolicyOverride] = Field(
+        default_factory=_item_category_defaults
+    )
+    item_default_overrides: dict[str, ItemPolicyOverride] = Field(
+        default_factory=_item_specific_defaults
+    )
     item_policy_overrides: dict[str, ItemPolicyOverride] = Field(default_factory=dict)
-
-    # Current and future catalog entries inherit these defaults. Per-ID boolean
-    # overrides support individual toggles before the GUI exists.
     shop_default_enabled: bool = True
     recipe_default_enabled: bool = True
     shop_overrides: dict[str, bool] = Field(default_factory=dict)
     recipe_overrides: dict[str, bool] = Field(default_factory=dict)
 
-    # Seconds between bot loop iterations.
     loop_interval: float = Field(default=1.0, gt=0.0)
-
-    # Back off when the planner can find no action at all. Set to 0 to keep
-    # checking at the normal loop interval.
     idle_wait_seconds: float = Field(default=30.0, ge=0.0, le=3600.0)
-
-    # Delay after a resolved item action and between accepted crate claims.
     item_action_delay_min: float = Field(default=1.5, ge=0.0, le=60.0)
     item_action_delay_max: float = Field(default=3.5, ge=0.0, le=60.0)
     crate_delay_min: float = Field(default=0.05, ge=0.0, le=5.0)
     crate_delay_max: float = Field(default=0.2, ge=0.0, le=5.0)
-
-    # Global hotkeys work even when the terminal or managed browser is not
-    # focused. See `keyboard` package syntax for valid values, e.g.
-    # "ctrl+alt+p".
     pause_hotkey: str = "f9"
     quit_hotkey: str = "f10"
-
-    # Defer runtime discovery and actions until the first resume.
-    start_paused: bool = True
-
+    start_paused: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
-    # Optional Discord notifications. The URL is secret so settings dumps and
-    # validation errors do not expose the webhook token.
     discord_webhook_url: SecretStr | None = None
     webhook_summary_interval: float = Field(default=3600.0, ge=60.0, le=86400.0)
     webhook_status_interval: float = Field(default=60.0, ge=0.0, le=3600.0)
 
-    # Overlay GUI (see gui/overlay.py) -- off by default so `run` keeps its
-    # existing terminal-only behavior unless explicitly opted into.
-    gui_enabled: bool = False
-    # 0 (fully transparent) - 1 (fully opaque).
-    gui_opacity: float = Field(default=0.85, ge=0.0, le=1.0)
-    # Always-on-top, and click-through (clicks land on whatever's behind
-    # it) *while it isn't the active window* -- alt-tab or click its
-    # taskbar entry to interact with it normally (drag, resize, scroll
-    # the log) until it loses focus again. Disable for a plain window
-    # instead -- see gui/overlay.py.
-    gui_overlay_mode: bool = True
+    theme: Literal["system", "dark", "light"] = "system"
+    start_minimized: bool = False
+    bot_autostart: bool = False
+    close_to_tray: bool = True
+    main_always_on_top: bool = False
+    main_focused_opacity: float = Field(default=1.0, ge=0.25, le=1.0)
+    main_unfocused_opacity: float = Field(default=0.92, ge=0.25, le=1.0)
+    overlay_visible: bool = False
+    overlay_always_on_top: bool = True
+    overlay_click_through: bool = True
+    overlay_focused_opacity: float = Field(default=1.0, ge=0.25, le=1.0)
+    overlay_unfocused_opacity: float = Field(default=0.85, ge=0.25, le=1.0)
+
+    def __init__(self, **data: Any) -> None:
+        data.pop("_env_file", None)
+        super().__init__(**data)
 
     @field_validator("discord_webhook_url", mode="before")
     @classmethod
     def empty_webhook_url_is_disabled(cls, value: object) -> object:
         if isinstance(value, str):
-            if not value.strip():
-                return None
-            return SecretStr(value)
+            return SecretStr(value) if value.strip() else None
+        return value
+
+    @field_validator("discord_webhook_url")
+    @classmethod
+    def webhook_url_uses_https(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and not value.get_secret_value().startswith("https://"):
+            raise ValueError("Discord webhook URL must use HTTPS")
         return value
 
     @field_validator("shop_overrides", "recipe_overrides")
@@ -158,7 +149,7 @@ class Settings(BaseSettings):
             raise ValueError("game IDs must be non-empty and have no surrounding whitespace")
         return value
 
-    @field_validator("item_policy_overrides")
+    @field_validator("item_default_overrides", "item_policy_overrides")
     @classmethod
     def validate_policy_keys(
         cls, value: dict[str, ItemPolicyOverride]
@@ -167,22 +158,150 @@ class Settings(BaseSettings):
             raise ValueError("policy keys must be non-empty and have no surrounding whitespace")
         return value
 
-    def item_policy(self, policy_key: str) -> ItemPolicy:
-        defaults = self.item_policy_defaults.model_dump()
-        if not self.prefer_merge_five:
-            defaults["prefer_merge_five"] = False
-        if override := self.item_policy_overrides.get(policy_key):
-            defaults.update(override.model_dump(exclude_none=True))
-        return ItemPolicy.model_validate(defaults)
+    @field_validator("item_category_defaults")
+    @classmethod
+    def validate_item_categories(
+        cls, value: dict[str, ItemPolicyOverride]
+    ) -> dict[str, ItemPolicyOverride]:
+        if any(
+            not category.strip() or category != category.strip() or "/" in category
+            for category in value
+        ):
+            raise ValueError("item categories must be non-empty single path segments")
+        return value
 
     @model_validator(mode="after")
-    def validate_timing_ranges(self) -> Self:
+    def validate_ranges(self) -> Self:
         for name in ("item_action_delay", "crate_delay"):
-            minimum = getattr(self, f"{name}_min")
-            maximum = getattr(self, f"{name}_max")
-            if minimum > maximum:
+            if getattr(self, f"{name}_min") > getattr(self, f"{name}_max"):
                 raise ValueError(f"{name}_min must be less than or equal to {name}_max")
         return self
 
+    def item_policy_default(self, policy_key: str, category: str | None = None) -> ItemPolicy:
+        values = self.item_policy_defaults.model_dump()
+        if not self.prefer_merge_five:
+            values["prefer_merge_five"] = False
+        category_key = category or policy_key.partition("/")[0]
+        if category_override := self.item_category_defaults.get(category_key):
+            values.update(category_override.model_dump(exclude_none=True))
+        if item_default := self.item_default_overrides.get(policy_key):
+            values.update(item_default.model_dump(exclude_none=True))
+        return ItemPolicy.model_validate(values)
 
-settings = Settings()
+    def item_policy(self, policy_key: str, category: str | None = None) -> ItemPolicy:
+        values = self.item_policy_default(policy_key, category).model_dump()
+        if override := self.item_policy_overrides.get(policy_key):
+            values.update(override.model_dump(exclude_none=True))
+        return ItemPolicy.model_validate(values)
+
+
+Settings = AppConfig
+ConfigListener = Callable[[AppConfig], None]
+
+
+class ConfigStore:
+    """Own a validated snapshot and persist successful updates atomically."""
+
+    def __init__(self, path: Path | None = None) -> None:
+        self.path = path or user_config_path()
+        self._lock = RLock()
+        self._listeners: list[ConfigListener] = []
+        self._current = AppConfig()
+
+    @property
+    def current(self) -> AppConfig:
+        with self._lock:
+            return self._current.model_copy(deep=True)
+
+    def load(self) -> AppConfig:
+        with self._lock:
+            if self.path.exists():
+                self._current = AppConfig.model_validate_json(self.path.read_text(encoding="utf-8"))
+            else:
+                self._persist(self._current)
+            return self._current.model_copy(deep=True)
+
+    def replace(self, config: AppConfig) -> AppConfig:
+        snapshot = AppConfig.model_validate(config.model_dump())
+        with self._lock:
+            self._persist(snapshot)
+            self._current = snapshot
+            listeners = tuple(self._listeners)
+        delivered = snapshot.model_copy(deep=True)
+        for listener in listeners:
+            listener(delivered)
+        return delivered
+
+    def update(self, **changes: object) -> AppConfig:
+        with self._lock:
+            values = self._current.model_dump()
+        values.update(changes)
+        return self.replace(AppConfig.model_validate(values))
+
+    def reset(self) -> AppConfig:
+        return self.replace(AppConfig())
+
+    def subscribe(self, listener: ConfigListener) -> Callable[[], None]:
+        with self._lock:
+            self._listeners.append(listener)
+
+        def unsubscribe() -> None:
+            with self._lock:
+                if listener in self._listeners:
+                    self._listeners.remove(listener)
+
+        return unsubscribe
+
+    def _persist(self, config: AppConfig) -> None:
+        payload = config.model_dump(mode="json")
+        payload["discord_webhook_url"] = (
+            config.discord_webhook_url.get_secret_value()
+            if config.discord_webhook_url is not None
+            else None
+        )
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=self.path.parent, prefix=f".{self.path.name}.", suffix=".tmp", text=True
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, indent=2) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            temporary.replace(self.path)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+        try:
+            self.path.chmod(0o600)
+        except OSError:
+            pass
+
+
+class ConfigProxy:
+    """Live read-through facade for legacy runtime modules during GUI updates."""
+
+    def __init__(self, config: AppConfig) -> None:
+        object.__setattr__(self, "_lock", RLock())
+        object.__setattr__(self, "_config", config)
+
+    def replace(self, config: AppConfig) -> None:
+        with self._lock:
+            object.__setattr__(self, "_config", config.model_copy(deep=True))
+
+    def snapshot(self) -> AppConfig:
+        with self._lock:
+            return self._config.model_copy(deep=True)
+
+    def __getattr__(self, name: str) -> Any:
+        with self._lock:
+            return getattr(self._config, name)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        with self._lock:
+            setattr(self._config, name, value)
+
+
+# Runtime reads are live, while constructors receive snapshots where practical.
+settings = ConfigProxy(AppConfig())
