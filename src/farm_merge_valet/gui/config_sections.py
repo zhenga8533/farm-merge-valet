@@ -12,6 +12,7 @@ class ConfigSection(StrEnum):
     SHOPS = "shops"
     BROWSER = "browser"
     SETTINGS = "settings"
+    VIEW = "view"
 
 
 SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
@@ -68,6 +69,12 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "overlay_click_through",
         "overlay_focused_opacity",
         "overlay_unfocused_opacity",
+    ),
+    ConfigSection.VIEW: (
+        "items_sort_column",
+        "items_sort_descending",
+        "shops_sort_column",
+        "shops_sort_descending",
     ),
 }
 

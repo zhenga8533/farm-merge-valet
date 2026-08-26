@@ -176,6 +176,48 @@ QTableWidget, QTreeWidget, QPlainTextEdit {{
     border: 1px solid {colors.border}; gridline-color: {colors.border};
     selection-background-color: {colors.selected};
 }}
+QTableWidget#policyView, QTreeWidget#policyView {{
+    background: {colors.input}; alternate-background-color: {colors.surface_subtle};
+    border: 1px solid {colors.border}; border-radius: 8px;
+    selection-background-color: {colors.selected};
+}}
+QTableWidget#policyView::item, QTreeWidget#policyView::item {{
+    border: none; border-bottom: 1px solid {colors.border}; padding: 8px 10px;
+}}
+QTableWidget#policyView::item:hover, QTreeWidget#policyView::item:hover {{
+    background: {colors.surface};
+}}
+QTableWidget#policyView::item:selected, QTreeWidget#policyView::item:selected {{
+    background: {colors.selected}; color: white;
+}}
+QTableWidget#policyView::item:disabled, QTreeWidget#policyView::item:disabled {{
+    color: {colors.muted};
+}}
+QWidget[policyCell="true"] {{ background: transparent; }}
+QLabel#policyBadge {{
+    background: {colors.surface}; color: {colors.muted};
+    border: 1px solid {colors.border}; border-radius: 8px;
+    padding: 3px 8px; font-size: 11px; font-weight: 600;
+}}
+QLabel#policyUnavailable {{
+    color: {colors.muted}; font-size: 16px; font-weight: 600;
+}}
+QCheckBox[policyToggle="true"] {{
+    background: transparent; spacing: 8px; font-weight: 600;
+}}
+QHeaderView#policyHeader {{ background: {colors.surface}; }}
+QHeaderView#policyHeader::section {{
+    background: {colors.surface}; color: {colors.text};
+    border: none; border-bottom: 1px solid {colors.border};
+    padding: 0 12px; min-height: 42px; font-weight: 600;
+}}
+QHeaderView#policyHeader::up-arrow,
+QHeaderView#policyHeader::down-arrow {{
+    image: none; width: 0; height: 0;
+}}
+QTableCornerButton::section {{
+    background: {colors.surface}; border: none; border-bottom: 1px solid {colors.border};
+}}
 QHeaderView::section {{
     background: {colors.surface}; border: none; border-bottom: 1px solid {colors.border};
     padding: 7px; font-weight: 600;
@@ -187,4 +229,25 @@ QToolTip {{ background: {colors.surface}; color: {colors.text}; border: 1px soli
 def apply_theme(app: QApplication, theme: str) -> None:
     app.setPalette(QPalette())
     colors = _DARK if theme == "dark" else _LIGHT if theme == "light" else _SYSTEM
+    palette = app.palette()
+    resolved = (
+        {
+            "policyPrimary": palette.color(QPalette.ColorRole.Highlight).name(),
+            "policyBorder": palette.color(QPalette.ColorRole.Mid).name(),
+            "policyInput": palette.color(QPalette.ColorRole.Base).name(),
+            "policyText": palette.color(QPalette.ColorRole.Text).name(),
+            "policyDisabled": palette.color(QPalette.ColorRole.Midlight).name(),
+        }
+        if theme == "system"
+        else {
+            "policyPrimary": colors.primary,
+            "policyBorder": colors.border,
+            "policyInput": colors.input,
+            "policyText": colors.text,
+            "policyDisabled": colors.disabled,
+        }
+    )
+    for name, value in resolved.items():
+        app.setProperty(name, value)
+    app.setProperty("fmvTheme", theme)
     app.setStyleSheet(_stylesheet(colors))

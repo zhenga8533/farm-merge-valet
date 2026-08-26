@@ -67,6 +67,7 @@ def test_read_board_state_preserves_claim_semantics(monkeypatch) -> None:
                 "objectID": 31,
                 "collectable": True,
                 "collectableIngredient": True,
+                "itemVariant": "wheat",
                 "behaviorNames": ["clickable", "ingredient", "collectable"],
             },
             {
@@ -88,6 +89,7 @@ def test_read_board_state_preserves_claim_semantics(monkeypatch) -> None:
     assert state is not None
     assert state[(4, 5)].collectable
     assert state[(4, 5)].collectable_ingredient
+    assert state[(4, 5)].item_variant == "wheat"
     assert state[(4, 5)].object_id == 31
     assert state[(6, 7)].producer_kind is ProducerKind.ANIMAL
     assert state[(6, 7)].tier == 4

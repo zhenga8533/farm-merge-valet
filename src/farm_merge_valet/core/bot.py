@@ -139,7 +139,7 @@ class Bot:
         self._blueprint_items: dict[str, ItemRef] = {}
         self._blueprint_policy_keys: dict[str, str] = {}
         self._immediate_claim_ids: frozenset[str] = frozenset()
-        self._max_item_tiers: dict[tuple[str, str], int] = {}
+        self._max_item_tiers: dict[tuple[str, str] | tuple[str, str, str | None], int] = {}
         self.board = BoardGrid()
         self._live_cells: dict[GridCoord, LiveCellState] = {}
         self._pending_action: _PendingAction | None = None
@@ -245,7 +245,7 @@ class Bot:
             )
             self._blueprint_items = catalog.automation_items
             self._blueprint_policy_keys = {
-                game_id: item.policy_key for game_id, item in catalog.items.items()
+                game_id: item.tier_policy_key for game_id, item in catalog.items.items()
             }
             self._immediate_claim_ids = catalog.immediate_claim_ids
         except (CatalogUnavailableError, OSError, ValueError) as exc:
@@ -260,7 +260,7 @@ class Bot:
             return False
         self._max_item_tiers = {}
         for item in self._blueprint_items.values():
-            key = (item.category, item.name)
+            key = item.identity
             self._max_item_tiers[key] = max(item.tier, self._max_item_tiers.get(key, 0))
         if not self._sync_board_from_live_state():
             log_event(
@@ -346,6 +346,8 @@ class Bot:
         blueprint_id = state.blueprint_id
         item = self._blueprint_items.get(blueprint_id) if blueprint_id is not None else None
         if item is not None:
+            if state.item_variant is not None:
+                item = ItemRef(item.category, item.name, item.tier, state.item_variant)
             board.set_cell(coord, Cell(CellKind.ITEM, item))
         elif blueprint_id in _LIVE_STATE_CELL_KIND:
             board.set_cell(coord, Cell(_LIVE_STATE_CELL_KIND[blueprint_id]))
@@ -409,12 +411,17 @@ class Bot:
         ranked = [
             (rank, action)
             for item in sorted(self.board.items_present(), key=self._item_sort_key)
-            if item.tier < self._max_item_tiers.get((item.category, item.name), item.tier + 1)
-            and settings.item_policy(item.policy_key).enabled
-            and settings.item_policy(item.policy_key).merge
+            if item.tier
+            < self._max_item_tiers.get(
+                item.identity,
+                self._max_item_tiers.get((item.category, item.name, None), item.tier + 1),
+            )
+            and settings.item_policy(item.tier_policy_key).enabled
+            and settings.item_policy(item.tier_policy_key).merge
             and (
                 prefer_merge_five is None
-                or settings.item_policy(item.policy_key).prefer_merge_five is prefer_merge_five
+                or settings.item_policy(item.tier_policy_key).prefer_merge_five
+                is prefer_merge_five
             )
             for rank, action in enumerate(
                 plan_merge_actions(

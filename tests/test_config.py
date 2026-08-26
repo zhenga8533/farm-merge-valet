@@ -103,6 +103,35 @@ def test_item_policy_partial_override_inherits_other_defaults() -> None:
     assert settings.item_policy("crops/wheat").prefer_merge_five
 
 
+def test_tier_policy_inherits_family_policy_and_can_override_one_tier() -> None:
+    settings = Settings(
+        _env_file=None,
+        item_policy_overrides={
+            "crops/wheat": {"prefer_merge_five": False},
+            "crops/wheat/tier/2": {"merge": False},
+        },
+    )
+
+    assert not settings.item_policy("crops/wheat/tier/1").prefer_merge_five
+    assert settings.item_policy("crops/wheat/tier/1").merge
+    assert not settings.item_policy("crops/wheat/tier/2").merge
+
+
+def test_upgrade_card_variant_inherits_legacy_family_policy() -> None:
+    settings = Settings(
+        _env_file=None,
+        item_policy_overrides={
+            "upgrade_cards/upgrade_card": {"merge": False},
+            "upgrade_cards/upgrade_card/wheat": {"always_remove": True},
+        },
+    )
+
+    policy = settings.item_policy("upgrade_cards/upgrade_card/wheat/tier/2")
+
+    assert not policy.merge
+    assert policy.always_remove
+
+
 def test_item_policy_override_can_reenable_family_when_global_default_is_disabled() -> None:
     settings = Settings(
         _env_file=None,

@@ -5,7 +5,7 @@ from dataclasses import replace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QSize
+from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -83,19 +83,105 @@ def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
     controller = ApplicationController(store)
     window = MainWindow(controller)
 
-    assert window.item_table.rowCount() == 2
-    rows = {
-        window.item_table.item(row, 0).text(): row for row in range(window.item_table.rowCount())
+    assert window.item_table.topLevelItemCount() == 2
+    assert window.item_table.columnCount() == 7
+    assert "Use default" not in {
+        button.text() for button in window.items_page.findChildren(QPushButton)
     }
-    wheat_merge = window.item_table.cellWidget(rows["Wheat"], 3).findChild(QCheckBox)
-    wheat_claim = window.item_table.cellWidget(rows["Wheat"], 5).findChild(QCheckBox)
-    milk_merge = window.item_table.cellWidget(rows["Milk"], 3).findChild(QCheckBox)
-    milk_claim = window.item_table.cellWidget(rows["Milk"], 5).findChild(QCheckBox)
+    rows = {
+        window.item_table.topLevelItem(row).text(0): window.item_table.topLevelItem(row)
+        for row in range(window.item_table.topLevelItemCount())
+    }
+    wheat_merge = window.item_table.itemWidget(rows["Wheat"], 3).findChild(QCheckBox)
+    wheat_claim = window.item_table.itemWidget(rows["Wheat"], 5).findChild(QCheckBox)
+    milk_merge = window.item_table.itemWidget(rows["Milk"], 3).findChild(QCheckBox)
+    milk_claim = window.item_table.itemWidget(rows["Milk"], 5).findChild(QCheckBox)
 
     assert wheat_merge is not None and wheat_merge.isEnabled()
-    assert wheat_claim is not None and not wheat_claim.isEnabled()
-    assert milk_merge is not None and not milk_merge.isEnabled()
+    assert wheat_claim is None
+    assert milk_merge is None
     assert milk_claim is not None and milk_claim.isEnabled() and milk_claim.isChecked()
+    assert window.item_table.itemWidget(rows["Wheat"], 5).findChild(QLabel).text() == "—"
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_item_families_expand_into_independent_tier_policies(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    wheat_1 = replace(
+        _catalog().items["wheat_1"], capabilities=frozenset({"mergeable", "shovelable"})
+    )
+    wheat_2 = replace(
+        wheat_1,
+        game_id="wheat_2",
+        tier=2,
+        mergeable=False,
+        merge_target=None,
+        capabilities=frozenset({"merge-result", "shovelable"}),
+    )
+    upgrade_1 = replace(
+        wheat_1,
+        game_id="upgrade_card_1",
+        family_id="upgrade_card",
+        policy_key="upgrade_cards/upgrade_card",
+        category="upgrade_cards",
+        display_name="Upgrade Card",
+        asset_path=None,
+        asset_alias=None,
+    )
+    upgrade_2 = replace(
+        upgrade_1,
+        game_id="upgrade_card_2",
+        tier=2,
+        mergeable=False,
+        merge_target=None,
+        capabilities=frozenset({"merge-result", "shovelable"}),
+    )
+    write_item_catalog(
+        catalog_dir / "catalog.json",
+        ItemCatalog(
+            {
+                "wheat_1": wheat_1,
+                "wheat_2": wheat_2,
+                "upgrade_card_1": upgrade_1,
+                "upgrade_card_2": upgrade_2,
+            }
+        ),
+    )
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+
+    roots = {
+        window.item_table.topLevelItem(index).text(0): window.item_table.topLevelItem(index)
+        for index in range(window.item_table.topLevelItemCount())
+    }
+    wheat = roots["Wheat"]
+    assert "Wheat Upgrade Cards" not in roots
+    cards = next(
+        wheat.child(index)
+        for index in range(wheat.childCount())
+        if wheat.child(index).text(0) == "Upgrade cards"
+    )
+    assert wheat.childCount() == 3
+    assert cards.childCount() == 2
+    assert [wheat.child(index).text(0) for index in range(2)] == ["Tier 1", "Tier 2"]
+    assert [cards.child(index).text(0) for index in range(2)] == ["Tier 1", "Tier 2"]
+    assert window.item_table.itemWidget(wheat.child(1), 3).findChild(QLabel).text() == "—"
+    remove = window.item_table.itemWidget(wheat.child(0), 6).findChild(QCheckBox)
+    assert remove is not None
+    remove.setChecked(True)
+    window._flush_config()
+    assert ConfigStore(store.path).load().item_policy("crops/wheat/tier/1").always_remove
+    assert window.item_table.isSortingEnabled()
+    window.items_page.expansion_controls.expand_button.click()
+    assert wheat.isExpanded()
+    assert cards.isExpanded()
+    window.items_page.expansion_controls.collapse_button.click()
+    assert not wheat.isExpanded()
+    assert not cards.isExpanded()
 
     window.quit_application()
     app.processEvents()
@@ -261,13 +347,14 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
     store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
     window = MainWindow(ApplicationController(store))
 
-    wheat_row = next(
-        row
-        for row in range(window.item_table.rowCount())
-        if window.item_table.item(row, 0).text() == "Wheat"
+    wheat_item = next(
+        window.item_table.topLevelItem(row)
+        for row in range(window.item_table.topLevelItemCount())
+        if window.item_table.topLevelItem(row).text(0) == "Wheat"
     )
-    assert not window.item_table.item(wheat_row, 0).icon().isNull()
+    assert not wheat_item.icon(0).isNull()
     assert window.item_table.iconSize() == QSize(40, 40)
+    assert wheat_item.sizeHint(0).height() == 52
     bakery = window.shop_tree.topLevelItem(0)
     assert bakery is not None and not bakery.icon(0).isNull()
     assert bakery.childCount() == 1 and not bakery.child(0).icon(0).isNull()
@@ -279,6 +366,16 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
     delegate.initStyleOption(recipe_option, window.shop_tree.indexFromItem(bakery.child(0)))
     assert shop_option.decorationSize == QSize(100, 54)
     assert recipe_option.decorationSize == QSize(40, 40)
+    assert window.item_table.objectName() == window.shop_tree.objectName() == "policyView"
+    assert window.item_table.alternatingRowColors()
+    assert window.shop_tree.alternatingRowColors()
+    assert window.item_table.selectionBehavior() == window.shop_tree.selectionBehavior()
+    shop_badge = window.shop_tree.itemWidget(bakery, 1)
+    recipe_badge = window.shop_tree.itemWidget(bakery.child(0), 1)
+    assert shop_badge is not None and shop_badge.findChild(QLabel).text() == "Shop"
+    assert recipe_badge is not None and recipe_badge.findChild(QLabel).text() == "Recipe"
+    assert bakery.sizeHint(0).height() == 64
+    assert bakery.child(0).sizeHint(0).height() == 64
 
     window.quit_application()
     app.processEvents()
@@ -340,7 +437,7 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
     app.processEvents()
 
 
-def test_individual_item_reset_returns_to_category_default(tmp_path) -> None:
+def test_item_bulk_toggle_targets_full_catalog_independent_of_filter(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     catalog_dir = tmp_path / "catalog"
     write_item_catalog(catalog_dir / "catalog.json", _catalog())
@@ -349,17 +446,128 @@ def test_individual_item_reset_returns_to_category_default(tmp_path) -> None:
         AppConfig(
             catalog_dir=catalog_dir,
             close_to_tray=False,
-            item_policy_overrides={"ingredients/milk": {"claim": False}},
         )
     )
     window = MainWindow(ApplicationController(store))
 
-    window._reset_item("ingredients/milk")
+    window.item_search.setText("Wheat")
+    window.items_page._set_all(2, False)
+    assert window.items_page.saved_label.text() == "Saving…"
     window._flush_config()
 
     saved = ConfigStore(store.path).load()
-    assert "ingredients/milk" not in saved.item_policy_overrides
-    assert saved.item_policy("ingredients/milk").claim
+    assert not saved.item_policy("crops/wheat").enabled
+    assert not saved.item_policy("ingredients/milk").enabled
+    assert window.items_page.saved_label.text() == "Saved"
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_shop_bulk_toggle_updates_all_shops_and_recipes(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    shop = CatalogItem(
+        game_id="bakery",
+        family_id="bakery",
+        policy_key="shops/bakery",
+        category="shops",
+        display_name="Bakery",
+        tier=None,
+        mergeable=False,
+        merge_target=None,
+        asset_alias=None,
+        asset_path=None,
+        capabilities=frozenset({"shop"}),
+        available_recipe_ids=("bread",),
+    )
+    recipe = CatalogItem(
+        game_id="bread",
+        family_id="bread",
+        policy_key="shop_products/bread",
+        category="shop_products",
+        display_name="Bread",
+        tier=None,
+        mergeable=False,
+        merge_target=None,
+        asset_alias=None,
+        asset_path=None,
+        capabilities=frozenset({"recipe"}),
+        recipe=RecipeMetadata("bakery", 60, (), ()),
+    )
+    write_item_catalog(catalog_dir / "catalog.json", ItemCatalog({"bakery": shop, "bread": recipe}))
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+
+    bakery = window.shop_tree.topLevelItem(0)
+    assert bakery is not None and bakery.childCount() == 1
+    window.shops_page.search.setText("bread")
+    assert not bakery.isHidden()
+    assert not bakery.child(0).isHidden()
+    assert bakery.isExpanded()
+    window.shops_page.search.setText("missing")
+    assert bakery.isHidden()
+    window.shops_page.search.clear()
+    assert not bakery.isHidden()
+    recipe_cell = window.shop_tree.itemWidget(bakery.child(0), 2)
+    recipe_toggle = recipe_cell.findChild(QCheckBox) if recipe_cell is not None else None
+    assert recipe_toggle is not None
+    recipe_toggle.setChecked(False)
+    window._flush_config()
+    assert not ConfigStore(store.path).load().recipe_overrides["bread"]
+
+    window.shops_page._set_all(2, False)
+    assert window.shops_page.saved_label.text() == "Saving…"
+    window._flush_config()
+
+    saved = ConfigStore(store.path).load()
+    assert not saved.shop_overrides["bakery"]
+    assert not saved.recipe_overrides["bread"]
+    assert window.shops_page.saved_label.text() == "Saved"
+    assert window.shop_tree.columnCount() == 3
+    assert window.shop_tree.isSortingEnabled()
+    bakery = window.shop_tree.topLevelItem(0)
+    assert bakery is not None
+    window.shops_page.expansion_controls.collapse_button.click()
+    assert not bakery.isExpanded()
+    window.shops_page.expansion_controls.expand_button.click()
+    assert bakery.isExpanded()
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_policy_sort_preferences_are_loaded_and_persisted(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(
+        AppConfig(
+            close_to_tray=False,
+            items_sort_column="category",
+            items_sort_descending=True,
+            shops_sort_column="enabled",
+            shops_sort_descending=True,
+        )
+    )
+    window = MainWindow(ApplicationController(store))
+
+    assert window.items_page.bulk_header.sortIndicatorSection() == 1
+    assert not window.items_page.bulk_header.isSortIndicatorShown()
+    assert window.items_page.bulk_header.sortIndicatorOrder() is Qt.SortOrder.DescendingOrder
+    assert window.shops_page.bulk_header.sortIndicatorSection() == 2
+    assert not window.shops_page.bulk_header.isSortIndicatorShown()
+    assert window.shops_page.bulk_header.sortIndicatorOrder() is Qt.SortOrder.DescendingOrder
+
+    window.items_page.bulk_header.setSortIndicator(5, Qt.SortOrder.AscendingOrder)
+    window.shops_page.bulk_header.setSortIndicator(1, Qt.SortOrder.AscendingOrder)
+    window._flush_config()
+
+    saved = ConfigStore(store.path).load()
+    assert saved.items_sort_column == "claim"
+    assert not saved.items_sort_descending
+    assert saved.shops_sort_column == "type"
+    assert not saved.shops_sort_descending
 
     window.quit_application()
     app.processEvents()

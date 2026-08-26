@@ -179,6 +179,11 @@ class MainWindow(QMainWindow):
         self.controller = controller
         self._draft = controller.config
         self._persisted_config = controller.config
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            app.setQuitOnLastWindowClosed(False)
+            if app.property("fmvTheme") != self._draft.theme:
+                apply_theme(app, self._draft.theme)
         self._really_quit = False
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
@@ -242,6 +247,7 @@ class MainWindow(QMainWindow):
         self.item_table = self.items_page.table
         self.item_search = self.items_page.search
         self.shop_tree = self.shops_page.tree
+        self.shop_search = self.shops_page.search
         self.browser_status_label = self.browser_page.status_label
         self.browser_choice = self.browser_page.browser_choice
         self.saved_label = self.settings_page.saved_label
@@ -309,14 +315,14 @@ class MainWindow(QMainWindow):
         self._reset_section(
             ConfigSection.ITEMS,
             "Reset item policies?",
-            "Restore item, category, and global item defaults and remove all item overrides?",
+            "Restore recommended item behavior and remove all custom item choices?",
         )
 
     def _reset_shop_policies(self) -> None:
         self._reset_section(
             ConfigSection.SHOPS,
             "Reset shop policies?",
-            "Restore shop and recipe defaults and remove all shop and recipe overrides?",
+            "Restore recommended shop and recipe behavior and remove all custom choices?",
         )
 
     def _reset_browser_configuration(self) -> None:
@@ -353,23 +359,25 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError) as exc:
             self._show_error(f"Could not reset settings: {exc}")
 
-    def _reset_item(self, key: str) -> None:
-        self.items_page.reset_item(key)
-
-    def _reset_shop_item(self, kind: str, key: str) -> None:
-        self.shops_page.reset_item(kind, key)
-
     def _queue_edit(self, edit: ConfigEdit) -> None:
-        editor = self.browser_page if edit.source == "browser" else self.settings_page
+        editor: ItemsPage | ShopsPage | BrowserPage | SettingsPage
+        if edit.source == "items":
+            editor = self.items_page
+        elif edit.source == "shops":
+            editor = self.shops_page
+        elif edit.source == "browser":
+            editor = self.browser_page
+        else:
+            editor = self.settings_page
         try:
             candidate = self._draft.model_copy(update=edit.changes)
             self._draft = AppConfig.model_validate(candidate.model_dump())
         except ValidationError as exc:
-            editor.show_validation_error(
-                edit.field,
-                exc.errors()[0]["msg"],
-                self._draft,
-            )
+            message = exc.errors()[0]["msg"]
+            if isinstance(editor, (BrowserPage, SettingsPage)):
+                editor.show_validation_error(edit.field, message, self._draft)
+            else:
+                editor.mark_error(f"Invalid: {message}")
             return
         editor.mark_saving(edit.field)
         self._save_timer.start()
@@ -385,7 +393,13 @@ class MainWindow(QMainWindow):
         try:
             self.controller.store.replace(self._draft)
         except (OSError, ValueError) as exc:
-            self.saved_label.setText("Save failed")
+            for page in (
+                self.items_page,
+                self.shops_page,
+                self.browser_page,
+                self.settings_page,
+            ):
+                page.configuration_header.mark_error("Save failed")
             self._show_error(f"Could not save settings: {exc}")
             return
         configure_logging(self._draft.log_level)
@@ -431,15 +445,13 @@ class MainWindow(QMainWindow):
         self.dashboard_page.set_hotkeys(config.start_stop_hotkey, config.pause_hotkey)
         self.overlay.set_hotkeys(config.start_stop_hotkey, config.pause_hotkey)
         if hasattr(self, "run_action"):
-            self.run_action.setText(
-                _menu_action_text("Start bot", config.start_stop_hotkey)
-            )
+            self.run_action.setText(_menu_action_text("Start bot", config.start_stop_hotkey))
             self.quit_action.setText(_menu_action_text("Quit", config.quit_hotkey))
             self._status_changed(self.controller.status)
 
     def _apply_appearance(self) -> None:
         app = QApplication.instance()
-        if isinstance(app, QApplication):
+        if isinstance(app, QApplication) and app.property("fmvTheme") != self._draft.theme:
             apply_theme(app, self._draft.theme)
         always_on_top = Qt.WindowType.WindowStaysOnTopHint
         if bool(self.windowFlags() & always_on_top) != self._draft.main_always_on_top:
@@ -470,9 +482,7 @@ class MainWindow(QMainWindow):
             active = status.state.active
             enabled = active and status.state is not ApplicationState.STOPPING
             run_label = "Stop bot" if active else "Start bot"
-            self.run_action.setText(
-                _menu_action_text(run_label, self._draft.start_stop_hotkey)
-            )
+            self.run_action.setText(_menu_action_text(run_label, self._draft.start_stop_hotkey))
             self.run_action.setEnabled(status.state is not ApplicationState.STOPPING)
             self.pause_action.setEnabled(enabled)
             pause_label = (
@@ -480,9 +490,7 @@ class MainWindow(QMainWindow):
                 if status.state in {ApplicationState.PAUSED, ApplicationState.RESUMING}
                 else "Pause bot"
             )
-            self.pause_action.setText(
-                _menu_action_text(pause_label, self._draft.pause_hotkey)
-            )
+            self.pause_action.setText(_menu_action_text(pause_label, self._draft.pause_hotkey))
             self.browser_page.set_runtime_active(active)
 
     def _running_changed(self, _running: bool, _paused: bool) -> None:
@@ -516,9 +524,7 @@ class MainWindow(QMainWindow):
         self.pause_action.triggered.connect(self.controller.toggle_pause)
         overlay_action.triggered.connect(self._toggle_overlay)
         self.quit_action.triggered.connect(self.quit_application)
-        menu.addActions(
-            (show_action, self.run_action, self.pause_action, overlay_action)
-        )
+        menu.addActions((show_action, self.run_action, self.pause_action, overlay_action))
         menu.addSeparator()
         menu.addAction(self.quit_action)
         self.tray.activated.connect(self._tray_activated)
@@ -569,7 +575,13 @@ class MainWindow(QMainWindow):
 
     def _finish_quit(self) -> None:
         self.tray.hide()
-        QApplication.quit()
+        self.overlay.close()
+        self.close()
+        self.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app = QApplication.instance()
+        if isinstance(app, QApplication) and app.property("fmvEventLoopRunning") is True:
+            app.quit()
 
 
 def run_application(store: ConfigStore | None = None) -> int:
@@ -612,4 +624,8 @@ def run_application(store: ConfigStore | None = None) -> int:
         controller.start_hotkeys()
         if config.bot_autostart:
             controller.start_bot()
-        return app.exec()
+        app.setProperty("fmvEventLoopRunning", True)
+        try:
+            return app.exec()
+        finally:
+            app.setProperty("fmvEventLoopRunning", False)

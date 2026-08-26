@@ -168,6 +168,7 @@ _READ_EXPRESSION = """
     const behaviors = content?._behaviors instanceof Map
       ? Array.from(content._behaviors.keys()) : [];
     const harvestable = content?.getBehavior?.('harvestable');
+    const upgradeCard = content?.getBehavior?.('upgradeCard');
     const harvestableType = harvestable?._data?.harvestableType;
     const producerKind = harvestableType === 'animal' || harvestableType === 'crop'
       ? harvestableType : null;
@@ -190,6 +191,8 @@ _READ_EXPRESSION = """
       ),
       producerKind,
       producerState,
+      itemVariant: typeof upgradeCard?._data?.targetObjectTreeIngredient === 'string'
+        ? upgradeCard._data.targetObjectTreeIngredient : null,
       behaviorNames: behaviors.filter((name) => typeof name === 'string'),
     });
   }
@@ -210,6 +213,7 @@ class LiveCellState:
     collectable_ingredient: bool = False
     producer_kind: ProducerKind | None = None
     producer_state: ProducerState | None = None
+    item_variant: str | None = None
     behavior_names: frozenset[str] = frozenset()
 
 
@@ -375,6 +379,7 @@ def read_board_state(
         except ValueError:
             producer_state = None
         behavior_names = entry.get("behaviorNames")
+        item_variant = entry.get("itemVariant")
         states[(entry["column"], entry["row"])] = LiveCellState(
             has_content=entry.get("hasContent") is True,
             blueprint_id=blueprint_id if isinstance(blueprint_id, str) else None,
@@ -384,6 +389,7 @@ def read_board_state(
             collectable_ingredient=entry.get("collectableIngredient") is True,
             producer_kind=producer_kind,
             producer_state=producer_state,
+            item_variant=item_variant if isinstance(item_variant, str) else None,
             behavior_names=frozenset(
                 value for value in behavior_names or [] if isinstance(value, str)
             ),

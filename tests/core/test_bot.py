@@ -504,6 +504,28 @@ def test_item_policy_can_disable_merging_for_one_family(monkeypatch) -> None:
     assert {action.item for action in actions} == {cow}
 
 
+def test_item_policy_can_disable_merging_for_one_tier(monkeypatch) -> None:
+    bot = bare_bot()
+    wheat_1 = ItemRef("crops", "wheat", 1)
+    wheat_2 = ItemRef("crops", "wheat", 2)
+    bot._max_item_tiers[("crops", "wheat")] = 4
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat_1))
+        bot.board.set_cell((x, 2), Cell(CellKind.ITEM, wheat_2))
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.settings.item_policy_overrides",
+        {
+            "crops/wheat": ItemPolicyOverride(prefer_merge_five=False),
+            "crops/wheat/tier/1": ItemPolicyOverride(merge=False),
+        },
+    )
+
+    actions = bot._merge_actions_for_policy()
+
+    assert actions
+    assert {action.item for action in actions} == {wheat_2}
+
+
 def test_live_sync_distinguishes_empty_structure_placeholder(monkeypatch) -> None:
     from farm_merge_valet.cdp.board_store import LiveCellState
 
@@ -520,6 +542,32 @@ def test_live_sync_distinguishes_empty_structure_placeholder(monkeypatch) -> Non
     assert bot._sync_board_from_live_state()
     assert bot.board.get_cell((0, 0)).kind is CellKind.EMPTY
     assert bot.board.get_cell((1, 0)).kind is CellKind.STRUCTURE
+
+
+def test_live_sync_keeps_upgrade_card_targets_as_distinct_variants(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._blueprint_items = {
+        "upgrade_card_1": ItemRef("upgrade_cards", "upgrade_card", 1)
+    }
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.read_board_state",
+        lambda *_, **__: {
+            (0, 0): LiveCellState(
+                True, "upgrade_card_1", item_variant="wheat"
+            ),
+            (1, 0): LiveCellState(
+                True, "upgrade_card_1", item_variant="cow"
+            ),
+        },
+    )
+
+    assert bot._sync_board_from_live_state()
+    assert bot.board.get_cell((0, 0)).item == ItemRef(
+        "upgrade_cards", "upgrade_card", 1, "wheat"
+    )
+    assert bot.board.get_cell((1, 0)).item == ItemRef(
+        "upgrade_cards", "upgrade_card", 1, "cow"
+    )
 
 
 def test_live_sync_classifies_only_catalogued_immediate_claims(monkeypatch) -> None:

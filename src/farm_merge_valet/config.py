@@ -13,6 +13,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
+from farm_merge_valet.core.board import item_base_policy_key, item_family_policy_key
 from farm_merge_valet.hotkeys import normalize_hotkey
 
 CONFIG_SCHEMA_VERSION = 1
@@ -97,6 +98,12 @@ class AppConfig(BaseModel):
     recipe_default_enabled: bool = True
     shop_overrides: dict[str, bool] = Field(default_factory=dict)
     recipe_overrides: dict[str, bool] = Field(default_factory=dict)
+    items_sort_column: Literal[
+        "item", "category", "enabled", "merge", "merge_five", "claim", "remove"
+    ] = "item"
+    items_sort_descending: bool = False
+    shops_sort_column: Literal["item", "type", "enabled"] = "item"
+    shops_sort_descending: bool = False
 
     loop_interval: float = Field(default=1.0, gt=0.0)
     idle_wait_seconds: float = Field(default=30.0, ge=0.0, le=3600.0)
@@ -201,6 +208,7 @@ class AppConfig(BaseModel):
         return self
 
     def item_policy_default(self, policy_key: str, category: str | None = None) -> ItemPolicy:
+        policy_key = item_base_policy_key(item_family_policy_key(policy_key))
         values = self.item_policy_defaults.model_dump()
         if not self.prefer_merge_five:
             values["prefer_merge_five"] = False
@@ -212,9 +220,19 @@ class AppConfig(BaseModel):
         return ItemPolicy.model_validate(values)
 
     def item_policy(self, policy_key: str, category: str | None = None) -> ItemPolicy:
-        values = self.item_policy_default(policy_key, category).model_dump()
-        if override := self.item_policy_overrides.get(policy_key):
+        family_key = item_family_policy_key(policy_key)
+        base_key = item_base_policy_key(family_key)
+        values = self.item_policy_default(base_key, category).model_dump()
+        if override := self.item_policy_overrides.get(base_key):
             values.update(override.model_dump(exclude_none=True))
+        if family_key != base_key and (
+            variant_override := self.item_policy_overrides.get(family_key)
+        ):
+            values.update(variant_override.model_dump(exclude_none=True))
+        if policy_key != family_key and (
+            tier_override := self.item_policy_overrides.get(policy_key)
+        ):
+            values.update(tier_override.model_dump(exclude_none=True))
         return ItemPolicy.model_validate(values)
 
 

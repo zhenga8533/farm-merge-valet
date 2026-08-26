@@ -8,7 +8,7 @@ from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from farm_merge_valet.core.board import ItemRef
+from farm_merge_valet.core.board import ItemRef, item_tier_policy_key
 
 CATALOG_SCHEMA_VERSION = 4
 SUPPORTED_CATALOG_SCHEMA_VERSIONS = frozenset({3, CATALOG_SCHEMA_VERSION})
@@ -82,6 +82,14 @@ class CatalogItem:
         if self.tier is None or not ({"mergeable", "merge-result"} & self.capabilities):
             return None
         return ItemRef(self.category, self.family_id, self.tier)
+
+    @property
+    def tier_policy_key(self) -> str:
+        return (
+            item_tier_policy_key(self.policy_key, self.tier)
+            if self.tier is not None
+            else self.policy_key
+        )
 
 
 @dataclass(frozen=True)
