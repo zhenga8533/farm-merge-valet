@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -44,6 +45,7 @@ from PySide6.QtWidgets import (
 
 from farm_merge_valet.config import AppConfig, ConfigStore, ItemPolicyOverride
 from farm_merge_valet.core.item_catalog import (
+    CatalogItem,
     ItemCatalog,
     TileClaimMode,
     load_item_catalog,
@@ -144,9 +146,9 @@ class CompactOverlay(QMainWindow):
             else self._config.overlay_unfocused_opacity
         )
         if sys.platform == "win32":
-            from farm_merge_valet.gui.overlay import _set_click_through
+            from farm_merge_valet.gui.native_window import set_click_through
 
-            _set_click_through(
+            set_click_through(
                 int(self.winId()),
                 self._config.overlay_click_through and not self.isActiveWindow(),
             )
@@ -304,7 +306,7 @@ class MainWindow(QMainWindow):
             )
             self.item_table.setSpan(0, 0, 1, 7)
             return
-        grouped: dict[str, list] = defaultdict(list)
+        grouped: dict[str, list[CatalogItem]] = defaultdict(list)
         for item in catalog.items.values():
             grouped[item.policy_key].append(item)
         rows = []
@@ -421,7 +423,7 @@ class MainWindow(QMainWindow):
                     "item_policy_overrides": {},
                 }
             ),
-            {1},
+            {"Items"},
         )
 
     def _build_shops(self) -> QWidget:
@@ -456,7 +458,7 @@ class MainWindow(QMainWindow):
         catalog = self._load_catalog()
         if catalog is None:
             return
-        recipes: dict[str, list] = defaultdict(list)
+        recipes: dict[str, list[CatalogItem]] = defaultdict(list)
         for item in catalog.items.values():
             if item.recipe is not None:
                 recipes[item.recipe.shop_id].append(item)
@@ -558,7 +560,7 @@ class MainWindow(QMainWindow):
                     "recipe_overrides": {},
                 }
             ),
-            {2},
+            {"Shops"},
         )
 
     def _build_browser(self) -> QWidget:
@@ -612,6 +614,10 @@ class MainWindow(QMainWindow):
     def _build_settings(self) -> QWidget:
         page, page_layout = _page("Settings", "Changes validate and autosave automatically.")
         reset_controls = QHBoxLayout()
+        reset_controls.addWidget(QLabel("Configuration"))
+        self.saved_label = QLabel("Saved")
+        self.saved_label.setObjectName("saveStatus")
+        reset_controls.addWidget(self.saved_label)
         reset_controls.addStretch()
         reset_settings = _secondary(QPushButton("Reset settings"))
         reset_all = _secondary(QPushButton("Reset everything"))
@@ -622,29 +628,53 @@ class MainWindow(QMainWindow):
         page_layout.addLayout(reset_controls)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         content = QWidget()
-        form = QFormLayout(content)
-        self.saved_label = QLabel("Saved")
-        form.addRow("Configuration", self.saved_label)
+        sections = QVBoxLayout(content)
+        sections.setContentsMargins(4, 4, 4, 4)
+        sections.setSpacing(14)
 
-        self._add_int(form, "Reserved empty cells", "merge_empty_cell_reserve", 0, 50)
-        self._add_int(form, "Producer claim open cells", "producer_claim_min_empty_cells", 1, 50)
-        self._add_float(form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600)
-        self._add_float(form, "Loop interval (seconds)", "loop_interval", 0.1, 60)
-        self._add_float(form, "Item delay minimum", "item_action_delay_min", 0, 60)
-        self._add_float(form, "Item delay maximum", "item_action_delay_max", 0, 60)
-        self._add_float(form, "Crate delay minimum", "crate_delay_min", 0, 5)
-        self._add_float(form, "Crate delay maximum", "crate_delay_max", 0, 5)
-        self._add_text(form, "Pause / resume hotkey", "pause_hotkey")
-        self._add_text(form, "Quit hotkey", "quit_hotkey")
-        self._add_text(form, "Game URL", "game_url")
-        self._add_text(form, "Page target", "window_title")
-        self._add_int(form, "CDP port", "cdp_port", 1, 65535)
-        self._add_path(form, "Browser executable", "browser_executable")
-        self._add_path(form, "Browser profile directory", "browser_profile_dir")
-        self._add_path(form, "Catalog directory", "catalog_dir", optional=False)
-        self._add_path(form, "Atlas cache directory", "atlas_cache_dir", optional=False)
+        automation, automation_form = self._settings_section("Automation")
+        self._add_int(automation_form, "Reserved empty cells", "merge_empty_cell_reserve", 0, 50)
+        self._add_int(
+            automation_form,
+            "Producer claim open cells",
+            "producer_claim_min_empty_cells",
+            1,
+            50,
+        )
+        self._add_float(automation_form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600)
+        self._add_float(automation_form, "Loop interval (seconds)", "loop_interval", 0.1, 60)
+        self._add_float(automation_form, "Item delay minimum", "item_action_delay_min", 0, 60)
+        self._add_float(automation_form, "Item delay maximum", "item_action_delay_max", 0, 60)
+        self._add_float(automation_form, "Crate delay minimum", "crate_delay_min", 0, 5)
+        self._add_float(automation_form, "Crate delay maximum", "crate_delay_max", 0, 5)
+        sections.addWidget(automation)
 
+        controls, controls_form = self._settings_section("Controls & startup")
+        self._add_text(controls_form, "Pause / resume hotkey", "pause_hotkey")
+        self._add_text(controls_form, "Quit hotkey", "quit_hotkey")
+        for field, label in (
+            ("browser_auto_launch", "Launch managed browser when needed"),
+            ("start_paused", "Start automation paused"),
+            ("start_minimized", "Start minimized to tray"),
+            ("bot_autostart", "Start bot with application"),
+            ("close_to_tray", "Close window to tray"),
+        ):
+            self._add_checkbox(controls_form, label, field)
+        sections.addWidget(controls)
+
+        browser, browser_form = self._settings_section("Browser & assets")
+        self._add_text(browser_form, "Game URL", "game_url")
+        self._add_text(browser_form, "Page target", "window_title")
+        self._add_int(browser_form, "CDP port", "cdp_port", 1, 65535)
+        self._add_path(browser_form, "Browser executable", "browser_executable")
+        self._add_path(browser_form, "Browser profile directory", "browser_profile_dir")
+        self._add_path(browser_form, "Catalog directory", "catalog_dir", optional=False)
+        self._add_path(browser_form, "Atlas cache directory", "atlas_cache_dir", optional=False)
+        sections.addWidget(browser)
+
+        notifications, notifications_form = self._settings_section("Notifications")
         webhook = QLineEdit()
         webhook.setEchoMode(QLineEdit.EchoMode.Password)
         webhook.setPlaceholderText("Optional Discord webhook URL")
@@ -653,35 +683,56 @@ class MainWindow(QMainWindow):
         webhook.editingFinished.connect(
             lambda: self._queue_config(discord_webhook_url=webhook.text().strip() or None)
         )
-        form.addRow("Discord webhook", webhook)
-        self._add_float(form, "Webhook status interval", "webhook_status_interval", 0, 3600)
-        self._add_float(form, "Webhook summary interval", "webhook_summary_interval", 60, 86400)
+        notifications_form.addRow("Discord webhook", webhook)
+        self._add_float(
+            notifications_form, "Webhook status interval", "webhook_status_interval", 0, 3600
+        )
+        self._add_float(
+            notifications_form,
+            "Webhook summary interval",
+            "webhook_summary_interval",
+            60,
+            86400,
+        )
+        sections.addWidget(notifications)
 
+        appearance, appearance_form = self._settings_section("Appearance")
         theme = QComboBox()
         theme.addItems(("system", "dark", "light"))
         theme.setCurrentText(self._draft.theme)
         theme.currentTextChanged.connect(lambda value: self._queue_config(theme=value))
-        form.addRow("Theme", theme)
+        appearance_form.addRow("Theme", theme)
         for field, label in (
-            ("browser_auto_launch", "Launch managed browser when needed"),
-            ("start_minimized", "Start minimized to tray"),
-            ("bot_autostart", "Start bot with application"),
-            ("close_to_tray", "Close window to tray"),
             ("main_always_on_top", "Dashboard always on top"),
             ("overlay_always_on_top", "Overlay always on top"),
             ("overlay_click_through", "Overlay click-through while inactive"),
         ):
-            checkbox = QCheckBox()
-            checkbox.setChecked(getattr(self._draft, field))
-            checkbox.toggled.connect(lambda value, name=field: self._queue_config(**{name: value}))
-            form.addRow(label, checkbox)
-        self._add_opacity(form, "Dashboard inactive opacity", "main_unfocused_opacity")
-        self._add_opacity(form, "Dashboard focused opacity", "main_focused_opacity")
-        self._add_opacity(form, "Overlay inactive opacity", "overlay_unfocused_opacity")
-        self._add_opacity(form, "Overlay focused opacity", "overlay_focused_opacity")
+            self._add_checkbox(appearance_form, label, field)
+        self._add_opacity(appearance_form, "Dashboard inactive opacity", "main_unfocused_opacity")
+        self._add_opacity(appearance_form, "Dashboard focused opacity", "main_focused_opacity")
+        self._add_opacity(appearance_form, "Overlay inactive opacity", "overlay_unfocused_opacity")
+        self._add_opacity(appearance_form, "Overlay focused opacity", "overlay_focused_opacity")
+        sections.addWidget(appearance)
+        sections.addStretch()
+
         scroll.setWidget(content)
         page_layout.addWidget(scroll, 1)
         return page
+
+    @staticmethod
+    def _settings_section(title: str) -> tuple[QGroupBox, QFormLayout]:
+        section = QGroupBox(title)
+        form = QFormLayout(section)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setContentsMargins(14, 18, 14, 14)
+        form.setSpacing(10)
+        return section, form
+
+    def _add_checkbox(self, form: QFormLayout, label: str, field: str) -> None:
+        checkbox = QCheckBox()
+        checkbox.setChecked(getattr(self._draft, field))
+        checkbox.toggled.connect(lambda value, name=field: self._queue_config(**{name: value}))
+        form.addRow(label, checkbox)
 
     def _add_int(
         self, form: QFormLayout, label: str, field: str, minimum: int, maximum: int
@@ -791,7 +842,7 @@ class MainWindow(QMainWindow):
             for field in AppConfig.model_fields
             if field != "schema_version" and field not in policy_fields
         }
-        self._replace_config(self._draft.model_copy(update=changes), {3, 4})
+        self._replace_config(self._draft.model_copy(update=changes), {"Browser", "Settings"})
 
     def _reset_all_settings(self) -> None:
         if not self._confirm_reset(
@@ -800,9 +851,9 @@ class MainWindow(QMainWindow):
             "overrides?",
         ):
             return
-        self._replace_config(AppConfig(), {1, 2, 3, 4})
+        self._replace_config(AppConfig(), {"Items", "Shops", "Browser", "Settings"})
 
-    def _replace_config(self, config: AppConfig, page_indexes: set[int]) -> None:
+    def _replace_config(self, config: AppConfig, page_names: set[str]) -> None:
         self._save_timer.stop()
         try:
             self.controller.store.replace(config)
@@ -814,22 +865,25 @@ class MainWindow(QMainWindow):
         self.overlay_button.setText(
             "Hide compact overlay" if config.overlay_visible else "Show compact overlay"
         )
-        self._rebuild_pages(page_indexes)
+        self._rebuild_pages(page_names)
 
-    def _rebuild_pages(self, page_indexes: set[int]) -> None:
+    def _rebuild_pages(self, page_names: set[str]) -> None:
         builders = {
-            1: self._build_items,
-            2: self._build_shops,
-            3: self._build_browser,
-            4: self._build_settings,
+            "Items": self._build_items,
+            "Shops": self._build_shops,
+            "Browser": self._build_browser,
+            "Settings": self._build_settings,
         }
         current = self.navigation.currentRow()
-        for index in sorted(page_indexes):
+        for name in self._NAVIGATION:
+            if name not in page_names:
+                continue
+            index = self._NAVIGATION.index(name)
             old_page = self.pages.widget(index)
             if old_page is None:
                 continue
             self.pages.removeWidget(old_page)
-            self.pages.insertWidget(index, builders[index]())
+            self.pages.insertWidget(index, builders[name]())
             old_page.deleteLater()
         self.navigation.setCurrentRow(current)
 

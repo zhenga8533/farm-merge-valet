@@ -6,10 +6,32 @@ from __future__ import annotations
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
 
+
+def _scrollbars(handle: str, hover: str, pressed: str) -> str:
+    return f"""
+QScrollBar:vertical {{ background: transparent; border: none; width: 12px; margin: 0; }}
+QScrollBar::handle:vertical {{ background: {handle}; border-radius: 4px; min-height: 28px; margin: 2px; }}
+QScrollBar::handle:vertical:hover {{ background: {hover}; }}
+QScrollBar::handle:vertical:pressed {{ background: {pressed}; }}
+QScrollBar:horizontal {{ background: transparent; border: none; height: 12px; margin: 0; }}
+QScrollBar::handle:horizontal {{ background: {handle}; border-radius: 4px; min-width: 28px; margin: 2px; }}
+QScrollBar::handle:horizontal:hover {{ background: {hover}; }}
+QScrollBar::handle:horizontal:pressed {{ background: {pressed}; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; border: none; background: none; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+QAbstractScrollArea::corner {{ background: transparent; border: none; }}
+"""
+
+
+_SYSTEM_SCROLLBARS = _scrollbars("palette(mid)", "palette(dark)", "palette(highlight)")
+
 _DARK = """
 QWidget { background: #11151b; color: #e6edf3; font-family: "Segoe UI"; font-size: 13px; }
 QMainWindow, QDialog { background: #0d1117; }
 QFrame#card { background: #161b22; border: 1px solid #2b3440; border-radius: 10px; }
+QGroupBox { border: 1px solid #2b3440; border-radius: 8px; margin-top: 10px; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; font-weight: 600; }
+QLabel#saveStatus { color: #8b949e; font-weight: 600; }
 QPushButton { background: #238636; border: none; border-radius: 6px; padding: 7px 14px; font-weight: 600; }
 QPushButton:hover { background: #2ea043; } QPushButton:disabled { background: #30363d; color: #8b949e; }
 QPushButton[secondary="true"] { background: #21262d; border: 1px solid #30363d; }
@@ -20,12 +42,15 @@ QTableWidget, QPlainTextEdit { background: #0d1117; alternate-background-color: 
 QHeaderView::section { background: #161b22; border: none; border-bottom: 1px solid #30363d; padding: 7px; font-weight: 600; }
 QTabWidget::pane { border: 1px solid #30363d; } QTabBar::tab { padding: 8px 14px; background: #161b22; } QTabBar::tab:selected { background: #1f6feb; }
 QToolTip { background: #21262d; color: #e6edf3; border: 1px solid #30363d; }
-"""
+""" + _scrollbars("#484f58", "#6e7681", "#8b949e")
 
 _LIGHT = """
 QWidget { background: #f6f8fa; color: #1f2328; font-family: "Segoe UI"; font-size: 13px; }
 QMainWindow, QDialog { background: #ffffff; }
 QFrame#card { background: #ffffff; border: 1px solid #d0d7de; border-radius: 10px; }
+QGroupBox { border: 1px solid #d0d7de; border-radius: 8px; margin-top: 10px; }
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; font-weight: 600; }
+QLabel#saveStatus { color: #57606a; font-weight: 600; }
 QPushButton { background: #1f883d; color: white; border: none; border-radius: 6px; padding: 7px 14px; font-weight: 600; }
 QPushButton:hover { background: #1a7f37; } QPushButton:disabled { background: #d0d7de; color: #57606a; }
 QPushButton[secondary="true"] { background: #f6f8fa; color: #1f2328; border: 1px solid #d0d7de; }
@@ -34,12 +59,12 @@ QListWidget { background: #f6f8fa; border: none; padding: 8px; }
 QListWidget::item { padding: 10px; border-radius: 6px; } QListWidget::item:selected { background: #0969da; color: white; }
 QTableWidget, QPlainTextEdit { background: white; alternate-background-color: #f6f8fa; border: 1px solid #d0d7de; gridline-color: #d0d7de; }
 QHeaderView::section { background: #f6f8fa; border: none; border-bottom: 1px solid #d0d7de; padding: 7px; font-weight: 600; }
-"""
+""" + _scrollbars("#afb8c1", "#8c959f", "#6e7781")
 
 
 def apply_theme(app: QApplication, theme: str) -> None:
     if theme == "system":
-        app.setStyleSheet("")
         app.setPalette(QPalette())
+        app.setStyleSheet(_SYSTEM_SCROLLBARS)
     else:
         app.setStyleSheet(_DARK if theme == "dark" else _LIGHT)

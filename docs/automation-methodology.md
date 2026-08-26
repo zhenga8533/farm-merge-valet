@@ -117,9 +117,10 @@ chests and distinguishes numbered, placed flowers/decorations from active
 merge chains.
 
 Catalog capabilities are descriptive facts from the game. User policy is a
-separate concern keyed by stable family ID, allowing future GUI controls to
-toggle families, select merge-5 behavior, or authorize shovel-based deadlock
-recovery without changing recognition or duplicating asset metadata.
+separate concern keyed by stable family ID, allowing GUI controls to toggle
+families and select merge-5 behavior without changing recognition or
+duplicating asset metadata. A future shovel policy can use the same boundary
+for explicitly authorized deadlock recovery.
 
 The existing board planner remains coordinate-based and viewport-neutral. It
 prioritizes trigger, degroup, and gather actions; prefers exact merge-5 work;
@@ -193,6 +194,6 @@ network or server-side interruption, and backend connectivity is not detected
 separately yet. Global pause/quit hotkeys and Ctrl+C remain available as inbound
 controls without being part of game interaction.
 
-Future phases may fulfill orders, clear obstacles, visit friends, and handle
-expansions/events. Network-dependent
-phases should add explicit backend-connectivity monitoring when implemented.
+Future phases may clear obstacles, visit friends, and handle expansions or
+events. Network-dependent phases should add explicit backend-connectivity
+monitoring when implemented.

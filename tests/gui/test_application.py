@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QSize
 from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtWidgets import QApplication, QCheckBox, QStyleOptionViewItem
+from PySide6.QtWidgets import QApplication, QCheckBox, QGroupBox, QLabel, QStyleOptionViewItem
 
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.core.catalog_store import write_item_catalog
@@ -102,6 +102,30 @@ def test_gui_changes_autosave_to_the_config_store(tmp_path) -> None:
     saved = ConfigStore(store.path).load()
     assert saved.theme == "dark"
     assert saved.idle_wait_seconds == 45.0
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    settings_page = window.pages.widget(window._NAVIGATION.index("Settings"))
+    assert settings_page is not None
+
+    section_titles = {group.title() for group in settings_page.findChildren(QGroupBox)}
+    labels = {label.text() for label in settings_page.findChildren(QLabel)}
+
+    assert section_titles == {
+        "Automation",
+        "Controls & startup",
+        "Browser & assets",
+        "Notifications",
+        "Appearance",
+    }
+    assert "Start automation paused" in labels
 
     window.quit_application()
     app.processEvents()

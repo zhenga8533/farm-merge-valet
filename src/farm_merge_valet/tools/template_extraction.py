@@ -8,7 +8,7 @@ URLs, or a diagnostic HAR capture, this module:
   3. Reads the live game's Discovery Book blueprint catalog.
   4. Slices every catalog asset and related visual state at the manifest's
      exact pixel coordinates, then writes a capability catalog used by the
-     bot and future GUI.
+     bot and GUI.
 
 Run `farm-merge-valet sync-assets` while the managed game is loaded. The
 `extract-templates path/to/capture.har` command is retained as a fallback.

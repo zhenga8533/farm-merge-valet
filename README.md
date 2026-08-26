@@ -182,7 +182,9 @@ Windows (or the platform user-data directory elsewhere). The dashboard exposes
 browser, automation, item/shop policy, timing, hotkey, Discord, logging, theme,
 tray, opacity, and compact-overlay controls. `.env` and `FMV_*` variables are
 not read. Invalid configuration is never silently overwritten; startup offers
-an explicit reset to safe defaults.
+an explicit reset to safe defaults. The Settings page groups automation,
+startup controls, browser/assets, notifications, and appearance; scoped reset
+controls preserve unrelated policy sections.
 
 ## Logging
 
@@ -202,23 +204,21 @@ records also carry a stable `fmv_event` name and an `fmv_context` dictionary;
 for example, action records include their planner action, effect, item, source,
 and destination.
 
-Enter an HTTPS Discord webhook in Settings to enable the asynchronous sink. Browser,
-runtime, pause/resume, quit, and stop events are sent immediately, as are
+Enter an HTTPS Discord webhook in Settings to enable the asynchronous sink.
+Browser, runtime, pause/resume, quit, and stop events are sent immediately, as are
 warnings and errors; duplicate warning messages are rate-limited. Messages use
 compact embeds with severity colors, readable titles, timestamps, and stable
-event identifiers. Routine actions are not sent individually. Instead,
-The summary interval (one hour by default) reports move, swap, merge,
-board-claim, crate, warning,
-and error totals. A final partial summary is sent during a clean shutdown.
-The webhook also maintains one current-status embed. It is edited every
-60 seconds by default and immediately on major
-state changes. After an alert or summary is posted, the previous status is
+event identifiers. Routine actions are not sent individually. Instead, the
+hourly summary reports move, swap, merge, board-claim, crate, warning, and error
+totals. A final partial summary is sent during a clean shutdown. The webhook
+also maintains one current-status embed. It is edited every 60 seconds by
+default and immediately on major state changes. After an alert or summary is posted, the previous status is
 deleted and recreated so the refreshed status remains the channel's latest
 message; ordinary interval updates edit it in place. Its message ID is stored
-under the per-user application-data directory and reused across runs. Set the interval to `0` to disable
-periodic edits without disabling event-driven updates. Webhook failures are
-logged locally and never block the bot loop. Charts and diagnostic screenshots
-are reserved for a future summary enhancement.
+under the per-user application-data directory and reused across runs. Set the
+status interval to `0` to disable periodic edits without disabling event-driven
+updates. Webhook failures are logged locally and never block the bot loop.
+Charts and diagnostic screenshots are reserved for a future summary enhancement.
 One-shot diagnostic and browser-management commands continue writing their
 requested results directly to the terminal or output file.
 
