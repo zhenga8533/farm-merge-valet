@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QKeyCombination, Qt, Signal
 from PySide6.QtGui import QHideEvent, QKeyEvent, QKeySequence
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QWidget
 
+from farm_merge_valet.gui.widgets import secondary_button, set_validation_state
 from farm_merge_valet.hotkeys import display_hotkey, normalize_hotkey
 
 _MODIFIER_KEYS = {
@@ -29,10 +30,8 @@ class HotkeyEdit(QWidget):
         self.display = QLineEdit()
         self.display.setReadOnly(True)
         self.display.setAccessibleName(accessible_name)
-        self.record_button = QPushButton("Record")
-        self.record_button.setProperty("secondary", True)
-        self.clear_button = QPushButton("Clear")
-        self.clear_button.setProperty("secondary", True)
+        self.record_button = secondary_button("Record")
+        self.clear_button = secondary_button("Clear")
         self.record_button.clicked.connect(self._toggle_recording)
         self.clear_button.clicked.connect(self.clear)
         layout = QHBoxLayout(self)
@@ -136,9 +135,4 @@ class HotkeyEdit(QWidget):
         super().hideEvent(event)
 
     def _set_error(self, message: str) -> None:
-        invalid = bool(message)
-        self.display.setProperty("invalid", invalid)
-        self.display.setToolTip(message)
-        self.display.setAccessibleDescription(message)
-        self.display.style().unpolish(self.display)
-        self.display.style().polish(self.display)
+        set_validation_state(self.display, message)

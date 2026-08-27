@@ -191,7 +191,7 @@ class MainWindow(QMainWindow):
         self._save_timer.timeout.connect(self._flush_config)
         self.setWindowTitle("Farm Merge Valet")
         self.setWindowIcon(_app_icon())
-        self.setMinimumSize(820, 560)
+        self.setMinimumSize(1000, 560)
         self.resize(1100, 740)
 
         root = QWidget()
@@ -292,12 +292,9 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
-            is QMessageBox.StandardButton.Yes
+            == QMessageBox.StandardButton.Yes
         ):
             self.controller.restart_browser()
-
-    def _refresh_browser(self) -> None:
-        self.controller.refresh_browser()
 
     def _confirm_reset(self, title: str, message: str) -> bool:
         return (
@@ -308,7 +305,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
-            is QMessageBox.StandardButton.Yes
+            == QMessageBox.StandardButton.Yes
         )
 
     def _reset_item_policies(self) -> None:
@@ -341,8 +338,16 @@ class MainWindow(QMainWindow):
         )
 
     def _reset_section(self, section: ConfigSection, title: str, message: str) -> None:
-        if self._confirm_reset(title, message):
-            self._replace_config(reset_config_section(self._draft, section))
+        if not self._confirm_reset(title, message):
+            return
+        if self._replace_config(reset_config_section(self._draft, section)):
+            headers = {
+                ConfigSection.ITEMS: self.items_page.configuration_header,
+                ConfigSection.SHOPS: self.shops_page.configuration_header,
+                ConfigSection.BROWSER: self.browser_page.configuration_header,
+                ConfigSection.SETTINGS: self.settings_page.configuration_header,
+            }
+            headers[section].mark_reset()
 
     def _reset_all_settings(self) -> None:
         if self._confirm_reset(
@@ -350,14 +355,17 @@ class MainWindow(QMainWindow):
             "Restore every Farm Merge Valet setting and remove all item, shop, and recipe "
             "overrides?",
         ):
-            self._replace_config(AppConfig())
+            if self._replace_config(AppConfig()):
+                self.settings_page.configuration_header.mark_reset()
 
-    def _replace_config(self, config: AppConfig, _page_names: set[str] | None = None) -> None:
+    def _replace_config(self, config: AppConfig) -> bool:
         self._save_timer.stop()
         try:
             self.controller.store.replace(config)
         except (OSError, ValueError) as exc:
             self._show_error(f"Could not reset settings: {exc}")
+            return False
+        return True
 
     def _queue_edit(self, edit: ConfigEdit) -> None:
         editor: ItemsPage | ShopsPage | BrowserPage | SettingsPage
@@ -492,9 +500,6 @@ class MainWindow(QMainWindow):
             )
             self.pause_action.setText(_menu_action_text(pause_label, self._draft.pause_hotkey))
             self.browser_page.set_runtime_active(active)
-
-    def _running_changed(self, _running: bool, _paused: bool) -> None:
-        self._status_changed(self.controller.status)
 
     def _append_log(self, timestamp: str, level: str, message: str, levelno: int) -> None:
         self.logs_page.append(timestamp, level, message, levelno)

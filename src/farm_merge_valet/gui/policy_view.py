@@ -10,11 +10,14 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QLabel,
-    QPushButton,
+    QLineEdit,
     QTableWidget,
     QTreeWidget,
+    QTreeWidgetItem,
     QWidget,
 )
+
+from farm_merge_valet.gui.widgets import secondary_button
 
 
 class PolicyCheckBox(QCheckBox):
@@ -75,10 +78,8 @@ class PolicyTreeExpansionControls(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        self.collapse_button = QPushButton("Collapse all")
-        self.expand_button = QPushButton("Expand all")
-        for button in (self.collapse_button, self.expand_button):
-            button.setProperty("secondary", True)
+        self.collapse_button = secondary_button("Collapse all")
+        self.expand_button = secondary_button("Expand all")
 
         self.collapse_button.setAccessibleName(f"Collapse all {scope}")
         self.expand_button.setAccessibleName(f"Expand all {scope}")
@@ -86,6 +87,29 @@ class PolicyTreeExpansionControls(QWidget):
         self.expand_button.clicked.connect(tree.expandAll)
         layout.addWidget(self.collapse_button)
         layout.addWidget(self.expand_button)
+
+
+class PolicyTreeToolbar(QWidget):
+    def __init__(
+        self,
+        tree: QTreeWidget,
+        *,
+        placeholder: str,
+        accessible_name: str,
+        scope: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText(placeholder)
+        self.search.setClearButtonEnabled(True)
+        self.search.setAccessibleName(accessible_name)
+        self.expansion_controls = PolicyTreeExpansionControls(tree, scope)
+        layout.addWidget(self.search, 1)
+        layout.addWidget(self.expansion_controls)
 
 
 def configure_policy_view(view: QAbstractItemView) -> None:
@@ -108,10 +132,20 @@ def configure_policy_toggle(control: QCheckBox) -> None:
     control.setMinimumSize(18, 18)
 
 
+def aggregate_check_state(values: list[bool]) -> Qt.CheckState:
+    return (
+        Qt.CheckState.Checked
+        if values and all(values)
+        else Qt.CheckState.Unchecked
+        if not values or not any(values)
+        else Qt.CheckState.PartiallyChecked
+    )
+
+
 def filter_policy_tree(tree: QTreeWidget, text: str) -> None:
     needle = text.casefold().strip()
 
-    def update_visibility(item, ancestor_matches: bool = False) -> bool:
+    def update_visibility(item: QTreeWidgetItem, ancestor_matches: bool = False) -> bool:
         own_matches = (
             needle in " ".join(item.text(column) for column in range(tree.columnCount())).casefold()
         )

@@ -59,7 +59,7 @@ class BulkToggleHeader(QHeaderView):
         if control is None:
             return size
         hint = control.sizeHint()
-        return QSize(max(size.width(), hint.width() + 36), max(size.height(), hint.height() + 12))
+        return QSize(max(size.width(), hint.width() + 24), max(size.height(), hint.height() + 12))
 
     def sizeHint(self) -> QSize:
         size = super().sizeHint()
@@ -77,9 +77,7 @@ class BulkToggleHeader(QHeaderView):
         super().showEvent(event)
         self._position_controls()
 
-    def paintSection(
-        self, painter: QPainter, rect: QRect, logical_index: int
-    ) -> None:
+    def paintSection(self, painter: QPainter, rect: QRect, logical_index: int) -> None:
         super().paintSection(painter, rect, logical_index)
         if logical_index != self.sortIndicatorSection():
             return
@@ -102,4 +100,4 @@ class BulkToggleHeader(QHeaderView):
     def _position_controls(self) -> None:
         for column, control in self._controls.items():
             left = self.sectionViewportPosition(column)
-            control.setGeometry(left + 12, 0, max(0, self.sectionSize(column) - 32), self.height())
+            control.setGeometry(left + 8, 0, max(0, self.sectionSize(column) - 22), self.height())

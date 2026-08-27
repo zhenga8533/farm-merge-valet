@@ -12,7 +12,6 @@ from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -22,6 +21,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLayout,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
@@ -50,9 +50,17 @@ from farm_merge_valet.gui.bulk_header import BulkToggleHeader
 from farm_merge_valet.gui.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.controller import ApplicationState, ApplicationStatus
 from farm_merge_valet.gui.hotkey_edit import HotkeyEdit
+from farm_merge_valet.gui.input_controls import (
+    FocusAwareComboBox,
+    FocusAwareDoubleSpinBox,
+    FocusAwareSlider,
+    FocusAwareSpinBox,
+    SettingsToggle,
+)
 from farm_merge_valet.gui.policy_view import (
     PolicyCheckBox,
-    PolicyTreeExpansionControls,
+    PolicyTreeToolbar,
+    aggregate_check_state,
     configure_policy_toggle,
     configure_policy_view,
     filter_policy_tree,
@@ -60,6 +68,7 @@ from farm_merge_valet.gui.policy_view import (
     policy_cell,
     policy_unavailable,
 )
+from farm_merge_valet.gui.widgets import secondary_button, set_validation_state
 
 logger = logging.getLogger(__name__)
 
@@ -120,12 +129,6 @@ class ConfigEdit:
     source: str = "settings"
 
 
-def secondary_button(text: str) -> QPushButton:
-    button = QPushButton(text)
-    button.setProperty("secondary", True)
-    return button
-
-
 def _settings_section(title: str) -> tuple[QGroupBox, QFormLayout]:
     section = QGroupBox(title)
     section.setMaximumWidth(900)
@@ -139,6 +142,7 @@ def _settings_section(title: str) -> tuple[QGroupBox, QFormLayout]:
 class AppPage(QWidget):
     def __init__(self, title: str, subtitle: str = "") -> None:
         super().__init__()
+        self.setObjectName("appPage")
         self.page_layout = QVBoxLayout(self)
         self.page_layout.setContentsMargins(20, 18, 20, 20)
         self.page_layout.setSpacing(12)
@@ -150,6 +154,62 @@ class AppPage(QWidget):
             description.setObjectName("pageSubtitle")
             description.setWordWrap(True)
             self.page_layout.addWidget(description)
+
+
+class _ConfigFormPage(AppPage):
+    def __init__(
+        self,
+        title: str,
+        subtitle: str,
+        config: AppConfig,
+        *,
+        form_label_width: int = 210,
+    ) -> None:
+        super().__init__(title, subtitle)
+        self._config = config
+        self._form_label_width = form_label_width
+        self.controls: dict[str, QWidget] = {}
+
+    def _request(self, field: str, value: object) -> None:
+        raise NotImplementedError
+
+    def _add_form_row(
+        self,
+        form: QFormLayout,
+        text: str,
+        field: QWidget | QLayout,
+    ) -> None:
+        label = QLabel(text)
+        label.setFixedWidth(self._form_label_width)
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        if isinstance(field, QWidget):
+            label.setBuddy(field)
+        form.addRow(label, field)
+
+    def _add_toggle(self, form: QFormLayout, label: str, field: str) -> None:
+        control = SettingsToggle()
+        control.setChecked(bool(getattr(self._config, field)))
+        control.setAccessibleName(label)
+        control.toggled.connect(lambda value, name=field: self._request(name, value))
+        self.controls[field] = control
+        self._add_form_row(form, label, control)
+
+    def _add_int(
+        self,
+        form: QFormLayout,
+        label: str,
+        field: str,
+        minimum: int,
+        maximum: int,
+    ) -> None:
+        control = FocusAwareSpinBox()
+        control.setRange(minimum, maximum)
+        control.setValue(getattr(self._config, field))
+        control.setAccessibleName(label)
+        control.valueChanged.connect(lambda value, name=field: self._request(name, value))
+        self.controls[field] = control
+        self._add_form_row(form, label, control)
 
 
 class DashboardPage(AppPage):
@@ -263,10 +323,6 @@ class ItemsPage(AppPage):
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
 
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Search item families and tiers…")
-        self.search.setClearButtonEnabled(True)
-        self.search.setAccessibleName("Search item families and tiers")
         self.table = QTreeWidget()
         self.table.setColumnCount(7)
         self.table.setHeaderLabels(("Item / tier", "Category", "", "", "", "", ""))
@@ -274,7 +330,7 @@ class ItemsPage(AppPage):
             {
                 2: "Enabled",
                 3: "Merge",
-                4: "Merge five",
+                4: "Merge 5",
                 5: "Claim",
                 6: "Remove",
             },
@@ -283,10 +339,10 @@ class ItemsPage(AppPage):
         self.bulk_header.toggled.connect(self._set_all)
         self.table.setHeader(self.bulk_header)
         self.table.setIconSize(_ITEM_ICON_SIZE)
-        self.bulk_header.setMinimumSectionSize(88)
+        self.bulk_header.setMinimumSectionSize(72)
         self.bulk_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.bulk_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-        self.bulk_header.resizeSection(1, 150)
+        self.bulk_header.resizeSection(1, 116)
         for column in range(2, 7):
             self.bulk_header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         configure_policy_view(self.table)
@@ -296,13 +352,14 @@ class ItemsPage(AppPage):
         self._apply_sort_preference()
         self.table.setAccessibleName("Item automation policies")
 
-        toolbar = QWidget()
-        toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(8)
-        toolbar_layout.addWidget(self.search, 1)
-        self.expansion_controls = PolicyTreeExpansionControls(self.table, "item groups")
-        toolbar_layout.addWidget(self.expansion_controls)
+        toolbar = PolicyTreeToolbar(
+            self.table,
+            placeholder="Search item families and tiers…",
+            accessible_name="Search item families and tiers",
+            scope="item groups",
+        )
+        self.search = toolbar.search
+        self.expansion_controls = toolbar.expansion_controls
         self.page_layout.addWidget(toolbar)
         self.page_layout.addWidget(self.table, 1)
         self.search.textChanged.connect(self._filter)
@@ -590,7 +647,7 @@ class ItemsPage(AppPage):
                 getattr(self._config.item_policy(definition.policy_key), field)
                 for definition in applicable
             ]
-            state = self._check_state(values)
+            state = aggregate_check_state(values)
             control = self._policy_checkbox(
                 state,
                 f"{label}: {field.replace('_', ' ')} for all tiers",
@@ -612,7 +669,7 @@ class ItemsPage(AppPage):
                 getattr(self._config.item_policy(definition.policy_key), field)
                 for definition in definitions
             ]
-            state = self._check_state(values)
+            state = aggregate_check_state(values)
             control.blockSignals(True)
             control.setCheckState(state)
             control.blockSignals(False)
@@ -647,16 +704,6 @@ class ItemsPage(AppPage):
             5: "claim",
             6: "always_remove",
         }
-
-    @staticmethod
-    def _check_state(values: list[bool]) -> Qt.CheckState:
-        return (
-            Qt.CheckState.Checked
-            if values and all(values)
-            else Qt.CheckState.Unchecked
-            if not values or not any(values)
-            else Qt.CheckState.PartiallyChecked
-        )
 
     def _show_empty(self, message: str) -> None:
         item = QTreeWidgetItem((message, "", "", "", "", "", ""))
@@ -735,7 +782,7 @@ class ItemsPage(AppPage):
                 for definition in self._row_definitions
                 if definition.supports(field)
             ]
-            state = self._check_state(values)
+            state = aggregate_check_state(values)
             self.bulk_header.set_state(column, state, enabled=bool(values))
 
 
@@ -750,10 +797,6 @@ class ShopsPage(AppPage):
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Search shops and recipes…")
-        self.search.setClearButtonEnabled(True)
-        self.search.setAccessibleName("Search shops and recipes")
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(("Shop / recipe", "Type", ""))
         self.bulk_header = BulkToggleHeader({2: "Enabled"}, self.tree)
@@ -773,13 +816,14 @@ class ShopsPage(AppPage):
         self._apply_sort_preference()
         self.tree.setAccessibleName("Shop and recipe policies")
 
-        toolbar = QWidget()
-        toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        toolbar_layout.setSpacing(8)
-        toolbar_layout.addWidget(self.search, 1)
-        self.expansion_controls = PolicyTreeExpansionControls(self.tree, "shop and recipe groups")
-        toolbar_layout.addWidget(self.expansion_controls)
+        toolbar = PolicyTreeToolbar(
+            self.tree,
+            placeholder="Search shops and recipes…",
+            accessible_name="Search shops and recipes",
+            scope="shop and recipe groups",
+        )
+        self.search = toolbar.search
+        self.expansion_controls = toolbar.expansion_controls
         self.page_layout.addWidget(toolbar)
         self.page_layout.addWidget(self.tree, 1)
         self.search.textChanged.connect(self._filter)
@@ -996,17 +1040,11 @@ class ShopsPage(AppPage):
             else self._config.recipe_overrides.get(key, self._config.recipe_default_enabled)
             for kind, key in self._catalog_keys
         ]
-        state = (
-            Qt.CheckState.Checked
-            if values and all(values)
-            else Qt.CheckState.Unchecked
-            if not values or not any(values)
-            else Qt.CheckState.PartiallyChecked
-        )
+        state = aggregate_check_state(values)
         self.bulk_header.set_state(2, state, enabled=bool(values))
 
 
-class BrowserPage(AppPage):
+class BrowserPage(_ConfigFormPage):
     config_edited = Signal(object)
     refresh_requested = Signal()
     restart_requested = Signal()
@@ -1016,9 +1054,8 @@ class BrowserPage(AppPage):
         super().__init__(
             "Managed browser",
             "Manage the dedicated browser, game connection, and local asset cache.",
+            config,
         )
-        self._config = config
-        self.controls: dict[str, QWidget] = {}
         self.configuration_header = ConfigurationHeader("Reset browser configuration")
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
@@ -1036,16 +1073,28 @@ class BrowserPage(AppPage):
         managed, form = _settings_section("Managed browser")
         self.status_label = QLabel("Not checked")
         self.status_label.setWordWrap(True)
-        self.browser_choice = QComboBox()
-        self.browser_choice.addItems(("auto", "chrome", "edge", "brave", "chromium"))
-        self.browser_choice.setCurrentText(config.browser)
-        self.browser_choice.currentTextChanged.connect(
-            lambda value: self._request("browser", value)
+        self.status_label.setAccessibleName("Managed browser status")
+        self.browser_choice = FocusAwareComboBox()
+        self.browser_choice.set_choices(
+            (
+                ("Auto-detect", "auto"),
+                ("Google Chrome", "chrome"),
+                ("Microsoft Edge", "edge"),
+                ("Brave", "brave"),
+                ("Chromium", "chromium"),
+            )
+        )
+        self.browser_choice.set_current_value(config.browser)
+        self.browser_choice.setAccessibleName("Preferred browser")
+        self.browser_choice.currentIndexChanged.connect(
+            lambda _index: self._request(
+                "browser", str(self.browser_choice.current_value())
+            )
         )
         self.controls["browser"] = self.browser_choice
-        form.addRow("Status", self.status_label)
-        form.addRow("Preferred browser", self.browser_choice)
-        self._add_checkbox(form, "Launch managed browser when needed", "browser_auto_launch")
+        self._add_form_row(form, "Status", self.status_label)
+        self._add_form_row(form, "Preferred browser", self.browser_choice)
+        self._add_toggle(form, "Launch automatically when needed", "browser_auto_launch")
         self._add_path(form, "Browser executable", "browser_executable")
         self._add_path(form, "Browser profile directory", "browser_profile_dir")
         buttons = QHBoxLayout()
@@ -1056,7 +1105,7 @@ class BrowserPage(AppPage):
         buttons.addWidget(self.refresh_button)
         buttons.addWidget(self.restart_button)
         buttons.addStretch()
-        form.addRow("Actions", buttons)
+        self._add_form_row(form, "Actions", buttons)
         sections.addWidget(managed)
 
         connection, form = _settings_section("Game connection")
@@ -1080,41 +1129,21 @@ class BrowserPage(AppPage):
 
     def _add_text(self, form: QFormLayout, label: str, field: str) -> None:
         control = QLineEdit(str(getattr(self._config, field)))
+        control.setAccessibleName(label)
         control.editingFinished.connect(
             lambda widget=control, name=field: self._request(name, widget.text().strip())
         )
         self.controls[field] = control
-        form.addRow(label, control)
-
-    def _add_checkbox(self, form: QFormLayout, label: str, field: str) -> None:
-        control = QCheckBox()
-        control.setChecked(bool(getattr(self._config, field)))
-        control.setAccessibleName(label)
-        control.toggled.connect(lambda value, name=field: self._request(name, value))
-        self.controls[field] = control
-        form.addRow(label, control)
-
-    def _add_int(
-        self,
-        form: QFormLayout,
-        label: str,
-        field: str,
-        minimum: int,
-        maximum: int,
-    ) -> None:
-        control = QSpinBox()
-        control.setRange(minimum, maximum)
-        control.setValue(getattr(self._config, field))
-        control.valueChanged.connect(lambda value, name=field: self._request(name, value))
-        self.controls[field] = control
-        form.addRow(label, control)
+        self._add_form_row(form, label, control)
 
     def _add_path(
         self, form: QFormLayout, label: str, field: str, *, optional: bool = True
     ) -> None:
         value = getattr(self._config, field)
         control = QLineEdit(str(value) if value is not None else "")
+        control.setAccessibleName(label)
         browse = secondary_button("Browse…")
+        browse.setAccessibleName(f"Choose {label.lower()}")
         row = QWidget()
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1138,15 +1167,15 @@ class BrowserPage(AppPage):
         control.editingFinished.connect(update)
         browse.clicked.connect(choose)
         self.controls[field] = control
-        form.addRow(label, row)
+        self._add_form_row(form, label, row)
 
     def apply_config(self, config: AppConfig) -> None:
         self._config = config
         for field, control in self.controls.items():
             control.blockSignals(True)
             value = getattr(config, field)
-            if isinstance(control, QComboBox):
-                control.setCurrentText(str(value))
+            if isinstance(control, FocusAwareComboBox):
+                control.set_current_value(value)
             elif isinstance(control, QCheckBox):
                 control.setChecked(bool(value))
             elif isinstance(control, QSpinBox):
@@ -1159,7 +1188,7 @@ class BrowserPage(AppPage):
     def mark_saving(self, field: str | None = None) -> None:
         self.configuration_header.mark_saving()
         if field is not None and field in self.controls:
-            self._set_invalid(self.controls[field], False, "")
+            set_validation_state(self.controls[field])
 
     def show_validation_error(self, field: str | None, message: str, config: AppConfig) -> None:
         self.configuration_header.mark_error(f"Invalid: {message}")
@@ -1168,16 +1197,8 @@ class BrowserPage(AppPage):
         self.apply_config(config)
         self.configuration_header.mark_error(f"Invalid: {message}")
         control = self.controls[field]
-        self._set_invalid(control, True, message)
+        set_validation_state(control, message)
         control.setFocus()
-
-    @staticmethod
-    def _set_invalid(control: QWidget, invalid: bool, message: str) -> None:
-        control.setProperty("invalid", invalid)
-        control.setToolTip(message)
-        control.setAccessibleDescription(message)
-        control.style().unpolish(control)
-        control.style().polish(control)
 
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
@@ -1189,22 +1210,21 @@ class BrowserPage(AppPage):
         self.restart_button.setEnabled(not active and not self._busy)
 
 
-class SettingsPage(AppPage):
+class SettingsPage(_ConfigFormPage):
     config_edited = Signal(object)
     reset_requested = Signal()
     reset_all_requested = Signal()
     hotkey_recording_changed = Signal(bool)
 
     def __init__(self, config: AppConfig) -> None:
-        super().__init__("Settings", "Changes validate and autosave automatically.")
-        self._config = config
-        self.controls: dict[str, QWidget] = {}
+        super().__init__("Settings", "Changes validate and autosave automatically.", config)
         self.opacity_labels: dict[str, QLabel] = {}
         self.configuration_header = ConfigurationHeader("Reset settings")
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
-        reset_all = self.configuration_header.add_action("Reset everything")
-        reset_all.clicked.connect(self.reset_all_requested)
+        reset_all = self.configuration_header.add_action("Reset all")
+        reset_all.clicked.connect(lambda _checked=False: self.reset_all_requested.emit())
+        self.reset_all_button = reset_all
         self.page_layout.addWidget(self.configuration_header)
 
         scroll = QScrollArea()
@@ -1219,12 +1239,12 @@ class SettingsPage(AppPage):
         automation, form = _settings_section("Automation")
         self._add_int(form, "Reserved empty cells", "merge_empty_cell_reserve", 0, 50)
         self._add_int(form, "Producer claim open cells", "producer_claim_min_empty_cells", 1, 50)
-        self._add_float(form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600)
-        self._add_float(form, "Loop interval (seconds)", "loop_interval", 0.1, 60)
-        self._add_float(form, "Item delay minimum", "item_action_delay_min", 0, 60)
-        self._add_float(form, "Item delay maximum", "item_action_delay_max", 0, 60)
-        self._add_float(form, "Crate delay minimum", "crate_delay_min", 0, 5)
-        self._add_float(form, "Crate delay maximum", "crate_delay_max", 0, 5)
+        self._add_float(form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)
+        self._add_float(form, "Loop interval (seconds)", "loop_interval", 0.01, 60, 0.1)
+        self._add_float(form, "Item delay minimum", "item_action_delay_min", 0, 60, 0.1)
+        self._add_float(form, "Item delay maximum", "item_action_delay_max", 0, 60, 0.1)
+        self._add_float(form, "Crate delay minimum", "crate_delay_min", 0, 5, 0.05)
+        self._add_float(form, "Crate delay maximum", "crate_delay_max", 0, 5, 0.05)
         sections.addWidget(automation)
 
         controls, form = _settings_section("Controls and startup")
@@ -1237,37 +1257,43 @@ class SettingsPage(AppPage):
             ("bot_autostart", "Start bot with application"),
             ("close_to_tray", "Close window to tray"),
         ):
-            self._add_checkbox(form, label, field)
+            self._add_toggle(form, label, field)
         sections.addWidget(controls)
 
         notifications, form = _settings_section("Notifications")
         webhook = QLineEdit()
         webhook.setEchoMode(QLineEdit.EchoMode.Password)
         webhook.setPlaceholderText("Optional Discord webhook URL")
+        webhook.setAccessibleName("Discord webhook")
         if config.discord_webhook_url:
             webhook.setText(config.discord_webhook_url.get_secret_value())
         webhook.editingFinished.connect(
             lambda: self._request("discord_webhook_url", webhook.text().strip() or None)
         )
         self.controls["discord_webhook_url"] = webhook
-        form.addRow("Discord webhook", webhook)
-        self._add_float(form, "Webhook status interval", "webhook_status_interval", 0, 3600)
-        self._add_float(form, "Webhook summary interval", "webhook_summary_interval", 60, 86400)
+        self._add_form_row(form, "Discord webhook", webhook)
+        self._add_float(form, "Webhook status interval", "webhook_status_interval", 0, 3600, 1)
+        self._add_float(form, "Webhook summary interval", "webhook_summary_interval", 60, 86400, 1)
         sections.addWidget(notifications)
 
         appearance, form = _settings_section("Appearance")
-        theme = QComboBox()
-        theme.addItems(("system", "dark", "light"))
-        theme.setCurrentText(config.theme)
-        theme.currentTextChanged.connect(lambda value: self._request("theme", value))
+        theme = FocusAwareComboBox()
+        theme.set_choices(
+            (("System default", "system"), ("Dark", "dark"), ("Light", "light"))
+        )
+        theme.set_current_value(config.theme)
+        theme.setAccessibleName("Theme")
+        theme.currentIndexChanged.connect(
+            lambda _index: self._request("theme", str(theme.current_value()))
+        )
         self.controls["theme"] = theme
-        form.addRow("Theme", theme)
+        self._add_form_row(form, "Theme", theme)
         for field, label in (
             ("main_always_on_top", "Dashboard always on top"),
             ("overlay_always_on_top", "Overlay always on top"),
             ("overlay_click_through", "Overlay click-through while inactive"),
         ):
-            self._add_checkbox(form, label, field)
+            self._add_toggle(form, label, field)
         self._add_opacity(form, "Dashboard inactive opacity", "main_unfocused_opacity")
         self._add_opacity(form, "Dashboard focused opacity", "main_focused_opacity")
         self._add_opacity(form, "Overlay inactive opacity", "overlay_unfocused_opacity")
@@ -1280,47 +1306,25 @@ class SettingsPage(AppPage):
     def _request(self, field: str, value: object) -> None:
         self.config_edited.emit(ConfigEdit({field: value}, field))
 
-    def _add_checkbox(self, form: QFormLayout, label: str, field: str) -> None:
-        control = QCheckBox()
-        control.setChecked(bool(getattr(self._config, field)))
-        control.setAccessibleName(label)
-        control.toggled.connect(lambda value, name=field: self._request(name, value))
-        self.controls[field] = control
-        form.addRow(label, control)
-
-    def _add_int(
+    def _add_float(
         self,
         form: QFormLayout,
         label: str,
         field: str,
-        minimum: int,
-        maximum: int,
+        minimum: float,
+        maximum: float,
+        step: float,
     ) -> None:
-        control = QSpinBox()
-        control.setRange(minimum, maximum)
-        control.setValue(getattr(self._config, field))
-        control.valueChanged.connect(lambda value, name=field: self._request(name, value))
-        self.controls[field] = control
-        form.addRow(label, control)
-
-    def _add_float(
-        self, form: QFormLayout, label: str, field: str, minimum: float, maximum: float
-    ) -> None:
-        control = QDoubleSpinBox()
+        control = FocusAwareDoubleSpinBox()
         control.setRange(minimum, maximum)
         control.setDecimals(2)
+        control.setSingleStep(step)
+        control.setKeyboardTracking(False)
         control.setValue(getattr(self._config, field))
+        control.setAccessibleName(label)
         control.valueChanged.connect(lambda value, name=field: self._request(name, value))
         self.controls[field] = control
-        form.addRow(label, control)
-
-    def _add_text(self, form: QFormLayout, label: str, field: str) -> None:
-        control = QLineEdit(str(getattr(self._config, field)))
-        control.editingFinished.connect(
-            lambda widget=control, name=field: self._request(name, widget.text().strip())
-        )
-        self.controls[field] = control
-        form.addRow(label, control)
+        self._add_form_row(form, label, control)
 
     def _add_hotkey(self, form: QFormLayout, label: str, field: str) -> None:
         value = getattr(self._config, field)
@@ -1328,14 +1332,16 @@ class SettingsPage(AppPage):
         control.value_changed.connect(lambda hotkey, name=field: self._request(name, hotkey))
         control.recording_changed.connect(self.hotkey_recording_changed)
         self.controls[field] = control
-        form.addRow(label, control)
+        self._add_form_row(form, label, control)
 
     def _add_opacity(self, form: QFormLayout, label: str, field: str) -> None:
-        control = QSlider(Qt.Orientation.Horizontal)
+        control = FocusAwareSlider(Qt.Orientation.Horizontal)
         control.setRange(25, 100)
         control.setValue(round(getattr(self._config, field) * 100))
+        control.setAccessibleName(label)
         value_label = QLabel(f"{control.value()}%")
         value_label.setMinimumWidth(42)
+        value_label.setAccessibleName(f"{label} value")
         row = QWidget()
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1349,7 +1355,7 @@ class SettingsPage(AppPage):
         control.valueChanged.connect(update)
         self.controls[field] = control
         self.opacity_labels[field] = value_label
-        form.addRow(label, row)
+        self._add_form_row(form, label, row)
 
     def show_validation_error(self, field: str | None, message: str, config: AppConfig) -> None:
         self.configuration_header.mark_error(f"Invalid: {message}")
@@ -1361,11 +1367,7 @@ class SettingsPage(AppPage):
             control.show_error(message)
             control.setFocus()
             return
-        control.setProperty("invalid", True)
-        control.setToolTip(message)
-        control.setAccessibleDescription(message)
-        control.style().unpolish(control)
-        control.style().polish(control)
+        set_validation_state(control, message)
         control.setFocus()
 
     def mark_saving(self, field: str | None = None) -> None:
@@ -1374,11 +1376,8 @@ class SettingsPage(AppPage):
             control = self.controls[field]
             if isinstance(control, HotkeyEdit):
                 control.show_error("")
-            control.setProperty("invalid", False)
-            control.setToolTip("")
-            control.setAccessibleDescription("")
-            control.style().unpolish(control)
-            control.style().polish(control)
+            else:
+                set_validation_state(control)
 
     def apply_config(self, config: AppConfig) -> None:
         self._config = config
@@ -1392,14 +1391,16 @@ class SettingsPage(AppPage):
             control.set_value(value if isinstance(value, str) else None)
         elif isinstance(control, QCheckBox):
             control.setChecked(bool(value))
-        elif isinstance(control, (QSpinBox, QDoubleSpinBox)):
-            control.setValue(value)  # type: ignore[arg-type]
+        elif isinstance(control, QSpinBox):
+            control.setValue(int(str(value)))
+        elif isinstance(control, QDoubleSpinBox):
+            control.setValue(float(str(value)))
         elif isinstance(control, QSlider):
             percent = round(float(str(value)) * 100)
             control.setValue(percent)
             self.opacity_labels[field].setText(f"{percent}%")
-        elif isinstance(control, QComboBox):
-            control.setCurrentText(str(value))
+        elif isinstance(control, FocusAwareComboBox):
+            control.set_current_value(value)
         elif isinstance(control, QLineEdit):
             if field == "discord_webhook_url" and isinstance(value, SecretStr):
                 value = value.get_secret_value()
@@ -1413,10 +1414,15 @@ class LogsPage(AppPage):
     def __init__(self, log_level: str) -> None:
         super().__init__("Logs", "Structured application events from the shared logging pipeline.")
         toolbar = QHBoxLayout()
-        self.filter = QComboBox()
-        self.filter.addItems(("DEBUG", "INFO", "WARNING", "ERROR"))
-        self.filter.setCurrentText(log_level)
-        self.filter.currentTextChanged.connect(self.log_level_changed)
+        self.filter = FocusAwareComboBox()
+        self.filter.set_choices(
+            (("Debug", "DEBUG"), ("Info", "INFO"), ("Warning", "WARNING"), ("Error", "ERROR"))
+        )
+        self.filter.set_current_value(log_level)
+        self.filter.setAccessibleName("Minimum log level")
+        self.filter.currentIndexChanged.connect(
+            lambda _index: self.log_level_changed.emit(str(self.filter.current_value()))
+        )
         clear = secondary_button("Clear")
         clear.clicked.connect(self.clear)
         toolbar.addWidget(QLabel("Minimum level"))
@@ -1432,7 +1438,7 @@ class LogsPage(AppPage):
         self.page_layout.addWidget(self.view, 1)
 
     def append(self, timestamp: str, level: str, message: str, levelno: int) -> None:
-        minimum = getattr(logging, self.filter.currentText(), logging.INFO)
+        minimum = getattr(logging, str(self.filter.current_value()), logging.INFO)
         if levelno >= minimum:
             self.view.appendPlainText(f"[{timestamp}] {level:<8} {message}")
 

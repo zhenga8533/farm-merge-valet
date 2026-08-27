@@ -7,9 +7,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QDoubleSpinBox,
     QGroupBox,
     QLabel,
     QPushButton,
@@ -212,6 +214,7 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     window = MainWindow(ApplicationController(store))
     settings_page = window.pages.widget(window._NAVIGATION.index("Settings"))
     assert settings_page is not None
+    assert window.minimumWidth() == 1000
 
     section_titles = {group.title() for group in settings_page.findChildren(QGroupBox)}
     labels = {label.text() for label in settings_page.findChildren(QLabel)}
@@ -223,7 +226,17 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         "Appearance",
     }
     assert "Start automation paused" in labels
+    assert "Reset all" in {
+        button.text() for button in window.settings_page.findChildren(QPushButton)
+    }
     assert all("_" not in title and "&" not in title for title in section_titles)
+    for control in window.settings_page.controls.values():
+        accessible = (
+            control.display.accessibleName()
+            if isinstance(control, HotkeyEdit)
+            else control.accessibleName()
+        )
+        assert accessible
 
     window.quit_application()
     app.processEvents()
@@ -254,6 +267,7 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
     assert "Browser and assets" not in {
         group.title() for group in settings_page.findChildren(QGroupBox)
     }
+    assert all(control.accessibleName() for control in window.browser_page.controls.values())
 
     window.browser_page._request("cdp_port", 9333)
     window._flush_config()
@@ -383,6 +397,7 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
 
 def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr("farm_merge_valet.config.user_cache_root", lambda: tmp_path / "cache")
     store = ConfigStore(tmp_path / "config.json")
     store.replace(
         AppConfig(
@@ -400,38 +415,50 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
     window = MainWindow(ApplicationController(store))
     monkeypatch.setattr(window, "_confirm_reset", lambda *_args: True)
 
-    window._reset_item_policies()
+    window.items_page.configuration_header.reset_button.click()
     after_items = ConfigStore(store.path).load()
     assert after_items.item_policy_defaults == AppConfig().item_policy_defaults
     assert after_items.item_category_defaults == AppConfig().item_category_defaults
     assert after_items.item_policy_overrides == {}
     assert not after_items.shop_default_enabled
     assert after_items.theme == "dark"
+    assert window.items_page.saved_label.text() == "Defaults restored"
+    assert window.items_page.saved_label.property("status") == "success"
 
-    window._reset_shop_policies()
+    window.shops_page.configuration_header.reset_button.click()
     after_shops = ConfigStore(store.path).load()
     assert after_shops.shop_default_enabled
     assert after_shops.recipe_default_enabled
     assert after_shops.shop_overrides == {}
     assert after_shops.theme == "dark"
+    assert window.shops_page.saved_label.text() == "Defaults restored"
+    assert window.shops_page.saved_label.property("status") == "success"
 
-    window._reset_general_settings()
+    window.settings_page.configuration_header.reset_button.click()
     after_settings = ConfigStore(store.path).load()
     assert after_settings.theme == AppConfig().theme
     assert after_settings.item_category_defaults == AppConfig().item_category_defaults
     assert after_settings.shop_default_enabled
     assert after_settings.browser == "edge"
     assert after_settings.cdp_port == 9333
+    assert window.settings_page.saved_label.text() == "Defaults restored"
+    assert window.settings_page.saved_label.property("status") == "success"
 
     window._queue_config(theme="dark")
     window._flush_config()
-    window._reset_browser_configuration()
+    window.browser_page.configuration_header.reset_button.click()
     after_browser = ConfigStore(store.path).load()
     assert after_browser.browser == AppConfig().browser
     assert after_browser.cdp_port == AppConfig().cdp_port
     assert after_browser.theme == "dark"
     assert after_browser.item_category_defaults == AppConfig().item_category_defaults
     assert after_browser.shop_default_enabled
+    assert window.browser_page.saved_label.text() == "Defaults restored"
+    assert window.browser_page.saved_label.property("status") == "success"
+
+    window.settings_page.reset_all_button.click()
+    assert ConfigStore(store.path).load() == AppConfig()
+    assert window.settings_page.saved_label.text() == "Defaults restored"
 
     window.quit_application()
     app.processEvents()
@@ -614,6 +641,26 @@ def test_invalid_coupled_setting_reverts_the_edited_control(tmp_path) -> None:
     assert minimum.value() == AppConfig().item_action_delay_min
     assert minimum.property("invalid") is True
     assert window.saved_label.text().startswith("Invalid:")
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_decimal_setting_accepts_fractional_keyboard_input(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    control = window.settings_page.controls["loop_interval"]
+    assert isinstance(control, QDoubleSpinBox)
+
+    control.lineEdit().selectAll()
+    QTest.keyClicks(control.lineEdit(), "0.25")
+    QTest.keyClick(control.lineEdit(), Qt.Key.Key_Return)
+    window._flush_config()
+
+    assert control.value() == 0.25
+    assert ConfigStore(store.path).load().loop_interval == 0.25
 
     window.quit_application()
     app.processEvents()

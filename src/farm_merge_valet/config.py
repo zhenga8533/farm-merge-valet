@@ -83,8 +83,8 @@ class AppConfig(BaseModel):
     catalog_dir: Path = Field(default_factory=lambda: user_cache_root() / "catalog")
     atlas_cache_dir: Path = Field(default_factory=lambda: user_cache_root() / "atlases")
 
-    merge_empty_cell_reserve: int = Field(default=1, ge=0)
-    producer_claim_min_empty_cells: int = Field(default=4, ge=1)
+    merge_empty_cell_reserve: int = Field(default=1, ge=0, le=50)
+    producer_claim_min_empty_cells: int = Field(default=4, ge=1, le=50)
     prefer_merge_five: bool = True
     item_policy_defaults: ItemPolicy = Field(default_factory=ItemPolicy)
     item_category_defaults: dict[str, ItemPolicyOverride] = Field(
@@ -105,7 +105,7 @@ class AppConfig(BaseModel):
     shops_sort_column: Literal["item", "type", "enabled"] = "item"
     shops_sort_descending: bool = False
 
-    loop_interval: float = Field(default=1.0, gt=0.0)
+    loop_interval: float = Field(default=1.0, ge=0.01, le=60.0)
     idle_wait_seconds: float = Field(default=30.0, ge=0.0, le=3600.0)
     item_action_delay_min: float = Field(default=1.5, ge=0.0, le=60.0)
     item_action_delay_max: float = Field(default=3.5, ge=0.0, le=60.0)

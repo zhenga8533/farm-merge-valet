@@ -11,8 +11,11 @@ from farm_merge_valet.config import AppConfig, ConfigStore, Settings
     [
         ("cdp_port", 0),
         ("merge_empty_cell_reserve", -1),
+        ("merge_empty_cell_reserve", 51),
         ("producer_claim_min_empty_cells", 0),
+        ("producer_claim_min_empty_cells", 51),
         ("loop_interval", 0),
+        ("loop_interval", 60.1),
         ("idle_wait_seconds", -0.1),
         ("crate_delay_max", 5.1),
         ("webhook_summary_interval", 59),

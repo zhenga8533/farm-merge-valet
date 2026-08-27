@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtGui import QPalette
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 
@@ -109,8 +109,9 @@ QAbstractScrollArea::corner {{ background: transparent; border: none; }}
 
 def _stylesheet(colors: _Colors) -> str:
     return f"""
-QWidget {{ background: {colors.surface_subtle}; color: {colors.text}; font-size: 13px; }}
+QWidget {{ color: {colors.text}; font-size: 13px; }}
 QMainWindow, QDialog {{ background: {colors.window}; }}
+QWidget#appPage {{ background: {colors.surface_subtle}; }}
 QLabel#pageTitle {{ font-size: 22px; font-weight: 600; }}
 QLabel#pageSubtitle, QLabel#metricLabel {{ color: {colors.muted}; }}
 QLabel#metricValue, QLabel#overlayStatus {{ font-size: 16px; font-weight: 600; }}
@@ -121,6 +122,8 @@ QFrame#metricCard {{ min-height: 62px; }}
 QGroupBox {{ border: 1px solid {colors.border}; border-radius: 8px; margin-top: 10px; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 5px; font-weight: 600; }}
 QLabel#saveStatus {{ color: {colors.muted}; font-weight: 600; }}
+QLabel#saveStatus[status="success"] {{ color: {colors.primary}; }}
+QLabel#saveStatus[status="error"] {{ color: {colors.danger}; }}
 QPushButton {{
     background: {colors.primary}; color: white; border: 1px solid {colors.primary};
     border-radius: 6px; padding: 7px 14px; font-weight: 600;
@@ -138,26 +141,61 @@ QPushButton[secondary="true"] {{
 }}
 QPushButton[secondary="true"]:hover {{ background: {colors.surface_subtle}; }}
 QPushButton[shortcutButton="true"] {{ padding: 0; }}
-QPushButton QLabel#actionButtonLabel {{
+QPushButton QLabel#actionButtonLabel:enabled {{
     background: transparent; color: white; font-weight: 600;
 }}
-QPushButton[secondary="true"] QLabel#actionButtonLabel {{ color: {colors.text}; }}
-QPushButton QLabel#shortcutKeycap {{
+QPushButton[secondary="true"] QLabel#actionButtonLabel:enabled {{ color: {colors.text}; }}
+QPushButton QLabel#shortcutKeycap:enabled {{
     background: rgba(255, 255, 255, 38); color: white;
     border: 1px solid rgba(255, 255, 255, 90); border-radius: 4px;
     padding: 1px 5px; font-family: "Cascadia Mono", Consolas, monospace;
     font-size: 11px; font-weight: 600;
 }}
-QPushButton[secondary="true"] QLabel#shortcutKeycap {{
+QPushButton[secondary="true"] QLabel#shortcutKeycap:enabled {{
     background: {colors.surface_subtle}; color: {colors.muted}; border-color: {colors.border};
 }}
-QPushButton:disabled QLabel#actionButtonLabel,
-QPushButton:disabled QLabel#shortcutKeycap {{ color: {colors.disabled_text}; }}
-QPushButton:disabled QLabel#shortcutKeycap {{
+QPushButton QLabel#actionButtonLabel:disabled,
+QPushButton QLabel#shortcutKeycap:disabled {{ color: {colors.disabled_text}; }}
+QPushButton QLabel#shortcutKeycap:disabled {{
     background: transparent; border-color: {colors.disabled_text};
 }}
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
     background: {colors.input}; border: 1px solid {colors.border}; border-radius: 6px; padding: 6px;
+}}
+QComboBox {{ padding-right: 38px; }}
+QComboBox::drop-down {{
+    subcontrol-origin: border; subcontrol-position: top right;
+    width: 32px; background: transparent; border: none;
+    border-left: 1px solid {colors.border}; border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
+}}
+QComboBox::drop-down:hover {{ background: {colors.surface_subtle}; }}
+QComboBox::down-arrow {{ image: none; width: 0; height: 0; }}
+QComboBox QAbstractItemView {{
+    background: {colors.input}; color: {colors.text}; border: 1px solid {colors.border};
+    selection-background-color: {colors.selected}; selection-color: white;
+    outline: none; padding: 4px;
+}}
+QSpinBox, QDoubleSpinBox {{ padding-right: 30px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-origin: border; subcontrol-position: top right;
+    width: 24px; background: transparent;
+    border: none; border-left: 1px solid {colors.border};
+    border-bottom: 1px solid {colors.border}; border-top-right-radius: 5px;
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border; subcontrol-position: bottom right;
+    width: 24px; background: transparent;
+    border: none; border-left: 1px solid {colors.border};
+    border-bottom-right-radius: 5px;
+}}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover,
+QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {{
+    background: {colors.surface_subtle};
+}}
+QSpinBox::up-arrow, QSpinBox::down-arrow,
+QDoubleSpinBox::up-arrow, QDoubleSpinBox::down-arrow {{
+    image: none; width: 0; height: 0;
 }}
 QLineEdit[invalid="true"], QComboBox[invalid="true"],
 QSpinBox[invalid="true"], QDoubleSpinBox[invalid="true"] {{ border: 2px solid #cf222e; }}
@@ -165,8 +203,26 @@ QPushButton:focus, QLineEdit:focus, QComboBox:focus,
 QSpinBox:focus, QDoubleSpinBox:focus, QAbstractItemView:focus {{
     border: 2px solid {colors.selected};
 }}
+QSlider::groove:horizontal {{
+    height: 6px; background: {colors.border}; border-radius: 3px;
+}}
+QSlider::sub-page:horizontal {{
+    background: {colors.selected}; border-radius: 3px;
+}}
+QSlider::handle:horizontal {{
+    background: {colors.input}; border: 2px solid {colors.selected};
+    width: 14px; margin: -6px 0; border-radius: 9px;
+}}
+QSlider::handle:horizontal:hover, QSlider:focus::handle:horizontal {{
+    background: {colors.surface_subtle};
+}}
+QSlider:disabled::sub-page:horizontal {{ background: {colors.disabled}; }}
+QSlider:disabled::handle:horizontal {{
+    background: {colors.surface_subtle}; border-color: {colors.disabled_text};
+}}
 QListWidget#navigation {{
-    background: {colors.window}; border: none; border-right: 1px solid {colors.border}; padding: 8px;
+    background: {colors.window}; border: none; border-right: 1px solid {colors.border};
+    padding: 8px; outline: none;
 }}
 QListWidget#navigation::item {{ padding: 10px; border-radius: 6px; }}
 QListWidget#navigation::item:hover {{ background: {colors.surface}; }}
@@ -209,7 +265,7 @@ QHeaderView#policyHeader {{ background: {colors.surface}; }}
 QHeaderView#policyHeader::section {{
     background: {colors.surface}; color: {colors.text};
     border: none; border-bottom: 1px solid {colors.border};
-    padding: 0 12px; min-height: 42px; font-weight: 600;
+    padding: 0 8px; min-height: 42px; font-weight: 600;
 }}
 QHeaderView#policyHeader::up-arrow,
 QHeaderView#policyHeader::down-arrow {{
@@ -227,8 +283,37 @@ QToolTip {{ background: {colors.surface}; color: {colors.text}; border: 1px soli
 
 
 def apply_theme(app: QApplication, theme: str) -> None:
-    app.setPalette(QPalette())
     colors = _DARK if theme == "dark" else _LIGHT if theme == "light" else _SYSTEM
+    palette = QPalette()
+    if theme != "system":
+        for role, color in (
+            (QPalette.ColorRole.Window, colors.window),
+            (QPalette.ColorRole.WindowText, colors.text),
+            (QPalette.ColorRole.Base, colors.input),
+            (QPalette.ColorRole.AlternateBase, colors.surface_subtle),
+            (QPalette.ColorRole.ToolTipBase, colors.surface),
+            (QPalette.ColorRole.ToolTipText, colors.text),
+            (QPalette.ColorRole.Text, colors.text),
+            (QPalette.ColorRole.Button, colors.surface),
+            (QPalette.ColorRole.ButtonText, colors.text),
+            (QPalette.ColorRole.Highlight, colors.selected),
+            (QPalette.ColorRole.HighlightedText, "#ffffff"),
+            (QPalette.ColorRole.PlaceholderText, colors.muted),
+            (QPalette.ColorRole.Mid, colors.border),
+            (QPalette.ColorRole.Midlight, colors.disabled),
+        ):
+            palette.setColor(role, QColor(color))
+        palette.setColor(
+            QPalette.ColorGroup.Disabled,
+            QPalette.ColorRole.Text,
+            QColor(colors.disabled_text),
+        )
+        palette.setColor(
+            QPalette.ColorGroup.Disabled,
+            QPalette.ColorRole.ButtonText,
+            QColor(colors.disabled_text),
+        )
+    app.setPalette(palette)
     palette = app.palette()
     resolved = (
         {
