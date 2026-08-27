@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from pydantic import SecretStr
-from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSize, Qt, Signal
+from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -46,6 +47,11 @@ from farm_merge_valet.core.item_catalog import (
     TileActionMode,
     load_item_catalog,
 )
+from farm_merge_valet.core.upgrade_progress import (
+    UpgradeProgress,
+    UpgradeTargetProgress,
+    UpgradeTierState,
+)
 from farm_merge_valet.gui.action_button import ActionButton
 from farm_merge_valet.gui.assets import CatalogIconLoader
 from farm_merge_valet.gui.bulk_header import BulkToggleHeader
@@ -60,15 +66,19 @@ from farm_merge_valet.gui.input_controls import (
     FocusAwareSpinBox,
     SettingsToggle,
 )
+from farm_merge_valet.gui.loading_state import LoadingState
 from farm_merge_valet.gui.policy_view import (
+    LazyPolicyBranches,
     PolicyCheckBox,
     PolicyTreeToolbar,
     aggregate_check_state,
     configure_policy_toggle,
     configure_policy_view,
+    expanded_policy_keys,
     filter_policy_tree,
     policy_badge,
     policy_cell,
+    policy_status,
     policy_unavailable,
 )
 from farm_merge_valet.gui.widgets import secondary_button, set_validation_state
@@ -341,12 +351,19 @@ class ItemsPage(AppPage):
     reset_requested = Signal()
     catalog_setup_requested = Signal()
 
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        icons: CatalogIconLoader | None = None,
+        populate_immediately: bool = True,
+    ) -> None:
         super().__init__(
             "Item policies",
             "Configure automation behavior for every discovered item family.",
         )
         self._config = config
+        self._icons = icons or CatalogIconLoader(config.catalog_dir)
         self.configuration_header = ConfigurationHeader("Reset item policies")
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
@@ -355,6 +372,16 @@ class ItemsPage(AppPage):
         self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
         self.page_layout.addWidget(
             self.catalog_onboarding,
+            1,
+            Qt.AlignmentFlag.AlignCenter,
+        )
+        self.loading_state = LoadingState(
+            "Loading item policies…",
+            "Preparing locally cached item families and controls.",
+        )
+        self.loading_state.setVisible(False)
+        self.page_layout.addWidget(
+            self.loading_state,
             1,
             Qt.AlignmentFlag.AlignCenter,
         )
@@ -399,8 +426,18 @@ class ItemsPage(AppPage):
         self.page_layout.addWidget(self.toolbar)
         self.page_layout.addWidget(self.table, 1)
         self.search.textChanged.connect(self._filter)
+        self._upgrade_progress: UpgradeProgress | None = None
+        self._upgrade_targets: dict[str, UpgradeTargetProgress] = {}
         self._catalog_loaded = False
-        self.populate()
+        self._populated = False
+        self._population_pending = False
+        self._row_definitions: list[_ItemPolicyRow] = []
+        self._policy_controls: list[
+            tuple[QTreeWidgetItem, PolicyCheckBox, tuple[_ItemPolicyRow, ...], str]
+        ] = []
+        self._lazy_branches = LazyPolicyBranches(self.table)
+        if populate_immediately:
+            self.populate()
         self.bulk_header.sortIndicatorChanged.connect(self._sort_changed)
 
     def apply_config(self, config: AppConfig, *, refresh: bool = True) -> None:
@@ -410,9 +447,10 @@ class ItemsPage(AppPage):
             or config.items_sort_descending != self._config.items_sort_descending
         )
         self._config = config
+        self._icons.set_catalog_dir(config.catalog_dir)
         if sort_changed:
             self._apply_sort_preference()
-        if refresh:
+        if refresh and self._populated:
             if catalog_changed or not self._catalog_loaded:
                 self.populate()
             else:
@@ -420,7 +458,35 @@ class ItemsPage(AppPage):
         self.configuration_header.mark_saved()
 
     def reload_catalog(self) -> None:
-        self.populate()
+        if self._populated:
+            self.populate()
+
+    def reload_catalog_if_missing(self) -> None:
+        if self._populated and not self._catalog_loaded:
+            self.populate()
+
+    def ensure_populated(self, *, deferred: bool = False) -> None:
+        if self._populated or self._population_pending:
+            return
+        if not deferred:
+            self.populate()
+            return
+        self._population_pending = True
+        self._show_loading()
+        QTimer.singleShot(16, self._finish_deferred_population)
+
+    def _finish_deferred_population(self) -> None:
+        try:
+            self.populate()
+        finally:
+            self._population_pending = False
+
+    def set_upgrade_progress(self, progress: UpgradeProgress | None) -> None:
+        if progress == self._upgrade_progress:
+            return
+        self._upgrade_progress = progress
+        if self._catalog_loaded:
+            self.populate()
 
     def _apply_sort_preference(self) -> None:
         column = _ITEM_SORT_COLUMNS[self._config.items_sort_column]
@@ -477,15 +543,16 @@ class ItemsPage(AppPage):
         self.configuration_header.mark_error(message)
 
     def populate(self) -> None:
-        expanded_keys = self._expanded_policy_keys()
+        self._populated = True
+        expanded_keys = expanded_policy_keys(self.table)
         sort_column = self.table.sortColumn()
         sort_order = self.bulk_header.sortIndicatorOrder()
         self.table.setSortingEnabled(False)
         self.table.clear()
-        self._row_definitions: list[_ItemPolicyRow] = []
-        self._policy_controls: list[
-            tuple[QTreeWidgetItem, PolicyCheckBox, tuple[_ItemPolicyRow, ...], str]
-        ] = []
+        self._row_definitions = []
+        self._policy_controls = []
+        self._lazy_branches.reset()
+        self._upgrade_targets = {}
         catalog = _load_catalog(self._config)
         if catalog is None:
             self._catalog_loaded = False
@@ -497,19 +564,46 @@ class ItemsPage(AppPage):
         for item in catalog.items.values():
             grouped[item.policy_key].append(item)
         upgrade_target_names: dict[str, str] = {}
+        upgrade_target_families: dict[str, str] = {}
         upgrade_groups: dict[str, list[CatalogItem]] = {}
         for key, items in tuple(grouped.items()):
             if not items or items[0].category != "upgrade_cards":
                 continue
             grouped.pop(key)
-            targets: dict[str, str] = {}
-            for target in catalog.items.values():
-                if target.category in {"animals", "crops"}:
-                    targets.setdefault(target.family_id, target.display_name)
-            for target_id, target_name in targets.items():
+            targets: list[tuple[str, str, str, UpgradeTargetProgress | None]] = []
+            if self._upgrade_progress is not None:
+                for target_progress in self._upgrade_progress.targets:
+                    producer = catalog.items.get(target_progress.producer_blueprint_id)
+                    if producer is None or producer.category not in {"animals", "crops"}:
+                        continue
+                    targets.append(
+                        (
+                            target_progress.target_id,
+                            producer.display_name,
+                            producer.family_id,
+                            target_progress,
+                        )
+                    )
+            else:
+                fallback_targets: dict[str, tuple[str, str]] = {}
+                for target in catalog.items.values():
+                    if target.category in {"animals", "crops"}:
+                        target_id = target.upgrade_target_id or target.family_id
+                        fallback_targets.setdefault(
+                            target_id,
+                            (target.display_name, target.family_id),
+                        )
+                targets.extend(
+                    (target_id, target_name, producer_family_id, None)
+                    for target_id, (target_name, producer_family_id) in fallback_targets.items()
+                )
+            for target_id, target_name, producer_family_id, maybe_progress in targets:
                 variant_key = f"{key}/{target_id}"
                 upgrade_groups[variant_key] = items
                 upgrade_target_names[variant_key] = target_name
+                upgrade_target_families[variant_key] = producer_family_id
+                if maybe_progress is not None:
+                    self._upgrade_targets[variant_key] = maybe_progress
         grouped.update(upgrade_groups)
         families = [
             (key, sorted(items, key=lambda item: (item.tier or 0, item.game_id)))
@@ -525,7 +619,6 @@ class ItemsPage(AppPage):
         if not families:
             self._show_empty("No configurable item families have been discovered yet")
             return
-        icons = CatalogIconLoader(self._config.catalog_dir)
         roots_by_family_id: dict[str, QTreeWidgetItem] = {}
         for family_key, items in families:
             definitions = [
@@ -539,7 +632,7 @@ class ItemsPage(AppPage):
                 root = self._new_policy_item(
                     family_name,
                     representative,
-                    icons,
+                    self._icons,
                     category=representative.category,
                 )
                 root.setData(0, Qt.ItemDataRole.UserRole, family_key)
@@ -548,6 +641,7 @@ class ItemsPage(AppPage):
                     representative,
                     roots_by_family_id,
                     upgrade_target,
+                    upgrade_target_families.get(family_key),
                 )
                 self._set_category_badge(root, representative.category)
                 self._add_policy_controls(root, definitions[0], family_name)
@@ -555,7 +649,7 @@ class ItemsPage(AppPage):
             root = self._new_policy_item(
                 family_name,
                 representative,
-                icons,
+                self._icons,
                 category=representative.category,
             )
             root.setData(0, Qt.ItemDataRole.UserRole, family_key)
@@ -570,40 +664,49 @@ class ItemsPage(AppPage):
                 representative,
                 roots_by_family_id,
                 upgrade_target,
+                upgrade_target_families.get(family_key),
             )
             self._set_category_badge(root, representative.category)
             self._add_family_controls(root, family_key, definitions, family_name)
-            for definition in definitions:
-                tier = definition.item.tier
-                child_name = f"Tier {tier}" if tier is not None else definition.item.display_name
-                child = self._new_policy_item(
-                    child_name,
-                    definition.item,
-                    icons,
-                    tier=tier,
-                )
-                child.setData(0, Qt.ItemDataRole.UserRole, definition.policy_key)
-                root.addChild(child)
-                self._add_policy_controls(child, definition, f"{family_name}, {child_name}")
-            root.setExpanded(family_key in expanded_keys)
+            tier_definitions = tuple(definitions)
+            self._lazy_branches.register(
+                family_key,
+                root,
+                partial(self._populate_item_tiers, root, tier_definitions, family_name),
+                searchable_text=" ".join(
+                    (
+                        family_name,
+                        root.text(1),
+                        family_key,
+                        *(f"Tier {row.item.tier} {row.item.display_name}" for row in definitions),
+                    )
+                ),
+            )
+        self._lazy_branches.restore_expanded(expanded_keys)
         self.table.setSortingEnabled(True)
         self.bulk_header.setSortIndicatorShown(False)
         self.table.sortByColumn(sort_column, sort_order)
         self._sync_bulk_header()
+        self._filter(self.search.text())
 
-    def _expanded_policy_keys(self) -> set[object]:
-        expanded: set[object] = set()
-        pending = [
-            self.table.topLevelItem(index) for index in range(self.table.topLevelItemCount())
-        ]
-        while pending:
-            item = pending.pop()
-            if item is None:
-                continue
-            if item.isExpanded():
-                expanded.add(item.data(0, Qt.ItemDataRole.UserRole))
-            pending.extend(item.child(index) for index in range(item.childCount()))
-        return expanded
+    def _populate_item_tiers(
+        self,
+        root: QTreeWidgetItem,
+        definitions: tuple[_ItemPolicyRow, ...],
+        family_name: str,
+    ) -> None:
+        for definition in definitions:
+            tier = definition.item.tier
+            child_name = f"Tier {tier}" if tier is not None else definition.item.display_name
+            child = self._new_policy_item(
+                child_name,
+                definition.item,
+                self._icons,
+                tier=tier,
+            )
+            child.setData(0, Qt.ItemDataRole.UserRole, definition.policy_key)
+            root.addChild(child)
+            self._add_policy_controls(child, definition, f"{family_name}, {child_name}")
 
     def _attach_policy_root(
         self,
@@ -611,11 +714,10 @@ class ItemsPage(AppPage):
         representative: CatalogItem,
         roots_by_family_id: dict[str, QTreeWidgetItem],
         upgrade_target: str | None,
+        upgrade_target_family_id: str | None,
     ) -> None:
         if upgrade_target is not None:
-            target_root = roots_by_family_id.get(
-                root.data(0, Qt.ItemDataRole.UserRole).rsplit("/", 1)[-1]
-            )
+            target_root = roots_by_family_id.get(upgrade_target_family_id or "")
             if target_root is not None:
                 target_root.addChild(root)
                 return
@@ -637,8 +739,20 @@ class ItemsPage(AppPage):
             or "shovelable" in item.capabilities
         )
 
-    @staticmethod
-    def _row_definition(family_key: str, item: CatalogItem, *, tier_scoped: bool) -> _ItemPolicyRow:
+    def _row_definition(
+        self,
+        family_key: str,
+        item: CatalogItem,
+        *,
+        tier_scoped: bool,
+    ) -> _ItemPolicyRow:
+        upgrade_progress = self._upgrade_targets.get(family_key)
+        upgrade_collectable = bool(
+            item.tile_action_mode is TileActionMode.UPGRADE
+            and upgrade_progress is not None
+            and item.tier is not None
+            and upgrade_progress.tier_state(item.tier) is UpgradeTierState.NOT_APPLIED
+        )
         return _ItemPolicyRow(
             item_tier_policy_key(family_key, item.tier)
             if tier_scoped and item.tier is not None
@@ -647,7 +761,8 @@ class ItemsPage(AppPage):
             item,
             item.merge_target is not None,
             item.tile_action_mode in {TileActionMode.COLLECT, TileActionMode.COLLECT_OPT_IN}
-            or (item.category in {"animals", "crops"} and item.tier == 4),
+            or (item.category in {"animals", "crops"} and item.tier == 4)
+            or upgrade_collectable,
             "shovelable" in item.capabilities,
         )
 
@@ -685,6 +800,13 @@ class ItemsPage(AppPage):
     ) -> None:
         policy = self._config.item_policy(definition.policy_key)
         for column, field in self._policy_fields().items():
+            if (
+                field == "collect"
+                and definition.item.tile_action_mode is TileActionMode.UPGRADE
+                and not definition.supports_collect
+            ):
+                self._add_upgrade_tier_status(item, column, definition, label)
+                continue
             if not definition.supports(field):
                 self.table.setItemWidget(item, column, policy_unavailable())
                 item.setText(column, "−1")
@@ -710,6 +832,14 @@ class ItemsPage(AppPage):
         label: str,
     ) -> None:
         for column, field in self._policy_fields().items():
+            if (
+                field == "collect"
+                and definitions
+                and definitions[0].item.tile_action_mode is TileActionMode.UPGRADE
+                and not any(definition.supports_collect for definition in definitions)
+            ):
+                self._add_upgrade_family_status(item, column, family_key, label)
+                continue
             applicable = [definition for definition in definitions if definition.supports(field)]
             if not applicable:
                 self.table.setItemWidget(item, column, policy_unavailable())
@@ -735,6 +865,69 @@ class ItemsPage(AppPage):
             item.setText(column, str(state.value))
             item.setForeground(column, QColor(Qt.GlobalColor.transparent))
             self._policy_controls.append((item, control, tuple(applicable), field))
+
+    def _add_upgrade_family_status(
+        self,
+        item: QTreeWidgetItem,
+        column: int,
+        family_key: str,
+        label: str,
+    ) -> None:
+        progress = self._upgrade_targets.get(family_key)
+        if progress is None:
+            self._set_policy_status(
+                item,
+                column,
+                "Unknown",
+                "muted",
+                f"{label}: connect the game to read applied upgrade tiers",
+            )
+            return
+        self._set_policy_status(
+            item,
+            column,
+            "Applied",
+            "applied",
+            f"{label}: all available card tiers are already applied",
+        )
+
+    def _add_upgrade_tier_status(
+        self,
+        item: QTreeWidgetItem,
+        column: int,
+        definition: _ItemPolicyRow,
+        label: str,
+    ) -> None:
+        progress = self._upgrade_targets.get(definition.family_key)
+        tier = definition.item.tier
+        if progress is None or tier is None:
+            self._set_policy_status(
+                item,
+                column,
+                "Unknown",
+                "muted",
+                f"{label}: connect the game to read this upgrade tier's state",
+            )
+            return
+        self._set_policy_status(
+            item,
+            column,
+            "Applied",
+            "applied",
+            f"{label}: this card tier or a higher tier is already applied",
+        )
+
+    def _set_policy_status(
+        self,
+        item: QTreeWidgetItem,
+        column: int,
+        text: str,
+        tone: str,
+        tooltip: str,
+    ) -> None:
+        self.table.setItemWidget(item, column, policy_status(text, tone, tooltip))
+        item.setText(column, text)
+        item.setForeground(column, QColor(Qt.GlobalColor.transparent))
 
     def _sync_policy_controls(self) -> None:
         for item, control, definitions, field in self._policy_controls:
@@ -787,14 +980,22 @@ class ItemsPage(AppPage):
             self.bulk_header.set_state(column, Qt.CheckState.Unchecked, enabled=False)
 
     def _show_catalog_onboarding(self) -> None:
+        self.loading_state.setVisible(False)
         self.catalog_onboarding.setVisible(True)
         self.toolbar.setVisible(False)
         self.table.setVisible(False)
 
     def _show_catalog_content(self) -> None:
+        self.loading_state.setVisible(False)
         self.catalog_onboarding.setVisible(False)
         self.toolbar.setVisible(True)
         self.table.setVisible(True)
+
+    def _show_loading(self) -> None:
+        self.catalog_onboarding.setVisible(False)
+        self.toolbar.setVisible(False)
+        self.table.setVisible(False)
+        self.loading_state.setVisible(True)
 
     def set_catalog_setup_busy(self, busy: bool) -> None:
         self.catalog_onboarding.set_busy(busy)
@@ -803,6 +1004,7 @@ class ItemsPage(AppPage):
         self.catalog_onboarding.set_status(message, error=error)
 
     def _filter(self, text: str) -> None:
+        self._lazy_branches.materialize_matches(text)
         filter_policy_tree(self.table, text)
 
     def set_override(self, key: str, family_key: str, field: str, value: bool) -> None:
@@ -880,9 +1082,16 @@ class ShopsPage(AppPage):
     reset_requested = Signal()
     catalog_setup_requested = Signal()
 
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        icons: CatalogIconLoader | None = None,
+        populate_immediately: bool = True,
+    ) -> None:
         super().__init__("Shops", "Configure every discovered shop and recipe independently.")
         self._config = config
+        self._icons = icons or CatalogIconLoader(config.catalog_dir)
         self.configuration_header = ConfigurationHeader("Reset shop policies")
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
@@ -925,7 +1134,13 @@ class ShopsPage(AppPage):
         self.page_layout.addWidget(self.tree, 1)
         self.search.textChanged.connect(self._filter)
         self._catalog_loaded = False
-        self.populate()
+        self._populated = False
+        self._catalog_keys: list[tuple[str, str]] = []
+        self._toggles: dict[tuple[str, str], PolicyCheckBox] = {}
+        self._tree_items: dict[tuple[str, str], QTreeWidgetItem] = {}
+        self._lazy_branches = LazyPolicyBranches(self.tree)
+        if populate_immediately:
+            self.populate()
         self.bulk_header.sortIndicatorChanged.connect(self._sort_changed)
 
     def apply_config(self, config: AppConfig, *, refresh: bool = True) -> None:
@@ -935,9 +1150,10 @@ class ShopsPage(AppPage):
             or config.shops_sort_descending != self._config.shops_sort_descending
         )
         self._config = config
+        self._icons.set_catalog_dir(config.catalog_dir)
         if sort_changed:
             self._apply_sort_preference()
-        if refresh:
+        if refresh and self._populated:
             if catalog_changed or not self._catalog_loaded:
                 self.populate()
             else:
@@ -945,7 +1161,16 @@ class ShopsPage(AppPage):
         self.configuration_header.mark_saved()
 
     def reload_catalog(self) -> None:
-        self.populate()
+        if self._populated:
+            self.populate()
+
+    def reload_catalog_if_missing(self) -> None:
+        if self._populated and not self._catalog_loaded:
+            self.populate()
+
+    def ensure_populated(self) -> None:
+        if not self._populated:
+            self.populate()
 
     def _apply_sort_preference(self) -> None:
         column = _SHOP_SORT_COLUMNS[self._config.shops_sort_column]
@@ -988,14 +1213,17 @@ class ShopsPage(AppPage):
         self.configuration_header.mark_error(message)
 
     def populate(self) -> None:
+        self._populated = True
+        expanded = expanded_policy_keys(self.tree)
         sort_column = self.tree.sortColumn()
         sort_order = self.bulk_header.sortIndicatorOrder()
         self.tree.setSortingEnabled(False)
         self.tree.blockSignals(True)
         self.tree.clear()
-        self._catalog_keys: list[tuple[str, str]] = []
-        self._toggles: dict[tuple[str, str], PolicyCheckBox] = {}
-        self._tree_items: dict[tuple[str, str], QTreeWidgetItem] = {}
+        self._catalog_keys = []
+        self._toggles = {}
+        self._tree_items = {}
+        self._lazy_branches.reset()
         catalog = _load_catalog(self._config)
         if catalog is None:
             self._catalog_loaded = False
@@ -1012,12 +1240,11 @@ class ShopsPage(AppPage):
             self._show_empty("No shops or recipes have been discovered yet")
             self.tree.blockSignals(False)
             return
-        icons = CatalogIconLoader(self._config.catalog_dir)
         for shop_id in sorted(recipes):
             shop = catalog.items.get(shop_id)
             shop_name = shop.display_name if shop else shop_id
             parent = QTreeWidgetItem((shop_name, "Shop", ""))
-            parent.setIcon(0, icons.icon_for(shop))
+            parent.setIcon(0, self._icons.icon_for(shop))
             parent.setData(0, Qt.ItemDataRole.UserRole, ("shop", shop_id))
             parent.setSizeHint(0, QSize(0, 64))
             parent_font = parent.font(0)
@@ -1042,35 +1269,22 @@ class ShopsPage(AppPage):
             self._catalog_keys.append(("shop", shop_id))
             self._toggles[("shop", shop_id)] = shop_toggle
             self._tree_items[("shop", shop_id)] = parent
-            for recipe in sorted(recipes[shop_id], key=lambda item: item.display_name):
-                child = QTreeWidgetItem((recipe.display_name, "Recipe", ""))
-                child.setIcon(0, icons.icon_for(recipe))
-                child.setData(0, Qt.ItemDataRole.UserRole, ("recipe", recipe.game_id))
-                child.setSizeHint(0, QSize(0, 64))
-                child.setToolTip(0, recipe.display_name)
-                parent.addChild(child)
-                child.setForeground(1, QColor(Qt.GlobalColor.transparent))
-                self.tree.setItemWidget(child, 1, policy_badge("Recipe"))
-                recipe_toggle = PolicyCheckBox()
-                configure_policy_toggle(recipe_toggle)
-                recipe_toggle.setChecked(
-                    self._config.recipe_overrides.get(
-                        recipe.game_id, self._config.recipe_default_enabled
-                    )
-                )
-                child.setText(2, "1" if recipe_toggle.isChecked() else "0")
-                child.setForeground(2, QColor(Qt.GlobalColor.transparent))
-                recipe_toggle.setAccessibleName(f"{recipe.display_name}: enabled")
-                recipe_toggle.toggled.connect(
-                    lambda value, item_key=recipe.game_id: self._set_item_enabled(
-                        "recipe", item_key, value
-                    )
-                )
-                self.tree.setItemWidget(child, 2, policy_cell(recipe_toggle))
+            shop_recipes = tuple(sorted(recipes[shop_id], key=lambda item: item.display_name))
+            for recipe in shop_recipes:
                 self._catalog_keys.append(("recipe", recipe.game_id))
-                self._toggles[("recipe", recipe.game_id)] = recipe_toggle
-                self._tree_items[("recipe", recipe.game_id)] = child
-        self.tree.expandAll()
+            self._lazy_branches.register(
+                ("shop", shop_id),
+                parent,
+                partial(self._populate_shop_recipes, parent, shop_recipes),
+                searchable_text=" ".join(
+                    (
+                        shop_name,
+                        shop_id,
+                        *(f"{recipe.display_name} {recipe.game_id}" for recipe in shop_recipes),
+                    )
+                ),
+            )
+        self._lazy_branches.restore_expanded(expanded)
         self.tree.blockSignals(False)
         self.tree.setSortingEnabled(True)
         self.bulk_header.setSortIndicatorShown(False)
@@ -1079,7 +1293,42 @@ class ShopsPage(AppPage):
         self._filter(self.search.text())
 
     def _filter(self, text: str) -> None:
+        self._lazy_branches.materialize_matches(text)
         filter_policy_tree(self.tree, text)
+
+    def _populate_shop_recipes(
+        self,
+        parent: QTreeWidgetItem,
+        recipes: tuple[CatalogItem, ...],
+    ) -> None:
+        for recipe in recipes:
+            child = QTreeWidgetItem((recipe.display_name, "Recipe", ""))
+            child.setIcon(0, self._icons.icon_for(recipe))
+            child.setData(0, Qt.ItemDataRole.UserRole, ("recipe", recipe.game_id))
+            child.setSizeHint(0, QSize(0, 64))
+            child.setToolTip(0, recipe.display_name)
+            parent.addChild(child)
+            child.setForeground(1, QColor(Qt.GlobalColor.transparent))
+            self.tree.setItemWidget(child, 1, policy_badge("Recipe"))
+            recipe_toggle = PolicyCheckBox()
+            configure_policy_toggle(recipe_toggle)
+            recipe_toggle.setChecked(
+                self._config.recipe_overrides.get(
+                    recipe.game_id, self._config.recipe_default_enabled
+                )
+            )
+            child.setText(2, "1" if recipe_toggle.isChecked() else "0")
+            child.setForeground(2, QColor(Qt.GlobalColor.transparent))
+            recipe_toggle.setAccessibleName(f"{recipe.display_name}: enabled")
+            recipe_toggle.toggled.connect(
+                lambda value, item_key=recipe.game_id: self._set_item_enabled(
+                    "recipe", item_key, value
+                )
+            )
+            self.tree.setItemWidget(child, 2, policy_cell(recipe_toggle))
+            identity = ("recipe", recipe.game_id)
+            self._toggles[identity] = recipe_toggle
+            self._tree_items[identity] = child
 
     def _sync_controls(self) -> None:
         for identity, control in self._toggles.items():
@@ -1170,7 +1419,7 @@ class BrowserPage(_ConfigFormPage):
     launch_requested = Signal()
     stop_requested = Signal()
     restart_requested = Signal()
-    assets_refresh_requested = Signal()
+    game_sync_requested = Signal()
     reset_requested = Signal()
 
     def __init__(self, config: AppConfig) -> None:
@@ -1239,28 +1488,28 @@ class BrowserPage(_ConfigFormPage):
         self._add_int(form, "CDP port", "cdp_port", 1, 65535)
         sections.addWidget(connection)
 
-        assets, form = _settings_section("Assets and cache")
-        self.asset_status_label = QLabel(self._asset_status(config))
-        self.asset_status_label.setWordWrap(True)
-        self.asset_status_label.setAccessibleName("Game asset status")
+        assets, form = _settings_section("Game data and assets")
+        self.game_sync_status_label = QLabel(self._game_sync_status(config))
+        self.game_sync_status_label.setWordWrap(True)
+        self.game_sync_status_label.setAccessibleName("Game data and asset status")
         self._add_path(form, "Catalog directory", "catalog_dir", optional=False)
         self._add_path(form, "Atlas cache directory", "atlas_cache_dir", optional=False)
-        self._add_form_row(form, "Status", self.asset_status_label)
-        self.assets_refresh_button = QPushButton("Refresh game assets")
-        self.assets_refresh_button.clicked.connect(self.assets_refresh_requested)
-        self._add_form_row(form, "Actions", self.assets_refresh_button)
+        self._add_form_row(form, "Status", self.game_sync_status_label)
+        self.game_sync_button = QPushButton("Synchronize game data and assets")
+        self.game_sync_button.clicked.connect(self.game_sync_requested)
+        self._add_form_row(form, "Actions", self.game_sync_button)
         sections.addWidget(assets)
         sections.addStretch()
         scroll.setWidget(content)
         self.page_layout.addWidget(scroll, 1)
         self._browser_busy = False
-        self._asset_busy = False
+        self._game_sync_busy = False
         self._runtime_active = False
         self._browser_status: BrowserStatus | None = None
         self._sync_action_states()
 
     @staticmethod
-    def _asset_status(config: AppConfig) -> str:
+    def _game_sync_status(config: AppConfig) -> str:
         catalog = config.catalog_dir / "catalog.json"
         if not catalog.is_file():
             return "No compiled catalog found"
@@ -1280,11 +1529,11 @@ class BrowserPage(_ConfigFormPage):
     def browser_status_known(self) -> bool:
         return self._browser_status is not None
 
-    def set_asset_status(self, status: str) -> None:
-        self.asset_status_label.setText(status)
+    def set_game_sync_status(self, status: str) -> None:
+        self.game_sync_status_label.setText(status)
 
-    def set_asset_busy(self, busy: bool) -> None:
-        self._asset_busy = busy
+    def set_game_sync_busy(self, busy: bool) -> None:
+        self._game_sync_busy = busy
         self._sync_action_states()
 
     def _sync_action_states(self) -> None:
@@ -1292,7 +1541,7 @@ class BrowserPage(_ConfigFormPage):
         running = status is not None and status.running
         managed = status is not None and status.managed
         compatible = status is not None and status.compatible
-        operation_busy = self._browser_busy or self._asset_busy
+        operation_busy = self._browser_busy or self._game_sync_busy
         self.browser_action_button.setText(
             "Stop managed browser" if running and managed else "Launch managed browser"
         )
@@ -1308,7 +1557,7 @@ class BrowserPage(_ConfigFormPage):
         self.restart_button.setEnabled(
             not operation_busy and not self._runtime_active and running and managed and compatible
         )
-        self.assets_refresh_button.setEnabled(not operation_busy and not self._runtime_active)
+        self.game_sync_button.setEnabled(not operation_busy and not self._runtime_active)
 
     def _request(self, field: str, value: object) -> None:
         self.config_edited.emit(ConfigEdit({field: value}, field, "browser"))
@@ -1369,7 +1618,7 @@ class BrowserPage(_ConfigFormPage):
             elif isinstance(control, QLineEdit):
                 control.setText(str(value) if value is not None else "")
             control.blockSignals(False)
-        self.asset_status_label.setText(self._asset_status(config))
+        self.game_sync_status_label.setText(self._game_sync_status(config))
         self.configuration_header.mark_saved()
 
     def mark_saving(self, field: str | None = None) -> None:

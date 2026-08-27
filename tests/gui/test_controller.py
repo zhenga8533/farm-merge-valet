@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from farm_merge_valet.browser.manager import BrowserKind, BrowserStatus
 from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.core.upgrade_progress import UpgradeProgress, UpgradeTargetProgress
 from farm_merge_valet.gui.controller import ApplicationController
 
 
@@ -64,7 +65,9 @@ def test_browser_refresh_runs_off_the_gui_thread(tmp_path, monkeypatch) -> None:
     app.processEvents()
 
 
-def test_asset_refresh_runs_in_shared_background_operation_lane(tmp_path, monkeypatch) -> None:
+def test_game_sync_refreshes_assets_and_upgrade_progress_in_background(
+    tmp_path, monkeypatch
+) -> None:
     app = QApplication.instance() or QApplication([])
     store = ConfigStore(tmp_path / "config.json")
     store.replace(AppConfig())
@@ -73,6 +76,8 @@ def test_asset_refresh_runs_in_shared_background_operation_lane(tmp_path, monkey
     worker_threads: list[int] = []
     busy_states: list[bool] = []
     statuses: list[str] = []
+    progress = UpgradeProgress((UpgradeTargetProgress("milk", "cow_4", 2),))
+    progress_updates: list[object] = []
 
     def refresh() -> None:
         worker_threads.append(threading.get_ident())
@@ -86,10 +91,15 @@ def test_asset_refresh_runs_in_shared_background_operation_lane(tmp_path, monkey
         "farm_merge_valet.core.item_catalog.load_item_catalog",
         lambda _path: type("Catalog", (), {"items": {"one": object()}})(),
     )
-    controller.asset_operation_changed.connect(busy_states.append)
-    controller.asset_status_changed.connect(statuses.append)
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.upgrade_progress.read_upgrade_progress",
+        lambda *_args: progress,
+    )
+    controller.game_sync_operation_changed.connect(busy_states.append)
+    controller.game_sync_status_changed.connect(statuses.append)
+    controller.upgrade_progress_changed.connect(progress_updates.append)
 
-    controller.refresh_assets()
+    controller.synchronize_game_data()
 
     assert busy_states == [True]
     release.set()
@@ -100,7 +110,68 @@ def test_asset_refresh_runs_in_shared_background_operation_lane(tmp_path, monkey
 
     assert worker_threads and worker_threads[0] != threading.get_ident()
     assert busy_states == [True, False]
-    assert statuses[-1] == "Game assets refreshed · Catalog entries: 1"
+    assert progress_updates == [progress]
+    assert statuses[-1] == (
+        "Game data and assets synchronized · Catalog entries: 1 · Upgrade targets: 1"
+    )
+    controller.shutdown()
+    app.processEvents()
+
+
+def test_bot_start_refreshes_upgrade_progress_without_synchronizing_assets(
+    tmp_path, monkeypatch
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig())
+    controller = ApplicationController(store)
+    browser_status = BrowserStatus(
+        running=True,
+        compatible=True,
+        managed=True,
+        kind=BrowserKind.CHROME,
+        game_loaded=True,
+    )
+    progress = UpgradeProgress((UpgradeTargetProgress("milk", "cow_4", 2),))
+    progress_updates: list[object] = []
+    asset_syncs: list[bool] = []
+
+    class BrowserManagerStub:
+        def __init__(self, _config: AppConfig) -> None:
+            pass
+
+        def ensure_running(self) -> BrowserStatus:
+            return browser_status
+
+        def status(self) -> BrowserStatus:
+            return browser_status
+
+    class BotStub:
+        paused = False
+        quit_requested = False
+
+        def request_quit(self) -> None:
+            self.quit_requested = True
+
+        def run_forever(self, *, on_initialized) -> None:
+            on_initialized()
+
+    monkeypatch.setattr("farm_merge_valet.gui.controller.BrowserManager", BrowserManagerStub)
+    monkeypatch.setattr("farm_merge_valet.gui.controller.Bot", BotStub)
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.upgrade_progress.read_upgrade_progress",
+        lambda *_args: progress,
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.tools.template_extraction.sync_runtime_assets",
+        lambda: asset_syncs.append(True),
+    )
+    controller.upgrade_progress_changed.connect(progress_updates.append)
+
+    controller._run_bot()
+
+    assert progress_updates == [progress]
+    assert asset_syncs == []
     controller.shutdown()
     app.processEvents()
 
@@ -146,6 +217,10 @@ def test_catalog_setup_launches_game_and_publishes_catalog_before_icons(
     monkeypatch.setattr("farm_merge_valet.gui.controller.BrowserManager", BrowserManagerStub)
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.GameRuntimeAdapter", RuntimeStub)
     monkeypatch.setattr(
+        "farm_merge_valet.cdp.upgrade_progress.read_upgrade_progress",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
         "farm_merge_valet.core.catalog_store.load_or_refresh_catalog",
         lambda *_args: catalog,
     )
@@ -157,8 +232,8 @@ def test_catalog_setup_launches_game_and_publishes_catalog_before_icons(
         "farm_merge_valet.core.item_catalog.load_item_catalog",
         lambda _path: catalog,
     )
-    controller.asset_operation_changed.connect(busy_states.append)
-    controller.asset_status_changed.connect(statuses.append)
+    controller.game_sync_operation_changed.connect(busy_states.append)
+    controller.game_sync_status_changed.connect(statuses.append)
     controller.catalog_refreshed.connect(catalog_counts.append)
 
     controller.setup_catalog()
@@ -224,6 +299,10 @@ def test_catalog_setup_keeps_catalog_available_when_icon_sync_fails(
     monkeypatch.setattr("farm_merge_valet.gui.controller.BrowserManager", BrowserManagerStub)
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.GameRuntimeAdapter", RuntimeStub)
     monkeypatch.setattr(
+        "farm_merge_valet.cdp.upgrade_progress.read_upgrade_progress",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
         "farm_merge_valet.core.catalog_store.load_or_refresh_catalog",
         lambda *_args: catalog,
     )
@@ -235,7 +314,7 @@ def test_catalog_setup_keeps_catalog_available_when_icon_sync_fails(
         "farm_merge_valet.tools.template_extraction.sync_runtime_assets",
         fail_icon_sync,
     )
-    controller.asset_status_changed.connect(statuses.append)
+    controller.game_sync_status_changed.connect(statuses.append)
     controller.catalog_setup_failed.connect(failures.append)
     controller.error.connect(errors.append)
     controller.assets_refreshed.connect(lambda: refreshed.append(True))
@@ -284,7 +363,7 @@ def test_catalog_setup_reports_when_game_never_finishes_loading(tmp_path, monkey
     monkeypatch.setattr("farm_merge_valet.gui.controller.BrowserManager", BrowserManagerStub)
     monkeypatch.setattr("farm_merge_valet.gui.controller._CATALOG_SETUP_TIMEOUT_SECONDS", 0.0)
     controller.catalog_setup_failed.connect(failures.append)
-    controller.asset_operation_changed.connect(busy_states.append)
+    controller.game_sync_operation_changed.connect(busy_states.append)
 
     controller.setup_catalog()
     deadline = time.monotonic() + 2

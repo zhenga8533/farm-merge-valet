@@ -77,11 +77,12 @@ class ApplicationController(QObject):
     browser_operation_changed = Signal(bool)
     browser_status_changed = Signal(str)
     browser_state_changed = Signal(object)
-    asset_operation_changed = Signal(bool)
-    asset_status_changed = Signal(str)
+    game_sync_operation_changed = Signal(bool)
+    game_sync_status_changed = Signal(str)
     catalog_setup_failed = Signal(str)
     catalog_refreshed = Signal(int)
     assets_refreshed = Signal()
+    upgrade_progress_changed = Signal(object)
     diagnostics_operation_changed = Signal(bool)
     diagnostics_exported = Signal(str)
     diagnostics_failed = Signal(str)
@@ -249,12 +250,16 @@ class ApplicationController(QObject):
             self._bot = Bot()
             if self._shutting_down or self._stopping:
                 self._bot.request_quit()
+
+            def refresh_startup_data() -> None:
+                self._refresh_upgrade_progress(config, source="bot startup")
+
             with discord_webhook_sink(
                 webhook,
                 config.webhook_summary_interval,
                 config.webhook_status_interval,
             ):
-                self._bot.run_forever()
+                self._bot.run_forever(on_initialized=refresh_startup_data)
         except BrowserManagerError as exc:
             failure = str(exc)
             log_event(
@@ -382,22 +387,75 @@ class ApplicationController(QObject):
 
         self._start_utility_operation(f"browser:{operation}", work)
 
-    def refresh_assets(self) -> None:
+    def synchronize_game_data(self) -> None:
         if self.status.state.active:
-            self.error.emit("Stop the bot before refreshing game assets.")
+            self.error.emit("Stop the bot before synchronizing game data and assets.")
             return
-        self.asset_status_changed.emit("Refreshing game assets…")
+        self.game_sync_status_changed.emit("Synchronizing game data and assets…")
 
         def work() -> str:
             from farm_merge_valet.core.item_catalog import load_item_catalog
             from farm_merge_valet.tools.template_extraction import sync_runtime_assets
 
-            settings.replace(self.store.current)
+            config = self.store.current
+            settings.replace(config)
+            target_count = self._refresh_upgrade_progress(config, source="manual synchronization")
             sync_runtime_assets()
-            catalog = load_item_catalog(self.store.current.catalog_dir / "catalog.json")
-            return f"Game assets refreshed · Catalog entries: {len(catalog.items)}"
+            catalog = load_item_catalog(config.catalog_dir / "catalog.json")
+            progress = (
+                f"Upgrade targets: {target_count}"
+                if target_count is not None
+                else "Upgrade progress unavailable"
+            )
+            return (
+                f"Game data and assets synchronized · Catalog entries: {len(catalog.items)} "
+                f"· {progress}"
+            )
 
-        self._start_utility_operation("assets:sync", work)
+        self._start_utility_operation("game-sync:manual", work)
+
+    def _refresh_upgrade_progress(self, config: AppConfig, *, source: str) -> int | None:
+        from farm_merge_valet.cdp.client import CdpConnectionError
+        from farm_merge_valet.cdp.upgrade_progress import read_upgrade_progress
+
+        try:
+            progress = read_upgrade_progress(config.cdp_port, config.window_title)
+        except CdpConnectionError as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "upgrade_progress.unavailable",
+                "Upgrade progress unavailable during %s: %s",
+                source,
+                exc,
+                source=source,
+                detail=str(exc),
+            )
+            self.upgrade_progress_changed.emit(None)
+            return None
+        self.upgrade_progress_changed.emit(progress)
+        if progress is None:
+            log_event(
+                logger,
+                logging.WARNING,
+                "upgrade_progress.unavailable",
+                "Upgrade progress unavailable during %s.",
+                source,
+                source=source,
+            )
+            return None
+        target_count = len(progress.targets)
+        log_event(
+            logger,
+            logging.INFO,
+            "upgrade_progress.refreshed",
+            "Upgrade progress refreshed during %s (%d targets).",
+            source,
+            target_count,
+            source=source,
+            target_count=target_count,
+        )
+        return target_count
 
     def setup_catalog(self) -> None:
         if self.status.state.active:
@@ -415,13 +473,13 @@ class ApplicationController(QObject):
             from farm_merge_valet.tools.template_extraction import sync_runtime_assets
 
             config = self.store.current
-            self.asset_status_changed.emit("Preparing the managed browser…")
+            self.game_sync_status_changed.emit("Preparing the managed browser…")
             settings.replace(config)
             manager = BrowserManager(config)
             browser_status = manager.ensure_running()
             self.browser_status_changed.emit(self._browser_status_text(browser_status))
             self.browser_state_changed.emit(browser_status)
-            self.asset_status_changed.emit("Waiting for the game to finish loading…")
+            self.game_sync_status_changed.emit("Waiting for the game to finish loading…")
 
             deadline = time.monotonic() + _CATALOG_SETUP_TIMEOUT_SECONDS
             last_error: Exception | None = None
@@ -442,7 +500,9 @@ class ApplicationController(QObject):
                     )
                 if browser_status.game_loaded:
                     if not discovery_announced:
-                        self.asset_status_changed.emit("Discovering items, shops, and recipes…")
+                        self.game_sync_status_changed.emit(
+                            "Discovering items, shops, and recipes…"
+                        )
                         discovery_announced = True
                     try:
                         runtime.discover()
@@ -469,9 +529,10 @@ class ApplicationController(QObject):
                 )
 
             self.catalog_refreshed.emit(len(catalog.items))
-            self.asset_status_changed.emit(
+            self.game_sync_status_changed.emit(
                 f"Catalog ready · {len(catalog.items)} entries · Synchronizing icons…"
             )
+            self._refresh_upgrade_progress(config, source="initial synchronization")
             try:
                 sync_runtime_assets()
             except (CdpConnectionError, OSError, RuntimeError, ValueError) as exc:
@@ -479,7 +540,7 @@ class ApplicationController(QObject):
             refreshed = load_item_catalog(config.catalog_dir / "catalog.json")
             return f"Game catalog ready · Entries: {len(refreshed.items)} · Icons synchronized"
 
-        self._start_utility_operation("assets:onboard", work)
+        self._start_utility_operation("game-sync:onboard", work)
 
     def export_diagnostics(self, output: Path, logs: str) -> None:
         def work() -> Path:
@@ -493,12 +554,15 @@ class ApplicationController(QObject):
         self,
         operation: str,
         work: Callable[[], object],
-    ) -> None:
+        *,
+        report_busy_error: bool = True,
+    ) -> bool:
         if self._shutting_down:
-            return
+            return False
         if self._utility_worker is not None and self._utility_worker.is_alive():
-            self.error.emit("Another background operation is already in progress.")
-            return
+            if report_busy_error:
+                self.error.emit("Another background operation is already in progress.")
+            return False
         category = operation.partition(":")[0]
         self._set_utility_busy(category, True)
 
@@ -514,12 +578,13 @@ class ApplicationController(QObject):
             name=f"fmv-{operation.replace(':', '-')}",
         )
         self._utility_worker.start()
+        return True
 
     def _set_utility_busy(self, category: str, busy: bool) -> None:
         if category == "browser":
             self.browser_operation_changed.emit(busy)
-        elif category == "assets":
-            self.asset_operation_changed.emit(busy)
+        elif category == "game-sync":
+            self.game_sync_operation_changed.emit(busy)
         elif category == "diagnostics":
             self.diagnostics_operation_changed.emit(busy)
 
@@ -530,8 +595,8 @@ class ApplicationController(QObject):
             message = str(result)
             if category == "browser":
                 self.browser_status_changed.emit(message)
-            elif category == "assets":
-                self.asset_status_changed.emit(message)
+            elif category == "game-sync":
+                self.game_sync_status_changed.emit(message)
                 if action == "onboard":
                     self.catalog_setup_failed.emit(message)
             elif category == "diagnostics":
@@ -550,8 +615,8 @@ class ApplicationController(QObject):
                     "stop": "Managed browser stopped",
                 }[action]
                 self._set_status(browser=message, last_activity=activity)
-        elif category == "assets":
-            self.asset_status_changed.emit(str(result))
+        elif category == "game-sync":
+            self.game_sync_status_changed.emit(str(result))
             self.assets_refreshed.emit()
         elif category == "diagnostics":
             self.diagnostics_exported.emit(str(result))

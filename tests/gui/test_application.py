@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import replace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -22,6 +23,7 @@ from farm_merge_valet.browser import BrowserKind, BrowserStatus
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.core.catalog_store import write_item_catalog
 from farm_merge_valet.core.item_catalog import CatalogItem, ItemCatalog, RecipeMetadata
+from farm_merge_valet.core.upgrade_progress import UpgradeProgress, UpgradeTargetProgress
 from farm_merge_valet.gui.application import MainWindow
 from farm_merge_valet.gui.controller import (
     ApplicationController,
@@ -107,6 +109,41 @@ def test_missing_catalog_shows_shared_onboarding_and_refreshes_when_discovered(t
     app.processEvents()
 
 
+def test_catalog_pages_populate_lazily_and_ignore_hidden_refreshes(
+    tmp_path, monkeypatch
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    write_item_catalog(catalog_dir / "catalog.json", _catalog())
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    controller = ApplicationController(store)
+    progress_reads: list[bool] = []
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.upgrade_progress.read_upgrade_progress",
+        lambda *_args: progress_reads.append(True),
+    )
+    window = MainWindow(controller, eager_catalog_pages=False)
+
+    assert window.item_table.topLevelItemCount() == 0
+    assert window.shop_tree.topLevelItemCount() == 0
+    controller.catalog_refreshed.emit(3)
+    app.processEvents()
+    assert window.item_table.topLevelItemCount() == 0
+    assert window.shop_tree.topLevelItemCount() == 0
+
+    window.navigation.setCurrentRow(1)
+    assert not window.items_page.loading_state.isHidden()
+    time.sleep(0.02)
+    app.processEvents()
+    assert window.item_table.topLevelItemCount() == 3
+    assert window.shop_tree.topLevelItemCount() == 0
+    assert progress_reads == []
+
+    window.quit_application()
+    app.processEvents()
+
+
 def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     catalog_dir = tmp_path / "catalog"
@@ -159,6 +196,8 @@ def test_item_tiers_sort_numerically(tmp_path) -> None:
     window = MainWindow(ApplicationController(store))
 
     coin = window.item_table.topLevelItem(0)
+    assert coin.childCount() == 0
+    coin.setExpanded(True)
     assert [coin.child(index).text(0) for index in range(coin.childCount())] == [
         "Tier 1",
         "Tier 2",
@@ -218,6 +257,9 @@ def test_item_families_expand_into_independent_tier_policies(tmp_path) -> None:
     store = ConfigStore(tmp_path / "config.json")
     store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
     window = MainWindow(ApplicationController(store))
+    window.items_page.set_upgrade_progress(
+        UpgradeProgress((UpgradeTargetProgress("wheat", "wheat_1", 2),))
+    )
 
     roots = {
         window.item_table.topLevelItem(index).text(0): window.item_table.topLevelItem(index)
@@ -225,15 +267,21 @@ def test_item_families_expand_into_independent_tier_policies(tmp_path) -> None:
     }
     wheat = roots["Wheat"]
     assert "Wheat Upgrade Cards" not in roots
+    wheat.setExpanded(True)
     cards = next(
         wheat.child(index)
         for index in range(wheat.childCount())
         if wheat.child(index).text(0) == "Upgrade cards"
     )
+    cards.setExpanded(True)
     assert wheat.childCount() == 3
     assert cards.childCount() == 2
     assert [wheat.child(index).text(0) for index in range(2)] == ["Tier 1", "Tier 2"]
     assert [cards.child(index).text(0) for index in range(2)] == ["Tier 1", "Tier 2"]
+    assert window.item_table.itemWidget(cards, 5).findChild(QLabel).text() == "Applied"
+    assert window.item_table.itemWidget(cards.child(0), 5).findChild(QLabel).text() == "Applied"
+    assert window.item_table.itemWidget(cards.child(1), 5).findChild(QLabel).text() == "Applied"
+    assert window.item_table.itemWidget(cards.child(0), 5).findChild(QCheckBox) is None
     assert window.item_table.itemWidget(wheat.child(1), 3).findChild(QLabel).text() == "—"
     remove = window.item_table.itemWidget(wheat.child(0), 6).findChild(QCheckBox)
     assert remove is not None
@@ -247,6 +295,67 @@ def test_item_families_expand_into_independent_tier_policies(tmp_path) -> None:
     window.items_page.expansion_controls.collapse_button.click()
     assert not wheat.isExpanded()
     assert not cards.isExpanded()
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_animal_upgrade_progress_uses_product_identity_but_nests_under_producer(
+    tmp_path,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    cow = replace(
+        _catalog().items["wheat_1"],
+        game_id="cow_4",
+        family_id="cow",
+        policy_key="animals/cow",
+        category="animals",
+        display_name="Cow",
+        tier=4,
+        merge_target=None,
+        capabilities=frozenset({"merge-result", "harvestable"}),
+    )
+    card_1 = replace(
+        cow,
+        game_id="upgrade_card_1",
+        family_id="upgrade_card",
+        policy_key="upgrade_cards/upgrade_card",
+        category="upgrade_cards",
+        display_name="Upgrade Card",
+        tier=1,
+        capabilities=frozenset({"upgradeCard"}),
+    )
+    card_2 = replace(card_1, game_id="upgrade_card_2", tier=2)
+    write_item_catalog(
+        catalog_dir / "catalog.json",
+        ItemCatalog({"cow_4": cow, "upgrade_card_1": card_1, "upgrade_card_2": card_2}),
+    )
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+
+    window.items_page.set_upgrade_progress(
+        UpgradeProgress((UpgradeTargetProgress("milk", "cow_4", 1),))
+    )
+
+    cow_root = window.item_table.topLevelItem(0)
+    assert cow_root.text(0) == "Cow"
+    cards = next(
+        cow_root.child(index)
+        for index in range(cow_root.childCount())
+        if cow_root.child(index).text(0) == "Upgrade cards"
+    )
+    cards.setExpanded(True)
+    assert cards.data(0, Qt.ItemDataRole.UserRole) == "upgrade_cards/upgrade_card/milk"
+    assert window.item_table.itemWidget(cards.child(0), 5).findChild(QLabel).text() == "Applied"
+    pending_collect = window.item_table.itemWidget(cards.child(1), 5).findChild(QCheckBox)
+    assert pending_collect is not None and not pending_collect.isChecked()
+    pending_collect.setChecked(True)
+    window._flush_config()
+    assert ConfigStore(store.path).load().item_policy(
+        "upgrade_cards/upgrade_card/milk/tier/2"
+    ).collect
 
     window.quit_application()
     app.processEvents()
@@ -422,7 +531,7 @@ def test_browser_actions_follow_managed_browser_and_runtime_state(tmp_path) -> N
     page.set_runtime_active(True)
     assert not page.browser_action_button.isEnabled()
     assert not page.restart_button.isEnabled()
-    assert not page.assets_refresh_button.isEnabled()
+    assert not page.game_sync_button.isEnabled()
 
     window.quit_application()
     app.processEvents()
@@ -513,6 +622,8 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
     bakery = window.shop_tree.topLevelItem(0)
     assert wheat_item.icon(0).isNull()
     assert bakery is not None and bakery.icon(0).isNull()
+    assert bakery.childCount() == 0
+    bakery.setExpanded(True)
     assert bakery.childCount() == 1 and bakery.child(0).icon(0).isNull()
 
     for relative_path in (wheat.asset_path, shop.asset_path, recipe.asset_path):
@@ -693,8 +804,10 @@ def test_shop_bulk_toggle_updates_all_shops_and_recipes(tmp_path) -> None:
     window = MainWindow(ApplicationController(store))
 
     bakery = window.shop_tree.topLevelItem(0)
-    assert bakery is not None and bakery.childCount() == 1
+    assert bakery is not None and bakery.childCount() == 0
+    assert not bakery.isExpanded()
     window.shops_page.search.setText("bread")
+    assert bakery.childCount() == 1
     assert not bakery.isHidden()
     assert not bakery.child(0).isHidden()
     assert bakery.isExpanded()

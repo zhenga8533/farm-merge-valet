@@ -21,6 +21,24 @@ _READ_ITEM_CATALOG_EXPRESSION = r"""
     for (const node of graph?.nodes || []) graphNames.set(node.ID, graph.name);
   }
   const discovery = new Set(rootServices?.discovery?.discoveryWhiteList || []);
+  const rewardItem = (value) => {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const found = rewardItem(entry);
+        if (found) return found;
+      }
+      return null;
+    }
+    if (!value || typeof value !== 'object') return null;
+    if (typeof value.key === 'string' && !value.key.startsWith('upgrade_card_')) {
+      return value.key;
+    }
+    for (const entry of Object.values(value)) {
+      const found = rewardItem(entry);
+      if (found) return found;
+    }
+    return null;
+  };
   const out = {};
   for (const [id, blueprint] of blueprints) {
     if (id.startsWith('base_')) continue;
@@ -39,6 +57,7 @@ _READ_ITEM_CATALOG_EXPRESSION = r"""
       tier: Number.isInteger(node?.tier) ? node.tier : null,
       isMergeable: node?.isMergeable === true || Boolean(components.mergeable?.target),
       isHarvestable: node?.isHarvestable === true,
+      upgradeTargetID: rewardItem(components.harvestable?.harvestReward),
       isCollectable: node?.isCollectable === true,
       inDiscoveryBook: discovery.has(id),
       availableRecipes: rootServices?.buildings?._buildingConfigs?.get(id)?.isWorkshop === true
@@ -61,6 +80,7 @@ _READ_ITEM_CATALOG_EXPRESSION = r"""
       tier: null,
       isMergeable: false,
       isHarvestable: false,
+      upgradeTargetID: null,
       isCollectable: false,
       inDiscoveryBook: false,
       recipeOwner: recipeOwners.get(id) || null,
@@ -79,6 +99,7 @@ _READ_ITEM_CATALOG_EXPRESSION = r"""
     tier: null,
     isMergeable: false,
     isHarvestable: false,
+    upgradeTargetID: null,
     isCollectable: false,
     inDiscoveryBook: false,
     availableRecipes: [],

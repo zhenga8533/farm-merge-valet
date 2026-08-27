@@ -176,16 +176,18 @@ def test_catalog_does_not_treat_numbered_decorations_as_mergeable() -> None:
 
 
 def test_catalog_policy_keys_separate_producers_from_their_products() -> None:
+    cow = _metadata(
+        components=["animal", "mergeable"],
+        alias="obj_animal_cow_00",
+        graph="cow",
+        tier=1,
+        target="cow_2",
+        mergeable=True,
+    )
+    cow["upgradeTargetID"] = "milk"
     catalog = build_item_catalog(
         {
-            "cow_1": _metadata(
-                components=["animal", "mergeable"],
-                alias="obj_animal_cow_00",
-                graph="cow",
-                tier=1,
-                target="cow_2",
-                mergeable=True,
-            ),
+            "cow_1": cow,
             "milk": _metadata(
                 components=["ingredient"],
                 alias="ingredient_milk",
@@ -195,6 +197,7 @@ def test_catalog_policy_keys_separate_producers_from_their_products() -> None:
     )
 
     assert catalog.items["cow_1"].policy_key == "animals/cow"
+    assert catalog.items["cow_1"].upgrade_target_id == "milk"
     assert catalog.items["milk"].policy_key == "ingredients/milk"
 
 

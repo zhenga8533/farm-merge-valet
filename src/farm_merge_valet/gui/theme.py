@@ -267,6 +267,14 @@ QLabel#policyBadge {{
 QLabel#policyUnavailable {{
     font-size: 12pt; font-weight: 600;
 }}
+QLabel#policyStatus {{
+    background: {colors.surface_subtle}; color: {colors.muted};
+    border: 1px solid {colors.border}; border-radius: 8px;
+    padding: 3px 8px; font-size: 8pt; font-weight: 600;
+}}
+QLabel#policyStatus[tone="applied"] {{
+    color: {colors.primary}; border-color: {colors.primary};
+}}
 QCheckBox[policyToggle="true"] {{
     background: transparent; spacing: 8px; font-weight: 600;
 }}
@@ -354,7 +362,7 @@ def refresh_widget_theme(widget: QWidget, theme: str) -> None:
     """Refresh one visible widget subtree after an application palette change."""
 
     def needs_repolish(child: QWidget) -> bool:
-        if child.objectName() == "policyBadge":
+        if child.objectName() in {"policyBadge", "policyStatus"}:
             return True
         if type(child).__name__ in {"PolicyCheckBox", "_BulkCheckBox"}:
             return False

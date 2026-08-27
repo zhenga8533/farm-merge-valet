@@ -941,6 +941,23 @@ def test_unexpected_bot_failure_is_logged_before_propagating(monkeypatch, caplog
     assert events[-1] == "bot.stopped"
 
 
+def test_run_forever_reports_first_successful_initialization(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._resume_cached_runtime = lambda: False
+    bot.initialize = lambda: True
+    initialized: list[bool] = []
+
+    def stop_after_first_step() -> None:
+        bot.request_quit()
+
+    bot.step = stop_after_first_step
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.start_paused", False)
+
+    bot.run_forever(on_initialized=lambda: initialized.append(True))
+
+    assert initialized == [True]
+
+
 def test_quit_cancellation_is_not_logged_as_an_unexpected_error(monkeypatch, caplog) -> None:
     bot = bare_bot()
     bot._resume_cached_runtime = lambda: False

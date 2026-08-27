@@ -92,6 +92,15 @@ requirement-based rewards, and non-actionable content. Any item carrying the
 game's `collectable` capability is eligible for the verified collection path;
 the policy default determines whether it is automated.
 
+Crop and animal upgrade progress is read from the game's authoritative
+`UpgradeCardModel`. Each target records its highest applied tier; that tier and
+all lower tiers are presented as applied rather than independently claimable. Producer
+catalog entries retain the game's upgrade-target identity (for example, the cow
+producer targets `milk`) so the GUI can place card status under the correct
+producer while keeping policy identity aligned with runtime data. The GUI shows
+Applied or Unknown status for unavailable tiers and a collection checkbox for
+higher tiers. Automatic upgrade-card claiming is not implemented yet.
+
 ## GUI policy
 
 The catalog describes what an item is and what the game permits. User choices

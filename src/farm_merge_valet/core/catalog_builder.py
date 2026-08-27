@@ -189,6 +189,11 @@ def build_item_catalog(metadata: dict[str, dict[str, Any]]) -> ItemCatalog:
             capabilities=frozenset(capabilities),
             available_recipe_ids=available_recipe_ids,
             recipe=recipe,
+            upgrade_target_id=(
+                value.get("upgradeTargetID")
+                if isinstance(value.get("upgradeTargetID"), str)
+                else None
+            ),
         )
     for game_id, family_id, alias in (
         ("collection_halloween_event", "halloween_event", "icon_tab_halloween"),

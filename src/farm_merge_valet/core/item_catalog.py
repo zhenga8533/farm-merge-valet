@@ -10,8 +10,8 @@ from typing import Any
 
 from farm_merge_valet.core.board import ItemRef, item_tier_policy_key
 
-CATALOG_SCHEMA_VERSION = 4
-SUPPORTED_CATALOG_SCHEMA_VERSIONS = frozenset({3, CATALOG_SCHEMA_VERSION})
+CATALOG_SCHEMA_VERSION = 5
+SUPPORTED_CATALOG_SCHEMA_VERSIONS = frozenset({3, 4, CATALOG_SCHEMA_VERSION})
 
 
 class TileActionMode(StrEnum):
@@ -58,6 +58,7 @@ class CatalogItem:
     capabilities: frozenset[str]
     available_recipe_ids: tuple[str, ...] = ()
     recipe: RecipeMetadata | None = None
+    upgrade_target_id: str | None = None
 
     @property
     def tile_action_mode(self) -> TileActionMode:
@@ -135,6 +136,7 @@ class ItemCatalog:
                     "asset_path": item.asset_path,
                     "capabilities": sorted(item.capabilities),
                     "available_recipe_ids": list(item.available_recipe_ids),
+                    "upgrade_target_id": item.upgrade_target_id,
                     "recipe": (
                         {
                             "shop_id": item.recipe.shop_id,
@@ -229,6 +231,9 @@ def _parse_catalog_item(blueprint_id: str, value: dict[str, Any], path: Path) ->
     ):
         raise ValueError(f"Invalid available recipes for {blueprint_id!r} in {path}")
     recipe = _parse_recipe_metadata(blueprint_id, value.get("recipe"), path)
+    upgrade_target_id = value.get("upgrade_target_id")
+    if upgrade_target_id is not None and not isinstance(upgrade_target_id, str):
+        raise ValueError(f"Invalid upgrade target for {blueprint_id!r} in {path}")
     return CatalogItem(
         game_id=blueprint_id,
         family_id=value["family_id"],
@@ -243,6 +248,7 @@ def _parse_catalog_item(blueprint_id: str, value: dict[str, Any], path: Path) ->
         capabilities=frozenset(capabilities),
         available_recipe_ids=tuple(available_recipe_ids),
         recipe=recipe,
+        upgrade_target_id=upgrade_target_id,
     )
 
 

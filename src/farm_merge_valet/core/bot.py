@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
 from queue import Empty, Queue
@@ -1485,8 +1486,9 @@ class Bot:
             self._last_idle_reason = reason
             self._last_idle_log_at = now
 
-    def run_forever(self) -> None:
+    def run_forever(self, *, on_initialized: Callable[[], None] | None = None) -> None:
         needs_initialization = not settings.start_paused
+        initialization_reported = False
         discovery_thread: Thread | None = None
         discovery_results: Queue[tuple[bool | None, BaseException | None]] = Queue(maxsize=1)
         retry_delay = settings.loop_interval
@@ -1554,6 +1556,9 @@ class Bot:
                         continue
                     needs_initialization = False
                     retry_delay = settings.loop_interval
+                    if not initialization_reported and on_initialized is not None:
+                        on_initialized()
+                        initialization_reported = True
                 try:
                     self.step()
                 except CdpCancelledError:

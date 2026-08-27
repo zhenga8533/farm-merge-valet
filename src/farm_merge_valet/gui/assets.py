@@ -16,6 +16,15 @@ class CatalogIconLoader:
         self._catalog_dir = catalog_dir
         self._cache: dict[str, QIcon] = {}
 
+    def set_catalog_dir(self, catalog_dir: Path) -> None:
+        if catalog_dir == self._catalog_dir:
+            return
+        self._catalog_dir = catalog_dir
+        self.clear()
+
+    def clear(self) -> None:
+        self._cache.clear()
+
     def icon_for(self, item: CatalogItem | None) -> QIcon:
         if item is None or item.asset_path is None:
             return QIcon()
@@ -23,7 +32,7 @@ class CatalogIconLoader:
         if cached is not None:
             return cached
         path = self._catalog_dir.joinpath(*PurePosixPath(item.asset_path).parts)
-        pixmap = QPixmap(str(path)) if path.is_file() else QPixmap()
+        pixmap = QPixmap(str(path))
         icon = QIcon(pixmap) if not pixmap.isNull() else QIcon()
         self._cache[item.asset_path] = icon
         return icon

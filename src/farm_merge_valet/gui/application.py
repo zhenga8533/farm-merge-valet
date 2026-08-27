@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.gui.action_button import ActionButton
+from farm_merge_valet.gui.assets import CatalogIconLoader
 from farm_merge_valet.gui.config_saver import ConfigSaver
 from farm_merge_valet.gui.config_sections import ConfigSection, reset_config_section
 from farm_merge_valet.gui.controller import (
@@ -211,7 +212,12 @@ class CompactOverlay(QMainWindow):
 class MainWindow(QMainWindow):
     _NAVIGATION = ("Dashboard", "Items", "Shops", "Browser", "Settings", "Logs")
 
-    def __init__(self, controller: ApplicationController) -> None:
+    def __init__(
+        self,
+        controller: ApplicationController,
+        *,
+        eager_catalog_pages: bool = True,
+    ) -> None:
         super().__init__()
         self.controller = controller
         self._draft = controller.config
@@ -251,8 +257,17 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
         self.dashboard_page = DashboardPage()
-        self.items_page = ItemsPage(self._draft)
-        self.shops_page = ShopsPage(self._draft)
+        self._catalog_icons = CatalogIconLoader(self._draft.catalog_dir)
+        self.items_page = ItemsPage(
+            self._draft,
+            icons=self._catalog_icons,
+            populate_immediately=eager_catalog_pages,
+        )
+        self.shops_page = ShopsPage(
+            self._draft,
+            icons=self._catalog_icons,
+            populate_immediately=eager_catalog_pages,
+        )
         self.browser_page = BrowserPage(self._draft)
         self.settings_page = SettingsPage(self._draft)
         self.logs_page = LogsPage(self._draft.log_level)
@@ -280,11 +295,12 @@ class MainWindow(QMainWindow):
         controller.browser_operation_changed.connect(self._browser_operation_changed)
         controller.browser_status_changed.connect(self.browser_status_label.setText)
         controller.browser_state_changed.connect(self.browser_page.set_browser_status)
-        controller.asset_operation_changed.connect(self._asset_operation_changed)
-        controller.asset_status_changed.connect(self._asset_status_changed)
+        controller.game_sync_operation_changed.connect(self._game_sync_operation_changed)
+        controller.game_sync_status_changed.connect(self._game_sync_status_changed)
         controller.catalog_setup_failed.connect(self._catalog_setup_failed)
-        controller.catalog_refreshed.connect(self._reload_catalog_pages)
-        controller.assets_refreshed.connect(self._reload_catalog_pages)
+        controller.catalog_refreshed.connect(self._catalog_metadata_refreshed)
+        controller.assets_refreshed.connect(self._catalog_assets_refreshed)
+        controller.upgrade_progress_changed.connect(self.items_page.set_upgrade_progress)
         controller.diagnostics_operation_changed.connect(self.logs_page.set_export_busy)
         controller.diagnostics_exported.connect(self.logs_page.set_export_result)
         controller.diagnostics_failed.connect(self.logs_page.set_export_error)
@@ -316,6 +332,10 @@ class MainWindow(QMainWindow):
     def _set_current_page(self, index: int) -> None:
         self.pages.setCurrentIndex(index)
         page = self.pages.currentWidget()
+        if page is self.items_page:
+            self.items_page.ensure_populated(deferred=True)
+        elif page is self.shops_page:
+            self.shops_page.ensure_populated()
         if page is self.browser_page and not self.browser_page.browser_status_known:
             self.controller.refresh_browser()
         app = QApplication.instance()
@@ -344,7 +364,7 @@ class MainWindow(QMainWindow):
         self.browser_page.launch_requested.connect(self.controller.launch_browser)
         self.browser_page.stop_requested.connect(self._confirm_browser_stop)
         self.browser_page.restart_requested.connect(self._confirm_browser_restart)
-        self.browser_page.assets_refresh_requested.connect(self.controller.refresh_assets)
+        self.browser_page.game_sync_requested.connect(self.controller.synchronize_game_data)
         self.browser_page.reset_requested.connect(self._reset_browser_configuration)
         self.settings_page.config_edited.connect(self._queue_edit)
         self.settings_page.hotkey_recording_changed.connect(self.controller.set_hotkey_recording)
@@ -656,14 +676,14 @@ class MainWindow(QMainWindow):
         self.browser_page.set_busy(busy)
         self.browser_page.set_runtime_active(self.controller.status.state.active)
 
-    def _asset_operation_changed(self, busy: bool) -> None:
-        self.browser_page.set_asset_busy(busy)
+    def _game_sync_operation_changed(self, busy: bool) -> None:
+        self.browser_page.set_game_sync_busy(busy)
         self.browser_page.set_runtime_active(self.controller.status.state.active)
         for page in self._catalog_pages():
             page.set_catalog_setup_busy(busy)
 
-    def _asset_status_changed(self, message: str) -> None:
-        self.browser_page.set_asset_status(message)
+    def _game_sync_status_changed(self, message: str) -> None:
+        self.browser_page.set_game_sync_status(message)
         for page in self._catalog_pages():
             page.set_catalog_setup_status(message)
 
@@ -674,7 +694,13 @@ class MainWindow(QMainWindow):
     def _catalog_pages(self) -> tuple[ItemsPage, ShopsPage]:
         return self.items_page, self.shops_page
 
-    def _reload_catalog_pages(self, *_args: object) -> None:
+    def _catalog_metadata_refreshed(self, *_args: object) -> None:
+        self._catalog_icons.clear()
+        for page in self._catalog_pages():
+            page.reload_catalog_if_missing()
+
+    def _catalog_assets_refreshed(self, *_args: object) -> None:
+        self._catalog_icons.clear()
         for page in self._catalog_pages():
             page.reload_catalog()
 
@@ -756,7 +782,7 @@ def run_application(store: ConfigStore | None = None) -> int:
     configure_logging(config.log_level)
     apply_theme(app, config.theme)
     controller = ApplicationController(config_store)
-    window = MainWindow(controller)
+    window = MainWindow(controller, eager_catalog_pages=False)
     signal.signal(signal.SIGINT, lambda *_args: window.quit_application())
     timer = QTimer()
     timer.setInterval(100)

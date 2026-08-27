@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Hashable
+from dataclasses import dataclass
+
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPaintEvent, QPalette, QPen
 from PySide6.QtWidgets import (
@@ -18,6 +21,77 @@ from PySide6.QtWidgets import (
 )
 
 from farm_merge_valet.gui.widgets import secondary_button
+
+
+@dataclass(frozen=True)
+class _LazyPolicyBranch:
+    item: QTreeWidgetItem
+    materialize: Callable[[], None]
+    searchable_text: str
+
+
+class LazyPolicyBranches:
+    """Materialize child rows only when a policy branch needs to be visible."""
+
+    def __init__(self, tree: QTreeWidget) -> None:
+        self._tree = tree
+        self._branches: dict[Hashable, _LazyPolicyBranch] = {}
+        self._keys_by_item: dict[int, Hashable] = {}
+        self._materialized: set[Hashable] = set()
+        tree.itemExpanded.connect(self._item_expanded)
+
+    def reset(self) -> None:
+        self._branches.clear()
+        self._keys_by_item.clear()
+        self._materialized.clear()
+
+    def register(
+        self,
+        key: Hashable,
+        item: QTreeWidgetItem,
+        materialize: Callable[[], None],
+        *,
+        searchable_text: str,
+    ) -> None:
+        item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+        self._branches[key] = _LazyPolicyBranch(item, materialize, searchable_text.casefold())
+        self._keys_by_item[id(item)] = key
+
+    def materialize(self, key: Hashable) -> None:
+        branch = self._branches.get(key)
+        if branch is None or key in self._materialized:
+            return
+        self._materialized.add(key)
+        sorting_enabled = self._tree.isSortingEnabled()
+        self._tree.setSortingEnabled(False)
+        self._tree.setUpdatesEnabled(False)
+        try:
+            branch.materialize()
+            branch.item.setChildIndicatorPolicy(
+                QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicatorWhenChildless
+            )
+        finally:
+            self._tree.setUpdatesEnabled(True)
+            self._tree.setSortingEnabled(sorting_enabled)
+
+    def materialize_matches(self, text: str) -> None:
+        needle = text.casefold().strip()
+        if not needle:
+            return
+        for key, branch in tuple(self._branches.items()):
+            if key not in self._materialized and needle in branch.searchable_text:
+                self.materialize(key)
+
+    def restore_expanded(self, keys: set[Hashable]) -> None:
+        for key in self._branches.keys() & keys:
+            branch = self._branches[key]
+            self.materialize(key)
+            branch.item.setExpanded(True)
+
+    def _item_expanded(self, item: QTreeWidgetItem) -> None:
+        key = self._keys_by_item.get(id(item))
+        if key is not None:
+            self.materialize(key)
 
 
 class PolicyCheckBox(QCheckBox):
@@ -153,6 +227,20 @@ def aggregate_check_state(values: list[bool]) -> Qt.CheckState:
     )
 
 
+def expanded_policy_keys(tree: QTreeWidget) -> set[Hashable]:
+    expanded: set[Hashable] = set()
+    pending = [tree.topLevelItem(index) for index in range(tree.topLevelItemCount())]
+    while pending:
+        item = pending.pop()
+        if item is None:
+            continue
+        key = item.data(0, Qt.ItemDataRole.UserRole)
+        if item.isExpanded() and isinstance(key, Hashable):
+            expanded.add(key)
+        pending.extend(item.child(index) for index in range(item.childCount()))
+    return expanded
+
+
 def filter_policy_tree(tree: QTreeWidget, text: str) -> None:
     needle = text.casefold().strip()
 
@@ -199,6 +287,15 @@ def policy_badge(text: str) -> QWidget:
     layout.addWidget(label)
     layout.addStretch()
     return container
+
+
+def policy_status(text: str, tone: str, tooltip: str) -> QWidget:
+    label = QLabel(text)
+    label.setObjectName("policyStatus")
+    label.setProperty("tone", tone)
+    label.setAccessibleName(tooltip)
+    label.setToolTip(tooltip)
+    return policy_cell(label)
 
 
 def policy_unavailable(reason: str = "Not applicable to this item") -> QWidget:
