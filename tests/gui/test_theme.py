@@ -5,6 +5,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication, QLabel
 
@@ -91,6 +92,26 @@ def test_theme_switches_reuse_one_palette_driven_stylesheet() -> None:
     assert app.styleSheet() == stylesheet
     assert "palette(window)" in stylesheet
     assert app.palette().color(QPalette.ColorRole.Window).name() == "#0d1117"
+
+    app.setStyleSheet("")
+
+
+def test_system_theme_replaces_all_owned_palette_roles_after_custom_theme() -> None:
+    app = QApplication.instance() or QApplication([])
+    apply_theme(app, "dark")
+
+    apply_theme(app, "system")
+
+    palette = app.palette()
+    is_dark = app.styleHints().colorScheme() == Qt.ColorScheme.Dark
+    expected = (
+        ("#0d1117", "#11151b", "#e6edf3")
+        if is_dark
+        else ("#ffffff", "#f6f8fa", "#1f2328")
+    )
+    assert palette.color(QPalette.ColorRole.Window).name() == expected[0]
+    assert palette.color(QPalette.ColorRole.AlternateBase).name() == expected[1]
+    assert palette.color(QPalette.ColorRole.Text).name() == expected[2]
 
     app.setStyleSheet("")
 

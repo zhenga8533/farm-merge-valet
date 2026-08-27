@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -281,46 +282,58 @@ QToolTip {{ background: {colors.surface}; color: {colors.text}; border: 1px soli
 """ + _scrollbars(colors)
 
 
+def _system_colors(app: QApplication) -> _Colors:
+    scheme = app.styleHints().colorScheme()
+    if scheme == Qt.ColorScheme.Dark:
+        return _DARK
+    if scheme == Qt.ColorScheme.Light:
+        return _LIGHT
+
+    system_window = app.style().standardPalette().color(QPalette.ColorRole.Window)
+    return _DARK if system_window.lightness() < 128 else _LIGHT
+
+
 def apply_theme(app: QApplication, theme: str) -> None:
-    colors = _DARK if theme == "dark" else _LIGHT if theme == "light" else None
+    colors = (
+        _DARK
+        if theme == "dark"
+        else _LIGHT
+        if theme == "light"
+        else _system_colors(app)
+    )
     palette = QPalette()
-    if colors is not None:
-        for role, color in (
-            (QPalette.ColorRole.Window, colors.window),
-            (QPalette.ColorRole.WindowText, colors.text),
-            (QPalette.ColorRole.Base, colors.input),
-            (QPalette.ColorRole.AlternateBase, colors.surface_subtle),
-            (QPalette.ColorRole.ToolTipBase, colors.surface),
-            (QPalette.ColorRole.ToolTipText, colors.text),
-            (QPalette.ColorRole.Text, colors.text),
-            (QPalette.ColorRole.Button, colors.surface),
-            (QPalette.ColorRole.ButtonText, colors.text),
-            (QPalette.ColorRole.Highlight, colors.selected),
-            (QPalette.ColorRole.HighlightedText, "#ffffff"),
-            (QPalette.ColorRole.PlaceholderText, colors.muted),
-            (QPalette.ColorRole.Mid, colors.border),
-            (QPalette.ColorRole.Midlight, colors.disabled),
-            (QPalette.ColorRole.Dark, colors.scroll),
-            (QPalette.ColorRole.Shadow, colors.scroll_hover),
-            (QPalette.ColorRole.Link, colors.primary),
-            (QPalette.ColorRole.LinkVisited, colors.primary_hover),
-        ):
-            palette.setColor(role, QColor(color))
-        for role in (
-            QPalette.ColorRole.WindowText,
-            QPalette.ColorRole.Text,
-            QPalette.ColorRole.ButtonText,
-            QPalette.ColorRole.PlaceholderText,
-        ):
-            palette.setColor(
-                QPalette.ColorGroup.Disabled,
-                role,
-                QColor(colors.disabled_text),
-            )
-    else:
-        primary = palette.color(QPalette.ColorRole.Highlight)
-        palette.setColor(QPalette.ColorRole.Link, primary)
-        palette.setColor(QPalette.ColorRole.LinkVisited, primary)
+    for role, color in (
+        (QPalette.ColorRole.Window, colors.window),
+        (QPalette.ColorRole.WindowText, colors.text),
+        (QPalette.ColorRole.Base, colors.input),
+        (QPalette.ColorRole.AlternateBase, colors.surface_subtle),
+        (QPalette.ColorRole.ToolTipBase, colors.surface),
+        (QPalette.ColorRole.ToolTipText, colors.text),
+        (QPalette.ColorRole.Text, colors.text),
+        (QPalette.ColorRole.Button, colors.surface),
+        (QPalette.ColorRole.ButtonText, colors.text),
+        (QPalette.ColorRole.Highlight, colors.selected),
+        (QPalette.ColorRole.HighlightedText, "#ffffff"),
+        (QPalette.ColorRole.PlaceholderText, colors.muted),
+        (QPalette.ColorRole.Mid, colors.border),
+        (QPalette.ColorRole.Midlight, colors.disabled),
+        (QPalette.ColorRole.Dark, colors.scroll),
+        (QPalette.ColorRole.Shadow, colors.scroll_hover),
+        (QPalette.ColorRole.Link, colors.primary),
+        (QPalette.ColorRole.LinkVisited, colors.primary_hover),
+    ):
+        palette.setColor(role, QColor(color))
+    for role in (
+        QPalette.ColorRole.WindowText,
+        QPalette.ColorRole.Text,
+        QPalette.ColorRole.ButtonText,
+        QPalette.ColorRole.PlaceholderText,
+    ):
+        palette.setColor(
+            QPalette.ColorGroup.Disabled,
+            role,
+            QColor(colors.disabled_text),
+        )
     app.setProperty("fmvTheme", theme)
     app.setPalette(palette)
     stylesheet = _stylesheet(_PALETTE_COLORS)
