@@ -1,6 +1,6 @@
 """Compile a user-local sprite catalog from the loaded game's atlases.
 
-The normal `sync-assets` flow discovers resources through CDP. Given those
+The normal `assets sync` flow discovers resources through CDP. Given those
 URLs, or a diagnostic HAR capture, this module:
   1. Finds every referenced atlas/spine sheet PNG.
   2. Downloads each PNG + its paired TexturePacker JSON manifest (same path,
@@ -10,8 +10,8 @@ URLs, or a diagnostic HAR capture, this module:
      exact pixel coordinates, then writes a capability catalog used by the
      bot and GUI.
 
-Run `farm-merge-valet sync-assets` while the managed game is loaded. The
-`extract-templates path/to/capture.har` command is retained as a fallback.
+Run `farm-merge-valet assets sync` while the managed game is loaded. The
+`assets extract path/to/capture.har` command is retained as a fallback.
 """
 
 from __future__ import annotations
@@ -371,7 +371,7 @@ def compile_cached_assets() -> None:
     if not atlases:
         raise RuntimeError(
             f"No cached atlases were found in {settings.atlas_cache_dir}. Run "
-            "sync-assets while the game is loaded, or extract-templates with a current HAR."
+            "assets sync while the game is loaded, or assets extract with a current HAR."
         )
     _compile_assets(atlases, catalog_dir)
 

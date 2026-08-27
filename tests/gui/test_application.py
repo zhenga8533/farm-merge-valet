@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
 )
 
+from farm_merge_valet.browser import BrowserKind, BrowserStatus
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.core.catalog_store import write_item_catalog
 from farm_merge_valet.core.item_catalog import CatalogItem, ItemCatalog, RecipeMetadata
@@ -276,7 +277,9 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         "Controls and startup",
         "Notifications",
         "Appearance",
+        "Application",
     }
+    assert "Version" in labels
     assert "Start automation paused" in labels
     assert "Reset all" in {
         button.text() for button in window.settings_page.findChildren(QPushButton)
@@ -325,6 +328,39 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
     window._flush_config()
 
     assert ConfigStore(store.path).load().cdp_port == 9333
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_browser_actions_follow_managed_browser_and_runtime_state(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    page = window.browser_page
+
+    assert page.browser_action_button.text() == "Launch managed browser"
+    assert page.browser_action_button.isEnabled()
+    assert not page.restart_button.isEnabled()
+
+    page.set_browser_status(
+        BrowserStatus(
+            running=True,
+            compatible=True,
+            managed=True,
+            kind=BrowserKind.CHROME,
+        )
+    )
+
+    assert page.browser_action_button.text() == "Stop managed browser"
+    assert page.browser_action_button.property("danger") is True
+    assert page.restart_button.isEnabled()
+
+    page.set_runtime_active(True)
+    assert not page.browser_action_button.isEnabled()
+    assert not page.restart_button.isEnabled()
+    assert not page.assets_refresh_button.isEnabled()
 
     window.quit_application()
     app.processEvents()

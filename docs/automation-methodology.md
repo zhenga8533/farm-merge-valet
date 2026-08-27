@@ -156,9 +156,9 @@ action pause the bot instead of repeatedly submitting the same drop.
 game-iframe DOM geometry. It does not focus or activate the browser.
 
 Scene calibration maps grid coordinates to pixels relative to that game-only
-capture. `visualize-positions` marks currently rendered cells by classification
+capture. `diagnostics positions` marks currently rendered cells by classification
 with a compact legend; there are no dead zones, actionable regions, crate
-exclusions, or pan anchors. `diagnose-live-state` includes runtime capability,
+exclusions, or pan anchors. `diagnostics live-state` includes runtime capability,
 scene identity, bounded handler-discovery stages, browser background-flag status,
 heartbeat status, claim capability, and counts of collectible, ready, cooling,
 and depleted objects. Heap-wide board-map candidates are collected only when

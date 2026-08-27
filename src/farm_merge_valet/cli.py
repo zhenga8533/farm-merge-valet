@@ -5,28 +5,22 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
 import cv2
-import numpy as np
 import typer
 from rich import print as rprint
 
 from farm_merge_valet.browser import BrowserKind, BrowserManager, BrowserManagerError
-from farm_merge_valet.cdp.board_store import arm_board_store, inspect_board_maps, read_board_state
-from farm_merge_valet.cdp.client import (
-    CdpConnectionError,
-    capture_game_frame,
-    list_targets,
-    read_background_flag_status,
-)
-from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
-from farm_merge_valet.cdp.scene_geometry import read_scene_calibration
+from farm_merge_valet.cdp.client import CdpConnectionError, list_targets
 from farm_merge_valet.config import ConfigStore, settings
-from farm_merge_valet.core.board import CellKind
-from farm_merge_valet.core.bot import Bot
+from farm_merge_valet.diagnostics import (
+    build_position_visualization,
+    capture_game_image,
+    export_support_bundle,
+    write_live_state_report,
+)
 from farm_merge_valet.logging_setup import configure_logging
 from farm_merge_valet.tools.template_extraction import (
     compile_cached_assets,
@@ -36,7 +30,11 @@ from farm_merge_valet.tools.template_extraction import (
 
 app = typer.Typer(help="Automation tool for Farm Merge Valley.", invoke_without_command=True)
 browser_app = typer.Typer(help="Manage the dedicated Chromium-family browser.")
+assets_app = typer.Typer(help="Synchronize and rebuild cached game assets.")
+diagnostics_app = typer.Typer(help="Capture runtime information for troubleshooting.")
 app.add_typer(browser_app, name="browser")
+app.add_typer(assets_app, name="assets")
+app.add_typer(diagnostics_app, name="diagnostics")
 
 logger = logging.getLogger(__name__)
 _config_store = ConfigStore()
@@ -62,17 +60,10 @@ def _default_output(suffix: str) -> Path:
     return Path("captures") / f"{datetime.now():%Y%m%d-%H%M%S}{suffix}"
 
 
-def _capture_image() -> np.ndarray:
-    encoded = np.frombuffer(capture_game_frame(settings.cdp_port, settings.window_title), np.uint8)
-    image = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
-    if image is None:
-        raise CdpConnectionError("Could not decode the browser's game screenshot.")
-    return image
-
-
-@app.command()
+@app.command(hidden=True)
 def run() -> None:
-    """Launch the desktop application (compatibility alias)."""
+    """Launch the desktop application (deprecated compatibility alias)."""
+    typer.echo("The 'run' alias is deprecated; use 'farm-merge-valet'.", err=True)
     from farm_merge_valet.gui.application import run_application
 
     raise typer.Exit(run_application(_config_store))
@@ -153,7 +144,8 @@ def browser_stop_cmd(
     rprint("[green]Managed browser stopped.[/green]")
 
 
-@app.command("list-targets")
+@diagnostics_app.command("targets")
+@app.command("list-targets", hidden=True)
 def list_targets_cmd() -> None:
     """List browser DevTools targets available on the configured port."""
     try:
@@ -164,12 +156,13 @@ def list_targets_cmd() -> None:
         raise typer.Exit(code=1) from exc
 
 
-@app.command()
+@diagnostics_app.command("capture")
+@app.command("capture", hidden=True)
 def capture(output: Path | None = typer.Option(None, "--output", "-o")) -> None:  # noqa: B008
     """Save a CDP screenshot cropped to the game iframe."""
     try:
-        frame = _capture_image()
-    except CdpConnectionError as exc:
+        frame = capture_game_image(settings.snapshot())
+    except (CdpConnectionError, RuntimeError) as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
     output = output or _default_output(".png")
@@ -178,49 +171,25 @@ def capture(output: Path | None = typer.Option(None, "--output", "-o")) -> None:
     rprint(f"[green]Saved[/green] {frame.shape[1]}x{frame.shape[0]} game capture to {output}")
 
 
-@app.command("visualize-positions")
+@diagnostics_app.command("positions")
+@app.command("visualize-positions", hidden=True)
 def visualize_positions_cmd(
     output: Path | None = typer.Option(None, "--output", "-o"),  # noqa: B008
 ) -> None:
     """Mark rendered cells by their current live-state classification."""
     try:
-        frame = _capture_image()
-        bot = Bot()
-        arm_board_store(settings.cdp_port, settings.window_title)
-        synced = bot._sync_board_from_live_state()
-        calibration = read_scene_calibration(settings.cdp_port, settings.window_title)
-    except CdpConnectionError as exc:
+        frame, synced, _counts = build_position_visualization(settings.snapshot())
+    except (CdpConnectionError, RuntimeError) as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
-    if calibration is None:
-        rprint("[red]Could not derive live scene geometry.[/red]")
-        raise typer.Exit(code=1)
-    colors = {
-        CellKind.ITEM: (40, 220, 40),
-        CellKind.EMPTY: (220, 180, 40),
-        CellKind.CLOUD: (200, 200, 200),
-        CellKind.STRUCTURE: (180, 80, 220),
-        CellKind.CLAIMABLE: (40, 160, 255),
-        CellKind.OTHER: (100, 100, 160),
-    }
-    counts: Counter[str] = Counter()
-    for coord in sorted(calibration.rendered_coords):
-        cell = bot.board.get_cell(coord)
-        kind = cell.kind if cell is not None else CellKind.OTHER
-        x, y = calibration.to_pixel(coord)
-        if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
-            cv2.circle(frame, (x, y), 8, colors[kind], 2)
-            counts[kind.name.lower()] += 1
-    legend = "  ".join(f"{name}:{count}" for name, count in sorted(counts.items()))
-    cv2.rectangle(frame, (6, 6), (min(frame.shape[1] - 6, 14 + len(legend) * 8), 32), (0, 0, 0), -1)
-    cv2.putText(frame, legend, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
     output = output or _default_output("_positions.png")
     output.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(output), frame)
     rprint(f"[green]Saved[/green] classified positions to {output} (live_synced={synced})")
 
 
-@app.command("diagnose-live-state")
+@diagnostics_app.command("live-state")
+@app.command("diagnose-live-state", hidden=True)
 def diagnose_live_state_cmd(
     output: Path | None = typer.Option(None, "--output", "-o"),  # noqa: B008
     include_heap_candidates: bool = typer.Option(
@@ -231,97 +200,20 @@ def diagnose_live_state_cmd(
 ) -> None:
     """Write board, runtime-capability, heartbeat, and scene diagnostics."""
     try:
-        adapter = GameRuntimeAdapter(settings.cdp_port, settings.window_title)
-        health = adapter.discover()
-        runtime_discovery = adapter.inspect_runtime()
-        arm_status = "already-armed" if health.board_available else "not-found"
-        candidates = (
-            inspect_board_maps(settings.cdp_port, settings.window_title)
-            if include_heap_candidates
-            else []
+        output = output or _default_output("_live-state.json")
+        write_live_state_report(
+            settings.snapshot(),
+            output,
+            include_heap_candidates=include_heap_candidates,
         )
-        board_state = read_board_state(settings.cdp_port, settings.window_title)
-        shop_orders = adapter.read_shop_orders() if health.shop_available else None
-        calibration = read_scene_calibration(settings.cdp_port, settings.window_title)
-    except CdpConnectionError as exc:
+    except (CdpConnectionError, RuntimeError) as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
-    report = {
-        "runtime": {
-            "available": health.available,
-            "scene_id": health.scene_id,
-            "board": health.board_available,
-            "item_drop": health.item_drop_available,
-            "crate_spawn": health.crate_spawn_available,
-            "inventory": health.inventory_available,
-            "claim": health.claim_available,
-            "shop_orders": health.shop_available,
-            "heartbeat": health.heartbeat,
-            "heartbeat_age_ms": health.heartbeat_age_ms,
-            "heartbeat_advancing": health.heartbeat_advancing,
-            "heartbeat_installed": health.heartbeat_installed,
-            "detail": health.detail,
-            "discovery": runtime_discovery,
-        },
-        "browser_background_flags": read_background_flag_status(settings.cdp_port),
-        "arm_status": arm_status,
-        "candidate_maps": candidates,
-        "selected_board": {
-            "reported_cells": len(board_state) if board_state is not None else None,
-            "open_cells": sum(not value.has_content for value in (board_state or {}).values()),
-            "common_blueprints": Counter(
-                value.blueprint_id for value in (board_state or {}).values() if value.blueprint_id
-            ).most_common(20),
-            "collectible_products": sum(
-                value.collectable_ingredient for value in (board_state or {}).values()
-            ),
-            "collectable_tiles": sum(value.collectable for value in (board_state or {}).values()),
-            "producers": Counter(
-                value.producer_state.value
-                for value in (board_state or {}).values()
-                if value.producer_state is not None
-            ),
-        },
-        "shop_orders": (
-            [
-                {
-                    "shop_id": order.shop_id,
-                    "recipe_id": order.recipe_id,
-                    "state": order.state.value,
-                    "duration_seconds": order.duration_seconds,
-                    "remaining_seconds": order.remaining_seconds,
-                    "affordable": order.affordable,
-                    "ingredients": [
-                        {
-                            "item_id": ingredient.item_id,
-                            "required": ingredient.required,
-                            "available": ingredient.available,
-                        }
-                        for ingredient in order.ingredients
-                    ],
-                    "reward_ids": list(order.reward_ids),
-                }
-                for order in shop_orders
-            ]
-            if shop_orders is not None
-            else None
-        ),
-        "scene": {
-            "rendered_cells": len(calibration.rendered_coords) if calibration else 0,
-            "origin": calibration.origin if calibration else None,
-            "column_step": calibration.col_step if calibration else None,
-            "row_step": calibration.row_step if calibration else None,
-            "canvas_scale": calibration.canvas_scale if calibration else None,
-            "canvas_offset": calibration.canvas_offset if calibration else None,
-        },
-    }
-    output = output or _default_output("_live-state.json")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, indent=2), encoding="utf-8")
     rprint(f"[green]Saved live-state diagnostics[/green] to {output}")
 
 
-@app.command("extract-templates")
+@assets_app.command("extract")
+@app.command("extract-templates", hidden=True)
 def extract_templates_cmd(
     har: Path = typer.Argument(...),  # noqa: B008
     force: bool = False,
@@ -333,7 +225,8 @@ def extract_templates_cmd(
         raise typer.Exit(code=1) from exc
 
 
-@app.command("compile-assets")
+@assets_app.command("compile")
+@app.command("compile-assets", hidden=True)
 def compile_assets_cmd() -> None:
     """Rebuild the item catalog and assets from the cached game atlases."""
     try:
@@ -343,7 +236,8 @@ def compile_assets_cmd() -> None:
         raise typer.Exit(code=1) from exc
 
 
-@app.command("sync-assets")
+@assets_app.command("sync")
+@app.command("sync-assets", hidden=True)
 def sync_assets_cmd(force: bool = False) -> None:
     """Discover and compile current game assets into the per-user cache."""
     try:
@@ -351,6 +245,25 @@ def sync_assets_cmd(force: bool = False) -> None:
     except RuntimeError as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
+
+
+@diagnostics_app.command("export")
+def export_diagnostics_cmd(
+    output: Path | None = typer.Option(None, "--output", "-o"),  # noqa: B008
+    include_screenshot: bool = typer.Option(False, "--include-screenshot"),
+) -> None:
+    """Create a sanitized support bundle that remains useful when the game is offline."""
+    output = output or _default_output("_diagnostics.zip")
+    try:
+        saved = export_support_bundle(
+            settings.snapshot(),
+            output,
+            include_screenshot=include_screenshot,
+        )
+    except (OSError, RuntimeError) as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    rprint(f"[green]Saved support diagnostics[/green] to {saved}")
 
 
 @app.command()

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import signal
 import sys
+from pathlib import Path
 
 from pydantic import ValidationError
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -277,6 +279,13 @@ class MainWindow(QMainWindow):
         controller.application_quit_requested.connect(self.quit_application)
         controller.browser_operation_changed.connect(self._browser_operation_changed)
         controller.browser_status_changed.connect(self.browser_status_label.setText)
+        controller.browser_state_changed.connect(self.browser_page.set_browser_status)
+        controller.asset_operation_changed.connect(self._asset_operation_changed)
+        controller.asset_status_changed.connect(self.browser_page.set_asset_status)
+        controller.assets_refreshed.connect(self._assets_refreshed)
+        controller.diagnostics_operation_changed.connect(self.logs_page.set_export_busy)
+        controller.diagnostics_exported.connect(self.logs_page.set_export_result)
+        controller.diagnostics_failed.connect(self.logs_page.set_export_error)
         controller.shutdown_complete.connect(self._finish_quit)
         self._status_changed(controller.status)
         self.dashboard_page.set_overlay_visible(self._draft.overlay_visible)
@@ -305,6 +314,8 @@ class MainWindow(QMainWindow):
     def _set_current_page(self, index: int) -> None:
         self.pages.setCurrentIndex(index)
         page = self.pages.currentWidget()
+        if page is self.browser_page and not self.browser_page.browser_status_known:
+            self.controller.refresh_browser()
         app = QApplication.instance()
         if (
             isinstance(page, QWidget)
@@ -326,13 +337,30 @@ class MainWindow(QMainWindow):
         self.shops_page.reset_requested.connect(self._reset_shop_policies)
         self.browser_page.config_edited.connect(self._queue_edit)
         self.browser_page.refresh_requested.connect(self.controller.refresh_browser)
+        self.browser_page.launch_requested.connect(self.controller.launch_browser)
+        self.browser_page.stop_requested.connect(self._confirm_browser_stop)
         self.browser_page.restart_requested.connect(self._confirm_browser_restart)
+        self.browser_page.assets_refresh_requested.connect(self.controller.refresh_assets)
         self.browser_page.reset_requested.connect(self._reset_browser_configuration)
         self.settings_page.config_edited.connect(self._queue_edit)
         self.settings_page.hotkey_recording_changed.connect(self.controller.set_hotkey_recording)
         self.settings_page.reset_requested.connect(self._reset_general_settings)
         self.settings_page.reset_all_requested.connect(self._reset_all_settings)
         self.logs_page.log_level_changed.connect(lambda value: self._queue_config(log_level=value))
+        self.logs_page.export_requested.connect(self._export_diagnostics)
+
+    def _confirm_browser_stop(self) -> None:
+        if (
+            QMessageBox.question(
+                self,
+                "Stop managed browser?",
+                "This closes only the verified Farm Merge Valet browser profile. Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
+            self.controller.stop_browser()
 
     def _confirm_browser_restart(self) -> None:
         if (
@@ -623,6 +651,24 @@ class MainWindow(QMainWindow):
     def _browser_operation_changed(self, busy: bool) -> None:
         self.browser_page.set_busy(busy)
         self.browser_page.set_runtime_active(self.controller.status.state.active)
+
+    def _asset_operation_changed(self, busy: bool) -> None:
+        self.browser_page.set_asset_busy(busy)
+        self.browser_page.set_runtime_active(self.controller.status.state.active)
+
+    def _assets_refreshed(self) -> None:
+        self.items_page.apply_config(self._draft)
+        self.shops_page.apply_config(self._draft)
+
+    def _export_diagnostics(self) -> None:
+        output, _filter = QFileDialog.getSaveFileName(
+            self,
+            "Export diagnostics",
+            "farm-merge-valet-diagnostics.zip",
+            "Zip archives (*.zip)",
+        )
+        if output:
+            self.controller.export_diagnostics(Path(output), self.logs_page.view.toPlainText())
 
     def _show_dashboard(self) -> None:
         self.showNormal()

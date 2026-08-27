@@ -5,12 +5,14 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from farm_merge_valet.browser import BrowserManager, BrowserManagerError
+from farm_merge_valet.browser import BrowserManager, BrowserManagerError, BrowserStatus
 from farm_merge_valet.config import AppConfig, ConfigStore, settings
 from farm_merge_valet.core.bot import Bot
 from farm_merge_valet.gui.hotkeys import HotkeyManager
@@ -71,8 +73,15 @@ class ApplicationController(QObject):
     application_quit_requested = Signal()
     browser_operation_changed = Signal(bool)
     browser_status_changed = Signal(str)
+    browser_state_changed = Signal(object)
+    asset_operation_changed = Signal(bool)
+    asset_status_changed = Signal(str)
+    assets_refreshed = Signal()
+    diagnostics_operation_changed = Signal(bool)
+    diagnostics_exported = Signal(str)
+    diagnostics_failed = Signal(str)
     shutdown_complete = Signal()
-    _browser_operation_finished = Signal(str, object)
+    _utility_operation_finished = Signal(str, object)
     _bot_finished = Signal(object, bool)
 
     def __init__(self, store: ConfigStore) -> None:
@@ -83,7 +92,7 @@ class ApplicationController(QObject):
         self.status = ApplicationStatus()
         self._bot: Bot | None = None
         self._worker: threading.Thread | None = None
-        self._browser_worker: threading.Thread | None = None
+        self._utility_worker: threading.Thread | None = None
         self._stopping = False
         self._shutting_down = False
         self._shutdown_deadline: float | None = None
@@ -97,7 +106,7 @@ class ApplicationController(QObject):
         self._bridge.record_received.connect(self._on_record)
         self.log_handler = GuiEventHandler(self._bridge)
         self._unsubscribe = store.subscribe(self._config_updated)
-        self._browser_operation_finished.connect(self._finish_browser_operation)
+        self._utility_operation_finished.connect(self._finish_utility_operation)
         self._bot_finished.connect(self._finish_bot)
         self._state_timer = QTimer(self)
         self._state_timer.setInterval(100)
@@ -211,6 +220,8 @@ class ApplicationController(QObject):
                 raise BrowserManagerError(
                     browser_status.detail or "A compatible managed browser is not running."
                 )
+            self.browser_status_changed.emit(self._browser_status_text(browser_status))
+            self.browser_state_changed.emit(browser_status)
             browser_name = browser_status.kind.value if browser_status.kind else "browser"
             log_event(
                 logger,
@@ -322,8 +333,8 @@ class ApplicationController(QObject):
         if quit_from_inbound_control:
             self.application_quit_requested.emit()
 
-    def browser_status(self) -> str:
-        status = BrowserManager(self.store.current).status()
+    @staticmethod
+    def _browser_status_text(status: BrowserStatus) -> str:
         if not status.running:
             return status.detail or "Managed browser is not running"
         loaded = "game loaded" if status.game_loaded else "waiting for game"
@@ -332,55 +343,129 @@ class ApplicationController(QObject):
     def refresh_browser(self) -> None:
         self._run_browser_operation("refresh")
 
+    def launch_browser(self) -> None:
+        self._run_browser_operation("launch")
+
+    def stop_browser(self) -> None:
+        self._run_browser_operation("stop")
+
     def restart_browser(self) -> None:
-        if self._bot is not None:
-            self.error.emit("Stop the bot before restarting the managed browser.")
-            return
         self._run_browser_operation("restart")
 
     def _run_browser_operation(self, operation: str) -> None:
+        if operation != "refresh" and self.status.state.active:
+            self.error.emit("Stop the bot before changing the managed browser.")
+            return
+        messages = {
+            "refresh": "Checking browser…",
+            "launch": "Launching managed browser…",
+            "restart": "Restarting managed browser…",
+            "stop": "Stopping managed browser…",
+        }
+        self.browser_status_changed.emit(messages[operation])
+
+        def work() -> BrowserStatus:
+            manager = BrowserManager(self.store.current)
+            if operation == "launch":
+                return manager.launch()
+            if operation == "restart":
+                return manager.restart()
+            if operation == "stop":
+                manager.stop()
+                return manager.status()
+            return manager.status()
+
+        self._start_utility_operation(f"browser:{operation}", work)
+
+    def refresh_assets(self) -> None:
+        if self.status.state.active:
+            self.error.emit("Stop the bot before refreshing game assets.")
+            return
+        self.asset_status_changed.emit("Refreshing game assets…")
+
+        def work() -> str:
+            from farm_merge_valet.core.item_catalog import load_item_catalog
+            from farm_merge_valet.tools.template_extraction import sync_runtime_assets
+
+            settings.replace(self.store.current)
+            sync_runtime_assets()
+            catalog = load_item_catalog(self.store.current.catalog_dir / "catalog.json")
+            return f"Game assets refreshed · Catalog entries: {len(catalog.items)}"
+
+        self._start_utility_operation("assets:sync", work)
+
+    def export_diagnostics(self, output: Path, logs: str) -> None:
+        def work() -> Path:
+            from farm_merge_valet.diagnostics import export_support_bundle
+
+            return export_support_bundle(self.store.current, output, logs=logs)
+
+        self._start_utility_operation("diagnostics:export", work)
+
+    def _start_utility_operation(
+        self,
+        operation: str,
+        work: Callable[[], object],
+    ) -> None:
         if self._shutting_down:
             return
-        if self._browser_worker is not None and self._browser_worker.is_alive():
+        if self._utility_worker is not None and self._utility_worker.is_alive():
+            self.error.emit("Another background operation is already in progress.")
             return
-        self.browser_operation_changed.emit(True)
-        self.browser_status_changed.emit(
-            "Restarting managed browser…" if operation == "restart" else "Checking browser…"
-        )
+        category = operation.partition(":")[0]
+        self._set_utility_busy(category, True)
 
         def run() -> None:
             try:
-                manager = BrowserManager(self.store.current)
-                if operation == "restart":
-                    status = manager.restart()
-                    loaded = "game loaded" if status.game_loaded else "waiting for game"
-                    browser_name = status.kind.value.title() if status.kind else "Browser"
-                    result = f"{browser_name} ready · {loaded}"
-                else:
-                    result = self.browser_status()
-                self._browser_operation_finished.emit(operation, result)
+                self._utility_operation_finished.emit(operation, work())
             except Exception as exc:
-                self._browser_operation_finished.emit(operation, exc)
+                self._utility_operation_finished.emit(operation, exc)
 
-        self._browser_worker = threading.Thread(
+        self._utility_worker = threading.Thread(
             target=run,
             daemon=True,
-            name=f"fmv-browser-{operation}",
+            name=f"fmv-{operation.replace(':', '-')}",
         )
-        self._browser_worker.start()
+        self._utility_worker.start()
 
-    def _finish_browser_operation(self, operation: str, result: object) -> None:
-        self.browser_operation_changed.emit(False)
+    def _set_utility_busy(self, category: str, busy: bool) -> None:
+        if category == "browser":
+            self.browser_operation_changed.emit(busy)
+        elif category == "assets":
+            self.asset_operation_changed.emit(busy)
+        elif category == "diagnostics":
+            self.diagnostics_operation_changed.emit(busy)
+
+    def _finish_utility_operation(self, operation: str, result: object) -> None:
+        category, _, action = operation.partition(":")
+        self._set_utility_busy(category, False)
         if isinstance(result, Exception):
             message = str(result)
-            self.browser_status_changed.emit(message)
+            if category == "browser":
+                self.browser_status_changed.emit(message)
+            elif category == "assets":
+                self.asset_status_changed.emit(message)
+            elif category == "diagnostics":
+                self.diagnostics_failed.emit(message)
             if not self._shutting_down:
                 self.error.emit(message)
             return
-        message = str(result)
-        self.browser_status_changed.emit(message)
-        if operation == "restart":
-            self._set_status(browser=message, last_activity="Managed browser restarted")
+        if category == "browser" and isinstance(result, BrowserStatus):
+            message = self._browser_status_text(result)
+            self.browser_status_changed.emit(message)
+            self.browser_state_changed.emit(result)
+            if action != "refresh":
+                activity = {
+                    "launch": "Managed browser launched",
+                    "restart": "Managed browser restarted",
+                    "stop": "Managed browser stopped",
+                }[action]
+                self._set_status(browser=message, last_activity=activity)
+        elif category == "assets":
+            self.asset_status_changed.emit(str(result))
+            self.assets_refreshed.emit()
+        elif category == "diagnostics":
+            self.diagnostics_exported.emit(str(result))
 
     def _on_record(self, record: logging.LogRecord) -> None:
         formatter = self.log_handler.formatter or logging.Formatter()
@@ -423,11 +508,11 @@ class ApplicationController(QObject):
         if not self._shutting_down:
             return
         bot_running = self._worker is not None and self._worker.is_alive()
-        browser_running = self._browser_worker is not None and self._browser_worker.is_alive()
+        utility_running = self._utility_worker is not None and self._utility_worker.is_alive()
         deadline_reached = (
             self._shutdown_deadline is not None and time.monotonic() >= self._shutdown_deadline
         )
-        if (bot_running or browser_running) and not deadline_reached:
+        if (bot_running or utility_running) and not deadline_reached:
             return
         self._state_timer.stop()
         if not self._unsubscribed:

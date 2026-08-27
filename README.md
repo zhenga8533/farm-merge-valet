@@ -50,17 +50,18 @@ the foreground application, and it does not intentionally pan the game camera.
 
 ```powershell
 farm-merge-valet
-farm-merge-valet list-targets
-farm-merge-valet capture
-farm-merge-valet visualize-positions
-farm-merge-valet diagnose-live-state
+farm-merge-valet diagnostics targets
+farm-merge-valet diagnostics capture
+farm-merge-valet diagnostics positions
+farm-merge-valet diagnostics live-state
+farm-merge-valet diagnostics export
 ```
 
 The command without a subcommand opens the desktop dashboard. Start launches or
 reuses the managed browser and begins automation; Start/Stop and Pause/Resume
 remain available from the dashboard, compact overlay, tray, and global
-shortcuts. `run` is retained as a GUI-launching compatibility alias. The browser
-manager refuses
+shortcuts. The deprecated `run` command remains as a hidden compatibility alias.
+The browser manager refuses
 an occupied endpoint with the wrong profile, executable, or switches.
 An ordinary resume validates and reuses the cached scene; heap discovery runs
 again only when the iframe, gameplay services, or active board identity changed.
@@ -72,9 +73,9 @@ hardware/firmware concern, so the recorded key is typically F9 rather than
 Fn+F9. Shortcuts fire once per physical key press and re-arm when the key is
 released. Quit is idempotent across keyboard and GUI shutdown paths.
 
-`capture` uses `Page.captureScreenshot` and live DOM geometry to save only the
-game iframe without focusing the browser. `visualize-positions` marks visible cells
-by current classification. `diagnose-live-state` reports board-map candidates,
+`diagnostics capture` uses `Page.captureScreenshot` and live DOM geometry to save only
+the game iframe without focusing the browser. `diagnostics positions` marks visible cells
+by current classification. `diagnostics live-state` reports board-map candidates,
 runtime capabilities, live shop orders and affordability, scene identity,
 animation-heartbeat state, and whether
 the browser has the required background flags. The potentially expensive
@@ -103,16 +104,16 @@ To discover the currently loaded game's atlases through CDP and build the
 categorized local sprite cache, use:
 
 ```powershell
-farm-merge-valet sync-assets
+farm-merge-valet assets sync
 ```
 
 To rebuild from the existing local atlas cache, use:
 
 ```powershell
-farm-merge-valet compile-assets
+farm-merge-valet assets compile
 ```
 
-`extract-templates <capture.har>` remains available as a diagnostic fallback.
+`assets extract <capture.har>` remains available as a diagnostic fallback.
 The first catalog build requires a loaded game so the compiler can read the
 authoritative blueprint, merge-graph, building, and recipe metadata. The GUI
 shows compiled sprites beside item families, shops, and recipes when the local

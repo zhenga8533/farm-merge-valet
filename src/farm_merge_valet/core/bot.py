@@ -339,6 +339,10 @@ class Bot:
         self._live_cells = raw
         return True
 
+    def sync_board_from_live_state(self) -> bool:
+        """Synchronize the diagnostic board snapshot from the live game state."""
+        return self._sync_board_from_live_state()
+
     def _set_live_cell(self, board: BoardGrid, coord: GridCoord, state: LiveCellState) -> None:
         if not state.has_content:
             board.set_cell(coord, Cell(CellKind.EMPTY))

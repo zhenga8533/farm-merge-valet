@@ -36,6 +36,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from farm_merge_valet import __version__
+from farm_merge_valet.browser import BrowserStatus
 from farm_merge_valet.config import AppConfig, ItemPolicyOverride
 from farm_merge_valet.core.board import item_tier_policy_key
 from farm_merge_valet.core.item_catalog import (
@@ -1049,7 +1051,10 @@ class ShopsPage(AppPage):
 class BrowserPage(_ConfigFormPage):
     config_edited = Signal(object)
     refresh_requested = Signal()
+    launch_requested = Signal()
+    stop_requested = Signal()
     restart_requested = Signal()
+    assets_refresh_requested = Signal()
     reset_requested = Signal()
 
     def __init__(self, config: AppConfig) -> None:
@@ -1101,10 +1106,14 @@ class BrowserPage(_ConfigFormPage):
         self._add_path(form, "Browser profile directory", "browser_profile_dir")
         buttons = QHBoxLayout()
         self.refresh_button = secondary_button("Refresh status")
+        self.browser_action_button = QPushButton("Launch managed browser")
         self.restart_button = QPushButton("Restart managed browser")
+        self.restart_button.setProperty("secondary", True)
         self.refresh_button.clicked.connect(self.refresh_requested)
+        self.browser_action_button.clicked.connect(self._request_browser_action)
         self.restart_button.clicked.connect(self.restart_requested)
         buttons.addWidget(self.refresh_button)
+        buttons.addWidget(self.browser_action_button)
         buttons.addWidget(self.restart_button)
         buttons.addStretch()
         self._add_form_row(form, "Actions", buttons)
@@ -1117,14 +1126,79 @@ class BrowserPage(_ConfigFormPage):
         sections.addWidget(connection)
 
         assets, form = _settings_section("Assets and cache")
+        self.asset_status_label = QLabel(self._asset_status(config))
+        self.asset_status_label.setWordWrap(True)
+        self.asset_status_label.setAccessibleName("Game asset status")
         self._add_path(form, "Catalog directory", "catalog_dir", optional=False)
         self._add_path(form, "Atlas cache directory", "atlas_cache_dir", optional=False)
+        self._add_form_row(form, "Status", self.asset_status_label)
+        self.assets_refresh_button = QPushButton("Refresh game assets")
+        self.assets_refresh_button.clicked.connect(self.assets_refresh_requested)
+        self._add_form_row(form, "Actions", self.assets_refresh_button)
         sections.addWidget(assets)
         sections.addStretch()
         scroll.setWidget(content)
         self.page_layout.addWidget(scroll, 1)
-        self._busy = False
+        self._browser_busy = False
+        self._asset_busy = False
         self._runtime_active = False
+        self._browser_status: BrowserStatus | None = None
+        self._sync_action_states()
+
+    @staticmethod
+    def _asset_status(config: AppConfig) -> str:
+        catalog = config.catalog_dir / "catalog.json"
+        if not catalog.is_file():
+            return "No compiled catalog found"
+        return "Compiled catalog available"
+
+    def _request_browser_action(self) -> None:
+        if self._browser_status is not None and self._browser_status.running:
+            self.stop_requested.emit()
+        else:
+            self.launch_requested.emit()
+
+    def set_browser_status(self, status: BrowserStatus) -> None:
+        self._browser_status = status
+        self._sync_action_states()
+
+    @property
+    def browser_status_known(self) -> bool:
+        return self._browser_status is not None
+
+    def set_asset_status(self, status: str) -> None:
+        self.asset_status_label.setText(status)
+
+    def set_asset_busy(self, busy: bool) -> None:
+        self._asset_busy = busy
+        self._sync_action_states()
+
+    def _sync_action_states(self) -> None:
+        status = self._browser_status
+        running = status is not None and status.running
+        managed = status is not None and status.managed
+        compatible = status is not None and status.compatible
+        operation_busy = self._browser_busy or self._asset_busy
+        self.browser_action_button.setText(
+            "Stop managed browser" if running and managed else "Launch managed browser"
+        )
+        danger = running and managed
+        if self.browser_action_button.property("danger") != danger:
+            self.browser_action_button.setProperty("danger", danger)
+            self.browser_action_button.style().unpolish(self.browser_action_button)
+            self.browser_action_button.style().polish(self.browser_action_button)
+        self.refresh_button.setEnabled(not operation_busy)
+        self.browser_action_button.setEnabled(
+            not operation_busy and not self._runtime_active and (not running or managed)
+        )
+        self.restart_button.setEnabled(
+            not operation_busy
+            and not self._runtime_active
+            and running
+            and managed
+            and compatible
+        )
+        self.assets_refresh_button.setEnabled(not operation_busy and not self._runtime_active)
 
     def _request(self, field: str, value: object) -> None:
         self.config_edited.emit(ConfigEdit({field: value}, field, "browser"))
@@ -1185,6 +1259,7 @@ class BrowserPage(_ConfigFormPage):
             elif isinstance(control, QLineEdit):
                 control.setText(str(value) if value is not None else "")
             control.blockSignals(False)
+        self.asset_status_label.setText(self._asset_status(config))
         self.configuration_header.mark_saved()
 
     def mark_saving(self, field: str | None = None) -> None:
@@ -1203,13 +1278,12 @@ class BrowserPage(_ConfigFormPage):
         control.setFocus()
 
     def set_busy(self, busy: bool) -> None:
-        self._busy = busy
-        self.refresh_button.setEnabled(not busy)
-        self.restart_button.setEnabled(not busy and not self._runtime_active)
+        self._browser_busy = busy
+        self._sync_action_states()
 
     def set_runtime_active(self, active: bool) -> None:
         self._runtime_active = active
-        self.restart_button.setEnabled(not active and not self._busy)
+        self._sync_action_states()
 
 
 class SettingsPage(_ConfigFormPage):
@@ -1301,6 +1375,13 @@ class SettingsPage(_ConfigFormPage):
         self._add_opacity(form, "Overlay inactive opacity", "overlay_unfocused_opacity")
         self._add_opacity(form, "Overlay focused opacity", "overlay_focused_opacity")
         sections.addWidget(appearance)
+
+        application, form = _settings_section("Application")
+        version = QLabel(__version__)
+        version.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        version.setAccessibleName("Application version")
+        self._add_form_row(form, "Version", version)
+        sections.addWidget(application)
         sections.addStretch()
         scroll.setWidget(content)
         self.page_layout.addWidget(scroll, 1)
@@ -1412,6 +1493,7 @@ class SettingsPage(_ConfigFormPage):
 
 class LogsPage(AppPage):
     log_level_changed = Signal(str)
+    export_requested = Signal()
 
     def __init__(self, log_level: str) -> None:
         super().__init__("Logs", "Structured application events from the shared logging pipeline.")
@@ -1427,10 +1509,16 @@ class LogsPage(AppPage):
         )
         clear = secondary_button("Clear")
         clear.clicked.connect(self.clear)
+        self.export_button = QPushButton("Export diagnostics…")
+        self.export_button.clicked.connect(self.export_requested)
         toolbar.addWidget(QLabel("Minimum level"))
         toolbar.addWidget(self.filter)
         toolbar.addStretch()
+        self.export_status = QLabel()
+        self.export_status.setObjectName("saveStatus")
+        toolbar.addWidget(self.export_status)
         toolbar.addWidget(clear)
+        toolbar.addWidget(self.export_button)
         self.page_layout.addLayout(toolbar)
         self.view = QPlainTextEdit()
         self.view.setReadOnly(True)
@@ -1446,3 +1534,15 @@ class LogsPage(AppPage):
 
     def clear(self) -> None:
         self.view.clear()
+
+    def set_export_busy(self, busy: bool) -> None:
+        self.export_button.setEnabled(not busy)
+        self.export_status.setText("Exporting…" if busy else self.export_status.text())
+
+    def set_export_result(self, output: str) -> None:
+        self.export_status.setText("Exported")
+        self.export_status.setToolTip(output)
+
+    def set_export_error(self, message: str) -> None:
+        self.export_status.setText("Export failed")
+        self.export_status.setToolTip(message)
