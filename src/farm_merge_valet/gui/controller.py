@@ -124,9 +124,13 @@ class ApplicationController(QObject):
                 last_activity="Browser settings saved · restart to apply",
             )
         if self._bot is not None:
-            configure_delays = getattr(self._bot.runtime, "configure_crate_delays", None)
-            if callable(configure_delays):
-                configure_delays(config.crate_delay_min, config.crate_delay_max)
+            if (
+                previous.crate_delay_min != config.crate_delay_min
+                or previous.crate_delay_max != config.crate_delay_max
+            ):
+                configure_delays = getattr(self._bot.runtime, "configure_crate_delays", None)
+                if callable(configure_delays):
+                    configure_delays(config.crate_delay_min, config.crate_delay_max)
             restart_fields = (
                 previous.discord_webhook_url != config.discord_webhook_url,
                 previous.webhook_summary_interval != config.webhook_summary_interval,

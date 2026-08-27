@@ -9,7 +9,7 @@ from pathlib import Path
 
 from pydantic import SecretStr
 from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QPalette
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -143,6 +143,8 @@ class AppPage(QWidget):
     def __init__(self, title: str, subtitle: str = "") -> None:
         super().__init__()
         self.setObjectName("appPage")
+        self.setAutoFillBackground(True)
+        self.setBackgroundRole(QPalette.ColorRole.AlternateBase)
         self.page_layout = QVBoxLayout(self)
         self.page_layout.setContentsMargins(20, 18, 20, 20)
         self.page_layout.setSpacing(12)

@@ -289,6 +289,18 @@ def test_config_store_round_trips_atomically_and_notifies(tmp_path) -> None:
     assert not list(path.parent.glob(".config.json.*.tmp"))
 
 
+def test_config_store_skips_unchanged_snapshot_notifications(tmp_path) -> None:
+    store = ConfigStore(tmp_path / "config.json")
+    config = store.load()
+    received: list[AppConfig] = []
+    store.subscribe(received.append)
+
+    result = store.replace(config)
+
+    assert result == config
+    assert received == []
+
+
 def test_config_store_rejects_malformed_files_without_overwriting(tmp_path) -> None:
     path = tmp_path / "config.json"
     path.write_text("not-json", encoding="utf-8")

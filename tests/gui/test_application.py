@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtGui import QColor, QPixmap
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -203,6 +203,58 @@ def test_gui_changes_autosave_to_the_config_store(tmp_path) -> None:
     assert saved.theme == "dark"
     assert saved.idle_wait_seconds == 45.0
 
+    window.quit_application()
+    app.processEvents()
+
+
+def test_config_changes_refresh_only_affected_gui_sections(tmp_path, monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    refreshed: list[str] = []
+
+    monkeypatch.setattr(
+        window.items_page,
+        "apply_config",
+        lambda *_args, **_kwargs: refreshed.append("items"),
+    )
+    monkeypatch.setattr(
+        window.shops_page,
+        "apply_config",
+        lambda *_args, **_kwargs: refreshed.append("shops"),
+    )
+    monkeypatch.setattr(
+        window.browser_page,
+        "apply_config",
+        lambda *_args, **_kwargs: refreshed.append("browser"),
+    )
+    monkeypatch.setattr(
+        window.settings_page,
+        "apply_config",
+        lambda *_args, **_kwargs: refreshed.append("settings"),
+    )
+
+    window._queue_config(idle_wait_seconds=45.0)
+    window._flush_config()
+
+    assert refreshed == ["settings"]
+    window.quit_application()
+    app.processEvents()
+
+
+def test_debounced_autosave_completes_through_background_saver(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    saved = QSignalSpy(window._config_saver.saved)
+
+    window._queue_config(idle_wait_seconds=45.0)
+
+    assert saved.wait(3000)
+    assert store.current.idle_wait_seconds == 45.0
+    assert window.settings_page.saved_label.text() == "Saved"
     window.quit_application()
     app.processEvents()
 

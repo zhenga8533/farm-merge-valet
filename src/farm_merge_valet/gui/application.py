@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.gui.action_button import ActionButton
+from farm_merge_valet.gui.config_saver import ConfigSaver
 from farm_merge_valet.gui.config_sections import ConfigSection, reset_config_section
 from farm_merge_valet.gui.controller import (
     ApplicationController,
@@ -39,7 +40,7 @@ from farm_merge_valet.gui.pages import (
     SettingsPage,
     ShopsPage,
 )
-from farm_merge_valet.gui.theme import apply_theme
+from farm_merge_valet.gui.theme import apply_theme, refresh_widget_theme
 from farm_merge_valet.hotkeys import display_hotkey
 from farm_merge_valet.logging_setup import configure_logging, logging_sink
 
@@ -53,6 +54,40 @@ _APPEARANCE_FIELDS = {
     "overlay_focused_opacity",
     "overlay_unfocused_opacity",
 }
+_HOTKEY_FIELDS = {"start_stop_hotkey", "pause_hotkey", "quit_hotkey"}
+_ITEM_FIELDS = {
+    "catalog_dir",
+    "item_policy_defaults",
+    "item_category_defaults",
+    "item_default_overrides",
+    "item_policy_overrides",
+    "prefer_merge_five",
+    "items_sort_column",
+    "items_sort_descending",
+}
+_ITEM_POLICY_FIELDS = _ITEM_FIELDS - {"items_sort_column", "items_sort_descending"}
+_SHOP_FIELDS = {
+    "catalog_dir",
+    "shop_default_enabled",
+    "recipe_default_enabled",
+    "shop_overrides",
+    "recipe_overrides",
+    "shops_sort_column",
+    "shops_sort_descending",
+}
+_SHOP_POLICY_FIELDS = _SHOP_FIELDS - {"shops_sort_column", "shops_sort_descending"}
+_BROWSER_FIELDS = {
+    "browser",
+    "browser_executable",
+    "browser_profile_dir",
+    "browser_auto_launch",
+    "game_url",
+    "window_title",
+    "cdp_port",
+    "catalog_dir",
+    "atlas_cache_dir",
+}
+_SETTINGS_FIELDS = set(AppConfig.model_fields) - _ITEM_FIELDS - _SHOP_FIELDS - _BROWSER_FIELDS
 
 
 def _app_icon() -> QIcon:
@@ -185,10 +220,15 @@ class MainWindow(QMainWindow):
             if app.property("fmvTheme") != self._draft.theme:
                 apply_theme(app, self._draft.theme)
         self._really_quit = False
+        self._pending_save_sections: set[str] = set()
+        self._configured_log_level = controller.config.log_level
+        self._config_saver = ConfigSaver(controller.store, self)
+        self._config_saver.saved.connect(self._config_save_completed)
+        self._config_saver.failed.connect(self._config_save_failed)
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(350)
-        self._save_timer.timeout.connect(self._flush_config)
+        self._save_timer.timeout.connect(self._save_config_async)
         self.setWindowTitle("Farm Merge Valet")
         self.setWindowIcon(_app_icon())
         self.setMinimumSize(1000, 560)
@@ -223,7 +263,7 @@ class MainWindow(QMainWindow):
             self.logs_page,
         ):
             self.pages.addWidget(page)
-        self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.navigation.currentRowChanged.connect(self._set_current_page)
         self.navigation.setCurrentRow(0)
         self._publish_compatibility_handles()
 
@@ -261,6 +301,17 @@ class MainWindow(QMainWindow):
         self.runtime_value = self.dashboard_page.runtime_value
         self.phase_value = self.dashboard_page.phase_value
         self.activity_value = self.dashboard_page.activity_value
+
+    def _set_current_page(self, index: int) -> None:
+        self.pages.setCurrentIndex(index)
+        page = self.pages.currentWidget()
+        app = QApplication.instance()
+        if (
+            isinstance(page, QWidget)
+            and isinstance(app, QApplication)
+            and page.property("fmvTheme") != app.property("fmvTheme")
+        ):
+            refresh_widget_theme(page, str(app.property("fmvTheme")))
 
     def _connect_pages(self) -> None:
         self.dashboard_page.run_requested.connect(self.controller.toggle_running)
@@ -361,7 +412,7 @@ class MainWindow(QMainWindow):
     def _replace_config(self, config: AppConfig) -> bool:
         self._save_timer.stop()
         try:
-            self.controller.store.replace(config)
+            self._config_saver.save_now(config)
         except (OSError, ValueError) as exc:
             self._show_error(f"Could not reset settings: {exc}")
             return False
@@ -379,7 +430,7 @@ class MainWindow(QMainWindow):
             editor = self.settings_page
         try:
             candidate = self._draft.model_copy(update=edit.changes)
-            self._draft = AppConfig.model_validate(candidate.model_dump())
+            validated = AppConfig.model_validate(candidate.model_dump())
         except ValidationError as exc:
             message = exc.errors()[0]["msg"]
             if isinstance(editor, (BrowserPage, SettingsPage)):
@@ -387,7 +438,14 @@ class MainWindow(QMainWindow):
             else:
                 editor.mark_error(f"Invalid: {message}")
             return
+        if validated == self._draft:
+            editor.configuration_header.mark_saved()
+            return
+        self._draft = validated
         editor.mark_saving(edit.field)
+        self._pending_save_sections.add(edit.source)
+        if self._config_saver.busy:
+            self._config_saver.request(self._draft)
         self._save_timer.start()
         if _APPEARANCE_FIELDS.intersection(edit.changes):
             self.overlay.apply_config(self._draft)
@@ -399,55 +457,69 @@ class MainWindow(QMainWindow):
 
     def _flush_config(self) -> None:
         try:
-            self.controller.store.replace(self._draft)
+            self._config_saver.save_now(self._draft)
         except (OSError, ValueError) as exc:
-            for page in (
-                self.items_page,
-                self.shops_page,
-                self.browser_page,
-                self.settings_page,
-            ):
-                page.configuration_header.mark_error("Save failed")
-            self._show_error(f"Could not save settings: {exc}")
-            return
-        configure_logging(self._draft.log_level)
+            self._config_save_failed(str(exc))
+
+    def _save_config_async(self) -> None:
+        self._config_saver.request(self._draft)
+
+    def _config_save_completed(self, config: AppConfig) -> None:
+        headers = {
+            "items": self.items_page.configuration_header,
+            "shops": self.shops_page.configuration_header,
+            "browser": self.browser_page.configuration_header,
+            "settings": self.settings_page.configuration_header,
+        }
+        for section in self._pending_save_sections:
+            headers[section].mark_saved()
+        self._pending_save_sections.clear()
+        if config.log_level != self._configured_log_level:
+            configure_logging(config.log_level)
+            self._configured_log_level = config.log_level
+
+    def _config_save_failed(self, message: str) -> None:
+        headers = {
+            "items": self.items_page.configuration_header,
+            "shops": self.shops_page.configuration_header,
+            "browser": self.browser_page.configuration_header,
+            "settings": self.settings_page.configuration_header,
+        }
+        targets = self._pending_save_sections or set(headers)
+        for section in targets:
+            headers[section].mark_error("Save failed")
+        self._show_error(f"Could not save settings: {message}")
 
     def _config_changed(self, config: AppConfig) -> None:
         previous = self._persisted_config
+        changed_fields = {
+            field
+            for field in AppConfig.model_fields
+            if getattr(previous, field) != getattr(config, field)
+        }
+        if not changed_fields:
+            return
         self._persisted_config = config
         self._draft = config
-        item_fields = (
-            "catalog_dir",
-            "item_policy_defaults",
-            "item_category_defaults",
-            "item_default_overrides",
-            "item_policy_overrides",
-            "prefer_merge_five",
-        )
-        shop_fields = (
-            "catalog_dir",
-            "shop_default_enabled",
-            "recipe_default_enabled",
-            "shop_overrides",
-            "recipe_overrides",
-        )
-        self.items_page.apply_config(
-            config,
-            refresh=any(
-                getattr(previous, field) != getattr(config, field) for field in item_fields
-            ),
-        )
-        self.shops_page.apply_config(
-            config,
-            refresh=any(
-                getattr(previous, field) != getattr(config, field) for field in shop_fields
-            ),
-        )
-        self.settings_page.apply_config(config)
-        self.browser_page.apply_config(config)
-        self.overlay.apply_config(config)
-        self._apply_hotkey_hints(config)
-        self._apply_appearance()
+        if changed_fields & _ITEM_FIELDS:
+            self.items_page.apply_config(
+                config,
+                refresh=bool(changed_fields & _ITEM_POLICY_FIELDS),
+            )
+        if changed_fields & _SHOP_FIELDS:
+            self.shops_page.apply_config(
+                config,
+                refresh=bool(changed_fields & _SHOP_POLICY_FIELDS),
+            )
+        if changed_fields & _SETTINGS_FIELDS:
+            self.settings_page.apply_config(config)
+        if changed_fields & _BROWSER_FIELDS:
+            self.browser_page.apply_config(config)
+        if changed_fields & _APPEARANCE_FIELDS:
+            self.overlay.apply_config(config)
+            self._apply_appearance()
+        if changed_fields & _HOTKEY_FIELDS:
+            self._apply_hotkey_hints(config)
 
     def _apply_hotkey_hints(self, config: AppConfig) -> None:
         self.dashboard_page.set_hotkeys(config.start_stop_hotkey, config.pause_hotkey)
@@ -461,6 +533,11 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if isinstance(app, QApplication) and app.property("fmvTheme") != self._draft.theme:
             apply_theme(app, self._draft.theme)
+            current_page = self.pages.currentWidget()
+            if isinstance(current_page, QWidget):
+                refresh_widget_theme(current_page, self._draft.theme)
+            refresh_widget_theme(self.navigation, self._draft.theme)
+            refresh_widget_theme(self.overlay, self._draft.theme)
         always_on_top = Qt.WindowType.WindowStaysOnTopHint
         if bool(self.windowFlags() & always_on_top) != self._draft.main_always_on_top:
             visible = self.isVisible()
@@ -570,9 +647,11 @@ class MainWindow(QMainWindow):
         if self._really_quit:
             return
         self._really_quit = True
-        if self._save_timer.isActive():
-            self._save_timer.stop()
-            self._flush_config()
+        self._save_timer.stop()
+        try:
+            self._config_saver.shutdown(self._draft)
+        except (OSError, ValueError) as exc:
+            self._config_save_failed(str(exc))
         self.setEnabled(False)
         self.overlay.setEnabled(False)
         self.tray.setToolTip("Farm Merge Valet — Shutting down")

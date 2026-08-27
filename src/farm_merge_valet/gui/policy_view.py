@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRect, QSize, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPaintEvent, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPaintEvent, QPalette, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -27,11 +27,12 @@ class PolicyCheckBox(QCheckBox):
 
     def paintEvent(self, _event: QPaintEvent) -> None:
         app = QApplication.instance()
-        primary = QColor(str(app.property("policyPrimary"))) if app else QColor("#1f883d")
-        border = QColor(str(app.property("policyBorder"))) if app else QColor("#8c959f")
-        surface = QColor(str(app.property("policyInput"))) if app else QColor("#ffffff")
-        text = QColor(str(app.property("policyText"))) if app else QColor("#1f2328")
-        disabled = QColor(str(app.property("policyDisabled"))) if app else QColor("#afb8c1")
+        palette = app.palette() if isinstance(app, QApplication) else self.palette()
+        primary = palette.color(QPalette.ColorRole.Link)
+        border = palette.color(QPalette.ColorRole.Mid)
+        surface = palette.color(QPalette.ColorRole.Base)
+        text = palette.color(QPalette.ColorRole.Text)
+        disabled = palette.color(QPalette.ColorRole.Midlight)
         if not self.isEnabled():
             primary = border = text = disabled
 
@@ -69,6 +70,16 @@ class PolicyCheckBox(QCheckBox):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 self.text(),
             )
+
+
+class _PolicyUnavailableLabel(QLabel):
+    def paintEvent(self, _event: QPaintEvent) -> None:
+        app = QApplication.instance()
+        palette = app.palette() if isinstance(app, QApplication) else self.palette()
+        painter = QPainter(self)
+        painter.setPen(palette.color(QPalette.ColorRole.PlaceholderText))
+        painter.setFont(self.font())
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
 
 
 class PolicyTreeExpansionControls(QWidget):
@@ -191,7 +202,7 @@ def policy_badge(text: str) -> QWidget:
 
 
 def policy_unavailable(reason: str = "Not applicable to this item") -> QWidget:
-    label = QLabel("—")
+    label = _PolicyUnavailableLabel("—")
     label.setObjectName("policyUnavailable")
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     label.setAccessibleName(reason)

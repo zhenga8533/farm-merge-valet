@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 
 @dataclass(frozen=True)
@@ -70,23 +70,23 @@ _LIGHT = _Colors(
     scroll_pressed="#6e7781",
 )
 
-_SYSTEM = _Colors(
+_PALETTE_COLORS = _Colors(
     window="palette(window)",
-    surface="palette(base)",
+    surface="palette(button)",
     surface_subtle="palette(alternate-base)",
     input="palette(base)",
     text="palette(text)",
-    muted="palette(mid)",
+    muted="palette(placeholder-text)",
     border="palette(mid)",
-    primary="palette(highlight)",
-    primary_hover="palette(highlight)",
+    primary="palette(link)",
+    primary_hover="palette(link-visited)",
     danger="#cf222e",
     danger_hover="#a40e26",
     selected="palette(highlight)",
     disabled="palette(midlight)",
-    disabled_text="palette(mid)",
-    scroll="palette(mid)",
-    scroll_hover="palette(dark)",
+    disabled_text="palette(placeholder-text)",
+    scroll="palette(dark)",
+    scroll_hover="palette(shadow)",
     scroll_pressed="palette(highlight)",
 )
 
@@ -109,12 +109,11 @@ QAbstractScrollArea::corner {{ background: transparent; border: none; }}
 
 def _stylesheet(colors: _Colors) -> str:
     return f"""
-QWidget {{ color: {colors.text}; font-size: 13px; }}
+QWidget {{ color: {colors.text}; font-size: 10pt; }}
 QMainWindow, QDialog {{ background: {colors.window}; }}
-QWidget#appPage {{ background: {colors.surface_subtle}; }}
-QLabel#pageTitle {{ font-size: 22px; font-weight: 600; }}
+QLabel#pageTitle {{ font-size: 17pt; font-weight: 600; }}
 QLabel#pageSubtitle, QLabel#metricLabel {{ color: {colors.muted}; }}
-QLabel#metricValue, QLabel#overlayStatus {{ font-size: 16px; font-weight: 600; }}
+QLabel#metricValue, QLabel#overlayStatus {{ font-size: 12pt; font-weight: 600; }}
 QFrame#card, QFrame#metricCard {{
     background: {colors.surface}; border: 1px solid {colors.border}; border-radius: 10px;
 }}
@@ -149,7 +148,7 @@ QPushButton QLabel#shortcutKeycap:enabled {{
     background: rgba(255, 255, 255, 38); color: white;
     border: 1px solid rgba(255, 255, 255, 90); border-radius: 4px;
     padding: 1px 5px; font-family: "Cascadia Mono", Consolas, monospace;
-    font-size: 11px; font-weight: 600;
+    font-size: 8pt; font-weight: 600;
 }}
 QPushButton[secondary="true"] QLabel#shortcutKeycap:enabled {{
     background: {colors.surface_subtle}; color: {colors.muted}; border-color: {colors.border};
@@ -253,10 +252,10 @@ QWidget[policyCell="true"] {{ background: transparent; }}
 QLabel#policyBadge {{
     background: {colors.surface}; color: {colors.muted};
     border: 1px solid {colors.border}; border-radius: 8px;
-    padding: 3px 8px; font-size: 11px; font-weight: 600;
+    padding: 3px 8px; font-size: 8pt; font-weight: 600;
 }}
 QLabel#policyUnavailable {{
-    color: {colors.muted}; font-size: 16px; font-weight: 600;
+    font-size: 12pt; font-weight: 600;
 }}
 QCheckBox[policyToggle="true"] {{
     background: transparent; spacing: 8px; font-weight: 600;
@@ -283,9 +282,9 @@ QToolTip {{ background: {colors.surface}; color: {colors.text}; border: 1px soli
 
 
 def apply_theme(app: QApplication, theme: str) -> None:
-    colors = _DARK if theme == "dark" else _LIGHT if theme == "light" else _SYSTEM
+    colors = _DARK if theme == "dark" else _LIGHT if theme == "light" else None
     palette = QPalette()
-    if theme != "system":
+    if colors is not None:
         for role, color in (
             (QPalette.ColorRole.Window, colors.window),
             (QPalette.ColorRole.WindowText, colors.text),
@@ -301,38 +300,53 @@ def apply_theme(app: QApplication, theme: str) -> None:
             (QPalette.ColorRole.PlaceholderText, colors.muted),
             (QPalette.ColorRole.Mid, colors.border),
             (QPalette.ColorRole.Midlight, colors.disabled),
+            (QPalette.ColorRole.Dark, colors.scroll),
+            (QPalette.ColorRole.Shadow, colors.scroll_hover),
+            (QPalette.ColorRole.Link, colors.primary),
+            (QPalette.ColorRole.LinkVisited, colors.primary_hover),
         ):
             palette.setColor(role, QColor(color))
-        palette.setColor(
-            QPalette.ColorGroup.Disabled,
+        for role in (
+            QPalette.ColorRole.WindowText,
             QPalette.ColorRole.Text,
-            QColor(colors.disabled_text),
-        )
-        palette.setColor(
-            QPalette.ColorGroup.Disabled,
             QPalette.ColorRole.ButtonText,
-            QColor(colors.disabled_text),
-        )
-    app.setPalette(palette)
-    palette = app.palette()
-    resolved = (
-        {
-            "policyPrimary": palette.color(QPalette.ColorRole.Highlight).name(),
-            "policyBorder": palette.color(QPalette.ColorRole.Mid).name(),
-            "policyInput": palette.color(QPalette.ColorRole.Base).name(),
-            "policyText": palette.color(QPalette.ColorRole.Text).name(),
-            "policyDisabled": palette.color(QPalette.ColorRole.Midlight).name(),
-        }
-        if theme == "system"
-        else {
-            "policyPrimary": colors.primary,
-            "policyBorder": colors.border,
-            "policyInput": colors.input,
-            "policyText": colors.text,
-            "policyDisabled": colors.disabled,
-        }
-    )
-    for name, value in resolved.items():
-        app.setProperty(name, value)
+            QPalette.ColorRole.PlaceholderText,
+        ):
+            palette.setColor(
+                QPalette.ColorGroup.Disabled,
+                role,
+                QColor(colors.disabled_text),
+            )
+    else:
+        primary = palette.color(QPalette.ColorRole.Highlight)
+        palette.setColor(QPalette.ColorRole.Link, primary)
+        palette.setColor(QPalette.ColorRole.LinkVisited, primary)
     app.setProperty("fmvTheme", theme)
-    app.setStyleSheet(_stylesheet(colors))
+    app.setPalette(palette)
+    stylesheet = _stylesheet(_PALETTE_COLORS)
+    if app.styleSheet() != stylesheet:
+        app.setStyleSheet(stylesheet)
+
+
+def refresh_widget_theme(widget: QWidget, theme: str) -> None:
+    """Refresh one visible widget subtree after an application palette change."""
+
+    def needs_repolish(child: QWidget) -> bool:
+        if child.objectName() == "policyBadge":
+            return True
+        if type(child).__name__ in {"PolicyCheckBox", "_BulkCheckBox"}:
+            return False
+        ancestor = child.parentWidget()
+        while ancestor is not None and ancestor is not widget:
+            if ancestor.property("policyCell") is True:
+                return False
+            ancestor = ancestor.parentWidget()
+        return child.property("policyCell") is not True
+
+    for child in (widget, *widget.findChildren(QWidget)):
+        if not needs_repolish(child):
+            continue
+        child.style().unpolish(child)
+        child.style().polish(child)
+        child.update()
+    widget.setProperty("fmvTheme", theme)

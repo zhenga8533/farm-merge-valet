@@ -246,6 +246,7 @@ class ConfigStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or user_config_path()
         self._lock = RLock()
+        self._write_lock = RLock()
         self._listeners: list[ConfigListener] = []
         self._current = AppConfig()
 
@@ -265,7 +266,25 @@ class ConfigStore:
     def replace(self, config: AppConfig) -> AppConfig:
         snapshot = AppConfig.model_validate(config.model_dump())
         with self._lock:
+            unchanged = snapshot == self._current and self.path.exists()
+        if unchanged:
+            return snapshot.model_copy(deep=True)
+        self.persist(snapshot)
+        return self.publish(snapshot)
+
+    def persist(self, config: AppConfig) -> AppConfig:
+        """Durably write a validated snapshot without notifying listeners."""
+
+        snapshot = AppConfig.model_validate(config.model_dump())
+        with self._write_lock:
             self._persist(snapshot)
+        return snapshot.model_copy(deep=True)
+
+    def publish(self, config: AppConfig) -> AppConfig:
+        """Make an already-persisted snapshot current and notify listeners."""
+
+        snapshot = AppConfig.model_validate(config.model_dump())
+        with self._lock:
             self._current = snapshot
             listeners = tuple(self._listeners)
         delivered = snapshot.model_copy(deep=True)
@@ -314,10 +333,11 @@ class ConfigStore:
         except BaseException:
             temporary.unlink(missing_ok=True)
             raise
-        try:
-            self.path.chmod(0o600)
-        except OSError:
-            pass
+        if os.name != "nt":
+            try:
+                self.path.chmod(0o600)
+            except OSError:
+                pass
 
 
 class ConfigProxy:

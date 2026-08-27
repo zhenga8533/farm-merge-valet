@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
 from farm_merge_valet.gui.action_button import ActionButton
 from farm_merge_valet.gui.theme import apply_theme
@@ -15,12 +15,14 @@ from farm_merge_valet.gui.theme import apply_theme
 @pytest.mark.parametrize(
     ("theme", "handle_color"),
     (
-        ("system", "palette(mid)"),
+        ("system", None),
         ("dark", "#484f58"),
         ("light", "#afb8c1"),
     ),
 )
-def test_themes_apply_consistent_modern_scrollbars(theme: str, handle_color: str) -> None:
+def test_themes_apply_consistent_modern_scrollbars(
+    theme: str, handle_color: str | None
+) -> None:
     app = QApplication.instance() or QApplication([])
 
     apply_theme(app, theme)
@@ -31,7 +33,9 @@ def test_themes_apply_consistent_modern_scrollbars(theme: str, handle_color: str
     assert "QScrollBar:horizontal" in stylesheet
     assert "height: 12px" in stylesheet
     assert "min-height: 28px" in stylesheet
-    assert handle_color in stylesheet
+    assert "background: palette(dark)" in stylesheet
+    if handle_color is not None:
+        assert app.palette().color(QPalette.ColorRole.Dark).name() == handle_color
 
     app.setStyleSheet("")
 
@@ -51,11 +55,15 @@ def test_owned_themes_use_semantic_palettes_without_child_backplates(
     apply_theme(app, theme)
 
     palette = app.palette()
+    label = QLabel("Point-sized theme text")
+    label.ensurePolished()
     assert palette.color(QPalette.ColorRole.Window).name() == window
     assert palette.color(QPalette.ColorRole.Text).name() == text
     assert palette.color(QPalette.ColorRole.Base).name() == base
+    assert label.font().pointSizeF() > 0
+    assert label.font().pixelSize() == -1
     assert "QWidget { background:" not in app.styleSheet()
-    assert "QWidget#appPage { background:" in app.styleSheet()
+    assert "QWidget#appPage { background:" not in app.styleSheet()
 
     app.setStyleSheet("")
 
@@ -73,11 +81,25 @@ def test_form_controls_share_application_owned_affordances() -> None:
     app.setStyleSheet("")
 
 
+def test_theme_switches_reuse_one_palette_driven_stylesheet() -> None:
+    app = QApplication.instance() or QApplication([])
+    apply_theme(app, "light")
+    stylesheet = app.styleSheet()
+
+    apply_theme(app, "dark")
+
+    assert app.styleSheet() == stylesheet
+    assert "palette(window)" in stylesheet
+    assert app.palette().color(QPalette.ColorRole.Window).name() == "#0d1117"
+
+    app.setStyleSheet("")
+
+
 @pytest.mark.parametrize(
     ("theme", "text", "muted", "disabled"),
     (
         ("light", "#1f2328", "#57606a", "#57606a"),
-        ("dark", "#e6edf3", "#a5afba", "#8b949e"),
+        ("dark", "#e6edf3", "#a5afba", "#a5afba"),
     ),
 )
 def test_action_button_labels_preserve_state_contrast(

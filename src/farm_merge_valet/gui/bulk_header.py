@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QPainter, QPalette, QPen
 from PySide6.QtWidgets import QApplication, QHeaderView, QWidget
 
 from farm_merge_valet.gui.policy_view import PolicyCheckBox
@@ -85,7 +85,8 @@ class BulkToggleHeader(QHeaderView):
         ascending = self.sortIndicatorOrder() is Qt.SortOrder.AscendingOrder
         vertical = -2 if ascending else 2
         app = QApplication.instance()
-        color = QColor(str(app.property("policyText"))) if app else QColor("#1f2328")
+        palette = app.palette() if isinstance(app, QApplication) else self.palette()
+        color = palette.color(QPalette.ColorRole.Text)
         color.setAlpha(160)
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
