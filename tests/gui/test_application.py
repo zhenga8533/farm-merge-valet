@@ -77,6 +77,36 @@ def _catalog() -> ItemCatalog:
     )
 
 
+def test_missing_catalog_shows_shared_onboarding_and_refreshes_when_discovered(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    controller = ApplicationController(store)
+    window = MainWindow(controller)
+
+    assert not window.items_page.catalog_onboarding.isHidden()
+    assert not window.shops_page.catalog_onboarding.isHidden()
+    assert window.items_page.table.isHidden()
+    assert window.shops_page.tree.isHidden()
+    assert window.items_page.catalog_onboarding.setup_button.text() == (
+        "Open game and synchronize"
+    )
+
+    write_item_catalog(catalog_dir / "catalog.json", _catalog())
+    controller.catalog_refreshed.emit(3)
+    app.processEvents()
+
+    assert window.items_page.catalog_onboarding.isHidden()
+    assert window.shops_page.catalog_onboarding.isHidden()
+    assert not window.items_page.table.isHidden()
+    assert not window.shops_page.tree.isHidden()
+    assert window.item_table.topLevelItemCount() == 3
+
+    window.quit_application()
+    app.processEvents()
+
+
 def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     catalog_dir = tmp_path / "catalog"
@@ -86,7 +116,7 @@ def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
     controller = ApplicationController(store)
     window = MainWindow(controller)
 
-    assert window.item_table.topLevelItemCount() == 2
+    assert window.item_table.topLevelItemCount() == 3
     assert window.item_table.columnCount() == 7
     assert "Use default" not in {
         button.text() for button in window.items_page.findChildren(QPushButton)
@@ -96,15 +126,44 @@ def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
         for row in range(window.item_table.topLevelItemCount())
     }
     wheat_merge = window.item_table.itemWidget(rows["Wheat"], 3).findChild(QCheckBox)
-    wheat_claim = window.item_table.itemWidget(rows["Wheat"], 5).findChild(QCheckBox)
+    wheat_collect = window.item_table.itemWidget(rows["Wheat"], 5).findChild(QCheckBox)
     milk_merge = window.item_table.itemWidget(rows["Milk"], 3).findChild(QCheckBox)
-    milk_claim = window.item_table.itemWidget(rows["Milk"], 5).findChild(QCheckBox)
+    milk_collect = window.item_table.itemWidget(rows["Milk"], 5).findChild(QCheckBox)
+    coin_collect = window.item_table.itemWidget(rows["Coin"], 5).findChild(QCheckBox)
 
     assert wheat_merge is not None and wheat_merge.isEnabled()
-    assert wheat_claim is None
+    assert wheat_collect is None
     assert milk_merge is None
-    assert milk_claim is not None and milk_claim.isEnabled() and milk_claim.isChecked()
+    assert milk_collect is not None and milk_collect.isEnabled() and milk_collect.isChecked()
+    assert coin_collect is not None and coin_collect.isEnabled() and not coin_collect.isChecked()
     assert window.item_table.itemWidget(rows["Wheat"], 5).findChild(QLabel).text() == "—"
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_item_tiers_sort_numerically(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    coin_1 = _catalog().items["coin_1"]
+    catalog = ItemCatalog(
+        {
+            "coin_1": coin_1,
+            "coin_2": replace(coin_1, game_id="coin_2", tier=2),
+            "coin_10": replace(coin_1, game_id="coin_10", tier=10),
+        }
+    )
+    write_item_catalog(catalog_dir / "catalog.json", catalog)
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+
+    coin = window.item_table.topLevelItem(0)
+    assert [coin.child(index).text(0) for index in range(coin.childCount())] == [
+        "Tier 1",
+        "Tier 2",
+        "Tier 10",
+    ]
 
     window.quit_application()
     app.processEvents()
@@ -133,6 +192,9 @@ def test_item_families_expand_into_independent_tier_policies(tmp_path) -> None:
         display_name="Upgrade Card",
         asset_path=None,
         asset_alias=None,
+        mergeable=False,
+        merge_target=None,
+        capabilities=frozenset({"clickable", "upgradeCard"}),
     )
     upgrade_2 = replace(
         upgrade_1,
@@ -140,7 +202,7 @@ def test_item_families_expand_into_independent_tier_policies(tmp_path) -> None:
         tier=2,
         mergeable=False,
         merge_target=None,
-        capabilities=frozenset({"merge-result", "shovelable"}),
+        capabilities=frozenset({"clickable", "upgradeCard"}),
     )
     write_item_catalog(
         catalog_dir / "catalog.json",
@@ -437,6 +499,22 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
     )
     catalog = ItemCatalog({**base.items, "wheat_1": wheat, "bakery": shop, "bread": recipe})
     write_item_catalog(catalog_dir / "catalog.json", catalog)
+
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    controller = ApplicationController(store)
+    window = MainWindow(controller)
+
+    wheat_item = next(
+        window.item_table.topLevelItem(row)
+        for row in range(window.item_table.topLevelItemCount())
+        if window.item_table.topLevelItem(row).text(0) == "Wheat"
+    )
+    bakery = window.shop_tree.topLevelItem(0)
+    assert wheat_item.icon(0).isNull()
+    assert bakery is not None and bakery.icon(0).isNull()
+    assert bakery.childCount() == 1 and bakery.child(0).icon(0).isNull()
+
     for relative_path in (wheat.asset_path, shop.asset_path, recipe.asset_path):
         assert relative_path is not None
         path = catalog_dir / relative_path
@@ -445,9 +523,8 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
         pixmap.fill(QColor("#238636"))
         assert pixmap.save(str(path))
 
-    store = ConfigStore(tmp_path / "config.json")
-    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
-    window = MainWindow(ApplicationController(store))
+    controller.assets_refreshed.emit()
+    app.processEvents()
 
     wheat_item = next(
         window.item_table.topLevelItem(row)
@@ -493,8 +570,8 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
             theme="dark",
             browser="edge",
             cdp_port=9333,
-            item_policy_defaults={"claim": True},
-            item_policy_overrides={"ingredients/milk": {"claim": False}},
+            item_policy_defaults={"collect": True},
+            item_policy_overrides={"ingredients/milk": {"collect": False}},
             shop_default_enabled=False,
             recipe_default_enabled=False,
             shop_overrides={"bakery": True},
@@ -679,7 +756,7 @@ def test_policy_sort_preferences_are_loaded_and_persisted(tmp_path) -> None:
     window._flush_config()
 
     saved = ConfigStore(store.path).load()
-    assert saved.items_sort_column == "claim"
+    assert saved.items_sort_column == "collect"
     assert not saved.items_sort_descending
     assert saved.shops_sort_column == "type"
     assert not saved.shops_sort_descending

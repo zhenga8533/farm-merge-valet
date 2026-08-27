@@ -281,8 +281,10 @@ class MainWindow(QMainWindow):
         controller.browser_status_changed.connect(self.browser_status_label.setText)
         controller.browser_state_changed.connect(self.browser_page.set_browser_status)
         controller.asset_operation_changed.connect(self._asset_operation_changed)
-        controller.asset_status_changed.connect(self.browser_page.set_asset_status)
-        controller.assets_refreshed.connect(self._assets_refreshed)
+        controller.asset_status_changed.connect(self._asset_status_changed)
+        controller.catalog_setup_failed.connect(self._catalog_setup_failed)
+        controller.catalog_refreshed.connect(self._reload_catalog_pages)
+        controller.assets_refreshed.connect(self._reload_catalog_pages)
         controller.diagnostics_operation_changed.connect(self.logs_page.set_export_busy)
         controller.diagnostics_exported.connect(self.logs_page.set_export_result)
         controller.diagnostics_failed.connect(self.logs_page.set_export_error)
@@ -332,8 +334,10 @@ class MainWindow(QMainWindow):
         self.overlay.pause_requested.connect(self.controller.toggle_pause)
         self.overlay.close_requested.connect(lambda: self._set_overlay_visible(False))
         self.items_page.config_edited.connect(self._queue_edit)
+        self.items_page.catalog_setup_requested.connect(self.controller.setup_catalog)
         self.items_page.reset_requested.connect(self._reset_item_policies)
         self.shops_page.config_edited.connect(self._queue_edit)
+        self.shops_page.catalog_setup_requested.connect(self.controller.setup_catalog)
         self.shops_page.reset_requested.connect(self._reset_shop_policies)
         self.browser_page.config_edited.connect(self._queue_edit)
         self.browser_page.refresh_requested.connect(self.controller.refresh_browser)
@@ -655,10 +659,24 @@ class MainWindow(QMainWindow):
     def _asset_operation_changed(self, busy: bool) -> None:
         self.browser_page.set_asset_busy(busy)
         self.browser_page.set_runtime_active(self.controller.status.state.active)
+        for page in self._catalog_pages():
+            page.set_catalog_setup_busy(busy)
 
-    def _assets_refreshed(self) -> None:
-        self.items_page.apply_config(self._draft)
-        self.shops_page.apply_config(self._draft)
+    def _asset_status_changed(self, message: str) -> None:
+        self.browser_page.set_asset_status(message)
+        for page in self._catalog_pages():
+            page.set_catalog_setup_status(message)
+
+    def _catalog_setup_failed(self, message: str) -> None:
+        for page in self._catalog_pages():
+            page.set_catalog_setup_status(message, error=True)
+
+    def _catalog_pages(self) -> tuple[ItemsPage, ShopsPage]:
+        return self.items_page, self.shops_page
+
+    def _reload_catalog_pages(self, *_args: object) -> None:
+        for page in self._catalog_pages():
+            page.reload_catalog()
 
     def _export_diagnostics(self) -> None:
         output, _filter = QFileDialog.getSaveFileName(

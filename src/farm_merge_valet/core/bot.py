@@ -28,7 +28,7 @@ from farm_merge_valet.core.board import (
     BoardGrid,
     Cell,
     CellKind,
-    ClaimTargetKind,
+    CollectionTargetKind,
     GridCoord,
     ItemRef,
     MergeAction,
@@ -75,7 +75,7 @@ _STRUCTURE_BLUEPRINTS = frozenset(
 
 
 class Phase(Enum):
-    CLAIM_TILES = auto()
+    COLLECT_TILES = auto()
     SHOPS = auto()
     CLAIM_CRATES = auto()
     MERGE = auto()
@@ -93,8 +93,8 @@ class _PendingAction:
 
 
 @dataclass(frozen=True)
-class _ClaimAction:
-    kind: ClaimTargetKind
+class _CollectAction:
+    kind: CollectionTargetKind
     coord: GridCoord
     blueprint_id: str
     object_id: int | None
@@ -102,8 +102,8 @@ class _ClaimAction:
 
 
 @dataclass
-class _PendingClaim:
-    action: _ClaimAction
+class _PendingCollection:
+    action: _CollectAction
     initial_state: LiveCellState
     scene_id: int | None
     submitted_at: float
@@ -138,14 +138,14 @@ class Bot:
         self.phase = Phase.CLAIM_CRATES
         self._blueprint_items: dict[str, ItemRef] = {}
         self._blueprint_policy_keys: dict[str, str] = {}
-        self._immediate_claim_ids: frozenset[str] = frozenset()
+        self._collectable_ids: frozenset[str] = frozenset()
         self._max_item_tiers: dict[tuple[str, str] | tuple[str, str, str | None], int] = {}
         self.board = BoardGrid()
         self._live_cells: dict[GridCoord, LiveCellState] = {}
         self._pending_action: _PendingAction | None = None
-        self._pending_claim: _PendingClaim | None = None
+        self._pending_collection: _PendingCollection | None = None
         self._pending_shop_action: _PendingShopAction | None = None
-        self._next_claim_action_at = 0.0
+        self._next_collection_action_at = 0.0
         self._action_failures: dict[tuple, int] = {}
         self._action_retry_at: dict[tuple, float] = {}
         self._next_item_action_at = 0.0
@@ -211,12 +211,12 @@ class Bot:
                 logging.WARNING,
                 "runtime.unavailable",
                 "Game target found, but action runtime is unavailable: %s "
-                "(board=%s, item actions=%s, board claims=%s, crate claims=%s, "
+                "(board=%s, item actions=%s, board collections=%s, crate claims=%s, "
                 "shop orders=%s, inventory=%s).",
                 self._last_health.detail or "no diagnostic detail",
                 self._last_health.board_available,
                 self._last_health.item_drop_available,
-                self._last_health.claim_available,
+                self._last_health.collection_available,
                 self._last_health.crate_spawn_available,
                 self._last_health.shop_available,
                 self._last_health.inventory_available,
@@ -230,10 +230,10 @@ class Bot:
                 logging.WARNING,
                 "runtime.partially_ready",
                 "Game runtime is partially ready: %s "
-                "(item actions=%s, board claims=%s, crate claims=%s, shop orders=%s).",
+                "(item actions=%s, board collections=%s, crate claims=%s, shop orders=%s).",
                 self._last_health.detail,
                 self._last_health.item_drop_available,
-                self._last_health.claim_available,
+                self._last_health.collection_available,
                 self._last_health.crate_spawn_available,
                 self._last_health.shop_available,
                 scene_id=self._last_health.scene_id,
@@ -247,7 +247,7 @@ class Bot:
             self._blueprint_policy_keys = {
                 game_id: item.tier_policy_key for game_id, item in catalog.items.items()
             }
-            self._immediate_claim_ids = catalog.immediate_claim_ids
+            self._collectable_ids = catalog.collectable_ids
         except (CatalogUnavailableError, OSError, ValueError) as exc:
             log_event(
                 logger,
@@ -357,8 +357,8 @@ class Bot:
             board.set_cell(coord, Cell(_LIVE_STATE_CELL_KIND[blueprint_id]))
         elif blueprint_id in _STRUCTURE_BLUEPRINTS:
             board.set_cell(coord, Cell(CellKind.STRUCTURE))
-        elif blueprint_id in self._immediate_claim_ids and state.collectable:
-            board.set_cell(coord, Cell(CellKind.CLAIMABLE))
+        elif blueprint_id in self._collectable_ids and state.collectable:
+            board.set_cell(coord, Cell(CellKind.COLLECTABLE))
         else:
             board.set_cell(coord, Cell(CellKind.OTHER))
 
@@ -424,8 +424,7 @@ class Bot:
             and settings.item_policy(item.tier_policy_key).merge
             and (
                 prefer_merge_five is None
-                or settings.item_policy(item.tier_policy_key).prefer_merge_five
-                is prefer_merge_five
+                or settings.item_policy(item.tier_policy_key).prefer_merge_five is prefer_merge_five
             )
             for rank, action in enumerate(
                 plan_merge_actions(
@@ -508,9 +507,9 @@ class Bot:
         }
 
     @staticmethod
-    def _claim_event_context(action: _ClaimAction) -> dict[str, object]:
+    def _collection_event_context(action: _CollectAction) -> dict[str, object]:
         return {
-            "claim_kind": action.kind.value,
+            "collection_kind": action.kind.value,
             "coord": action.coord,
             "blueprint_id": action.blueprint_id,
             "object_id": action.object_id,
@@ -522,26 +521,28 @@ class Bot:
             state.blueprint_id is not None and state.producer_kind is not None and state.tier == 4
         )
 
-    def _claim_enabled(self, blueprint_id: str) -> bool:
+    def _collection_enabled(self, blueprint_id: str) -> bool:
         policy_key = self._blueprint_policy_keys.get(blueprint_id)
         if policy_key is None:
             return False
         policy = settings.item_policy(policy_key)
-        return policy.enabled and policy.claim
+        return policy.enabled and policy.collect
 
-    def _claim_actions(self) -> tuple[list[_ClaimAction], list[_ClaimAction], list[_ClaimAction]]:
-        immediate: list[_ClaimAction] = []
-        depleted: list[_ClaimAction] = []
-        ready: list[_ClaimAction] = []
+    def _collection_actions(
+        self,
+    ) -> tuple[list[_CollectAction], list[_CollectAction], list[_CollectAction]]:
+        immediate: list[_CollectAction] = []
+        depleted: list[_CollectAction] = []
+        ready: list[_CollectAction] = []
         for coord, state in sorted(self._live_cells.items()):
             if state.blueprint_id is None:
                 continue
-            if not self._claim_enabled(state.blueprint_id):
+            if not self._collection_enabled(state.blueprint_id):
                 continue
-            if state.collectable and state.blueprint_id in self._immediate_claim_ids:
+            if state.collectable and state.blueprint_id in self._collectable_ids:
                 immediate.append(
-                    _ClaimAction(
-                        ClaimTargetKind.IMMEDIATE,
+                    _CollectAction(
+                        CollectionTargetKind.IMMEDIATE,
                         coord,
                         state.blueprint_id,
                         state.object_id,
@@ -552,8 +553,8 @@ class Bot:
                 continue
             if state.producer_state is ProducerState.DEPLETED:
                 depleted.append(
-                    _ClaimAction(
-                        ClaimTargetKind.DEPLETED_PRODUCER,
+                    _CollectAction(
+                        CollectionTargetKind.DEPLETED_PRODUCER,
                         coord,
                         state.blueprint_id,
                         state.object_id,
@@ -562,8 +563,8 @@ class Bot:
                 )
             elif state.producer_state is ProducerState.READY:
                 ready.append(
-                    _ClaimAction(
-                        ClaimTargetKind.PRODUCER,
+                    _CollectAction(
+                        CollectionTargetKind.PRODUCER,
                         coord,
                         state.blueprint_id,
                         state.object_id,
@@ -579,16 +580,16 @@ class Bot:
         return sum(
             self._is_recognized_tier_four_producer(state)
             and state.blueprint_id is not None
-            and self._claim_enabled(state.blueprint_id)
+            and self._collection_enabled(state.blueprint_id)
             and state.producer_state is ProducerState.COOLING
             for state in self._live_cells.values()
         )
 
-    def _claim_succeeded(self, pending: _PendingClaim) -> bool:
+    def _collection_succeeded(self, pending: _PendingCollection) -> bool:
         current = self._live_cells.get(pending.action.coord)
-        if pending.action.kind is ClaimTargetKind.IMMEDIATE:
+        if pending.action.kind is CollectionTargetKind.IMMEDIATE:
             return current is None or current.object_id != pending.action.object_id
-        if pending.action.kind is ClaimTargetKind.PRODUCER:
+        if pending.action.kind is CollectionTargetKind.PRODUCER:
             return (
                 current is None
                 or current.object_id != pending.action.object_id
@@ -600,8 +601,8 @@ class Bot:
             or current.producer_state is not ProducerState.DEPLETED
         )
 
-    def _verify_pending_claim(self, health: RuntimeHealth) -> bool:
-        pending = self._pending_claim
+    def _verify_pending_collection(self, health: RuntimeHealth) -> bool:
+        pending = self._pending_collection
         if pending is None:
             return True
         now = time.monotonic()
@@ -609,37 +610,37 @@ class Bot:
         if not health.heartbeat_advancing:
             if age >= _ACTION_SETTLE_SECONDS:
                 self._report_wait(
-                    "submitted board claim is pending while the game heartbeat is frozen",
-                    **self._claim_event_context(pending.action),
+                    "submitted board collection is pending while the game heartbeat is frozen",
+                    **self._collection_event_context(pending.action),
                 )
             return False
         if health.scene_id != pending.scene_id and not pending.scene_change_logged:
             log_event(
                 logger,
                 logging.WARNING,
-                "claim.pending_scene_changed",
-                "Runtime scene changed from %s to %s while a board claim was pending; "
+                "collection.pending_scene_changed",
+                "Runtime scene changed from %s to %s while a board collection was pending; "
                 "verifying against the reloaded board.",
                 pending.scene_id,
                 health.scene_id,
                 previous_scene_id=pending.scene_id,
                 scene_id=health.scene_id,
-                **self._claim_event_context(pending.action),
+                **self._collection_event_context(pending.action),
             )
             pending.scene_change_logged = True
-        if self._claim_succeeded(pending):
-            self._pending_claim = None
+        if self._collection_succeeded(pending):
+            self._pending_collection = None
             self._last_wait_reason = None
             self._last_idle_reason = None
             log_event(
                 logger,
                 logging.DEBUG,
-                "claim.confirmed",
-                "%s claim confirmed at %s.",
+                "collection.confirmed",
+                "%s collection confirmed at %s.",
                 pending.action.kind.value.replace("-", " ").title(),
                 pending.action.coord,
                 elapsed_seconds=age,
-                **self._claim_event_context(pending.action),
+                **self._collection_event_context(pending.action),
             )
             return True
         current = self._live_cells.get(pending.action.coord)
@@ -651,40 +652,40 @@ class Bot:
         if health.item_action_busy or (not settled and age < _ACTION_MAX_PENDING_SECONDS):
             if age >= _ACTION_SETTLE_SECONDS:
                 self._report_wait(
-                    "the submitted board claim is still resolving",
-                    **self._claim_event_context(pending.action),
+                    "the submitted board collection is still resolving",
+                    **self._collection_event_context(pending.action),
                 )
             return False
-        self._pending_claim = None
-        self._next_claim_action_at = now + _ACTION_RETRY_SECONDS
+        self._pending_collection = None
+        self._next_collection_action_at = now + _ACTION_RETRY_SECONDS
         log_event(
             logger,
             logging.WARNING,
-            "claim.not_accepted",
-            "%s claim at %s was not accepted after %.1fs; replanning.",
+            "collection.not_accepted",
+            "%s collection at %s was not accepted after %.1fs; replanning.",
             pending.action.kind.value.replace("-", " ").title(),
             pending.action.coord,
             age,
             elapsed_seconds=age,
-            **self._claim_event_context(pending.action),
+            **self._collection_event_context(pending.action),
         )
         return True
 
-    def _submit_claim(self, action: _ClaimAction, health: RuntimeHealth) -> bool:
-        if self._pending_action is not None or self._pending_claim is not None:
+    def _submit_collection(self, action: _CollectAction, health: RuntimeHealth) -> bool:
+        if self._pending_action is not None or self._pending_collection is not None:
             return False
         log_event(
             logger,
             logging.DEBUG,
-            "claim.planned",
-            "Planned %s claim for %s at %s.",
+            "collection.planned",
+            "Planned %s collection for %s at %s.",
             action.kind.value.replace("-", " "),
             action.blueprint_id,
             action.coord,
             empty_cells=len(self.board.find_empty()),
-            **self._claim_event_context(action),
+            **self._collection_event_context(action),
         )
-        result = self.runtime.submit_board_claim(
+        result = self.runtime.submit_board_collection(
             action.coord,
             action.kind,
             action.blueprint_id,
@@ -693,7 +694,7 @@ class Bot:
         if result.status is ActionStatus.SUBMITTED:
             submitted_at = time.monotonic()
             initial_state = self._live_cells[action.coord]
-            self._pending_claim = _PendingClaim(
+            self._pending_collection = _PendingCollection(
                 action,
                 initial_state,
                 health.scene_id,
@@ -705,34 +706,34 @@ class Bot:
             log_event(
                 logger,
                 logging.DEBUG,
-                "claim.submitted",
-                "Submitted %s claim for %s at %s; awaiting verification.",
+                "collection.submitted",
+                "Submitted %s collection for %s at %s; awaiting verification.",
                 action.kind.value.replace("-", " "),
                 action.blueprint_id,
                 action.coord,
                 scene_id=health.scene_id,
-                **self._claim_event_context(action),
+                **self._collection_event_context(action),
             )
             return True
         if result.status is ActionStatus.BUSY:
             self._report_wait(
                 "the game is finishing another board interaction",
                 status=result.status.value,
-                **self._claim_event_context(action),
+                **self._collection_event_context(action),
             )
         elif result.status is ActionStatus.UNAVAILABLE:
             self._report_wait(
-                result.detail or "board claim handler unavailable",
+                result.detail or "board collection handler unavailable",
                 status=result.status.value,
-                **self._claim_event_context(action),
+                **self._collection_event_context(action),
             )
         else:
-            self._next_claim_action_at = time.monotonic() + _ACTION_RETRY_SECONDS
+            self._next_collection_action_at = time.monotonic() + _ACTION_RETRY_SECONDS
             log_event(
                 logger,
                 logging.WARNING,
-                "claim.rejected",
-                "%s claim for %s at %s could not be submitted: %s (%s).",
+                "collection.rejected",
+                "%s collection for %s at %s could not be submitted: %s (%s).",
                 action.kind.value.replace("-", " ").title(),
                 action.blueprint_id,
                 action.coord,
@@ -740,7 +741,7 @@ class Bot:
                 result.detail or "no detail",
                 status=result.status.value,
                 detail=result.detail,
-                **self._claim_event_context(action),
+                **self._collection_event_context(action),
             )
         return False
 
@@ -842,7 +843,7 @@ class Bot:
         return True
 
     def _submit_shop_action(self, action: ShopAction, health: RuntimeHealth) -> bool:
-        if any((self._pending_action, self._pending_claim, self._pending_shop_action)):
+        if any((self._pending_action, self._pending_collection, self._pending_shop_action)):
             return False
         log_event(
             logger,
@@ -1042,7 +1043,7 @@ class Bot:
         return True
 
     def _submit_merge(self, action: MergeAction, health: RuntimeHealth) -> bool:
-        if self._pending_action is not None or self._pending_claim is not None:
+        if self._pending_action is not None or self._pending_collection is not None:
             return False
         result = self.runtime.submit_item_drop(action.start, action.end)
         if result.status is ActionStatus.SUBMITTED:
@@ -1103,23 +1104,23 @@ class Bot:
             )
         return False
 
-    def _step_claim_tiles(
+    def _step_collect_tiles(
         self,
         health: RuntimeHealth,
-        immediate: list[_ClaimAction],
-        depleted: list[_ClaimAction],
-        ready: list[_ClaimAction],
+        immediate: list[_CollectAction],
+        depleted: list[_CollectAction],
+        ready: list[_CollectAction],
     ) -> None:
-        if time.monotonic() < self._next_claim_action_at:
+        if time.monotonic() < self._next_collection_action_at:
             return
         if immediate:
-            self._submit_claim(immediate[0], health)
+            self._submit_collection(immediate[0], health)
             return
         empty_count = len(self.board.find_empty())
         for action in depleted:
             required = 1 if action.producer_kind is ProducerKind.CROP else 0
             if empty_count >= required:
-                self._submit_claim(action, health)
+                self._submit_collection(action, health)
                 return
         if depleted:
             self._set_phase(Phase.MERGE)
@@ -1128,11 +1129,11 @@ class Bot:
             else:
                 self._report_wait("one open cell is required to retire a depleted crop")
             return
-        if ready and empty_count >= settings.producer_claim_min_empty_cells:
-            self._submit_claim(ready[0], health)
+        if ready and empty_count >= settings.producer_collect_min_empty_cells:
+            self._submit_collection(ready[0], health)
             return
         if ready:
-            required = settings.producer_claim_min_empty_cells
+            required = settings.producer_collect_min_empty_cells
             self._set_phase(Phase.MERGE)
             if health.item_drop_available:
                 self._step_merge(health, True, required_empty_cells=required)
@@ -1235,7 +1236,7 @@ class Bot:
             required_empty_cells is not None and len(self.board.find_empty()) < required_empty_cells
         ):
             self._report_wait(
-                f"a producer claim needs {required_empty_cells} open cells and no merge "
+                f"a producer collection needs {required_empty_cells} open cells and no merge "
                 "can currently create more space",
                 empty_cells=len(self.board.find_empty()),
                 required_empty_cells=required_empty_cells,
@@ -1298,7 +1299,7 @@ class Bot:
                 not health.available
                 or (self.phase is Phase.MERGE and not health.item_drop_available)
                 or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
-                or (self.phase is Phase.CLAIM_TILES and not health.claim_available)
+                or (self.phase is Phase.COLLECT_TILES and not health.collection_available)
                 or (self.phase is Phase.SHOPS and not health.shop_available)
             )
             if capability_missing:
@@ -1311,7 +1312,7 @@ class Bot:
                     not health.available
                     or (self.phase is Phase.MERGE and not health.item_drop_available)
                     or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
-                    or (self.phase is Phase.CLAIM_TILES and not health.claim_available)
+                    or (self.phase is Phase.COLLECT_TILES and not health.collection_available)
                     or (self.phase is Phase.SHOPS and not health.shop_available)
                 )
                 if capability_missing:
@@ -1336,7 +1337,7 @@ class Bot:
             return
         if not self._verify_pending_action(health):
             return
-        if not self._verify_pending_claim(health):
+        if not self._verify_pending_collection(health):
             return
         shop_policy_enabled = self._shop_policy().may_enable_orders
         shop_orders: tuple[ShopOrder, ...] | None = ()
@@ -1367,14 +1368,14 @@ class Bot:
             self._report_wait(f"game heartbeat is not advancing{age}")
             return
         board_needs_merge = self._board_needs_merge()
-        immediate, depleted, ready = self._claim_actions()
+        immediate, depleted, ready = self._collection_actions()
         if immediate or depleted or ready:
             self._last_cooling_producer_count = None
-            self._set_phase(Phase.CLAIM_TILES)
-            if not health.claim_available:
-                self._report_wait("board claim capability unavailable")
+            self._set_phase(Phase.COLLECT_TILES)
+            if not health.collection_available:
+                self._report_wait("board collection capability unavailable")
                 return
-            self._step_claim_tiles(health, immediate, depleted, ready)
+            self._step_collect_tiles(health, immediate, depleted, ready)
             return
         cooling_producers = self._cooling_producer_count()
         if cooling_producers and cooling_producers != self._last_cooling_producer_count:
@@ -1390,7 +1391,7 @@ class Bot:
         if shop_policy_enabled and shop_orders is not None:
             if self._step_shops(health, shop_orders, board_needs_merge):
                 return
-        if self.phase is Phase.CLAIM_TILES:
+        if self.phase is Phase.COLLECT_TILES:
             self._set_phase(Phase.CLAIM_CRATES)
         if self.phase is Phase.CLAIM_CRATES:
             self._step_claim_crates(board_needs_merge)

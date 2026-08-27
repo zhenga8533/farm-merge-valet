@@ -15,7 +15,7 @@ from typing import Protocol
 from farm_merge_valet.cdp.board_store import arm_board_store
 from farm_merge_valet.cdp.client import apply_background_overrides, evaluate
 from farm_merge_valet.cdp.inventory_store import arm_crate_inventory
-from farm_merge_valet.core.board import ClaimTargetKind, GridCoord
+from farm_merge_valet.core.board import CollectionTargetKind, GridCoord
 from farm_merge_valet.core.shops import ShopIngredient, ShopOrder, ShopOrderState
 from farm_merge_valet.logging_setup import log_event
 
@@ -64,7 +64,7 @@ class RuntimeHealth:
     heartbeat_installed: bool = False
     detail: str | None = None
     item_action_busy: bool = False
-    claim_available: bool = False
+    collection_available: bool = False
     shop_available: bool = False
 
 
@@ -79,7 +79,7 @@ _DISCOVER_EXPRESSION = r"""
     typeof value._onGesturePick === 'function' &&
     typeof value._onGestureDrop === 'function' &&
     value._services?.mapGrid && value._services?.interactionService;
-  const validClaimHandler = (value) => validItemHandler(value) &&
+  const validCollectionHandler = (value) => validItemHandler(value) &&
     typeof value._simulateClick === 'function';
 
   // Board-cell signals are owned by the active map-grid service. This is a
@@ -105,7 +105,7 @@ _DISCOVER_EXPRESSION = r"""
   const dropContexts = new Set(subscribers(interaction?.onGestureDrop)
     .map((subscriber) => subscriber?.context));
   const itemHandler = pickContexts.find((candidate) => dropContexts.has(candidate)) || null;
-  const claimHandler = pickContexts.find(validClaimHandler) || null;
+  const collectionHandler = pickContexts.find(validCollectionHandler) || null;
 
   // The gameplay HUD owns the authoritative crate event. Visual button states
   // can remain subscribed to inventory updates after their private event set
@@ -125,7 +125,7 @@ _DISCOVER_EXPRESSION = r"""
   window.__fmvGameplayServices = services;
   window.__fmvGameplayMapScreen = screen;
   window.__fmvItemInteractionHandler = itemHandler;
-  window.__fmvClaimInteractionHandler = claimHandler;
+  window.__fmvCollectInteractionHandler = collectionHandler;
   window.__fmvCrateSpawnSignal = validCrateSignal;
   window.__fmvOrdersService = validShopOrders ? orders : null;
   window.__fmvRuntimeBoard = board;
@@ -139,7 +139,7 @@ _DISCOVER_EXPRESSION = r"""
   const missing = [];
   if (!services) missing.push('gameplay-services');
   if (!itemHandler) missing.push('item-interaction-handler');
-  if (!claimHandler) missing.push('claim-interaction-handler');
+  if (!collectionHandler) missing.push('collection-interaction-handler');
   if (!validCrateSignal) missing.push('crate-spawn-signal');
   if (!inventory) missing.push('crate-inventory');
   window.__fmvRuntimeDiscovery = {
@@ -148,7 +148,7 @@ _DISCOVER_EXPRESSION = r"""
     pickSubscribers: subscribers(interaction?.onGesturePick).length,
     dropSubscribers: subscribers(interaction?.onGestureDrop).length,
     itemDrop: Boolean(itemHandler),
-    claim: Boolean(claimHandler),
+    collection: Boolean(collectionHandler),
     crateSpawn: Boolean(validCrateSignal),
     crateSubscribers: crateSubscribers.length,
     inventory: Boolean(inventory),
@@ -160,7 +160,7 @@ _DISCOVER_EXPRESSION = r"""
     sceneId: window.__fmvRuntimeSceneIdentity,
     board: true,
     itemDrop: Boolean(itemHandler),
-    claim: Boolean(claimHandler),
+    collection: Boolean(collectionHandler),
     crateSpawn: Boolean(validCrateSignal),
     inventory: Boolean(inventory),
     shopOrders: Boolean(validShopOrders),
@@ -186,7 +186,7 @@ _DISCOVERY_DIAGNOSTICS_EXPRESSION = r"""
 (() => window.__fmvRuntimeDiscovery || {
   strategy: 'not-run', services: false, pickSubscribers: 0,
   dropSubscribers: 0, itemDrop: false, crateSpawn: false,
-  claim: false,
+  collection: false,
   shopOrders: false,
   inventory: Boolean(window.__fmvCrateInventoryItem), missing: ['discovery-not-run'],
 })()
@@ -213,7 +213,7 @@ _HEALTH_EXPRESSION = r"""
 (() => {
   const board = window.__fmvBoardCells;
   const handler = window.__fmvItemInteractionHandler;
-  const claimHandler = window.__fmvClaimInteractionHandler;
+  const collectionHandler = window.__fmvCollectInteractionHandler;
   const crateSignal = window.__fmvCrateSpawnSignal;
   const orders = window.__fmvOrdersService;
   const beat = window.__fmvHeartbeat;
@@ -230,9 +230,9 @@ _HEALTH_EXPRESSION = r"""
   const currentItemHandler = currentBoard && handler?._services === services &&
     subscribers(interaction?.onGesturePick).some((entry) => entry?.context === handler) &&
     subscribers(interaction?.onGestureDrop).some((entry) => entry?.context === handler);
-  const currentClaimHandler = currentBoard && claimHandler?._services === services &&
-    typeof claimHandler._simulateClick === 'function' &&
-    subscribers(interaction?.onGestureTap).some((entry) => entry?.context === claimHandler);
+  const currentCollectionHandler = currentBoard && collectionHandler?._services === services &&
+    typeof collectionHandler._simulateClick === 'function' &&
+    subscribers(interaction?.onGestureTap).some((entry) => entry?.context === collectionHandler);
   const currentCrateSignal = currentBoard &&
     services?.hudService?._commonEvents?.spawnCrates === crateSignal &&
     typeof crateSignal?.fire === 'function' && subscribers(crateSignal).length > 0;
@@ -247,7 +247,7 @@ _HEALTH_EXPRESSION = r"""
     sceneId,
     board: board instanceof Map && currentBoard,
     itemDrop: Boolean(currentItemHandler),
-    claim: Boolean(currentClaimHandler),
+    collection: Boolean(currentCollectionHandler),
     itemActionBusy: Boolean(currentItemHandler && (
       handler.busy || handler.isBusy?.() || handler.dragging || handler._dragging ||
       handler._currentObject || handler._originCell
@@ -465,9 +465,9 @@ def _crate_expression(limit: int, scene_id: int | None) -> str:
 """
 
 
-def _claim_expression(
+def _collection_expression(
     coord: GridCoord,
-    expected_kind: ClaimTargetKind,
+    expected_kind: CollectionTargetKind,
     expected_blueprint_id: str,
     expected_object_id: int | None,
     scene_id: int | None,
@@ -479,7 +479,7 @@ def _claim_expression(
   const expectedBlueprintID = {json.dumps(expected_blueprint_id)};
   const expectedObjectID = {json.dumps(expected_object_id)};
   const board = window.__fmvBoardCells;
-  const handler = window.__fmvClaimInteractionHandler;
+  const handler = window.__fmvCollectInteractionHandler;
   const identity = window.__fmvGameplayServices?.mapGrid ||
     window.__fmvGameplayMapScreen || handler || board;
   const currentSceneId = identity && window.__fmvRuntimeSceneIds
@@ -656,10 +656,10 @@ class GameRuntime(Protocol):
 
     def submit_item_drop(self, start: GridCoord, end: GridCoord) -> ActionResult: ...
 
-    def submit_board_claim(
+    def submit_board_collection(
         self,
         coord: GridCoord,
-        expected_kind: ClaimTargetKind,
+        expected_kind: CollectionTargetKind,
         expected_blueprint_id: str,
         expected_object_id: int | None,
     ) -> ActionResult: ...
@@ -804,11 +804,11 @@ class GameRuntimeAdapter:
             self._scene_id = None
             self._discovery_detail = "runtime-scene-changed"
         item_drop = raw.get("itemDrop") is True
-        claim = raw.get("claim") is True
+        collection = raw.get("collection") is True
         crate_spawn = raw.get("crateSpawn") is True
         board = raw.get("board") is True
         return RuntimeHealth(
-            available=board and (item_drop or claim or crate_spawn) and scene_id is not None,
+            available=board and (item_drop or collection or crate_spawn) and scene_id is not None,
             scene_id=scene_id,
             board_available=board,
             item_drop_available=item_drop,
@@ -824,7 +824,7 @@ class GameRuntimeAdapter:
             heartbeat_installed=raw.get("heartbeatInstalled") is True,
             detail=self._discovery_detail,
             item_action_busy=raw.get("itemActionBusy") is True,
-            claim_available=claim,
+            collection_available=collection,
             shop_available=raw.get("shopOrders") is True,
         )
 
@@ -845,15 +845,15 @@ class GameRuntimeAdapter:
             status, raw.get("detail") if isinstance(raw.get("detail"), str) else None
         )
 
-    def submit_board_claim(
+    def submit_board_collection(
         self,
         coord: GridCoord,
-        expected_kind: ClaimTargetKind,
+        expected_kind: CollectionTargetKind,
         expected_blueprint_id: str,
         expected_object_id: int | None,
     ) -> ActionResult:
         raw = self._evaluate(
-            _claim_expression(
+            _collection_expression(
                 coord,
                 expected_kind,
                 expected_blueprint_id,
@@ -968,7 +968,9 @@ class GameRuntimeAdapter:
         return self._shop_action_result(_shop_start_expression(shop_id, recipe_id, self._scene_id))
 
     def claim_shop_order(self, shop_id: str, recipe_id: str) -> ActionResult:
-        return self._shop_action_result(_shop_claim_expression(shop_id, recipe_id, self._scene_id))
+        return self._shop_action_result(
+            _shop_claim_expression(shop_id, recipe_id, self._scene_id)
+        )
 
     def _shop_action_result(self, expression: str) -> ActionResult:
         raw = self._evaluate(expression)

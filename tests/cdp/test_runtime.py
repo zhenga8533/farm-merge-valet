@@ -2,7 +2,7 @@ import logging
 from threading import Event
 
 from farm_merge_valet.cdp.runtime import ActionStatus, GameRuntimeAdapter
-from farm_merge_valet.core.board import ClaimTargetKind
+from farm_merge_valet.core.board import CollectionTargetKind
 from farm_merge_valet.core.shops import ShopOrderState
 
 
@@ -13,7 +13,7 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
                 "sceneId": 3,
                 "board": True,
                 "itemDrop": True,
-                "claim": True,
+                "collection": True,
                 "crateSpawn": True,
                 "inventory": True,
                 "heartbeat": 10,
@@ -23,7 +23,7 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
                 "sceneId": 3,
                 "board": True,
                 "itemDrop": True,
-                "claim": True,
+                "collection": True,
                 "crateSpawn": True,
                 "inventory": True,
                 "heartbeat": 11,
@@ -39,7 +39,7 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
     health = adapter.read_runtime_health()
     assert health.heartbeat_advancing
     assert health.item_action_busy
-    assert health.claim_available
+    assert health.collection_available
 
 
 def test_scene_change_invalidates_cached_identity(monkeypatch) -> None:
@@ -154,11 +154,11 @@ def test_discovery_uses_active_gameplay_crate_signal() -> None:
     assert "inventory?.onAnimateChanges" not in _DISCOVER_EXPRESSION
 
 
-def test_discovery_validates_internal_claim_handler() -> None:
+def test_discovery_validates_internal_collection_handler() -> None:
     from farm_merge_valet.cdp.runtime import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 
     assert "typeof value._simulateClick === 'function'" in _DISCOVER_EXPRESSION
-    assert "window.__fmvClaimInteractionHandler" in _DISCOVER_EXPRESSION
+    assert "window.__fmvCollectInteractionHandler" in _DISCOVER_EXPRESSION
     assert "onGestureTap" in _HEALTH_EXPRESSION
 
 
@@ -263,7 +263,7 @@ def test_drop_uses_confirmed_gesture_pipeline(monkeypatch) -> None:
     assert "submitItemDrop" not in expression
 
 
-def test_claim_uses_internal_click_pipeline_without_screen_coordinates(monkeypatch) -> None:
+def test_collection_uses_internal_click_pipeline_without_screen_coordinates(monkeypatch) -> None:
     expression = ""
 
     def capture_expression(_port, value, _title, **_kwargs):
@@ -273,8 +273,8 @@ def test_claim_uses_internal_click_pipeline_without_screen_coordinates(monkeypat
 
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", capture_expression)
 
-    result = GameRuntimeAdapter(9222, "Farm").submit_board_claim(
-        (69, 67), ClaimTargetKind.IMMEDIATE, "milk", 3832
+    result = GameRuntimeAdapter(9222, "Farm").submit_board_collection(
+        (69, 67), CollectionTargetKind.IMMEDIATE, "milk", 3832
     )
 
     assert result.status is ActionStatus.SUBMITTED
@@ -288,14 +288,14 @@ def test_claim_uses_internal_click_pipeline_without_screen_coordinates(monkeypat
     assert "getWorldToScreenPosition" not in expression
 
 
-def test_claim_returns_structured_invalid_target(monkeypatch) -> None:
+def test_collection_returns_structured_invalid_target(monkeypatch) -> None:
     monkeypatch.setattr(
         "farm_merge_valet.cdp.runtime.evaluate",
         lambda *_, **__: {"status": "invalid-target"},
     )
 
-    result = GameRuntimeAdapter(9222, "Farm").submit_board_claim(
-        (1, 2), ClaimTargetKind.PRODUCER, "cow_4", 9
+    result = GameRuntimeAdapter(9222, "Farm").submit_board_collection(
+        (1, 2), CollectionTargetKind.PRODUCER, "cow_4", 9
     )
 
     assert result.status is ActionStatus.INVALID_TARGET

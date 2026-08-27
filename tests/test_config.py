@@ -12,8 +12,8 @@ from farm_merge_valet.config import AppConfig, ConfigStore, Settings
         ("cdp_port", 0),
         ("merge_empty_cell_reserve", -1),
         ("merge_empty_cell_reserve", 51),
-        ("producer_claim_min_empty_cells", 0),
-        ("producer_claim_min_empty_cells", 51),
+        ("producer_collect_min_empty_cells", 0),
+        ("producer_collect_min_empty_cells", 51),
         ("loop_interval", 0),
         ("loop_interval", 60.1),
         ("idle_wait_seconds", -0.1),
@@ -81,18 +81,23 @@ def test_merge_five_is_enabled_by_default() -> None:
     assert settings.item_policy("crops/wheat").enabled
     assert settings.item_policy("crops/wheat").merge
     assert settings.item_policy("crops/wheat").prefer_merge_five
-    assert not settings.item_policy("crops/wheat").claim
+    assert not settings.item_policy("crops/wheat").collect
     assert not settings.item_policy("crops/wheat").always_remove
 
 
-def test_claim_defaults_support_category_and_item_specific_policies() -> None:
+def test_collection_defaults_support_category_and_item_specific_policies() -> None:
     settings = Settings(_env_file=None)
 
-    assert settings.item_policy("ingredients/milk").claim
-    assert settings.item_policy("ingredients/egg").claim
-    assert settings.item_policy("currencies/ticket").claim
-    assert not settings.item_policy("currencies/coin").claim
-    assert not settings.item_policy("crops/wheat").claim
+    assert settings.item_policy("ingredients/milk").collect
+    assert settings.item_policy("ingredients/egg").collect
+    assert settings.item_policy("currencies/ticket").collect
+    assert not settings.item_policy("currencies/coin").collect
+    assert not settings.item_policy("crops/wheat").collect
+
+
+def test_legacy_claim_policy_field_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        AppConfig(item_policy_overrides={"ingredients/milk": {"claim": True}})
 
 
 def test_item_policy_partial_override_inherits_other_defaults() -> None:
@@ -161,7 +166,7 @@ def test_item_policy_environment_variables_are_ignored(monkeypatch) -> None:
     monkeypatch.setenv(
         "FMV_ITEM_POLICY_DEFAULTS",
         '{"enabled": true, "merge": true, "prefer_merge_five": true, '
-        '"claim": false, "always_remove": false}',
+        '"collect": false, "always_remove": false}',
     )
     monkeypatch.setenv(
         "FMV_ITEM_POLICY_OVERRIDES",
@@ -173,14 +178,14 @@ def test_item_policy_environment_variables_are_ignored(monkeypatch) -> None:
     assert not settings.item_policy("building_resources/stone").always_remove
 
 
-def test_item_claim_override_can_disable_one_category_default() -> None:
+def test_item_collection_override_can_disable_one_category_default() -> None:
     settings = Settings(
         _env_file=None,
-        item_policy_overrides={"ingredients/milk": {"claim": False}},
+        item_policy_overrides={"ingredients/milk": {"collect": False}},
     )
 
-    assert not settings.item_policy("ingredients/milk").claim
-    assert settings.item_policy("ingredients/egg").claim
+    assert not settings.item_policy("ingredients/milk").collect
+    assert settings.item_policy("ingredients/egg").collect
 
 
 def test_all_shop_automation_is_enabled_by_default() -> None:
@@ -205,8 +210,8 @@ def test_shop_policy_environment_variables_are_ignored(monkeypatch) -> None:
     assert settings.recipe_overrides == {}
 
 
-def test_producer_claim_reserves_four_cells_by_default() -> None:
-    assert Settings(_env_file=None).producer_claim_min_empty_cells == 4
+def test_producer_collection_reserves_four_cells_by_default() -> None:
+    assert Settings(_env_file=None).producer_collect_min_empty_cells == 4
 
 
 def test_managed_browser_defaults_to_auto_launch() -> None:
@@ -276,7 +281,7 @@ def test_config_store_round_trips_atomically_and_notifies(tmp_path) -> None:
     initial = store.load()
     updated = store.update(
         theme="dark",
-        item_policy_overrides={"animals/cow": {"claim": True}},
+        item_policy_overrides={"animals/cow": {"collect": True}},
         discord_webhook_url="https://example.test/private-token",
     )
     unsubscribe()

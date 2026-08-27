@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 from farm_merge_valet.core.board import item_base_policy_key, item_family_policy_key
 from farm_merge_valet.hotkeys import normalize_hotkey
 
-CONFIG_SCHEMA_VERSION = 1
+CONFIG_SCHEMA_VERSION: Literal[1] = 1
 
 
 def user_data_root() -> Path:
@@ -46,7 +46,7 @@ class ItemPolicy(BaseModel):
     enabled: bool = True
     merge: bool = True
     prefer_merge_five: bool = True
-    claim: bool = False
+    collect: bool = False
     always_remove: bool = False
 
 
@@ -55,16 +55,16 @@ class ItemPolicyOverride(BaseModel):
     enabled: bool | None = None
     merge: bool | None = None
     prefer_merge_five: bool | None = None
-    claim: bool | None = None
+    collect: bool | None = None
     always_remove: bool | None = None
 
 
 def _item_category_defaults() -> dict[str, ItemPolicyOverride]:
-    return {"ingredients": ItemPolicyOverride(claim=True)}
+    return {"ingredients": ItemPolicyOverride(collect=True)}
 
 
 def _item_specific_defaults() -> dict[str, ItemPolicyOverride]:
-    return {"currencies/ticket": ItemPolicyOverride(claim=True)}
+    return {"currencies/ticket": ItemPolicyOverride(collect=True)}
 
 
 class AppConfig(BaseModel):
@@ -72,7 +72,7 @@ class AppConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1] = CONFIG_SCHEMA_VERSION
     window_title: str = "r/FarmMergeValley"
     browser: Literal["auto", "chrome", "edge", "brave", "chromium"] = "auto"
     browser_executable: Path | None = None
@@ -84,7 +84,7 @@ class AppConfig(BaseModel):
     atlas_cache_dir: Path = Field(default_factory=lambda: user_cache_root() / "atlases")
 
     merge_empty_cell_reserve: int = Field(default=1, ge=0, le=50)
-    producer_claim_min_empty_cells: int = Field(default=4, ge=1, le=50)
+    producer_collect_min_empty_cells: int = Field(default=4, ge=1, le=50)
     prefer_merge_five: bool = True
     item_policy_defaults: ItemPolicy = Field(default_factory=ItemPolicy)
     item_category_defaults: dict[str, ItemPolicyOverride] = Field(
@@ -99,7 +99,7 @@ class AppConfig(BaseModel):
     shop_overrides: dict[str, bool] = Field(default_factory=dict)
     recipe_overrides: dict[str, bool] = Field(default_factory=dict)
     items_sort_column: Literal[
-        "item", "category", "enabled", "merge", "merge_five", "claim", "remove"
+        "item", "category", "enabled", "merge", "merge_five", "collect", "remove"
     ] = "item"
     items_sort_descending: bool = False
     shops_sort_column: Literal["item", "type", "enabled"] = "item"

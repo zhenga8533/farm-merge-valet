@@ -86,20 +86,19 @@ in addition to the core game taxonomy. Exact runtime IDs, family IDs, and
 aliases retain any spelling used by the game; player-facing spelling belongs in
 `display_name`.
 
-Each catalog item also derives a tile-claim mode from semantic runtime metadata.
-The modes distinguish immediate one-click claims from upgrade prompts,
-confirmation dialogs, requirement-based rewards, and non-claimable content.
-This classification is fail-closed: only immediate claims are automated, while
-the other modes preserve intent for later policy and GUI work.
+Each catalog item also derives a tile-action mode from semantic runtime metadata.
+The modes distinguish standard and opt-in collection from upgrade interactions,
+requirement-based rewards, and non-actionable content. Any item carrying the
+game's `collectable` capability is eligible for the verified collection path;
+the policy default determines whether it is automated.
 
 ## GUI policy
 
 The catalog describes what an item is and what the game permits. User choices
 should be stored separately by `policy_key`. Mergeable tiers intentionally
 share a key, while non-chain products and recipes remain independently
-configurable. The GUI policy layer holds enabled, merge, merge-5, and claim
-toggles without changing
-recognition or duplicating assets. Any future merge submission mode should
+configurable. The GUI policy layer holds enabled, merge, merge-5, and collect
+toggles without changing recognition or duplicating assets. Any future merge submission mode should
 likewise be a policy/action concern, not a catalog capability inferred from an
 image.
 
@@ -111,15 +110,15 @@ discovered merge family; for example,
 enables merge-3 for cows and excludes wheat from merge planning. The overall
 `enabled` field can suppress every supported automation behavior for a key,
 while `merge` controls merge planning specifically.
-Board-item and tier-4 producer claims additionally require `claim: true`.
+Board-item and tier-4 producer collection additionally requires `collect: true`.
 Immediate ingredients and `currencies/ticket` default on; other current and
-future items default off. Producer and product keys remain independent—for
+future collectable items default off. Producer and product keys remain independent—for
 example, `animals/cow` controls harvesting the producer while
 `ingredients/milk` controls collecting milk from the board. HUD supply claims
 and shop rewards use their own policies rather than this item field.
 Policy fields are consumed only by applicable capabilities: non-mergeable
-items ignore `merge` and `prefer_merge_five`, while non-claimable items ignore
-`claim`. The GUI uses these facts to disable controls that are not relevant to
+items ignore `merge` and `prefer_merge_five`, while non-collectable items ignore
+`collect`. The GUI uses these facts to disable controls that are not relevant to
 an item.
 The `always_remove` field is reserved for a future shovel action and defaults
 to false; configuring it does not currently submit destructive actions.

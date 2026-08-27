@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from farm_merge_valet.core.catalog_builder import build_item_catalog
-from farm_merge_valet.core.item_catalog import TileClaimMode
+from farm_merge_valet.core.item_catalog import TileActionMode
 
 
 def _metadata(
@@ -29,7 +29,7 @@ def _metadata(
     }
 
 
-def test_catalog_assigns_tile_claim_modes_without_enabling_unsafe_clicks() -> None:
+def test_catalog_assigns_tile_action_modes_without_enabling_unsafe_clicks() -> None:
     catalog = build_item_catalog(
         {
             "milk": _metadata(components=["ingredient"], alias="ingredient_milk", collectable=True),
@@ -63,13 +63,13 @@ def test_catalog_assigns_tile_claim_modes_without_enabling_unsafe_clicks() -> No
         }
     )
 
-    assert catalog.items["milk"].tile_claim_mode is TileClaimMode.IMMEDIATE
-    assert catalog.items["ticket"].tile_claim_mode is TileClaimMode.IMMEDIATE
-    assert catalog.items["crate_1"].tile_claim_mode is TileClaimMode.IMMEDIATE
-    assert catalog.items["coin_1"].tile_claim_mode is TileClaimMode.CONFIRMATION
-    assert catalog.items["upgrade_card_1"].tile_claim_mode is TileClaimMode.UPGRADE_PROMPT
-    assert catalog.items["reward_crate_bronze"].tile_claim_mode is TileClaimMode.REQUIREMENT
-    assert catalog.immediate_claim_ids == frozenset({"milk", "ticket", "crate_1"})
+    assert catalog.items["milk"].tile_action_mode is TileActionMode.COLLECT
+    assert catalog.items["ticket"].tile_action_mode is TileActionMode.COLLECT
+    assert catalog.items["crate_1"].tile_action_mode is TileActionMode.COLLECT
+    assert catalog.items["coin_1"].tile_action_mode is TileActionMode.COLLECT_OPT_IN
+    assert catalog.items["upgrade_card_1"].tile_action_mode is TileActionMode.UPGRADE
+    assert catalog.items["reward_crate_bronze"].tile_action_mode is TileActionMode.OPEN_REQUIREMENT
+    assert catalog.collectable_ids == frozenset({"milk", "ticket", "crate_1", "coin_1"})
 
 
 def test_catalog_preserves_shop_recipe_cost_duration_and_rewards() -> None:

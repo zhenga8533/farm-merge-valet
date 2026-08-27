@@ -42,7 +42,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
     ),
     ConfigSection.SETTINGS: (
         "merge_empty_cell_reserve",
-        "producer_claim_min_empty_cells",
+        "producer_collect_min_empty_cells",
         "loop_interval",
         "idle_wait_seconds",
         "item_action_delay_min",

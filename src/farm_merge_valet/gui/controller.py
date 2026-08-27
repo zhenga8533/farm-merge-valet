@@ -22,6 +22,9 @@ from farm_merge_valet.observability.discord import discord_webhook_sink
 
 logger = logging.getLogger(__name__)
 
+_CATALOG_SETUP_TIMEOUT_SECONDS = 120.0
+_CATALOG_SETUP_POLL_SECONDS = 1.0
+
 
 class ApplicationState(StrEnum):
     STOPPED = "Stopped"
@@ -76,6 +79,8 @@ class ApplicationController(QObject):
     browser_state_changed = Signal(object)
     asset_operation_changed = Signal(bool)
     asset_status_changed = Signal(str)
+    catalog_setup_failed = Signal(str)
+    catalog_refreshed = Signal(int)
     assets_refreshed = Signal()
     diagnostics_operation_changed = Signal(bool)
     diagnostics_exported = Signal(str)
@@ -394,6 +399,88 @@ class ApplicationController(QObject):
 
         self._start_utility_operation("assets:sync", work)
 
+    def setup_catalog(self) -> None:
+        if self.status.state.active:
+            self.error.emit("Stop the bot before synchronizing the game catalog.")
+            return
+
+        def work() -> str:
+            from farm_merge_valet.cdp.client import CdpConnectionError
+            from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
+            from farm_merge_valet.core.catalog_store import (
+                CatalogUnavailableError,
+                load_or_refresh_catalog,
+            )
+            from farm_merge_valet.core.item_catalog import load_item_catalog
+            from farm_merge_valet.tools.template_extraction import sync_runtime_assets
+
+            config = self.store.current
+            self.asset_status_changed.emit("Preparing the managed browser…")
+            settings.replace(config)
+            manager = BrowserManager(config)
+            browser_status = manager.ensure_running()
+            self.browser_status_changed.emit(self._browser_status_text(browser_status))
+            self.browser_state_changed.emit(browser_status)
+            self.asset_status_changed.emit("Waiting for the game to finish loading…")
+
+            deadline = time.monotonic() + _CATALOG_SETUP_TIMEOUT_SECONDS
+            last_error: Exception | None = None
+            runtime = GameRuntimeAdapter(config.cdp_port, config.window_title)
+            catalog = None
+            discovery_announced = False
+            while time.monotonic() < deadline:
+                browser_status = manager.status()
+                if not browser_status.running:
+                    raise BrowserManagerError(
+                        browser_status.detail
+                        or "The managed browser closed during synchronization."
+                    )
+                if not browser_status.compatible:
+                    raise BrowserManagerError(
+                        browser_status.detail
+                        or "The managed browser is not compatible with catalog synchronization."
+                    )
+                if browser_status.game_loaded:
+                    if not discovery_announced:
+                        self.asset_status_changed.emit("Discovering items, shops, and recipes…")
+                        discovery_announced = True
+                    try:
+                        runtime.discover()
+                        catalog = load_or_refresh_catalog(
+                            config.catalog_dir,
+                            config.cdp_port,
+                            config.window_title,
+                        )
+                    except (
+                        CatalogUnavailableError,
+                        CdpConnectionError,
+                        OSError,
+                        ValueError,
+                    ) as exc:
+                        last_error = exc
+                    if catalog is not None and catalog.items:
+                        break
+                time.sleep(_CATALOG_SETUP_POLL_SECONDS)
+            if catalog is None or not catalog.items:
+                detail = f" Last result: {last_error}" if last_error is not None else ""
+                raise RuntimeError(
+                    "The game catalog did not become available. Keep the managed game open "
+                    f"and finish any sign-in or loading steps, then try again.{detail}"
+                )
+
+            self.catalog_refreshed.emit(len(catalog.items))
+            self.asset_status_changed.emit(
+                f"Catalog ready · {len(catalog.items)} entries · Synchronizing icons…"
+            )
+            try:
+                sync_runtime_assets()
+            except (CdpConnectionError, OSError, RuntimeError, ValueError) as exc:
+                return f"Catalog ready · Icons were not synchronized: {exc}"
+            refreshed = load_item_catalog(config.catalog_dir / "catalog.json")
+            return f"Game catalog ready · Entries: {len(refreshed.items)} · Icons synchronized"
+
+        self._start_utility_operation("assets:onboard", work)
+
     def export_diagnostics(self, output: Path, logs: str) -> None:
         def work() -> Path:
             from farm_merge_valet.diagnostics import export_support_bundle
@@ -445,6 +532,8 @@ class ApplicationController(QObject):
                 self.browser_status_changed.emit(message)
             elif category == "assets":
                 self.asset_status_changed.emit(message)
+                if action == "onboard":
+                    self.catalog_setup_failed.emit(message)
             elif category == "diagnostics":
                 self.diagnostics_failed.emit(message)
             if not self._shutting_down:
@@ -483,7 +572,7 @@ class ApplicationController(QObject):
             updates["last_activity"] = message
         elif event == "planner.phase_changed":
             updates["phase"] = str(context.get("phase", "—")).replace("_", " ").title()
-        elif event in {"item_action.confirmed", "claim.confirmed", "crate.claim_completed"}:
+        elif event in {"item_action.confirmed", "collection.confirmed", "crate.claim_completed"}:
             updates["last_activity"] = message
         elif record.levelno >= logging.ERROR:
             updates["last_activity"] = message

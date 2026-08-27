@@ -13,7 +13,7 @@ from farm_merge_valet.core.board import (
     BoardGrid,
     Cell,
     CellKind,
-    ClaimTargetKind,
+    CollectionTargetKind,
     ItemRef,
     MergeAction,
     MergeActionKind,
@@ -24,9 +24,9 @@ from farm_merge_valet.core.board import (
 from farm_merge_valet.core.bot import (
     Bot,
     Phase,
-    _ClaimAction,
+    _CollectAction,
     _PendingAction,
-    _PendingClaim,
+    _PendingCollection,
 )
 from farm_merge_valet.core.shops import ShopAction, ShopActionKind, ShopOrder, ShopOrderState
 
@@ -35,7 +35,7 @@ class FakeRuntime:
     def __init__(self) -> None:
         self.drops: list[tuple[tuple[int, int], tuple[int, int]]] = []
         self.spawn_limits: list[int] = []
-        self.claims: list[tuple[tuple[int, int], ClaimTargetKind, str, int | None]] = []
+        self.collections: list[tuple[tuple[int, int], CollectionTargetKind, str, int | None]] = []
         self.started_orders: list[tuple[str, str]] = []
         self.claimed_orders: list[tuple[str, str]] = []
         self.shop_orders: tuple[ShopOrder, ...] = ()
@@ -48,8 +48,10 @@ class FakeRuntime:
         self.spawn_limits.append(limit)
         return CrateSpawnResult(ActionStatus.SUBMITTED, limit, 0)
 
-    def submit_board_claim(self, coord, expected_kind, expected_blueprint_id, expected_object_id):
-        self.claims.append((coord, expected_kind, expected_blueprint_id, expected_object_id))
+    def submit_board_collection(
+        self, coord, expected_kind, expected_blueprint_id, expected_object_id
+    ):
+        self.collections.append((coord, expected_kind, expected_blueprint_id, expected_object_id))
         return ActionResult(ActionStatus.SUBMITTED)
 
     def read_shop_orders(self):
@@ -76,7 +78,7 @@ def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
         1.0,
         advancing,
         item_action_busy=item_action_busy,
-        claim_available=True,
+        collection_available=True,
         shop_available=True,
     )
 
@@ -93,15 +95,15 @@ def bare_bot() -> Bot:
     bot._quit_requested = False
     bot._quit_lock = Lock()
     bot._pending_action = None
-    bot._pending_claim = None
+    bot._pending_collection = None
     bot._pending_shop_action = None
-    bot._next_claim_action_at = 0.0
+    bot._next_collection_action_at = 0.0
     bot._action_failures = {}
     bot._action_retry_at = {}
     bot._next_item_action_at = 0.0
     bot._max_item_tiers = {}
     bot._blueprint_policy_keys = {"milk": "ingredients/milk"}
-    bot._immediate_claim_ids = frozenset({"milk"})
+    bot._collectable_ids = frozenset({"milk"})
     bot._last_health = None
     bot._last_wait_reason = None
     bot._last_wait_log_at = 0.0
@@ -546,34 +548,24 @@ def test_live_sync_distinguishes_empty_structure_placeholder(monkeypatch) -> Non
 
 def test_live_sync_keeps_upgrade_card_targets_as_distinct_variants(monkeypatch) -> None:
     bot = bare_bot()
-    bot._blueprint_items = {
-        "upgrade_card_1": ItemRef("upgrade_cards", "upgrade_card", 1)
-    }
+    bot._blueprint_items = {"upgrade_card_1": ItemRef("upgrade_cards", "upgrade_card", 1)}
     monkeypatch.setattr(
         "farm_merge_valet.core.bot.read_board_state",
         lambda *_, **__: {
-            (0, 0): LiveCellState(
-                True, "upgrade_card_1", item_variant="wheat"
-            ),
-            (1, 0): LiveCellState(
-                True, "upgrade_card_1", item_variant="cow"
-            ),
+            (0, 0): LiveCellState(True, "upgrade_card_1", item_variant="wheat"),
+            (1, 0): LiveCellState(True, "upgrade_card_1", item_variant="cow"),
         },
     )
 
     assert bot._sync_board_from_live_state()
-    assert bot.board.get_cell((0, 0)).item == ItemRef(
-        "upgrade_cards", "upgrade_card", 1, "wheat"
-    )
-    assert bot.board.get_cell((1, 0)).item == ItemRef(
-        "upgrade_cards", "upgrade_card", 1, "cow"
-    )
+    assert bot.board.get_cell((0, 0)).item == ItemRef("upgrade_cards", "upgrade_card", 1, "wheat")
+    assert bot.board.get_cell((1, 0)).item == ItemRef("upgrade_cards", "upgrade_card", 1, "cow")
 
 
-def test_live_sync_classifies_only_catalogued_immediate_claims(monkeypatch) -> None:
+def test_live_sync_classifies_only_catalogued_collectable_items(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_items = {}
-    bot._immediate_claim_ids = frozenset({"milk", "ticket", "crate_1"})
+    bot._collectable_ids = frozenset({"milk", "ticket", "crate_1"})
     monkeypatch.setattr(
         "farm_merge_valet.core.bot.read_board_state",
         lambda *_, **__: {
@@ -584,12 +576,12 @@ def test_live_sync_classifies_only_catalogued_immediate_claims(monkeypatch) -> N
     )
 
     assert bot._sync_board_from_live_state()
-    assert bot.board.get_cell((0, 0)).kind is CellKind.CLAIMABLE
-    assert bot.board.get_cell((1, 0)).kind is CellKind.CLAIMABLE
+    assert bot.board.get_cell((0, 0)).kind is CellKind.COLLECTABLE
+    assert bot.board.get_cell((1, 0)).kind is CellKind.COLLECTABLE
     assert bot.board.get_cell((2, 0)).kind is CellKind.OTHER
 
 
-def test_ground_product_is_claimed_before_ready_producer(monkeypatch) -> None:
+def test_ground_product_is_collected_before_ready_producer(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_items = {
         "cow_4": ItemRef("animals", "cow", 4),
@@ -598,8 +590,8 @@ def test_ground_product_is_claimed_before_ready_producer(monkeypatch) -> None:
     monkeypatch.setattr(
         "farm_merge_valet.core.bot.settings.item_policy_overrides",
         {
-            "animals/cow": ItemPolicyOverride(claim=True),
-            "ingredients/milk": ItemPolicyOverride(claim=True),
+            "animals/cow": ItemPolicyOverride(collect=True),
+            "ingredients/milk": ItemPolicyOverride(collect=True),
         },
     )
     bot._live_cells = {
@@ -615,17 +607,17 @@ def test_ground_product_is_claimed_before_ready_producer(monkeypatch) -> None:
     }
     for x in range(4):
         bot.board.set_cell((x, 1), Cell(CellKind.EMPTY))
-    products, depleted, ready = bot._claim_actions()
+    products, depleted, ready = bot._collection_actions()
 
-    bot._step_claim_tiles(health(advancing=True), products, depleted, ready)
+    bot._step_collect_tiles(health(advancing=True), products, depleted, ready)
 
-    assert bot.runtime.claims == [((1, 0), ClaimTargetKind.IMMEDIATE, "milk", 10)]
+    assert bot.runtime.collections == [((1, 0), CollectionTargetKind.IMMEDIATE, "milk", 10)]
     assert bot.runtime.spawn_limits == []
 
 
-def test_only_enabled_immediate_catalog_items_become_tile_claim_actions(monkeypatch) -> None:
+def test_only_enabled_immediate_catalog_items_become_tile_collection_actions(monkeypatch) -> None:
     bot = bare_bot()
-    bot._immediate_claim_ids = frozenset({"ticket", "crate_1"})
+    bot._collectable_ids = frozenset({"ticket", "crate_1", "coin_1"})
     bot._blueprint_policy_keys = {
         "ticket": "deliveries/ticket",
         "crate_1": "supply_crates/crate",
@@ -636,8 +628,8 @@ def test_only_enabled_immediate_catalog_items_become_tile_claim_actions(monkeypa
     monkeypatch.setattr(
         "farm_merge_valet.core.bot.settings.item_policy_overrides",
         {
-            "deliveries/ticket": ItemPolicyOverride(claim=True),
-            "supply_crates/crate": ItemPolicyOverride(claim=True),
+            "deliveries/ticket": ItemPolicyOverride(collect=True),
+            "supply_crates/crate": ItemPolicyOverride(collect=True),
         },
     )
     bot._live_cells = {
@@ -648,15 +640,38 @@ def test_only_enabled_immediate_catalog_items_become_tile_claim_actions(monkeypa
         (5, 0): LiveCellState(True, "reward_crate_bronze", 14, collectable=True),
     }
 
-    immediate, depleted, ready = bot._claim_actions()
+    immediate, depleted, ready = bot._collection_actions()
 
     assert [action.blueprint_id for action in immediate] == ["ticket", "crate_1"]
-    assert all(action.kind is ClaimTargetKind.IMMEDIATE for action in immediate)
+    assert all(action.kind is CollectionTargetKind.IMMEDIATE for action in immediate)
     assert depleted == []
     assert ready == []
 
 
-def test_ingredient_claims_default_on_while_producer_claims_default_off() -> None:
+def test_collectable_currency_tier_can_be_enabled_independently(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._collectable_ids = frozenset({"coin_1", "coin_2"})
+    bot._blueprint_policy_keys = {
+        "coin_1": "currencies/coin/tier/1",
+        "coin_2": "currencies/coin/tier/2",
+    }
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.settings.item_policy_overrides",
+        {"currencies/coin/tier/2": ItemPolicyOverride(collect=True)},
+    )
+    bot._live_cells = {
+        (1, 0): LiveCellState(True, "coin_1", 10, collectable=True),
+        (2, 0): LiveCellState(True, "coin_2", 11, collectable=True),
+    }
+
+    immediate, depleted, ready = bot._collection_actions()
+
+    assert [action.blueprint_id for action in immediate] == ["coin_2"]
+    assert depleted == []
+    assert ready == []
+
+
+def test_ingredient_collection_defaults_on_while_producer_collection_defaults_off() -> None:
     bot = bare_bot()
     bot._blueprint_policy_keys.update({"cow_4": "animals/cow"})
     bot._live_cells = {
@@ -671,7 +686,7 @@ def test_ingredient_claims_default_on_while_producer_claims_default_off() -> Non
         ),
     }
 
-    immediate, depleted, ready = bot._claim_actions()
+    immediate, depleted, ready = bot._collection_actions()
 
     assert [action.blueprint_id for action in immediate] == ["milk"]
     assert depleted == []
@@ -680,8 +695,8 @@ def test_ingredient_claims_default_on_while_producer_claims_default_off() -> Non
 
 def test_ready_producer_merges_and_defers_crates_below_space_threshold(monkeypatch) -> None:
     bot = bare_bot()
-    action = _ClaimAction(
-        ClaimTargetKind.PRODUCER,
+    action = _CollectAction(
+        CollectionTargetKind.PRODUCER,
         (4, 4),
         "cow_4",
         22,
@@ -691,26 +706,26 @@ def test_ready_producer_merges_and_defers_crates_below_space_threshold(monkeypat
         bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
     calls = []
     bot._step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
-    monkeypatch.setattr("farm_merge_valet.core.bot.settings.producer_claim_min_empty_cells", 4)
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.producer_collect_min_empty_cells", 4)
 
-    bot._step_claim_tiles(health(advancing=True), [], [], [action])
+    bot._step_collect_tiles(health(advancing=True), [], [], [action])
 
     assert bot.phase is Phase.MERGE
     assert calls == [4]
-    assert bot.runtime.claims == []
+    assert bot.runtime.collections == []
     assert bot.runtime.spawn_limits == []
 
 
-def test_ready_producer_is_claimed_with_required_space(monkeypatch) -> None:
+def test_ready_producer_is_collected_with_required_space(monkeypatch) -> None:
     bot = bare_bot()
-    claim = _ClaimAction(
-        ClaimTargetKind.PRODUCER,
+    collection = _CollectAction(
+        CollectionTargetKind.PRODUCER,
         (4, 4),
         "cow_4",
         22,
         ProducerKind.ANIMAL,
     )
-    bot._live_cells[claim.coord] = LiveCellState(
+    bot._live_cells[collection.coord] = LiveCellState(
         True,
         "cow_4",
         22,
@@ -720,24 +735,24 @@ def test_ready_producer_is_claimed_with_required_space(monkeypatch) -> None:
     )
     for x in range(4):
         bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
-    monkeypatch.setattr("farm_merge_valet.core.bot.settings.producer_claim_min_empty_cells", 4)
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.producer_collect_min_empty_cells", 4)
 
-    bot._step_claim_tiles(health(advancing=True), [], [], [claim])
+    bot._step_collect_tiles(health(advancing=True), [], [], [collection])
 
-    assert bot.runtime.claims == [((4, 4), ClaimTargetKind.PRODUCER, "cow_4", 22)]
-    assert bot._pending_claim is not None
+    assert bot.runtime.collections == [((4, 4), CollectionTargetKind.PRODUCER, "cow_4", 22)]
+    assert bot._pending_collection is not None
 
 
 def test_depleted_animal_can_retire_without_an_empty_cell() -> None:
     bot = bare_bot()
-    claim = _ClaimAction(
-        ClaimTargetKind.DEPLETED_PRODUCER,
+    collection = _CollectAction(
+        CollectionTargetKind.DEPLETED_PRODUCER,
         (4, 4),
         "cow_4",
         22,
         ProducerKind.ANIMAL,
     )
-    bot._live_cells[claim.coord] = LiveCellState(
+    bot._live_cells[collection.coord] = LiveCellState(
         True,
         "cow_4",
         22,
@@ -746,15 +761,15 @@ def test_depleted_animal_can_retire_without_an_empty_cell() -> None:
         producer_state=ProducerState.DEPLETED,
     )
 
-    bot._step_claim_tiles(health(advancing=True), [], [claim], [])
+    bot._step_collect_tiles(health(advancing=True), [], [collection], [])
 
-    assert bot.runtime.claims
+    assert bot.runtime.collections
 
 
 def test_depleted_crop_requires_one_empty_cell() -> None:
     bot = bare_bot()
-    claim = _ClaimAction(
-        ClaimTargetKind.DEPLETED_PRODUCER,
+    collection = _CollectAction(
+        CollectionTargetKind.DEPLETED_PRODUCER,
         (4, 4),
         "wheat_4",
         22,
@@ -763,19 +778,19 @@ def test_depleted_crop_requires_one_empty_cell() -> None:
     calls = []
     bot._step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
 
-    bot._step_claim_tiles(health(advancing=True), [], [claim], [])
+    bot._step_collect_tiles(health(advancing=True), [], [collection], [])
 
     assert calls == [1]
-    assert bot.runtime.claims == []
+    assert bot.runtime.collections == []
 
 
-def test_cooling_producer_does_not_create_claim_work(monkeypatch) -> None:
+def test_cooling_producer_does_not_create_collection_work(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_items = {}
     bot._blueprint_policy_keys = {"cow_4": "animals/cow"}
     monkeypatch.setattr(
         "farm_merge_valet.core.bot.settings.item_policy_overrides",
-        {"animals/cow": ItemPolicyOverride(claim=True)},
+        {"animals/cow": ItemPolicyOverride(collect=True)},
     )
     bot._live_cells = {
         (4, 4): LiveCellState(
@@ -788,16 +803,16 @@ def test_cooling_producer_does_not_create_claim_work(monkeypatch) -> None:
         )
     }
 
-    assert bot._claim_actions() == ([], [], [])
+    assert bot._collection_actions() == ([], [], [])
     assert bot._cooling_producer_count() == 1
 
 
-def test_harvestable_non_tier_four_item_is_not_a_producer_claim(monkeypatch) -> None:
+def test_harvestable_non_tier_four_item_is_not_a_producer_collection(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_policy_keys = {"cow_3": "animals/cow"}
     monkeypatch.setattr(
         "farm_merge_valet.core.bot.settings.item_policy_overrides",
-        {"animals/cow": ItemPolicyOverride(claim=True)},
+        {"animals/cow": ItemPolicyOverride(collect=True)},
     )
     bot._live_cells = {
         (4, 4): LiveCellState(
@@ -810,49 +825,49 @@ def test_harvestable_non_tier_four_item_is_not_a_producer_claim(monkeypatch) -> 
         )
     }
 
-    assert bot._claim_actions() == ([], [], [])
+    assert bot._collection_actions() == ([], [], [])
 
 
-def test_pending_product_claim_survives_frozen_heartbeat(monkeypatch) -> None:
+def test_pending_product_collection_survives_frozen_heartbeat(monkeypatch) -> None:
     bot = bare_bot()
     initial = LiveCellState(True, "milk", 10, collectable=True, collectable_ingredient=True)
-    claim = _ClaimAction(ClaimTargetKind.IMMEDIATE, (1, 2), "milk", 10)
-    bot._live_cells[claim.coord] = initial
-    bot._pending_claim = _PendingClaim(claim, initial, 7, 1.0, initial, 1.0)
+    collection = _CollectAction(CollectionTargetKind.IMMEDIATE, (1, 2), "milk", 10)
+    bot._live_cells[collection.coord] = initial
+    bot._pending_collection = _PendingCollection(collection, initial, 7, 1.0, initial, 1.0)
     monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 5.0)
 
-    assert not bot._verify_pending_claim(health(advancing=False))
-    assert bot._pending_claim is not None
+    assert not bot._verify_pending_collection(health(advancing=False))
+    assert bot._pending_collection is not None
 
 
-def test_pending_product_claim_confirms_from_authoritative_source_change(
+def test_pending_product_collection_confirms_from_authoritative_source_change(
     monkeypatch, caplog
 ) -> None:
     bot = bare_bot()
     initial = LiveCellState(True, "milk", 10, collectable=True, collectable_ingredient=True)
-    claim = _ClaimAction(ClaimTargetKind.IMMEDIATE, (1, 2), "milk", 10)
-    bot._live_cells[claim.coord] = initial
-    bot._pending_claim = _PendingClaim(claim, initial, 7, 1.0, initial, 1.0)
-    bot._live_cells[claim.coord] = LiveCellState(False, None)
+    collection = _CollectAction(CollectionTargetKind.IMMEDIATE, (1, 2), "milk", 10)
+    bot._live_cells[collection.coord] = initial
+    bot._pending_collection = _PendingCollection(collection, initial, 7, 1.0, initial, 1.0)
+    bot._live_cells[collection.coord] = LiveCellState(False, None)
     monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 2.0)
 
     with caplog.at_level(logging.DEBUG):
-        assert bot._verify_pending_claim(health(advancing=True))
+        assert bot._verify_pending_collection(health(advancing=True))
 
-    assert bot._pending_claim is None
-    assert any(record.fmv_event == "claim.confirmed" for record in caplog.records)
+    assert bot._pending_collection is None
+    assert any(record.fmv_event == "collection.confirmed" for record in caplog.records)
 
 
-def test_claim_noop_cools_down_before_retry(monkeypatch) -> None:
+def test_collection_noop_cools_down_before_retry(monkeypatch) -> None:
     bot = bare_bot()
     initial = LiveCellState(True, "milk", 10, collectable=True, collectable_ingredient=True)
-    claim = _ClaimAction(ClaimTargetKind.IMMEDIATE, (1, 2), "milk", 10)
-    bot._live_cells[claim.coord] = initial
-    bot._pending_claim = _PendingClaim(claim, initial, 7, 1.0, initial, 1.0)
+    collection = _CollectAction(CollectionTargetKind.IMMEDIATE, (1, 2), "milk", 10)
+    bot._live_cells[collection.coord] = initial
+    bot._pending_collection = _PendingCollection(collection, initial, 7, 1.0, initial, 1.0)
     monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 5.0)
 
-    assert bot._verify_pending_claim(health(advancing=True))
-    assert bot._next_claim_action_at == 15.0
+    assert bot._verify_pending_collection(health(advancing=True))
+    assert bot._next_collection_action_at == 15.0
 
 
 def test_hotkey_callbacks_log_and_set_control_flags(caplog) -> None:

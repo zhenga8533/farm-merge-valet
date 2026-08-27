@@ -243,14 +243,14 @@ class DiscordWebhookHandler(logging.Handler):
                 tier = context.get("item_tier")
                 self._status.last_activity = f"{effect}: {item} tier {tier}"
                 self._status.mode = "Running"
-            elif event.startswith("claim."):
-                self._status.phase = "Claim Tiles"
-                if event in {"claim.planned", "claim.submitted"}:
+            elif event.startswith("collection."):
+                self._status.phase = "Collect Tiles"
+                if event in {"collection.planned", "collection.submitted"}:
                     self._status.mode = "Running"
-            if event == "claim.confirmed":
-                kind = str(context.get("claim_kind", "board claim")).replace("-", " ")
+            if event == "collection.confirmed":
+                kind = str(context.get("collection_kind", "board collection")).replace("-", " ")
                 blueprint = str(context.get("blueprint_id", "item"))
-                self._status.last_activity = f"Claimed {kind}: {blueprint}"
+                self._status.last_activity = f"Collected {kind}: {blueprint}"
                 self._status.mode = "Running"
             elif event.startswith("crate."):
                 self._status.phase = "Claim Crates"
@@ -275,9 +275,9 @@ class DiscordWebhookHandler(logging.Handler):
         if event == "action.confirmed":
             effect = str(context.get("effect", "item_action"))
             metric_updates[f"action.{effect}"] += 1
-        elif event == "claim.confirmed":
-            kind = str(context.get("claim_kind", "board_claim"))
-            metric_updates[f"claim.{kind}"] += 1
+        elif event == "collection.confirmed":
+            kind = str(context.get("collection_kind", "board_collection"))
+            metric_updates[f"collection.{kind}"] += 1
         elif event == "crate.claim_completed":
             spawned = context.get("spawned", 0)
             if isinstance(spawned, int):
@@ -351,8 +351,8 @@ class DiscordWebhookHandler(logging.Handler):
         elapsed = max(0.0, now - self._started_at)
         period = "Final" if final else "Hourly"
         actions = sum(metrics[f"action.{effect}"] for effect in ("move", "swap", "merge"))
-        immediate_claims = metrics["claim.immediate"]
-        producers = metrics["claim.producer"] + metrics["claim.depleted-producer"]
+        immediate_collections = metrics["collection.immediate"]
+        producers = metrics["collection.producer"] + metrics["collection.depleted-producer"]
         hours, remainder = divmod(int(elapsed), 3600)
         minutes = remainder // 60
         uptime = f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
@@ -379,7 +379,8 @@ class DiscordWebhookHandler(logging.Handler):
                         {
                             "name": "Board activity",
                             "value": (
-                                f"Tile claims {immediate_claims} · Producers {producers} · "
+                                f"Tile collections {immediate_collections} · "
+                                f"Producers {producers} · "
                                 f"Crates {metrics['crates']}"
                             ),
                             "inline": False,
@@ -424,12 +425,12 @@ class DiscordWebhookHandler(logging.Handler):
         minutes = remainder // 60
         uptime = f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
         actions = sum(metrics[f"action.{effect}"] for effect in ("move", "swap", "merge"))
-        claims = (
-            metrics["claim.immediate"]
-            + metrics["claim.producer"]
-            + metrics["claim.depleted-producer"]
+        collections = (
+            metrics["collection.immediate"]
+            + metrics["collection.producer"]
+            + metrics["collection.depleted-producer"]
         )
-        board_activity = f"Claims {claims} · Crates {metrics['crates']}"
+        board_activity = f"Collections {collections} · Crates {metrics['crates']}"
         if status.remaining_crates is not None:
             board_activity += f" · Supply remaining {status.remaining_crates}"
         return {

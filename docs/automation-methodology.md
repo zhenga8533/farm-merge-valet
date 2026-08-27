@@ -26,7 +26,7 @@ stale connection is closed before target discovery retries once. Temporary
 objects returned by `Runtime.queryObjects` are released after use.
 
 The runtime adapter locates and validates the active gameplay screen, board
-map, item/claim interaction handler, shop-order service, live HUD crate event, and supply inventory. References
+map, item/collection interaction handler, shop-order service, live HUD crate event, and supply inventory. References
 are retained in the page only while their scene identity remains current. A
 runtime update that breaks discovery fails closed with structured health and
 action diagnostics; physical input is never used as a fallback.
@@ -36,15 +36,16 @@ loop is advancing. The bot may continue observing while it is frozen, but sends
 no actions and queues no retries. This prevents a background-tab suspension
 from being mistaken for an action failure.
 
-## Claim tiles and producers
+## Collect tiles and producers
 
 The live cell read includes semantic behaviors as well as blueprint identity.
-Catalog metadata assigns tile interactions to explicit modes: immediate,
-upgrade prompt, confirmation, requirement, or none. Only immediate claims are
-eligible for generic automation, and the policy key must also have Claim
-enabled in the GUI. Eligible content includes collectable ingredients, train tickets, and
-ordinary supply-crate tiles. Coins, energy, crystals, upgrade cards, and reward
-containers remain recognized but cannot enter the generic click pipeline.
+Catalog metadata assigns tile interactions to explicit modes: standard
+collection, opt-in collection, upgrade, requirement, or none. Every object with
+the game's `collectable` capability can enter the verified collection pipeline,
+and its tier policy must also have Collect enabled in the GUI. Ingredients and
+train tickets default on. Coins, energy, gems, ordinary supply-crate tiles, and
+newly discovered collectable types are exposed but default off. Upgrade cards
+and requirement-based reward containers remain separate interaction types.
 
 Recognized tier-4 crop and animal items are ready when they are harvestable
 without an active `cooldown` or `depleted` behavior, cooling while `cooldown`
@@ -52,20 +53,20 @@ is present, and ready for retirement when depleted. The visual
 `cooldownPreview` behavior is not used as authoritative state because it
 persists after the timer for a second harvest has completed.
 
-The claim phase collects immediate tiles first, then retires depleted
+The collection phase collects board tiles first, then retires depleted
 producers, then harvests ready producers. Depleted animals convert in place;
 depleted crops require one open cell for their two tier-1 replacements. A ready
 producer requires the configured minimum open-cell count (four by default).
-If the requirement is not met, merge work preempts claims and supply
+If the requirement is not met, merge work preempts collection and supply
 crates. With no productive merge available, the bot waits and keeps observing.
 
-Claims use the active interaction handler's internal object-click pipeline.
+Collection uses the active interaction handler's internal object-click pipeline.
 The adapter validates the scene, coordinate, object identity, blueprint, and
-expected behaviors immediately before submission. An immediate claim is
+expected behaviors immediately before submission. A tile collection is
 confirmed when the source object leaves; harvesting is confirmed by a producer
 lifecycle transition; retirement is confirmed when the tier-4 producer is
-replaced. A pending claim follows the same heartbeat and no-duplicate rules as
-an item drop. The game may collect several matching objects from one accepted
+replaced. A pending collection follows the same heartbeat and no-duplicate
+rules as an item drop. The game may collect several matching objects from one accepted
 click; the next authoritative read discards stale candidates and replans from
 the resulting board.
 
@@ -160,7 +161,7 @@ capture. `diagnostics positions` marks currently rendered cells by classificatio
 with a compact legend; there are no dead zones, actionable regions, crate
 exclusions, or pan anchors. `diagnostics live-state` includes runtime capability,
 scene identity, bounded handler-discovery stages, browser background-flag status,
-heartbeat status, claim capability, and counts of collectible, ready, cooling,
+heartbeat status, collection capability, and counts of collectable, ready, cooling,
 and depleted objects. Heap-wide board-map candidates are collected only when
 `--include-heap-candidates` is explicitly requested.
 
@@ -169,7 +170,7 @@ individual plans, submissions, confirmations, slow-stage timings, cached
 discovery, and planner transitions are `DEBUG` diagnostics. Runtime readiness,
 user controls, crate-batch results, and transitions into a genuinely idle state
 use `INFO`; recoverable failures use `WARNING`; unsafe terminal conditions use
-`ERROR`. When no claim, crate, or item action can be planned, the loop uses the
+`ERROR`. When no collection, crate, or item action can be planned, the loop uses the
 configured idle delay before checking authoritative state again.
 
 Operational records are emitted once with readable text, a stable `fmv_event`

@@ -14,12 +14,12 @@ CATALOG_SCHEMA_VERSION = 4
 SUPPORTED_CATALOG_SCHEMA_VERSIONS = frozenset({3, CATALOG_SCHEMA_VERSION})
 
 
-class TileClaimMode(StrEnum):
+class TileActionMode(StrEnum):
     NONE = "none"
-    IMMEDIATE = "immediate"
-    UPGRADE_PROMPT = "upgrade-prompt"
-    CONFIRMATION = "confirmation"
-    REQUIREMENT = "requirement"
+    COLLECT = "collect"
+    COLLECT_OPT_IN = "collect-opt-in"
+    UPGRADE = "upgrade"
+    OPEN_REQUIREMENT = "open-requirement"
 
 
 @dataclass(frozen=True)
@@ -60,22 +60,20 @@ class CatalogItem:
     recipe: RecipeMetadata | None = None
 
     @property
-    def tile_claim_mode(self) -> TileClaimMode:
+    def tile_action_mode(self) -> TileActionMode:
         if self.category == "upgrade_cards":
-            return TileClaimMode.UPGRADE_PROMPT
+            return TileActionMode.UPGRADE
         if "crateReward" in self.capabilities:
-            return TileClaimMode.REQUIREMENT
+            return TileActionMode.OPEN_REQUIREMENT
         if "collectable" not in self.capabilities:
-            return TileClaimMode.NONE
+            return TileActionMode.NONE
         if (
             "ingredient" in self.capabilities
             or "ticketAnimation" in self.capabilities
             or self.category == "supply_crates"
         ):
-            return TileClaimMode.IMMEDIATE
-        if self.category == "currencies":
-            return TileClaimMode.CONFIRMATION
-        return TileClaimMode.NONE
+            return TileActionMode.COLLECT
+        return TileActionMode.COLLECT_OPT_IN
 
     @property
     def automation_item(self) -> ItemRef | None:
@@ -106,11 +104,11 @@ class ItemCatalog:
         }
 
     @property
-    def immediate_claim_ids(self) -> frozenset[str]:
+    def collectable_ids(self) -> frozenset[str]:
         return frozenset(
             game_id
             for game_id, item in self.items.items()
-            if item.tile_claim_mode is TileClaimMode.IMMEDIATE
+            if item.tile_action_mode in {TileActionMode.COLLECT, TileActionMode.COLLECT_OPT_IN}
         )
 
     @property

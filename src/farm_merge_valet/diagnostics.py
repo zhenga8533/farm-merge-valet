@@ -52,7 +52,7 @@ def build_position_visualization(
         CellKind.EMPTY: (220, 180, 40),
         CellKind.CLOUD: (200, 200, 200),
         CellKind.STRUCTURE: (180, 80, 220),
-        CellKind.CLAIMABLE: (40, 160, 255),
+        CellKind.COLLECTABLE: (40, 160, 255),
         CellKind.OTHER: (100, 100, 160),
     }
     counts: Counter[str] = Counter()
@@ -92,9 +92,7 @@ def collect_live_state_report(
     health = adapter.discover()
     runtime_discovery = adapter.inspect_runtime()
     candidates = (
-        inspect_board_maps(config.cdp_port, config.window_title)
-        if include_heap_candidates
-        else []
+        inspect_board_maps(config.cdp_port, config.window_title) if include_heap_candidates else []
     )
     board_state = read_board_state(config.cdp_port, config.window_title)
     shop_orders = adapter.read_shop_orders() if health.shop_available else None
@@ -107,7 +105,7 @@ def collect_live_state_report(
             "item_drop": health.item_drop_available,
             "crate_spawn": health.crate_spawn_available,
             "inventory": health.inventory_available,
-            "claim": health.claim_available,
+            "collection": health.collection_available,
             "shop_orders": health.shop_available,
             "heartbeat": health.heartbeat,
             "heartbeat_age_ms": health.heartbeat_age_ms,
@@ -123,9 +121,7 @@ def collect_live_state_report(
             "reported_cells": len(board_state) if board_state is not None else None,
             "open_cells": sum(not value.has_content for value in (board_state or {}).values()),
             "common_blueprints": Counter(
-                value.blueprint_id
-                for value in (board_state or {}).values()
-                if value.blueprint_id
+                value.blueprint_id for value in (board_state or {}).values() if value.blueprint_id
             ).most_common(20),
             "collectible_products": sum(
                 value.collectable_ingredient for value in (board_state or {}).values()

@@ -43,12 +43,13 @@ from farm_merge_valet.core.board import item_tier_policy_key
 from farm_merge_valet.core.item_catalog import (
     CatalogItem,
     ItemCatalog,
-    TileClaimMode,
+    TileActionMode,
     load_item_catalog,
 )
 from farm_merge_valet.gui.action_button import ActionButton
 from farm_merge_valet.gui.assets import CatalogIconLoader
 from farm_merge_valet.gui.bulk_header import BulkToggleHeader
+from farm_merge_valet.gui.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.controller import ApplicationState, ApplicationStatus
 from farm_merge_valet.gui.hotkey_edit import HotkeyEdit
@@ -82,7 +83,7 @@ _ITEM_SORT_COLUMNS = {
     "enabled": 2,
     "merge": 3,
     "merge_five": 4,
-    "claim": 5,
+    "collect": 5,
     "remove": 6,
 }
 _SHOP_SORT_COLUMNS = {"item": 0, "type": 1, "enabled": 2}
@@ -103,13 +104,36 @@ class _ShopIconDelegate(QStyledItemDelegate):
         )
 
 
+class _PolicyTreeItem(QTreeWidgetItem):
+    def __init__(
+        self,
+        values: tuple[str, ...],
+        *,
+        sort_column: int,
+        tier: int | None = None,
+    ) -> None:
+        super().__init__(values)
+        self.sort_column = sort_column
+        self._tier_sort_key = (0, tier, "") if tier is not None else (1, 0, values[0].casefold())
+
+    def __lt__(self, other: QTreeWidgetItem) -> bool:
+        if self.sort_column == 0:
+            other_key = (
+                other._tier_sort_key
+                if isinstance(other, _PolicyTreeItem)
+                else (1, 0, other.text(0).casefold())
+            )
+            return self._tier_sort_key < other_key
+        return self.text(self.sort_column).casefold() < other.text(self.sort_column).casefold()
+
+
 @dataclass(frozen=True)
 class _ItemPolicyRow:
     policy_key: str
     family_key: str
     item: CatalogItem
     supports_merge: bool
-    supports_claim: bool
+    supports_collect: bool
     supports_remove: bool
 
     def supports(self, field: str) -> bool:
@@ -117,8 +141,8 @@ class _ItemPolicyRow:
             field == "enabled"
             or field in {"merge", "prefer_merge_five"}
             and self.supports_merge
-            or field == "claim"
-            and self.supports_claim
+            or field == "collect"
+            and self.supports_collect
             or field == "always_remove"
             and self.supports_remove
         )
@@ -315,6 +339,7 @@ def _load_catalog(config: AppConfig) -> ItemCatalog | None:
 class ItemsPage(AppPage):
     config_edited = Signal(object)
     reset_requested = Signal()
+    catalog_setup_requested = Signal()
 
     def __init__(self, config: AppConfig) -> None:
         super().__init__(
@@ -326,6 +351,13 @@ class ItemsPage(AppPage):
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
+        self.catalog_onboarding = CatalogOnboarding()
+        self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
+        self.page_layout.addWidget(
+            self.catalog_onboarding,
+            1,
+            Qt.AlignmentFlag.AlignCenter,
+        )
 
         self.table = QTreeWidget()
         self.table.setColumnCount(7)
@@ -335,7 +367,7 @@ class ItemsPage(AppPage):
                 2: "Enabled",
                 3: "Merge",
                 4: "Merge 5",
-                5: "Claim",
+                5: "Collect",
                 6: "Remove",
             },
             self.table,
@@ -356,17 +388,18 @@ class ItemsPage(AppPage):
         self._apply_sort_preference()
         self.table.setAccessibleName("Item automation policies")
 
-        toolbar = PolicyTreeToolbar(
+        self.toolbar = PolicyTreeToolbar(
             self.table,
             placeholder="Search item families and tiers…",
             accessible_name="Search item families and tiers",
             scope="item groups",
         )
-        self.search = toolbar.search
-        self.expansion_controls = toolbar.expansion_controls
-        self.page_layout.addWidget(toolbar)
+        self.search = self.toolbar.search
+        self.expansion_controls = self.toolbar.expansion_controls
+        self.page_layout.addWidget(self.toolbar)
         self.page_layout.addWidget(self.table, 1)
         self.search.textChanged.connect(self._filter)
+        self._catalog_loaded = False
         self.populate()
         self.bulk_header.sortIndicatorChanged.connect(self._sort_changed)
 
@@ -380,11 +413,14 @@ class ItemsPage(AppPage):
         if sort_changed:
             self._apply_sort_preference()
         if refresh:
-            if catalog_changed or not hasattr(self, "_policy_controls"):
+            if catalog_changed or not self._catalog_loaded:
                 self.populate()
             else:
                 self._sync_policy_controls()
         self.configuration_header.mark_saved()
+
+    def reload_catalog(self) -> None:
+        self.populate()
 
     def _apply_sort_preference(self) -> None:
         column = _ITEM_SORT_COLUMNS[self._config.items_sort_column]
@@ -398,6 +434,8 @@ class ItemsPage(AppPage):
             self.table.sortByColumn(column, order)
 
     def _sort_changed(self, column: int, order: Qt.SortOrder) -> None:
+        self._set_item_sort_column(column)
+        self.table.sortByColumn(column, order)
         sort_key = next(
             key
             for key, configured_column in _ITEM_SORT_COLUMNS.items()
@@ -413,6 +451,18 @@ class ItemsPage(AppPage):
             items_sort_column=sort_key,
             items_sort_descending=descending,
         )
+
+    def _set_item_sort_column(self, column: int) -> None:
+        pending = [
+            self.table.topLevelItem(index) for index in range(self.table.topLevelItemCount())
+        ]
+        while pending:
+            item = pending.pop()
+            if item is None:
+                continue
+            if isinstance(item, _PolicyTreeItem):
+                item.sort_column = column
+            pending.extend(item.child(index) for index in range(item.childCount()))
 
     def _emit(self, **changes: object) -> None:
         self._config = AppConfig.model_validate(
@@ -438,8 +488,11 @@ class ItemsPage(AppPage):
         ] = []
         catalog = _load_catalog(self._config)
         if catalog is None:
-            self._show_empty("Catalog unavailable — load the game and sync assets")
+            self._catalog_loaded = False
+            self._show_catalog_onboarding()
             return
+        self._catalog_loaded = True
+        self._show_catalog_content()
         grouped: dict[str, list[CatalogItem]] = defaultdict(list)
         for item in catalog.items.values():
             grouped[item.policy_key].append(item)
@@ -523,7 +576,12 @@ class ItemsPage(AppPage):
             for definition in definitions:
                 tier = definition.item.tier
                 child_name = f"Tier {tier}" if tier is not None else definition.item.display_name
-                child = self._new_policy_item(child_name, definition.item, icons)
+                child = self._new_policy_item(
+                    child_name,
+                    definition.item,
+                    icons,
+                    tier=tier,
+                )
                 child.setData(0, Qt.ItemDataRole.UserRole, definition.policy_key)
                 root.addChild(child)
                 self._add_policy_controls(child, definition, f"{family_name}, {child_name}")
@@ -568,10 +626,16 @@ class ItemsPage(AppPage):
 
     @staticmethod
     def _item_is_configurable(item: CatalogItem) -> bool:
-        supports_claim = item.tile_claim_mode is TileClaimMode.IMMEDIATE or (
-            item.category in {"animals", "crops"} and item.tier == 4
+        supports_collect = item.tile_action_mode in {
+            TileActionMode.COLLECT,
+            TileActionMode.COLLECT_OPT_IN,
+        } or (item.category in {"animals", "crops"} and item.tier == 4)
+        return (
+            item.merge_target is not None
+            or supports_collect
+            or item.tile_action_mode is TileActionMode.UPGRADE
+            or "shovelable" in item.capabilities
         )
-        return item.merge_target is not None or supports_claim or "shovelable" in item.capabilities
 
     @staticmethod
     def _row_definition(family_key: str, item: CatalogItem, *, tier_scoped: bool) -> _ItemPolicyRow:
@@ -582,7 +646,7 @@ class ItemsPage(AppPage):
             family_key,
             item,
             item.merge_target is not None,
-            item.tile_claim_mode is TileClaimMode.IMMEDIATE
+            item.tile_action_mode in {TileActionMode.COLLECT, TileActionMode.COLLECT_OPT_IN}
             or (item.category in {"animals", "crops"} and item.tier == 4),
             "shovelable" in item.capabilities,
         )
@@ -594,8 +658,13 @@ class ItemsPage(AppPage):
         icons: CatalogIconLoader,
         *,
         category: str | None = None,
+        tier: int | None = None,
     ) -> QTreeWidgetItem:
-        item = QTreeWidgetItem((name, "", "", "", "", "", ""))
+        item = _PolicyTreeItem(
+            (name, "", "", "", "", "", ""),
+            sort_column=self.table.sortColumn(),
+            tier=tier,
+        )
         item.setIcon(0, icons.icon_for(catalog_item))
         item.setSizeHint(0, QSize(0, 52))
         item.setToolTip(0, name)
@@ -705,7 +774,7 @@ class ItemsPage(AppPage):
             2: "enabled",
             3: "merge",
             4: "prefer_merge_five",
-            5: "claim",
+            5: "collect",
             6: "always_remove",
         }
 
@@ -716,6 +785,22 @@ class ItemsPage(AppPage):
         self.table.addTopLevelItem(item)
         for column in range(2, 7):
             self.bulk_header.set_state(column, Qt.CheckState.Unchecked, enabled=False)
+
+    def _show_catalog_onboarding(self) -> None:
+        self.catalog_onboarding.setVisible(True)
+        self.toolbar.setVisible(False)
+        self.table.setVisible(False)
+
+    def _show_catalog_content(self) -> None:
+        self.catalog_onboarding.setVisible(False)
+        self.toolbar.setVisible(True)
+        self.table.setVisible(True)
+
+    def set_catalog_setup_busy(self, busy: bool) -> None:
+        self.catalog_onboarding.set_busy(busy)
+
+    def set_catalog_setup_status(self, message: str, *, error: bool = False) -> None:
+        self.catalog_onboarding.set_status(message, error=error)
 
     def _filter(self, text: str) -> None:
         filter_policy_tree(self.table, text)
@@ -793,6 +878,7 @@ class ItemsPage(AppPage):
 class ShopsPage(AppPage):
     config_edited = Signal(object)
     reset_requested = Signal()
+    catalog_setup_requested = Signal()
 
     def __init__(self, config: AppConfig) -> None:
         super().__init__("Shops", "Configure every discovered shop and recipe independently.")
@@ -801,6 +887,13 @@ class ShopsPage(AppPage):
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
+        self.catalog_onboarding = CatalogOnboarding()
+        self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
+        self.page_layout.addWidget(
+            self.catalog_onboarding,
+            1,
+            Qt.AlignmentFlag.AlignCenter,
+        )
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(("Shop / recipe", "Type", ""))
         self.bulk_header = BulkToggleHeader({2: "Enabled"}, self.tree)
@@ -820,17 +913,18 @@ class ShopsPage(AppPage):
         self._apply_sort_preference()
         self.tree.setAccessibleName("Shop and recipe policies")
 
-        toolbar = PolicyTreeToolbar(
+        self.toolbar = PolicyTreeToolbar(
             self.tree,
             placeholder="Search shops and recipes…",
             accessible_name="Search shops and recipes",
             scope="shop and recipe groups",
         )
-        self.search = toolbar.search
-        self.expansion_controls = toolbar.expansion_controls
-        self.page_layout.addWidget(toolbar)
+        self.search = self.toolbar.search
+        self.expansion_controls = self.toolbar.expansion_controls
+        self.page_layout.addWidget(self.toolbar)
         self.page_layout.addWidget(self.tree, 1)
         self.search.textChanged.connect(self._filter)
+        self._catalog_loaded = False
         self.populate()
         self.bulk_header.sortIndicatorChanged.connect(self._sort_changed)
 
@@ -844,11 +938,14 @@ class ShopsPage(AppPage):
         if sort_changed:
             self._apply_sort_preference()
         if refresh:
-            if catalog_changed or not hasattr(self, "_toggles"):
+            if catalog_changed or not self._catalog_loaded:
                 self.populate()
             else:
                 self._sync_controls()
         self.configuration_header.mark_saved()
+
+    def reload_catalog(self) -> None:
+        self.populate()
 
     def _apply_sort_preference(self) -> None:
         column = _SHOP_SORT_COLUMNS[self._config.shops_sort_column]
@@ -901,9 +998,12 @@ class ShopsPage(AppPage):
         self._tree_items: dict[tuple[str, str], QTreeWidgetItem] = {}
         catalog = _load_catalog(self._config)
         if catalog is None:
-            self._show_empty("Catalog unavailable — load the game and sync assets")
+            self._catalog_loaded = False
+            self._show_catalog_onboarding()
             self.tree.blockSignals(False)
             return
+        self._catalog_loaded = True
+        self._show_catalog_content()
         recipes: dict[str, list[CatalogItem]] = defaultdict(list)
         for item in catalog.items.values():
             if item.recipe is not None:
@@ -1005,6 +1105,22 @@ class ShopsPage(AppPage):
         item.setFirstColumnSpanned(True)
         self.bulk_header.set_state(2, Qt.CheckState.Unchecked, enabled=False)
 
+    def _show_catalog_onboarding(self) -> None:
+        self.catalog_onboarding.setVisible(True)
+        self.toolbar.setVisible(False)
+        self.tree.setVisible(False)
+
+    def _show_catalog_content(self) -> None:
+        self.catalog_onboarding.setVisible(False)
+        self.toolbar.setVisible(True)
+        self.tree.setVisible(True)
+
+    def set_catalog_setup_busy(self, busy: bool) -> None:
+        self.catalog_onboarding.set_busy(busy)
+
+    def set_catalog_setup_status(self, message: str, *, error: bool = False) -> None:
+        self.catalog_onboarding.set_status(message, error=error)
+
     def _set_item_enabled(self, kind: str, key: str, enabled: bool) -> None:
         field = "shop_overrides" if kind == "shop" else "recipe_overrides"
         default = (
@@ -1094,9 +1210,7 @@ class BrowserPage(_ConfigFormPage):
         self.browser_choice.set_current_value(config.browser)
         self.browser_choice.setAccessibleName("Preferred browser")
         self.browser_choice.currentIndexChanged.connect(
-            lambda _index: self._request(
-                "browser", str(self.browser_choice.current_value())
-            )
+            lambda _index: self._request("browser", str(self.browser_choice.current_value()))
         )
         self.controls["browser"] = self.browser_choice
         self._add_form_row(form, "Status", self.status_label)
@@ -1192,11 +1306,7 @@ class BrowserPage(_ConfigFormPage):
             not operation_busy and not self._runtime_active and (not running or managed)
         )
         self.restart_button.setEnabled(
-            not operation_busy
-            and not self._runtime_active
-            and running
-            and managed
-            and compatible
+            not operation_busy and not self._runtime_active and running and managed and compatible
         )
         self.assets_refresh_button.setEnabled(not operation_busy and not self._runtime_active)
 
@@ -1314,7 +1424,13 @@ class SettingsPage(_ConfigFormPage):
 
         automation, form = _settings_section("Automation")
         self._add_int(form, "Reserved empty cells", "merge_empty_cell_reserve", 0, 50)
-        self._add_int(form, "Producer claim open cells", "producer_claim_min_empty_cells", 1, 50)
+        self._add_int(
+            form,
+            "Producer collection open cells",
+            "producer_collect_min_empty_cells",
+            1,
+            50,
+        )
         self._add_float(form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)
         self._add_float(form, "Loop interval (seconds)", "loop_interval", 0.01, 60, 0.1)
         self._add_float(form, "Item delay minimum", "item_action_delay_min", 0, 60, 0.1)
@@ -1354,9 +1470,7 @@ class SettingsPage(_ConfigFormPage):
 
         appearance, form = _settings_section("Appearance")
         theme = FocusAwareComboBox()
-        theme.set_choices(
-            (("System default", "system"), ("Dark", "dark"), ("Light", "light"))
-        )
+        theme.set_choices((("System default", "system"), ("Dark", "dark"), ("Light", "light")))
         theme.set_current_value(config.theme)
         theme.setAccessibleName("Theme")
         theme.currentIndexChanged.connect(

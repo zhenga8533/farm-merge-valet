@@ -115,10 +115,19 @@ QMainWindow, QDialog {{ background: {colors.window}; }}
 QLabel#pageTitle {{ font-size: 17pt; font-weight: 600; }}
 QLabel#pageSubtitle, QLabel#metricLabel {{ color: {colors.muted}; }}
 QLabel#metricValue, QLabel#overlayStatus {{ font-size: 12pt; font-weight: 600; }}
-QFrame#card, QFrame#metricCard {{
+QFrame#card, QFrame#metricCard, QFrame#catalogOnboarding {{
     background: {colors.surface}; border: 1px solid {colors.border}; border-radius: 10px;
 }}
 QFrame#metricCard {{ min-height: 62px; }}
+QFrame#catalogOnboarding {{ min-height: 210px; }}
+QLabel#onboardingTitle {{ font-size: 14pt; font-weight: 600; }}
+QLabel#onboardingStatus {{ color: {colors.muted}; }}
+QLabel#onboardingStatus[status="error"] {{ color: {colors.danger}; }}
+QProgressBar {{
+    background: {colors.surface_subtle}; border: 1px solid {colors.border};
+    border-radius: 4px; min-height: 7px; max-height: 7px;
+}}
+QProgressBar::chunk {{ background: {colors.primary}; border-radius: 3px; }}
 QGroupBox {{ border: 1px solid {colors.border}; border-radius: 8px; margin-top: 10px; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 5px; font-weight: 600; }}
 QLabel#saveStatus {{ color: {colors.muted}; font-weight: 600; }}
