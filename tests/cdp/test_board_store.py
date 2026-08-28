@@ -55,7 +55,7 @@ def test_arm_board_store_releases_query_object(monkeypatch) -> None:
     assert methods[-1] == "Runtime.releaseObject"
 
 
-def test_read_board_state_preserves_collection_semantics(monkeypatch) -> None:
+def test_read_board_state_preserves_collectable_semantics(monkeypatch) -> None:
     monkeypatch.setattr(
         "farm_merge_valet.cdp.board_store.evaluate",
         lambda *_args, **_kwargs: [

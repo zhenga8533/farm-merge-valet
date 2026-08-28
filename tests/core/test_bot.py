@@ -13,7 +13,7 @@ from farm_merge_valet.core.board import (
     BoardGrid,
     Cell,
     CellKind,
-    CollectionTargetKind,
+    InteractionTargetKind,
     ItemRef,
     MergeAction,
     MergeActionKind,
@@ -24,9 +24,9 @@ from farm_merge_valet.core.board import (
 from farm_merge_valet.core.bot import (
     Bot,
     Phase,
-    _CollectAction,
+    _InteractionAction,
     _PendingAction,
-    _PendingCollection,
+    _PendingInteraction,
 )
 from farm_merge_valet.core.shops import ShopAction, ShopActionKind, ShopOrder, ShopOrderState
 
@@ -35,7 +35,7 @@ class FakeRuntime:
     def __init__(self) -> None:
         self.drops: list[tuple[tuple[int, int], tuple[int, int]]] = []
         self.spawn_limits: list[int] = []
-        self.collections: list[tuple[tuple[int, int], CollectionTargetKind, str, int | None]] = []
+        self.interactions: list[tuple[tuple[int, int], InteractionTargetKind, str, int | None]] = []
         self.started_orders: list[tuple[str, str]] = []
         self.claimed_orders: list[tuple[str, str]] = []
         self.shop_orders: tuple[ShopOrder, ...] = ()
@@ -48,10 +48,10 @@ class FakeRuntime:
         self.spawn_limits.append(limit)
         return CrateSpawnResult(ActionStatus.SUBMITTED, limit, 0)
 
-    def submit_board_collection(
+    def submit_board_interaction(
         self, coord, expected_kind, expected_blueprint_id, expected_object_id
     ):
-        self.collections.append((coord, expected_kind, expected_blueprint_id, expected_object_id))
+        self.interactions.append((coord, expected_kind, expected_blueprint_id, expected_object_id))
         return ActionResult(ActionStatus.SUBMITTED)
 
     def read_shop_orders(self):
@@ -78,7 +78,7 @@ def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
         1.0,
         advancing,
         item_action_busy=item_action_busy,
-        collection_available=True,
+        interaction_available=True,
         shop_available=True,
     )
 
@@ -95,15 +95,15 @@ def bare_bot() -> Bot:
     bot._quit_requested = False
     bot._quit_lock = Lock()
     bot._pending_action = None
-    bot._pending_collection = None
+    bot._pending_interaction = None
     bot._pending_shop_action = None
-    bot._next_collection_action_at = 0.0
+    bot._next_interaction_action_at = 0.0
     bot._action_failures = {}
     bot._action_retry_at = {}
     bot._next_item_action_at = 0.0
     bot._max_item_tiers = {}
     bot._blueprint_policy_keys = {"milk": "ingredients/milk"}
-    bot._collectable_ids = frozenset({"milk"})
+    bot._direct_interaction_ids = frozenset({"milk"})
     bot._last_health = None
     bot._last_wait_reason = None
     bot._last_wait_log_at = 0.0
@@ -565,7 +565,7 @@ def test_live_sync_keeps_upgrade_card_targets_as_distinct_variants(monkeypatch) 
 def test_live_sync_classifies_only_catalogued_collectable_items(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_items = {}
-    bot._collectable_ids = frozenset({"milk", "ticket", "crate_1"})
+    bot._direct_interaction_ids = frozenset({"milk", "ticket", "crate_1"})
     monkeypatch.setattr(
         "farm_merge_valet.core.bot.read_board_state",
         lambda *_, **__: {
@@ -576,12 +576,12 @@ def test_live_sync_classifies_only_catalogued_collectable_items(monkeypatch) -> 
     )
 
     assert bot._sync_board_from_live_state()
-    assert bot.board.get_cell((0, 0)).kind is CellKind.COLLECTABLE
-    assert bot.board.get_cell((1, 0)).kind is CellKind.COLLECTABLE
+    assert bot.board.get_cell((0, 0)).kind is CellKind.INTERACTABLE
+    assert bot.board.get_cell((1, 0)).kind is CellKind.INTERACTABLE
     assert bot.board.get_cell((2, 0)).kind is CellKind.OTHER
 
 
-def test_ground_product_is_collected_before_ready_producer(monkeypatch) -> None:
+def test_ground_product_is_interacted_with_before_ready_producer(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_items = {
         "cow_4": ItemRef("animals", "cow", 4),
@@ -590,8 +590,8 @@ def test_ground_product_is_collected_before_ready_producer(monkeypatch) -> None:
     monkeypatch.setattr(
         "farm_merge_valet.core.bot.settings.item_policy_overrides",
         {
-            "animals/cow": ItemPolicyOverride(collect=True),
-            "ingredients/milk": ItemPolicyOverride(collect=True),
+            "animals/cow": ItemPolicyOverride(interact=True),
+            "ingredients/milk": ItemPolicyOverride(interact=True),
         },
     )
     bot._live_cells = {
@@ -607,20 +607,20 @@ def test_ground_product_is_collected_before_ready_producer(monkeypatch) -> None:
     }
     for x in range(4):
         bot.board.set_cell((x, 1), Cell(CellKind.EMPTY))
-    products, depleted, ready = bot._collection_actions()
+    products, depleted, ready = bot._interaction_actions()
 
-    bot._step_collect_tiles(health(advancing=True), products, depleted, ready)
+    bot._step_interact_tiles(health(advancing=True), products, depleted, ready)
 
-    assert bot.runtime.collections == [((1, 0), CollectionTargetKind.IMMEDIATE, "milk", 10)]
+    assert bot.runtime.interactions == [((1, 0), InteractionTargetKind.IMMEDIATE, "milk", 10)]
     assert bot.runtime.spawn_limits == []
 
 
-def test_only_enabled_immediate_catalog_items_become_tile_collection_actions(monkeypatch) -> None:
+def test_only_enabled_immediate_catalog_items_become_tile_interaction_actions(monkeypatch) -> None:
     bot = bare_bot()
-    bot._collectable_ids = frozenset({"ticket", "crate_1", "coin_1"})
+    bot._direct_interaction_ids = frozenset({"ticket", "crate_1", "coin_1"})
     bot._blueprint_policy_keys = {
         "ticket": "deliveries/ticket",
-        "crate_1": "supply_crates/crate",
+        "crate_1": "resources/crate",
         "coin_1": "currencies/coin",
         "upgrade_card_1": "upgrade_cards/upgrade_card",
         "reward_crate_bronze": "reward_chests/reward_crate_bronze",
@@ -628,8 +628,8 @@ def test_only_enabled_immediate_catalog_items_become_tile_collection_actions(mon
     monkeypatch.setattr(
         "farm_merge_valet.core.bot.settings.item_policy_overrides",
         {
-            "deliveries/ticket": ItemPolicyOverride(collect=True),
-            "supply_crates/crate": ItemPolicyOverride(collect=True),
+            "deliveries/ticket": ItemPolicyOverride(interact=True),
+            "resources/crate": ItemPolicyOverride(interact=True),
         },
     )
     bot._live_cells = {
@@ -640,38 +640,38 @@ def test_only_enabled_immediate_catalog_items_become_tile_collection_actions(mon
         (5, 0): LiveCellState(True, "reward_crate_bronze", 14, collectable=True),
     }
 
-    immediate, depleted, ready = bot._collection_actions()
+    immediate, depleted, ready = bot._interaction_actions()
 
     assert [action.blueprint_id for action in immediate] == ["ticket", "crate_1"]
-    assert all(action.kind is CollectionTargetKind.IMMEDIATE for action in immediate)
+    assert all(action.kind is InteractionTargetKind.IMMEDIATE for action in immediate)
     assert depleted == []
     assert ready == []
 
 
 def test_collectable_currency_tier_can_be_enabled_independently(monkeypatch) -> None:
     bot = bare_bot()
-    bot._collectable_ids = frozenset({"coin_1", "coin_2"})
+    bot._direct_interaction_ids = frozenset({"coin_1", "coin_2"})
     bot._blueprint_policy_keys = {
         "coin_1": "currencies/coin/tier/1",
         "coin_2": "currencies/coin/tier/2",
     }
     monkeypatch.setattr(
         "farm_merge_valet.core.bot.settings.item_policy_overrides",
-        {"currencies/coin/tier/2": ItemPolicyOverride(collect=True)},
+        {"currencies/coin/tier/2": ItemPolicyOverride(interact=True)},
     )
     bot._live_cells = {
         (1, 0): LiveCellState(True, "coin_1", 10, collectable=True),
         (2, 0): LiveCellState(True, "coin_2", 11, collectable=True),
     }
 
-    immediate, depleted, ready = bot._collection_actions()
+    immediate, depleted, ready = bot._interaction_actions()
 
     assert [action.blueprint_id for action in immediate] == ["coin_2"]
     assert depleted == []
     assert ready == []
 
 
-def test_ingredient_collection_defaults_on_while_producer_collection_defaults_off() -> None:
+def test_ingredient_and_producer_interaction_default_on() -> None:
     bot = bare_bot()
     bot._blueprint_policy_keys.update({"cow_4": "animals/cow"})
     bot._live_cells = {
@@ -686,17 +686,17 @@ def test_ingredient_collection_defaults_on_while_producer_collection_defaults_of
         ),
     }
 
-    immediate, depleted, ready = bot._collection_actions()
+    immediate, depleted, ready = bot._interaction_actions()
 
     assert [action.blueprint_id for action in immediate] == ["milk"]
     assert depleted == []
-    assert ready == []
+    assert [action.blueprint_id for action in ready] == ["cow_4"]
 
 
 def test_ready_producer_merges_and_defers_crates_below_space_threshold(monkeypatch) -> None:
     bot = bare_bot()
-    action = _CollectAction(
-        CollectionTargetKind.PRODUCER,
+    action = _InteractionAction(
+        InteractionTargetKind.PRODUCER,
         (4, 4),
         "cow_4",
         22,
@@ -706,26 +706,26 @@ def test_ready_producer_merges_and_defers_crates_below_space_threshold(monkeypat
         bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
     calls = []
     bot._step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
-    monkeypatch.setattr("farm_merge_valet.core.bot.settings.producer_collect_min_empty_cells", 4)
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.producer_interact_min_empty_cells", 4)
 
-    bot._step_collect_tiles(health(advancing=True), [], [], [action])
+    bot._step_interact_tiles(health(advancing=True), [], [], [action])
 
     assert bot.phase is Phase.MERGE
     assert calls == [4]
-    assert bot.runtime.collections == []
+    assert bot.runtime.interactions == []
     assert bot.runtime.spawn_limits == []
 
 
-def test_ready_producer_is_collected_with_required_space(monkeypatch) -> None:
+def test_ready_producer_is_interacted_with_with_required_space(monkeypatch) -> None:
     bot = bare_bot()
-    collection = _CollectAction(
-        CollectionTargetKind.PRODUCER,
+    interaction = _InteractionAction(
+        InteractionTargetKind.PRODUCER,
         (4, 4),
         "cow_4",
         22,
         ProducerKind.ANIMAL,
     )
-    bot._live_cells[collection.coord] = LiveCellState(
+    bot._live_cells[interaction.coord] = LiveCellState(
         True,
         "cow_4",
         22,
@@ -735,24 +735,24 @@ def test_ready_producer_is_collected_with_required_space(monkeypatch) -> None:
     )
     for x in range(4):
         bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
-    monkeypatch.setattr("farm_merge_valet.core.bot.settings.producer_collect_min_empty_cells", 4)
+    monkeypatch.setattr("farm_merge_valet.core.bot.settings.producer_interact_min_empty_cells", 4)
 
-    bot._step_collect_tiles(health(advancing=True), [], [], [collection])
+    bot._step_interact_tiles(health(advancing=True), [], [], [interaction])
 
-    assert bot.runtime.collections == [((4, 4), CollectionTargetKind.PRODUCER, "cow_4", 22)]
-    assert bot._pending_collection is not None
+    assert bot.runtime.interactions == [((4, 4), InteractionTargetKind.PRODUCER, "cow_4", 22)]
+    assert bot._pending_interaction is not None
 
 
 def test_depleted_animal_can_retire_without_an_empty_cell() -> None:
     bot = bare_bot()
-    collection = _CollectAction(
-        CollectionTargetKind.DEPLETED_PRODUCER,
+    interaction = _InteractionAction(
+        InteractionTargetKind.DEPLETED_PRODUCER,
         (4, 4),
         "cow_4",
         22,
         ProducerKind.ANIMAL,
     )
-    bot._live_cells[collection.coord] = LiveCellState(
+    bot._live_cells[interaction.coord] = LiveCellState(
         True,
         "cow_4",
         22,
@@ -761,15 +761,15 @@ def test_depleted_animal_can_retire_without_an_empty_cell() -> None:
         producer_state=ProducerState.DEPLETED,
     )
 
-    bot._step_collect_tiles(health(advancing=True), [], [collection], [])
+    bot._step_interact_tiles(health(advancing=True), [], [interaction], [])
 
-    assert bot.runtime.collections
+    assert bot.runtime.interactions
 
 
 def test_depleted_crop_requires_one_empty_cell() -> None:
     bot = bare_bot()
-    collection = _CollectAction(
-        CollectionTargetKind.DEPLETED_PRODUCER,
+    interaction = _InteractionAction(
+        InteractionTargetKind.DEPLETED_PRODUCER,
         (4, 4),
         "wheat_4",
         22,
@@ -778,19 +778,19 @@ def test_depleted_crop_requires_one_empty_cell() -> None:
     calls = []
     bot._step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
 
-    bot._step_collect_tiles(health(advancing=True), [], [collection], [])
+    bot._step_interact_tiles(health(advancing=True), [], [interaction], [])
 
     assert calls == [1]
-    assert bot.runtime.collections == []
+    assert bot.runtime.interactions == []
 
 
-def test_cooling_producer_does_not_create_collection_work(monkeypatch) -> None:
+def test_cooling_producer_does_not_create_interaction_work(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_items = {}
     bot._blueprint_policy_keys = {"cow_4": "animals/cow"}
     monkeypatch.setattr(
         "farm_merge_valet.core.bot.settings.item_policy_overrides",
-        {"animals/cow": ItemPolicyOverride(collect=True)},
+        {"animals/cow": ItemPolicyOverride(interact=True)},
     )
     bot._live_cells = {
         (4, 4): LiveCellState(
@@ -803,16 +803,16 @@ def test_cooling_producer_does_not_create_collection_work(monkeypatch) -> None:
         )
     }
 
-    assert bot._collection_actions() == ([], [], [])
+    assert bot._interaction_actions() == ([], [], [])
     assert bot._cooling_producer_count() == 1
 
 
-def test_harvestable_non_tier_four_item_is_not_a_producer_collection(monkeypatch) -> None:
+def test_harvestable_non_tier_four_item_is_not_a_producer_interaction(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_policy_keys = {"cow_3": "animals/cow"}
     monkeypatch.setattr(
         "farm_merge_valet.core.bot.settings.item_policy_overrides",
-        {"animals/cow": ItemPolicyOverride(collect=True)},
+        {"animals/cow": ItemPolicyOverride(interact=True)},
     )
     bot._live_cells = {
         (4, 4): LiveCellState(
@@ -825,49 +825,49 @@ def test_harvestable_non_tier_four_item_is_not_a_producer_collection(monkeypatch
         )
     }
 
-    assert bot._collection_actions() == ([], [], [])
+    assert bot._interaction_actions() == ([], [], [])
 
 
-def test_pending_product_collection_survives_frozen_heartbeat(monkeypatch) -> None:
+def test_pending_product_interaction_survives_frozen_heartbeat(monkeypatch) -> None:
     bot = bare_bot()
     initial = LiveCellState(True, "milk", 10, collectable=True, collectable_ingredient=True)
-    collection = _CollectAction(CollectionTargetKind.IMMEDIATE, (1, 2), "milk", 10)
-    bot._live_cells[collection.coord] = initial
-    bot._pending_collection = _PendingCollection(collection, initial, 7, 1.0, initial, 1.0)
+    interaction = _InteractionAction(InteractionTargetKind.IMMEDIATE, (1, 2), "milk", 10)
+    bot._live_cells[interaction.coord] = initial
+    bot._pending_interaction = _PendingInteraction(interaction, initial, 7, 1.0, initial, 1.0)
     monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 5.0)
 
-    assert not bot._verify_pending_collection(health(advancing=False))
-    assert bot._pending_collection is not None
+    assert not bot._verify_pending_interaction(health(advancing=False))
+    assert bot._pending_interaction is not None
 
 
-def test_pending_product_collection_confirms_from_authoritative_source_change(
+def test_pending_product_interaction_confirms_from_authoritative_source_change(
     monkeypatch, caplog
 ) -> None:
     bot = bare_bot()
     initial = LiveCellState(True, "milk", 10, collectable=True, collectable_ingredient=True)
-    collection = _CollectAction(CollectionTargetKind.IMMEDIATE, (1, 2), "milk", 10)
-    bot._live_cells[collection.coord] = initial
-    bot._pending_collection = _PendingCollection(collection, initial, 7, 1.0, initial, 1.0)
-    bot._live_cells[collection.coord] = LiveCellState(False, None)
+    interaction = _InteractionAction(InteractionTargetKind.IMMEDIATE, (1, 2), "milk", 10)
+    bot._live_cells[interaction.coord] = initial
+    bot._pending_interaction = _PendingInteraction(interaction, initial, 7, 1.0, initial, 1.0)
+    bot._live_cells[interaction.coord] = LiveCellState(False, None)
     monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 2.0)
 
     with caplog.at_level(logging.DEBUG):
-        assert bot._verify_pending_collection(health(advancing=True))
+        assert bot._verify_pending_interaction(health(advancing=True))
 
-    assert bot._pending_collection is None
-    assert any(record.fmv_event == "collection.confirmed" for record in caplog.records)
+    assert bot._pending_interaction is None
+    assert any(record.fmv_event == "interaction.confirmed" for record in caplog.records)
 
 
-def test_collection_noop_cools_down_before_retry(monkeypatch) -> None:
+def test_interaction_noop_cools_down_before_retry(monkeypatch) -> None:
     bot = bare_bot()
     initial = LiveCellState(True, "milk", 10, collectable=True, collectable_ingredient=True)
-    collection = _CollectAction(CollectionTargetKind.IMMEDIATE, (1, 2), "milk", 10)
-    bot._live_cells[collection.coord] = initial
-    bot._pending_collection = _PendingCollection(collection, initial, 7, 1.0, initial, 1.0)
+    interaction = _InteractionAction(InteractionTargetKind.IMMEDIATE, (1, 2), "milk", 10)
+    bot._live_cells[interaction.coord] = initial
+    bot._pending_interaction = _PendingInteraction(interaction, initial, 7, 1.0, initial, 1.0)
     monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 5.0)
 
-    assert bot._verify_pending_collection(health(advancing=True))
-    assert bot._next_collection_action_at == 15.0
+    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot._next_interaction_action_at == 15.0
 
 
 def test_hotkey_callbacks_log_and_set_control_flags(caplog) -> None:

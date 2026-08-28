@@ -6,6 +6,12 @@ import re
 from collections import defaultdict
 from typing import Any
 
+from farm_merge_valet.core.catalog_labels import catalog_display_name, catalog_group_name
+from farm_merge_valet.core.catalog_taxonomy import (
+    classify_catalog_item,
+    presentation_group_id,
+    presentation_variant_label,
+)
 from farm_merge_valet.core.item_catalog import (
     CatalogItem,
     ItemCatalog,
@@ -15,122 +21,7 @@ from farm_merge_valet.core.item_catalog import (
     catalog_policy_key,
 )
 
-_FAMILY_DISPLAY_NAMES = {
-    "alpaca": "Alpaca",
-    "apple": "Apple",
-    "avocado": "Avocado Plant",
-    "bee": "Bee",
-    "carrot": "Carrot",
-    "chicken": "Chicken",
-    "coffee": "Coffee Plant",
-    "coin": "Coin",
-    "corn": "Corn",
-    "cow": "Cow",
-    "deer": "Deer",
-    "energy": "Energy",
-    "flower": "Flowers",
-    "gazebo": "Grand Gazebo",
-    "gazebo_decoration": "Park Decorations",
-    "gazebo_token": "Park Decorations",
-    "gem": "Crystal",
-    "goat": "Goat",
-    "greenhouse": "Greenhouse",
-    "halloween_event": "Halloween Event",
-    "halloween_shop": "Halloween Shop",
-    "horse": "Horse",
-    "christmas_event": "Christmas Event",
-    "christmas_shop": "Christmas Shop",
-    "pig": "Pig",
-    "sapling": "Sapling",
-    "sheep": "Sheep",
-    "soybeans": "Soybeans",
-    "stone": "Stone",
-    "supplies": "Supplies",
-    "sugarcane": "Sugarcane",
-    "sunflower": "Sunflower",
-    "tomato": "Tomato Plant",
-    "tool": "Tools",
-    "trufflepig": "Truffle Pig",
-    "upgrade_card": "Upgrade Card",
-    "wheat": "Wheat",
-    "wood": "Wood",
-}
-
-_BLUEPRINT_DISPLAY_NAMES = {
-    "market": "Farmer's Market",
-    "bakery": "Bakery",
-    "dairy": "Dairy",
-    "bbq": "BBQ",
-    "sweets": "Sweets Station",
-    "loom": "Loom",
-    "barista": "Barista",
-    "tomato_on_wheels": "Tomato on Wheels",
-    "building_avocadofiesta": "Avocado Fiesta",
-    "building_trufflelicious": "Trufflelicious",
-    "building_apple_delights": "Apple Delights",
-    "building_bee_food_truck": "The Honey Pot",
-    "building_pink_pony_club": "Pink Pony Club",
-    "building_casa_de_alpaca": "Casa de Alpaca",
-    "decorative_toilet": "Outhouse",
-    "decorative_windmill": "Windmill",
-    "decorative_chickencoop": "Chicken Coop",
-    "decorative_doghouse": "Dog House",
-    "decorative_farmhouse": "Farm House",
-    "decorative_feedingtrough": "Feeding Trough",
-    "decorative_birdshouse": "Bird House",
-    "decorative_barn": "Barn",
-    "decorative_flowerpots": "Flower Pot",
-    "decorative_fountain": "Fountain",
-    "decorative_haywagon": "Hay Wagon",
-    "decorative_lamppost": "Lamp Post",
-    "decorative_milktank": "Milk Tank",
-    "decorative_picknicktable": "Picnic Table",
-    "decorative_shed": "Shed",
-    "decorative_silo": "Silo",
-    "decorative_stoneflowerpot": "Stone Flower Pot",
-    "decorative_watertower": "Water Tower",
-    "decorative_well": "Well",
-    "alpacawool": "Alpaca Wool",
-    "apple": "Apple",
-    "avocado": "Avocado",
-    "bacon": "Bacon",
-    "carrot": "Carrot",
-    "coffeebeans": "Coffee Beans",
-    "corn": "Corn",
-    "egg": "Egg",
-    "fur": "Fur",
-    "goatmilk": "Goat Milk",
-    "honey": "Honey",
-    "horseshoe": "Horseshoe",
-    "milk": "Milk",
-    "soybeans": "Soybeans",
-    "sugarcane": "Sugarcane",
-    "sunflower": "Sunflower",
-    "tomato": "Tomato",
-    "truffle": "Truffle",
-    "wheat": "Wheat",
-    "wool": "Wool",
-}
-
 _NUMBERED_TIER = re.compile(r"^(?P<family>.+)_(?P<tier>[1-9][0-9]*)$")
-
-# These graph families lack a unique component that distinguishes their player-facing
-# role. Keeping the compatibility exceptions in one table makes new runtime content
-# fall through to `uncategorized` instead of acquiring a guessed classification.
-_FAMILY_CATEGORY_OVERRIDES = {
-    "coin": "currencies",
-    "crate": "supply_crates",
-    "energy": "currencies",
-    "flower": "decorations",
-    "gazebo": "mergeable_buildings",
-    "gazebo_decoration": "decorations",
-    "gazebo_token": "mergeable_buildings",
-    "gem": "currencies",
-    "greenhouse": "mergeable_buildings",
-    "sapling": "plants",
-    "supplies": "currencies",
-    "upgrade_card": "upgrade_cards",
-}
 
 
 def build_item_catalog(metadata: dict[str, dict[str, Any]]) -> ItemCatalog:
@@ -141,6 +32,25 @@ def build_item_catalog(metadata: dict[str, dict[str, Any]]) -> ItemCatalog:
     }
     merge_results = set(merge_targets.values())
     chain_identity = _merge_chain_identities(merge_targets)
+    chain_families = {family_id for family_id, _tier in chain_identity.values()}
+    movable_variant_bases = {
+        blueprint_id.removesuffix("_moveable")
+        for blueprint_id in metadata
+        if blueprint_id.endswith("_moveable")
+    }
+    chain_categories: dict[str, str] = {}
+    for blueprint_id, (family_id, _tier) in chain_identity.items():
+        value = metadata.get(blueprint_id, {})
+        chain_components = {
+            name for name in value.get("componentNames", []) if isinstance(name, str)
+        }
+        if value.get("isMergeable") is True or blueprint_id in merge_targets:
+            chain_components.add("mergeable")
+        if blueprint_id in merge_results:
+            chain_components.add("merge-result")
+        taxonomy = classify_catalog_item(blueprint_id, family_id, chain_components, value)
+        if taxonomy.category != "uncategorized":
+            chain_categories.setdefault(family_id, taxonomy.category)
     items: dict[str, CatalogItem] = {}
     for blueprint_id, value in metadata.items():
         component_names = frozenset(
@@ -161,8 +71,25 @@ def build_item_catalog(metadata: dict[str, dict[str, Any]]) -> ItemCatalog:
             capabilities.add("collectable")
         if value.get("inDiscoveryBook") is True:
             capabilities.add("discovery-book")
-        category = _category_for(blueprint_id, family_id, component_names, value)
-        display_name = _display_name(blueprint_id, family_id)
+        taxonomy = classify_catalog_item(blueprint_id, family_id, capabilities, value)
+        category = (
+            chain_categories.get(family_id, taxonomy.category)
+            if blueprint_id in chain_identity
+            else taxonomy.category
+        )
+        group_id = presentation_group_id(
+            blueprint_id,
+            family_id,
+            category,
+            connected=blueprint_id in chain_identity,
+            family_has_connected_chain=family_id in chain_families,
+        )
+        variant_label = presentation_variant_label(
+            blueprint_id,
+            category,
+            distinguish_mobility=(blueprint_id.removesuffix("_moveable") in movable_variant_bases),
+        )
+        display_name = catalog_display_name(blueprint_id, family_id)
         asset_alias = value.get("assetAlias")
         normalized_alias = asset_alias if isinstance(asset_alias, str) else None
         available_recipe_ids = tuple(
@@ -174,7 +101,13 @@ def build_item_catalog(metadata: dict[str, dict[str, Any]]) -> ItemCatalog:
         items[blueprint_id] = CatalogItem(
             game_id=blueprint_id,
             family_id=family_id,
-            policy_key=catalog_policy_key(blueprint_id, category, family_id, capabilities),
+            policy_key=catalog_policy_key(
+                blueprint_id,
+                category,
+                group_id,
+                capabilities,
+                tier=tier,
+            ),
             category=category,
             display_name=display_name,
             tier=tier,
@@ -194,30 +127,19 @@ def build_item_catalog(metadata: dict[str, dict[str, Any]]) -> ItemCatalog:
                 if isinstance(value.get("upgradeTargetID"), str)
                 else None
             ),
-        )
-    for game_id, family_id, alias in (
-        ("collection_halloween_event", "halloween_event", "icon_tab_halloween"),
-        ("collection_halloween_shop", "halloween_shop", "icon_eventimage_halloweenshop"),
-        ("collection_christmas_event", "christmas_event", "icon_eventimage_christmas"),
-        ("collection_christmas_shop", "christmas_shop", "icon_eventimage_christmasshop"),
-    ):
-        items.setdefault(
-            game_id,
-            CatalogItem(
-                game_id=game_id,
-                family_id=family_id,
-                policy_key=catalog_policy_key(
-                    game_id, "decorations", family_id, frozenset({"collection"})
-                ),
-                category="decorations",
-                display_name=_display_name(game_id, family_id),
-                tier=None,
-                mergeable=False,
-                merge_target=None,
-                asset_alias=alias,
-                asset_path=catalog_asset_path(game_id, "decorations", family_id),
-                capabilities=frozenset({"collection"}),
+            traits=taxonomy.traits
+            | (
+                {"unlinked"}
+                if (
+                    family_id in chain_families
+                    and blueprint_id not in chain_identity
+                    and category == chain_categories.get(family_id)
+                )
+                else set()
             ),
+            group_id=group_id,
+            group_name=catalog_group_name(group_id, display_name),
+            variant_label=variant_label,
         )
     return ItemCatalog(items)
 
@@ -295,87 +217,3 @@ def _default_identity(blueprint_id: str, value: dict[str, Any]) -> tuple[str, in
     if match:
         return match.group("family"), int(match.group("tier"))
     return blueprint_id, tier
-
-
-def _category_for(
-    blueprint_id: str,
-    family_id: str,
-    components: frozenset[str],
-    value: dict[str, Any],
-) -> str:
-    extends = value.get("extends")
-    if "recipe" in components:
-        return "shop_products"
-    if family_id in _FAMILY_CATEGORY_OVERRIDES:
-        return _FAMILY_CATEGORY_OVERRIDES[family_id]
-    if "areaLock" in components:
-        return "map_areas"
-    if "crate" in components:
-        return "supply_crates"
-    if "heavyObject" in components or blueprint_id.startswith("blocker_"):
-        return "blockers"
-    if "deliveryTruck" in components or blueprint_id.startswith("delivery_"):
-        return "deliveries"
-    if any(
-        capability in components
-        for capability in (
-            "likesBillboard",
-            "signInBonusGiftBox",
-            "shortcutBonusGiftBox",
-            "subscribeBonusGiftBox",
-        )
-    ):
-        return "bonuses"
-    if "ticketAnimation" in components:
-        return "currencies"
-    if "trainstation" in components or blueprint_id.startswith("traintrack_"):
-        return "transport"
-    if "crop" in components or extends in {"base_crop", "base_harvestable_crop"}:
-        return "crops"
-    if "animal" in components or extends in {"base_animal", "base_harvestable_animal"}:
-        return "animals"
-    if "shop" in components:
-        return "shops"
-    if "upgradeCard" in components:
-        return "upgrade_cards"
-    if _is_event_family(family_id) or "goldenItem" in components:
-        return "event_items"
-    if "currency" in components:
-        return "currencies"
-    if "mapResources" in components or "tool" in components:
-        return "building_resources"
-    if "mapSource" in components or extends in {"base_tree", "base_rock", "base_toolbox"}:
-        return "obstacles"
-    if "crateReward" in components or "crateRewardKey" in components:
-        return "rewards"
-    if (
-        blueprint_id.startswith("decorative_halloween_")
-        or blueprint_id.startswith("decorative_christmas_")
-        or blueprint_id.startswith("decorative_timelimitedevent_")
-    ):
-        return "decorations"
-    if extends == "base_decorative":
-        return "repairable_buildings"
-    if "ingredient" in components or extends == "base_ingredient":
-        return "ingredients"
-    if str(extends).startswith("base_golden"):
-        return "event_items"
-    if "mergeable" in components or value.get("isMergeable") is True:
-        return "event_items" if _is_event_family(family_id) else "miscellaneous_mergeables"
-    if "building" in components or "decorative" in components:
-        return "buildings"
-    return "uncategorized"
-
-
-def _is_event_family(family_id: str) -> bool:
-    return family_id.startswith(("golden_", "island", "jungle"))
-
-
-def _display_name(blueprint_id: str, family_id: str) -> str:
-    if blueprint_id.startswith("recipe_"):
-        return blueprint_id.removeprefix("recipe_").replace("_", " ").title()
-    if blueprint_id in _BLUEPRINT_DISPLAY_NAMES:
-        return _BLUEPRINT_DISPLAY_NAMES[blueprint_id]
-    if family_id in _FAMILY_DISPLAY_NAMES:
-        return _FAMILY_DISPLAY_NAMES[family_id]
-    return family_id.replace("_", " ").title()

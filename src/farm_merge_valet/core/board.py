@@ -36,9 +36,9 @@ class CellKind(Enum):
     PURCHASABLE = auto()  # gem-purchasable plot; can sit inside open land
     # One-click content that leaves the board when selected, such as a
     # harvested ingredient, train ticket, or supply-crate tile.
-    COLLECTABLE = auto()
+    INTERACTABLE = auto()
     # Occupied content that is not recognized as a merge item, structure, or
-    # enabled immediate collection. It must remain non-actionable.
+    # enabled immediate interaction. It must remain non-actionable.
     OTHER = auto()
     # A placed building/decoration or one of its unavailable footprint cells.
     # The game labels footprint placeholders "empty", but genuinely open
@@ -46,7 +46,7 @@ class CellKind(Enum):
     STRUCTURE = auto()
 
 
-class CollectionTargetKind(StrEnum):
+class InteractionTargetKind(StrEnum):
     IMMEDIATE = "immediate"
     PRODUCER = "producer"
     DEPLETED_PRODUCER = "depleted-producer"

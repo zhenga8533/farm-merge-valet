@@ -31,6 +31,7 @@ from farm_merge_valet.gui.controller import (
     ApplicationStatus,
 )
 from farm_merge_valet.gui.hotkey_edit import HotkeyEdit
+from farm_merge_valet.gui.policy_view import POLICY_SORT_ROLE
 
 
 def _catalog() -> ItemCatalog:
@@ -91,9 +92,7 @@ def test_missing_catalog_shows_shared_onboarding_and_refreshes_when_discovered(t
     assert not window.shops_page.catalog_onboarding.isHidden()
     assert window.items_page.table.isHidden()
     assert window.shops_page.tree.isHidden()
-    assert window.items_page.catalog_onboarding.setup_button.text() == (
-        "Open game and synchronize"
-    )
+    assert window.items_page.catalog_onboarding.setup_button.text() == ("Open game and synchronize")
 
     write_item_catalog(catalog_dir / "catalog.json", _catalog())
     controller.catalog_refreshed.emit(3)
@@ -109,9 +108,7 @@ def test_missing_catalog_shows_shared_onboarding_and_refreshes_when_discovered(t
     app.processEvents()
 
 
-def test_catalog_pages_populate_lazily_and_ignore_hidden_refreshes(
-    tmp_path, monkeypatch
-) -> None:
+def test_catalog_pages_populate_lazily_and_ignore_hidden_refreshes(tmp_path, monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     catalog_dir = tmp_path / "catalog"
     write_item_catalog(catalog_dir / "catalog.json", _catalog())
@@ -163,17 +160,27 @@ def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
         for row in range(window.item_table.topLevelItemCount())
     }
     wheat_merge = window.item_table.itemWidget(rows["Wheat"], 3).findChild(QCheckBox)
-    wheat_collect = window.item_table.itemWidget(rows["Wheat"], 5).findChild(QCheckBox)
+    wheat_interact = window.item_table.itemWidget(rows["Wheat"], 5).findChild(QCheckBox)
     milk_merge = window.item_table.itemWidget(rows["Milk"], 3).findChild(QCheckBox)
-    milk_collect = window.item_table.itemWidget(rows["Milk"], 5).findChild(QCheckBox)
-    coin_collect = window.item_table.itemWidget(rows["Coin"], 5).findChild(QCheckBox)
+    milk_interact = window.item_table.itemWidget(rows["Milk"], 5).findChild(QCheckBox)
+    coin_interact = window.item_table.itemWidget(rows["Coin"], 5).findChild(QCheckBox)
 
     assert wheat_merge is not None and wheat_merge.isEnabled()
-    assert wheat_collect is None
+    assert wheat_interact is None
     assert milk_merge is None
-    assert milk_collect is not None and milk_collect.isEnabled() and milk_collect.isChecked()
-    assert coin_collect is not None and coin_collect.isEnabled() and not coin_collect.isChecked()
+    assert milk_interact is not None and milk_interact.isEnabled() and milk_interact.isChecked()
+    assert coin_interact is not None and coin_interact.isEnabled() and not coin_interact.isChecked()
     assert window.item_table.itemWidget(rows["Wheat"], 5).findChild(QLabel).text() == "—"
+    window.item_table.setCurrentItem(rows["Wheat"])
+    assert all(rows["Wheat"].text(column) == "" for column in range(1, 7))
+    assert rows["Wheat"].data(3, POLICY_SORT_ROLE) is True
+    category_badge = window.item_table.itemWidget(rows["Wheat"], 1)
+    assert category_badge is not None
+    assert window.item_table.columnWidth(1) >= category_badge.sizeHint().width()
+    for column in range(1, 7):
+        widget = window.item_table.itemWidget(rows["Wheat"], column)
+        if widget is not None:
+            assert rows["Wheat"].sizeHint(column).width() >= widget.sizeHint().width()
 
     window.quit_application()
     app.processEvents()
@@ -197,12 +204,22 @@ def test_item_tiers_sort_numerically(tmp_path) -> None:
 
     coin = window.item_table.topLevelItem(0)
     assert coin.childCount() == 0
+    window.item_search.setText("Tier 2")
+    QTest.qWait(150)
+    assert coin.childCount() == 0
+    assert not coin.isHidden()
+    assert not coin.isExpanded()
     coin.setExpanded(True)
     assert [coin.child(index).text(0) for index in range(coin.childCount())] == [
         "Tier 1",
         "Tier 2",
         "Tier 10",
     ]
+    assert coin.child(0).isHidden()
+    assert not coin.child(1).isHidden()
+    window.item_search.clear()
+    assert coin.isExpanded()
+    assert all(not coin.child(index).isHidden() for index in range(coin.childCount()))
 
     window.quit_application()
     app.processEvents()
@@ -300,6 +317,62 @@ def test_item_families_expand_into_independent_tier_policies(tmp_path) -> None:
     app.processEvents()
 
 
+def test_obstacle_variants_group_and_expose_clear_interaction_only(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    base = _catalog().items["wheat_1"]
+    rock_small = replace(
+        base,
+        game_id="rock_small",
+        family_id="rock_small",
+        policy_key="obstacles/rock_small",
+        category="obstacles",
+        display_name="Rock Small",
+        tier=None,
+        mergeable=False,
+        merge_target=None,
+        capabilities=frozenset({"mapSource", "source"}),
+        traits=frozenset({"source-clearable", "fixed"}),
+        group_id="rock",
+        group_name="Rocks",
+        variant_label="Small · Fixed",
+    )
+    rock_movable = replace(
+        rock_small,
+        game_id="rock_small_moveable",
+        family_id="rock_small_moveable",
+        policy_key="obstacles/rock_small_moveable",
+        capabilities=frozenset({"mapSource", "source", "movable"}),
+        traits=frozenset({"source-clearable", "movable"}),
+        variant_label="Small · Movable",
+    )
+    write_item_catalog(
+        catalog_dir / "catalog.json",
+        ItemCatalog({rock_small.game_id: rock_small, rock_movable.game_id: rock_movable}),
+    )
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+
+    root = window.item_table.topLevelItem(0)
+    assert root.text(0) == "Rocks"
+    root.setExpanded(True)
+    assert [root.child(index).text(0) for index in range(root.childCount())] == [
+        "Small · Fixed",
+        "Small · Movable",
+    ]
+    for index in range(root.childCount()):
+        interact = window.item_table.itemWidget(root.child(index), 5).findChild(QCheckBox)
+        assert interact is not None and interact.isChecked()
+        assert interact.accessibleName().endswith(": clear")
+        remove_cell = window.item_table.itemWidget(root.child(index), 6)
+        assert remove_cell.findChild(QCheckBox) is None
+        assert remove_cell.findChild(QLabel).text() == "—"
+
+    window.quit_application()
+    app.processEvents()
+
+
 def test_animal_upgrade_progress_uses_product_identity_but_nests_under_producer(
     tmp_path,
 ) -> None:
@@ -327,9 +400,17 @@ def test_animal_upgrade_progress_uses_product_identity_but_nests_under_producer(
         capabilities=frozenset({"upgradeCard"}),
     )
     card_2 = replace(card_1, game_id="upgrade_card_2", tier=2)
+    card_3 = replace(card_1, game_id="upgrade_card_3", tier=3)
     write_item_catalog(
         catalog_dir / "catalog.json",
-        ItemCatalog({"cow_4": cow, "upgrade_card_1": card_1, "upgrade_card_2": card_2}),
+        ItemCatalog(
+            {
+                "cow_4": cow,
+                "upgrade_card_1": card_1,
+                "upgrade_card_2": card_2,
+                "upgrade_card_3": card_3,
+            }
+        ),
     )
     store = ConfigStore(tmp_path / "config.json")
     store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
@@ -349,13 +430,18 @@ def test_animal_upgrade_progress_uses_product_identity_but_nests_under_producer(
     cards.setExpanded(True)
     assert cards.data(0, Qt.ItemDataRole.UserRole) == "upgrade_cards/upgrade_card/milk"
     assert window.item_table.itemWidget(cards.child(0), 5).findChild(QLabel).text() == "Applied"
-    pending_collect = window.item_table.itemWidget(cards.child(1), 5).findChild(QCheckBox)
-    assert pending_collect is not None and not pending_collect.isChecked()
-    pending_collect.setChecked(True)
+    pending_interact = window.item_table.itemWidget(cards.child(1), 5).findChild(QCheckBox)
+    assert pending_interact is not None and not pending_interact.isChecked()
+    tier_three_interact = window.item_table.itemWidget(cards.child(2), 5).findChild(QCheckBox)
+    assert tier_three_interact is not None and tier_three_interact.isChecked()
+    pending_interact.setChecked(True)
     window._flush_config()
-    assert ConfigStore(store.path).load().item_policy(
-        "upgrade_cards/upgrade_card/milk/tier/2"
-    ).collect
+    assert (
+        ConfigStore(store.path)
+        .load()
+        .item_policy("upgrade_cards/upgrade_card/milk/tier/2")
+        .interact
+    )
 
     window.quit_application()
     app.processEvents()
@@ -681,8 +767,8 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
             theme="dark",
             browser="edge",
             cdp_port=9333,
-            item_policy_defaults={"collect": True},
-            item_policy_overrides={"ingredients/milk": {"collect": False}},
+            item_policy_defaults={"interact": True},
+            item_policy_overrides={"ingredients/milk": {"interact": False}},
             shop_default_enabled=False,
             recipe_default_enabled=False,
             shop_overrides={"bakery": True},
@@ -807,14 +893,19 @@ def test_shop_bulk_toggle_updates_all_shops_and_recipes(tmp_path) -> None:
     assert bakery is not None and bakery.childCount() == 0
     assert not bakery.isExpanded()
     window.shops_page.search.setText("bread")
-    assert bakery.childCount() == 1
+    QTest.qWait(150)
+    assert bakery.childCount() == 0
     assert not bakery.isHidden()
+    assert not bakery.isExpanded()
+    bakery.setExpanded(True)
+    assert bakery.childCount() == 1
     assert not bakery.child(0).isHidden()
-    assert bakery.isExpanded()
     window.shops_page.search.setText("missing")
+    QTest.qWait(150)
     assert bakery.isHidden()
     window.shops_page.search.clear()
     assert not bakery.isHidden()
+    assert bakery.isExpanded()
     recipe_cell = window.shop_tree.itemWidget(bakery.child(0), 2)
     recipe_toggle = recipe_cell.findChild(QCheckBox) if recipe_cell is not None else None
     assert recipe_toggle is not None
@@ -869,7 +960,7 @@ def test_policy_sort_preferences_are_loaded_and_persisted(tmp_path) -> None:
     window._flush_config()
 
     saved = ConfigStore(store.path).load()
-    assert saved.items_sort_column == "collect"
+    assert saved.items_sort_column == "interact"
     assert not saved.items_sort_descending
     assert saved.shops_sort_column == "type"
     assert not saved.shops_sort_descending

@@ -8,7 +8,8 @@ from farm_merge_valet.config import Settings, settings
 
 
 @pytest.fixture(autouse=True)
-def use_default_runtime_settings(monkeypatch):
+def use_default_runtime_settings(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     for variable in list(os.environ):
         if variable.upper().startswith("FMV_"):
             monkeypatch.delenv(variable)

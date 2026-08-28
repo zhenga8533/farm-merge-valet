@@ -311,13 +311,7 @@ def _system_colors(app: QApplication) -> _Colors:
 
 
 def apply_theme(app: QApplication, theme: str) -> None:
-    colors = (
-        _DARK
-        if theme == "dark"
-        else _LIGHT
-        if theme == "light"
-        else _system_colors(app)
-    )
+    colors = _DARK if theme == "dark" else _LIGHT if theme == "light" else _system_colors(app)
     palette = QPalette()
     for role, color in (
         (QPalette.ColorRole.Window, colors.window),

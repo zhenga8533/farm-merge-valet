@@ -86,11 +86,12 @@ in addition to the core game taxonomy. Exact runtime IDs, family IDs, and
 aliases retain any spelling used by the game; player-facing spelling belongs in
 `display_name`.
 
-Each catalog item also derives a tile-action mode from semantic runtime metadata.
-The modes distinguish standard and opt-in collection from upgrade interactions,
-requirement-based rewards, and non-actionable content. Any item carrying the
-game's `collectable` capability is eligible for the verified collection path;
-the policy default determines whether it is automated.
+Each catalog item also derives a tile-interaction mode from semantic runtime
+metadata. The modes distinguish direct and opt-in interaction, obstacle clearing,
+upgrade application, requirement-based rewards, and non-actionable content. Any
+item carrying the game's `collectable` capability is eligible for the verified
+direct-interaction path; source obstacles use the clear mode. The policy default
+determines whether the applicable action is automated.
 
 Crop and animal upgrade progress is read from the game's authoritative
 `UpgradeCardModel`. Each target records its highest applied tier; that tier and
@@ -98,7 +99,7 @@ all lower tiers are presented as applied rather than independently claimable. Pr
 catalog entries retain the game's upgrade-target identity (for example, the cow
 producer targets `milk`) so the GUI can place card status under the correct
 producer while keeping policy identity aligned with runtime data. The GUI shows
-Applied or Unknown status for unavailable tiers and a collection checkbox for
+Applied or Unknown status for unavailable tiers and an interaction checkbox for
 higher tiers. Automatic upgrade-card claiming is not implemented yet.
 
 ## GUI policy
@@ -106,7 +107,7 @@ higher tiers. Automatic upgrade-card claiming is not implemented yet.
 The catalog describes what an item is and what the game permits. User choices
 should be stored separately by `policy_key`. Mergeable tiers intentionally
 share a key, while non-chain products and recipes remain independently
-configurable. The GUI policy layer holds enabled, merge, merge-5, and collect
+configurable. The GUI policy layer holds enabled, merge, merge-5, and interact
 toggles without changing recognition or duplicating assets. Any future merge submission mode should
 likewise be a policy/action concern, not a catalog capability inferred from an
 image.
@@ -119,15 +120,17 @@ discovered merge family; for example,
 enables merge-3 for cows and excludes wheat from merge planning. The overall
 `enabled` field can suppress every supported automation behavior for a key,
 while `merge` controls merge planning specifically.
-Board-item and tier-4 producer collection additionally requires `collect: true`.
-Immediate ingredients and `currencies/ticket` default on; other current and
-future collectable items default off. Producer and product keys remain independent—for
-example, `animals/cow` controls harvesting the producer while
-`ingredients/milk` controls collecting milk from the board. HUD supply claims
-and shop rewards use their own policies rather than this item field.
+Board-item interaction, tier-4 producer harvesting, upgrade application, and
+obstacle clearing additionally require `interact: true`. Ingredients, tickets,
+ordinary supply crates, crops, animals, obstacles, and upgrade-card tiers 1 and
+3 default on; other current and future direct-interaction items default off. Producer and product
+keys remain independent—for example, `animals/cow` controls harvesting the
+producer while `ingredients/milk` controls interacting with milk on the board.
+HUD supply claims and shop rewards use their own policies rather than this item
+field.
 Policy fields are consumed only by applicable capabilities: non-mergeable
-items ignore `merge` and `prefer_merge_five`, while non-collectable items ignore
-`collect`. The GUI uses these facts to disable controls that are not relevant to
+items ignore `merge` and `prefer_merge_five`, while items without a supported
+primary interaction ignore `interact`. The GUI uses these facts to disable controls that are not relevant to
 an item.
 The `always_remove` field is reserved for a future shovel action and defaults
 to false; configuring it does not currently submit destructive actions.

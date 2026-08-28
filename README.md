@@ -3,10 +3,10 @@
 Farm Merge Valet automates Farm Merge Valley through the Chromium DevTools
 Protocol (CDP) and the game's own interaction systems. It reads authoritative board and
 inventory state, preserves the merge-5 planner and board-space policy, and
-submits item drops, board collection, producer harvesting, and supply claims
+submits item drops, board interactions, producer harvesting, and supply claims
 without moving the mouse or typing into the game.
 
-The current loop can collect enabled ground items, harvest and retire enabled
+The current loop can interact with enabled ground items, harvest and retire enabled
 tier-4 producers, fulfill shop orders, claim supply crates, and plan
 merge-3/merge-5 actions including swaps. Obstacle clearing and visits are not
 implemented yet.
@@ -125,9 +125,12 @@ separately configurable. Item policy resolves global defaults, category
 defaults, item-specific defaults, and finally partial per-key user overrides.
 Automation, merging, and merge-5 default on for current and future merge
 families. `enabled` controls all supported automation for a key, while `merge`
-can exclude an individual family from merge planning only. Ingredient and
-train-ticket collection defaults on; other board-item and tier-4 producer
-collection remains opt-in. HUD supply crates and shop rewards are governed separately.
+can exclude an individual family from merge planning only. `interact` controls
+the item's primary action: direct interaction, producer harvesting, upgrade
+application, or obstacle clearing. Ingredients, train tickets, ordinary supply
+crates, crops, animals, obstacles, and upgrade-card tiers 1 and 3 default on.
+Other direct-interaction items remain opt-in. HUD supply crates and shop rewards
+are governed separately.
 Fields that do not match an item's catalog capabilities are ignored, allowing
 the GUI to expose only relevant controls without separate schemas.
 The default-disabled `always_remove` field is reserved for future shovel
@@ -153,10 +156,11 @@ change, or a genuine no-op. Genuine no-ops cool down before retry, and three
 failures of the same action pause the bot. Runtime incompatibility reports an
 unavailable capability; there is no mouse-input fallback.
 
-Collectable board tiles—including ground ingredients, train tickets, currencies,
+Game-marked `collectable` board tiles—including ground ingredients, train tickets, currencies,
 energy, gems, and ordinary supply crates—can be configured per tier and are
-collected before any producer or HUD supply claim. Ingredients and tickets are
-enabled by default; the other collectable types are opt-in.
+interacted with before any producer or HUD supply claim. Ingredients, tickets,
+and ordinary supply crates are enabled by default; the other direct-interaction
+types are opt-in.
 Exhausted animals are retired into coins, while exhausted crops are
 retired only with an open cell available for their two tier-1 replacements. A
 ready tier-4 producer preempts crates and is harvested only after the configured
@@ -225,7 +229,7 @@ Browser, runtime, pause/resume, quit, and stop events are sent immediately, as a
 warnings and errors; duplicate warning messages are rate-limited. Messages use
 compact embeds with severity colors, readable titles, timestamps, and stable
 event identifiers. Routine actions are not sent individually. Instead, the
-hourly summary reports move, swap, merge, board-collection, crate, warning, and error
+hourly summary reports move, swap, merge, board-interaction, crate, warning, and error
 totals. A final partial summary is sent during a clean shutdown. The webhook
 also maintains one current-status embed. It is edited every 60 seconds by
 default and immediately on major state changes. After an alert or summary is posted, the previous status is

@@ -67,9 +67,7 @@ class HotkeyBindings:
     ) -> HotkeyBindings:
         bindings = cls(
             start_stop=normalize_hotkey(start_stop) if start_stop is not None else None,
-            pause_resume=(
-                normalize_hotkey(pause_resume) if pause_resume is not None else None
-            ),
+            pause_resume=(normalize_hotkey(pause_resume) if pause_resume is not None else None),
             quit_application=(
                 normalize_hotkey(quit_application) if quit_application is not None else None
             ),

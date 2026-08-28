@@ -85,9 +85,9 @@ def test_webhook_routes_lifecycle_and_summarizes_actions(monkeypatch, tmp_path) 
         log_event(
             event_logger,
             logging.DEBUG,
-            "collection.confirmed",
-            "Immediate collection confirmed.",
-            collection_kind="immediate",
+            "interaction.confirmed",
+            "Immediate interaction confirmed.",
+            interaction_kind="immediate",
             blueprint_id="ticket",
         )
         log_event(
@@ -131,7 +131,7 @@ def test_webhook_routes_lifecycle_and_summarizes_actions(monkeypatch, tmp_path) 
     assert any(
         any(
             field["name"] == "Board activity"
-            and "Tile collections 1" in field["value"]
+            and "Tile interactions 1" in field["value"]
             and "Crates 2" in field["value"]
             for field in embed.get("fields", [])
         )

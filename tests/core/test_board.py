@@ -223,7 +223,7 @@ def test_swap_candidates_exclude_non_items_and_matching_items() -> None:
     positions = {(0, 0), (10, 10), (20, 20), (30, 30), (40, 40)}
     for coord in positions:
         grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
-    grid.set_cell((1, 0), Cell(kind=CellKind.COLLECTABLE))
+    grid.set_cell((1, 0), Cell(kind=CellKind.INTERACTABLE))
     grid.set_cell((-1, 0), Cell(kind=CellKind.STRUCTURE))
     grid.set_cell((0, 1), Cell(kind=CellKind.CLOUD))
     grid.set_cell((0, -1), Cell(kind=CellKind.ITEM, item=WHEAT_1))

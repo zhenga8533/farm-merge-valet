@@ -52,7 +52,7 @@ def build_position_visualization(
         CellKind.EMPTY: (220, 180, 40),
         CellKind.CLOUD: (200, 200, 200),
         CellKind.STRUCTURE: (180, 80, 220),
-        CellKind.COLLECTABLE: (40, 160, 255),
+        CellKind.INTERACTABLE: (40, 160, 255),
         CellKind.OTHER: (100, 100, 160),
     }
     counts: Counter[str] = Counter()
@@ -105,7 +105,7 @@ def collect_live_state_report(
             "item_drop": health.item_drop_available,
             "crate_spawn": health.crate_spawn_available,
             "inventory": health.inventory_available,
-            "collection": health.collection_available,
+            "interaction": health.interaction_available,
             "shop_orders": health.shop_available,
             "heartbeat": health.heartbeat,
             "heartbeat_age_ms": health.heartbeat_age_ms,

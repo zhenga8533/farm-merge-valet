@@ -259,9 +259,7 @@ def test_catalog_setup_launches_game_and_publishes_catalog_before_icons(
     app.processEvents()
 
 
-def test_catalog_setup_keeps_catalog_available_when_icon_sync_fails(
-    tmp_path, monkeypatch
-) -> None:
+def test_catalog_setup_keeps_catalog_available_when_icon_sync_fails(tmp_path, monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     store = ConfigStore(tmp_path / "config.json")
     store.replace(AppConfig(catalog_dir=tmp_path / "catalog"))

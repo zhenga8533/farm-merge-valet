@@ -10,14 +10,15 @@ from typing import Any
 
 from farm_merge_valet.core.board import ItemRef, item_tier_policy_key
 
-CATALOG_SCHEMA_VERSION = 5
-SUPPORTED_CATALOG_SCHEMA_VERSIONS = frozenset({3, 4, CATALOG_SCHEMA_VERSION})
+CATALOG_SCHEMA_VERSION = 6
+SUPPORTED_CATALOG_SCHEMA_VERSIONS = frozenset({CATALOG_SCHEMA_VERSION})
 
 
-class TileActionMode(StrEnum):
+class TileInteractionMode(StrEnum):
     NONE = "none"
-    COLLECT = "collect"
-    COLLECT_OPT_IN = "collect-opt-in"
+    DIRECT = "direct"
+    DIRECT_OPT_IN = "direct-opt-in"
+    CLEAR = "clear"
     UPGRADE = "upgrade"
     OPEN_REQUIREMENT = "open-requirement"
 
@@ -59,28 +60,46 @@ class CatalogItem:
     available_recipe_ids: tuple[str, ...] = ()
     recipe: RecipeMetadata | None = None
     upgrade_target_id: str | None = None
+    traits: frozenset[str] = frozenset()
+    group_id: str | None = None
+    group_name: str | None = None
+    variant_label: str | None = None
 
     @property
-    def tile_action_mode(self) -> TileActionMode:
+    def presentation_group_id(self) -> str:
+        return self.group_id or self.family_id
+
+    @property
+    def presentation_group_name(self) -> str:
+        return self.group_name or self.display_name
+
+    @property
+    def presentation_key(self) -> str:
+        return f"{self.category}/{self.presentation_group_id}"
+
+    @property
+    def tile_interaction_mode(self) -> TileInteractionMode:
         if self.category == "upgrade_cards":
-            return TileActionMode.UPGRADE
+            return TileInteractionMode.UPGRADE
         if "crateReward" in self.capabilities:
-            return TileActionMode.OPEN_REQUIREMENT
+            return TileInteractionMode.OPEN_REQUIREMENT
+        if self.category == "obstacles":
+            return TileInteractionMode.CLEAR
         if "collectable" not in self.capabilities:
-            return TileActionMode.NONE
+            return TileInteractionMode.NONE
         if (
             "ingredient" in self.capabilities
             or "ticketAnimation" in self.capabilities
-            or self.category == "supply_crates"
+            or "container" in self.traits
         ):
-            return TileActionMode.COLLECT
-        return TileActionMode.COLLECT_OPT_IN
+            return TileInteractionMode.DIRECT
+        return TileInteractionMode.DIRECT_OPT_IN
 
     @property
     def automation_item(self) -> ItemRef | None:
         if self.tier is None or not ({"mergeable", "merge-result"} & self.capabilities):
             return None
-        return ItemRef(self.category, self.family_id, self.tier)
+        return ItemRef(self.category, self.presentation_group_id, self.tier)
 
     @property
     def tier_policy_key(self) -> str:
@@ -105,11 +124,12 @@ class ItemCatalog:
         }
 
     @property
-    def collectable_ids(self) -> frozenset[str]:
+    def direct_interaction_ids(self) -> frozenset[str]:
         return frozenset(
             game_id
             for game_id, item in self.items.items()
-            if item.tile_action_mode in {TileActionMode.COLLECT, TileActionMode.COLLECT_OPT_IN}
+            if item.tile_interaction_mode
+            in {TileInteractionMode.DIRECT, TileInteractionMode.DIRECT_OPT_IN}
         )
 
     @property
@@ -137,6 +157,10 @@ class ItemCatalog:
                     "capabilities": sorted(item.capabilities),
                     "available_recipe_ids": list(item.available_recipe_ids),
                     "upgrade_target_id": item.upgrade_target_id,
+                    "traits": sorted(item.traits),
+                    "group_id": item.presentation_group_id,
+                    "group_name": item.presentation_group_name,
+                    "variant_label": item.variant_label,
                     "recipe": (
                         {
                             "shop_id": item.recipe.shop_id,
@@ -199,7 +223,14 @@ def load_item_catalog(path: Path) -> ItemCatalog:
 
 
 def _parse_catalog_item(blueprint_id: str, value: dict[str, Any], path: Path) -> CatalogItem:
-    required_strings = ("family_id", "policy_key", "category", "display_name")
+    required_strings = (
+        "family_id",
+        "policy_key",
+        "category",
+        "display_name",
+        "group_id",
+        "group_name",
+    )
     if any(not isinstance(value.get(key), str) for key in required_strings):
         raise ValueError(f"Invalid identity for {blueprint_id!r} in {path}")
     tier = value.get("tier")
@@ -207,6 +238,8 @@ def _parse_catalog_item(blueprint_id: str, value: dict[str, Any], path: Path) ->
     asset_alias = value.get("asset_alias")
     asset_path = value.get("asset_path")
     capabilities = value.get("capabilities")
+    traits = value.get("traits")
+    variant_label = value.get("variant_label")
     if tier is not None and (not isinstance(tier, int) or tier < 1):
         raise ValueError(f"Invalid tier for {blueprint_id!r} in {path}")
     if merge_target is not None and not isinstance(merge_target, str):
@@ -225,6 +258,10 @@ def _parse_catalog_item(blueprint_id: str, value: dict[str, Any], path: Path) ->
         isinstance(capability, str) for capability in capabilities
     ):
         raise ValueError(f"Invalid capabilities for {blueprint_id!r} in {path}")
+    if not isinstance(traits, list) or not all(isinstance(trait, str) for trait in traits):
+        raise ValueError(f"Invalid traits for {blueprint_id!r} in {path}")
+    if variant_label is not None and not isinstance(variant_label, str):
+        raise ValueError(f"Invalid variant label for {blueprint_id!r} in {path}")
     available_recipe_ids = value.get("available_recipe_ids", [])
     if not isinstance(available_recipe_ids, list) or not all(
         isinstance(recipe_id, str) for recipe_id in available_recipe_ids
@@ -249,6 +286,10 @@ def _parse_catalog_item(blueprint_id: str, value: dict[str, Any], path: Path) ->
         available_recipe_ids=tuple(available_recipe_ids),
         recipe=recipe,
         upgrade_target_id=upgrade_target_id,
+        traits=frozenset(traits),
+        group_id=value["group_id"],
+        group_name=value["group_name"],
+        variant_label=variant_label,
     )
 
 
@@ -310,7 +351,14 @@ def catalog_asset_path(game_id: str, category: str, family_id: str) -> str:
 
 
 def catalog_policy_key(
-    game_id: str, category: str, family_id: str, capabilities: set[str] | frozenset[str]
+    game_id: str,
+    category: str,
+    family_id: str,
+    capabilities: set[str] | frozenset[str],
+    *,
+    tier: int | None = None,
 ) -> str:
-    scope = family_id if {"mergeable", "merge-result"} & capabilities else game_id
+    scope = (
+        family_id if tier is not None or {"mergeable", "merge-result"} & capabilities else game_id
+    )
     return f"{category}/{scope}"

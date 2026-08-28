@@ -21,9 +21,7 @@ from farm_merge_valet.gui.theme import apply_theme
         ("light", "#afb8c1"),
     ),
 )
-def test_themes_apply_consistent_modern_scrollbars(
-    theme: str, handle_color: str | None
-) -> None:
+def test_themes_apply_consistent_modern_scrollbars(theme: str, handle_color: str | None) -> None:
     app = QApplication.instance() or QApplication([])
 
     apply_theme(app, theme)
@@ -104,11 +102,7 @@ def test_system_theme_replaces_all_owned_palette_roles_after_custom_theme() -> N
 
     palette = app.palette()
     is_dark = app.styleHints().colorScheme() == Qt.ColorScheme.Dark
-    expected = (
-        ("#0d1117", "#11151b", "#e6edf3")
-        if is_dark
-        else ("#ffffff", "#f6f8fa", "#1f2328")
-    )
+    expected = ("#0d1117", "#11151b", "#e6edf3") if is_dark else ("#ffffff", "#f6f8fa", "#1f2328")
     assert palette.color(QPalette.ColorRole.Window).name() == expected[0]
     assert palette.color(QPalette.ColorRole.AlternateBase).name() == expected[1]
     assert palette.color(QPalette.ColorRole.Text).name() == expected[2]

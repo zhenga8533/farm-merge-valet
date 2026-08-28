@@ -105,7 +105,7 @@ Facebook/TikTok community posts, and direct in-app observation (marked
   and can be harvested twice. The second harvest becomes available after a
   cooldown. This lifecycle is directly observed in the live game state.
 - Harvested ingredients appear as collectible board objects and occupy cells
-  until collected. An observed ingredient click can collect multiple matching
+  until interacted with. An observed ingredient click can handle multiple matching
   products from the board at once.
 - After the final harvest, animals retire into coins. Crops retire into two
   tier-1 items of the same crop, requiring one additional open cell.

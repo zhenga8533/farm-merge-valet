@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QRect, QSize, Qt
+from PySide6.QtCore import QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPaintEvent, QPalette, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -21,6 +21,80 @@ from PySide6.QtWidgets import (
 )
 
 from farm_merge_valet.gui.widgets import secondary_button
+
+POLICY_SORT_ROLE = Qt.ItemDataRole.UserRole + 1
+POLICY_SEARCH_ROLE = Qt.ItemDataRole.UserRole + 2
+_SEARCH_DEBOUNCE_MS = 120
+
+
+class PolicyTreeItem(QTreeWidgetItem):
+    def __init__(self, values: tuple[str, ...], *, tier: int | None = None) -> None:
+        super().__init__(values)
+        self._tier_sort_key = (0, tier, "") if tier is not None else (1, 0, values[0].casefold())
+
+    def __lt__(self, other: QTreeWidgetItem) -> bool:
+        tree = self.treeWidget()
+        column = tree.sortColumn() if tree is not None else 0
+        if column == 0:
+            other_key = (
+                other._tier_sort_key
+                if isinstance(other, PolicyTreeItem)
+                else (1, 0, other.text(0).casefold())
+            )
+            return self._tier_sort_key < other_key
+        return _policy_sort_key(self, column) < _policy_sort_key(other, column)
+
+
+def _policy_sort_key(item: QTreeWidgetItem, column: int) -> tuple[int, float | str]:
+    value = item.data(column, POLICY_SORT_ROLE)
+    if isinstance(value, bool):
+        return 0, float(value)
+    if isinstance(value, int | float):
+        return 0, float(value)
+    return 1, str(value if value is not None else item.text(column)).casefold()
+
+
+def set_policy_widget(
+    tree: QTreeWidget,
+    item: QTreeWidgetItem,
+    column: int,
+    widget: QWidget,
+    *,
+    sort_value: bool | int | float | str,
+    search_text: str | None = None,
+) -> None:
+    set_policy_value(item, column, sort_value, search_text=search_text)
+    widget.ensurePolished()
+    hint = widget.sizeHint()
+    widget.setMinimumWidth(hint.width())
+    item.setSizeHint(column, hint)
+    tree.setItemWidget(item, column, widget)
+
+
+def set_policy_value(
+    item: QTreeWidgetItem,
+    column: int,
+    sort_value: bool | int | float | str,
+    *,
+    search_text: str | None = None,
+) -> None:
+    item.setText(column, "")
+    item.setData(column, POLICY_SORT_ROLE, sort_value)
+    item.setData(column, POLICY_SEARCH_ROLE, search_text if search_text is not None else sort_value)
+
+
+def fit_policy_widget_column(tree: QTreeWidget, column: int, *, minimum: int) -> None:
+    width = max(minimum, tree.columnWidth(column))
+    pending = [tree.topLevelItem(index) for index in range(tree.topLevelItemCount())]
+    while pending:
+        item = pending.pop()
+        if item is None:
+            continue
+        widget = tree.itemWidget(item, column)
+        if widget is not None:
+            width = max(width, widget.sizeHint().width() + 4)
+        pending.extend(item.child(index) for index in range(item.childCount()))
+    tree.header().resizeSection(column, width)
 
 
 @dataclass(frozen=True)
@@ -38,6 +112,7 @@ class LazyPolicyBranches:
         self._branches: dict[Hashable, _LazyPolicyBranch] = {}
         self._keys_by_item: dict[int, Hashable] = {}
         self._materialized: set[Hashable] = set()
+        self._filter_text = ""
         tree.itemExpanded.connect(self._item_expanded)
 
     def reset(self) -> None:
@@ -74,13 +149,13 @@ class LazyPolicyBranches:
             self._tree.setUpdatesEnabled(True)
             self._tree.setSortingEnabled(sorting_enabled)
 
-    def materialize_matches(self, text: str) -> None:
-        needle = text.casefold().strip()
-        if not needle:
-            return
-        for key, branch in tuple(self._branches.items()):
-            if key not in self._materialized and needle in branch.searchable_text:
-                self.materialize(key)
+    def apply_filter(self, text: str) -> None:
+        self._filter_text = text
+        filter_policy_tree(
+            self._tree,
+            text,
+            indexed_descendants=self._indexed_descendants,
+        )
 
     def restore_expanded(self, keys: set[Hashable]) -> None:
         for key in self._branches.keys() & keys:
@@ -92,6 +167,12 @@ class LazyPolicyBranches:
         key = self._keys_by_item.get(id(item))
         if key is not None:
             self.materialize(key)
+            self.apply_filter(self._filter_text)
+
+    def _indexed_descendants(self, item: QTreeWidgetItem) -> str:
+        key = self._keys_by_item.get(id(item))
+        branch = self._branches.get(key) if key is not None else None
+        return branch.searchable_text if branch is not None else ""
 
 
 class PolicyCheckBox(QCheckBox):
@@ -175,6 +256,8 @@ class PolicyTreeExpansionControls(QWidget):
 
 
 class PolicyTreeToolbar(QWidget):
+    filter_requested = Signal(str)
+
     def __init__(
         self,
         tree: QTreeWidget,
@@ -192,9 +275,25 @@ class PolicyTreeToolbar(QWidget):
         self.search.setPlaceholderText(placeholder)
         self.search.setClearButtonEnabled(True)
         self.search.setAccessibleName(accessible_name)
+        self._filter_timer = QTimer(self)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(_SEARCH_DEBOUNCE_MS)
+        self._filter_timer.timeout.connect(self._emit_filter)
+        self.search.textChanged.connect(self._schedule_filter)
+        self.search.returnPressed.connect(self._emit_filter)
         self.expansion_controls = PolicyTreeExpansionControls(tree, scope)
         layout.addWidget(self.search, 1)
         layout.addWidget(self.expansion_controls)
+
+    def _schedule_filter(self, text: str) -> None:
+        if text:
+            self._filter_timer.start()
+            return
+        self._emit_filter()
+
+    def _emit_filter(self) -> None:
+        self._filter_timer.stop()
+        self.filter_requested.emit(self.search.text())
 
 
 def configure_policy_view(view: QAbstractItemView) -> None:
@@ -241,12 +340,27 @@ def expanded_policy_keys(tree: QTreeWidget) -> set[Hashable]:
     return expanded
 
 
-def filter_policy_tree(tree: QTreeWidget, text: str) -> None:
+def filter_policy_tree(
+    tree: QTreeWidget,
+    text: str,
+    *,
+    indexed_descendants: Callable[[QTreeWidgetItem], str] | None = None,
+) -> None:
     needle = text.casefold().strip()
 
     def update_visibility(item: QTreeWidgetItem, ancestor_matches: bool = False) -> bool:
-        own_matches = (
-            needle in " ".join(item.text(column) for column in range(tree.columnCount())).casefold()
+        searchable = " ".join(
+            " ".join(
+                (
+                    item.text(column),
+                    str(item.data(column, POLICY_SEARCH_ROLE) or ""),
+                )
+            )
+            for column in range(tree.columnCount())
+        )
+        own_matches = needle in searchable.casefold()
+        indexed_matches = bool(
+            needle and indexed_descendants is not None and needle in indexed_descendants(item)
         )
         branch_matches = ancestor_matches or own_matches
         descendant_matches = False
@@ -254,10 +368,8 @@ def filter_policy_tree(tree: QTreeWidget, text: str) -> None:
             child = item.child(child_index)
             if child is not None:
                 descendant_matches = update_visibility(child, branch_matches) or descendant_matches
-        visible = branch_matches or descendant_matches
+        visible = branch_matches or indexed_matches or descendant_matches
         item.setHidden(not visible)
-        if needle and descendant_matches:
-            item.setExpanded(True)
         return visible
 
     for index in range(tree.topLevelItemCount()):
@@ -278,13 +390,22 @@ def policy_cell(widget: QWidget, *, centered: bool = True) -> QWidget:
 
 
 def policy_badge(text: str) -> QWidget:
-    label = QLabel(text)
-    label.setObjectName("policyBadge")
+    return policy_badges((text,))
+
+
+def policy_badges(texts: tuple[str, ...]) -> QWidget:
+    labels = []
+    for text in texts:
+        label = QLabel(text)
+        label.setObjectName("policyBadge")
+        labels.append(label)
     container = QWidget()
     container.setProperty("policyCell", True)
     layout = QHBoxLayout(container)
     layout.setContentsMargins(8, 0, 8, 0)
-    layout.addWidget(label)
+    layout.setSpacing(4)
+    for label in labels:
+        layout.addWidget(label)
     layout.addStretch()
     return container
 

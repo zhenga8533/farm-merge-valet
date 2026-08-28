@@ -12,8 +12,8 @@ from farm_merge_valet.config import AppConfig, ConfigStore, Settings
         ("cdp_port", 0),
         ("merge_empty_cell_reserve", -1),
         ("merge_empty_cell_reserve", 51),
-        ("producer_collect_min_empty_cells", 0),
-        ("producer_collect_min_empty_cells", 51),
+        ("producer_interact_min_empty_cells", 0),
+        ("producer_interact_min_empty_cells", 51),
         ("loop_interval", 0),
         ("loop_interval", 60.1),
         ("idle_wait_seconds", -0.1),
@@ -64,6 +64,7 @@ def test_hotkeys_are_canonicalized_before_persistence() -> None:
         "drag_duration_min",
         "drag_duration_max",
         "crate_click_settle",
+        "producer_collect_min_empty_cells",
     ],
 )
 def test_settings_reject_removed_legacy_keys(field: str) -> None:
@@ -81,23 +82,55 @@ def test_merge_five_is_enabled_by_default() -> None:
     assert settings.item_policy("crops/wheat").enabled
     assert settings.item_policy("crops/wheat").merge
     assert settings.item_policy("crops/wheat").prefer_merge_five
-    assert not settings.item_policy("crops/wheat").collect
+    assert settings.item_policy("crops/wheat").interact
     assert not settings.item_policy("crops/wheat").always_remove
 
 
-def test_collection_defaults_support_category_and_item_specific_policies() -> None:
+def test_interaction_defaults_support_category_and_item_specific_policies() -> None:
     settings = Settings(_env_file=None)
 
-    assert settings.item_policy("ingredients/milk").collect
-    assert settings.item_policy("ingredients/egg").collect
-    assert settings.item_policy("currencies/ticket").collect
-    assert not settings.item_policy("currencies/coin").collect
-    assert not settings.item_policy("crops/wheat").collect
+    assert settings.item_policy("ingredients/milk").interact
+    assert settings.item_policy("ingredients/egg").interact
+    assert settings.item_policy("currencies/ticket").interact
+    assert settings.item_policy("resources/crate").interact
+    assert settings.item_policy("resources/crate/tier/1").interact
+    assert not settings.item_policy("currencies/coin").interact
+    assert settings.item_policy("crops/wheat").interact
+    assert settings.item_policy("animals/cow").interact
+    assert settings.item_policy("obstacles/rock").interact
+
+
+def test_upgrade_card_interaction_defaults_to_tiers_one_and_three_for_every_target() -> None:
+    settings = Settings(_env_file=None)
+
+    for target in ("wheat", "milk"):
+        key = f"upgrade_cards/upgrade_card/{target}"
+        assert settings.item_policy(f"{key}/tier/1").interact
+        assert not settings.item_policy(f"{key}/tier/2").interact
+        assert settings.item_policy(f"{key}/tier/3").interact
+
+
+def test_configured_interaction_defaults_override_recommendations() -> None:
+    settings = Settings(
+        _env_file=None,
+        item_category_defaults={"ingredients": {"interact": False}},
+        item_default_overrides={"currencies/ticket": {"interact": False}},
+    )
+
+    assert not settings.item_policy("ingredients/milk").interact
+    assert not settings.item_policy("currencies/ticket").interact
+    assert settings.item_policy("crops/wheat").interact
+    assert settings.item_policy("resources/crate/tier/2").interact
 
 
 def test_legacy_claim_policy_field_is_rejected() -> None:
     with pytest.raises(ValidationError):
         AppConfig(item_policy_overrides={"ingredients/milk": {"claim": True}})
+
+
+def test_legacy_collect_policy_field_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        AppConfig(item_policy_overrides={"ingredients/milk": {"collect": True}})
 
 
 def test_item_policy_partial_override_inherits_other_defaults() -> None:
@@ -125,7 +158,7 @@ def test_tier_policy_inherits_family_policy_and_can_override_one_tier() -> None:
     assert not settings.item_policy("crops/wheat/tier/2").merge
 
 
-def test_upgrade_card_variant_inherits_legacy_family_policy() -> None:
+def test_upgrade_card_variant_inherits_base_family_policy() -> None:
     settings = Settings(
         _env_file=None,
         item_policy_overrides={
@@ -138,6 +171,17 @@ def test_upgrade_card_variant_inherits_legacy_family_policy() -> None:
 
     assert not policy.merge
     assert policy.always_remove
+
+
+def test_upgrade_card_base_tier_override_applies_to_every_target() -> None:
+    settings = Settings(
+        _env_file=None,
+        item_policy_overrides={
+            "upgrade_cards/upgrade_card/tier/1": {"interact": False},
+        },
+    )
+
+    assert not settings.item_policy("upgrade_cards/upgrade_card/wheat/tier/1").interact
 
 
 def test_item_policy_override_can_reenable_family_when_global_default_is_disabled() -> None:
@@ -166,26 +210,26 @@ def test_item_policy_environment_variables_are_ignored(monkeypatch) -> None:
     monkeypatch.setenv(
         "FMV_ITEM_POLICY_DEFAULTS",
         '{"enabled": true, "merge": true, "prefer_merge_five": true, '
-        '"collect": false, "always_remove": false}',
+        '"interact": false, "always_remove": false}',
     )
     monkeypatch.setenv(
         "FMV_ITEM_POLICY_OVERRIDES",
-        '{"building_resources/stone": {"always_remove": true}}',
+        '{"resources/stone": {"always_remove": true}}',
     )
 
     settings = Settings(_env_file=None)
 
-    assert not settings.item_policy("building_resources/stone").always_remove
+    assert not settings.item_policy("resources/stone").always_remove
 
 
-def test_item_collection_override_can_disable_one_category_default() -> None:
+def test_item_interaction_override_can_disable_one_category_default() -> None:
     settings = Settings(
         _env_file=None,
-        item_policy_overrides={"ingredients/milk": {"collect": False}},
+        item_policy_overrides={"ingredients/milk": {"interact": False}},
     )
 
-    assert not settings.item_policy("ingredients/milk").collect
-    assert settings.item_policy("ingredients/egg").collect
+    assert not settings.item_policy("ingredients/milk").interact
+    assert settings.item_policy("ingredients/egg").interact
 
 
 def test_all_shop_automation_is_enabled_by_default() -> None:
@@ -210,8 +254,8 @@ def test_shop_policy_environment_variables_are_ignored(monkeypatch) -> None:
     assert settings.recipe_overrides == {}
 
 
-def test_producer_collection_reserves_four_cells_by_default() -> None:
-    assert Settings(_env_file=None).producer_collect_min_empty_cells == 4
+def test_producer_interaction_reserves_four_cells_by_default() -> None:
+    assert Settings(_env_file=None).producer_interact_min_empty_cells == 4
 
 
 def test_managed_browser_defaults_to_auto_launch() -> None:
@@ -281,7 +325,7 @@ def test_config_store_round_trips_atomically_and_notifies(tmp_path) -> None:
     initial = store.load()
     updated = store.update(
         theme="dark",
-        item_policy_overrides={"animals/cow": {"collect": True}},
+        item_policy_overrides={"animals/cow": {"interact": True}},
         discord_webhook_url="https://example.test/private-token",
     )
     unsubscribe()

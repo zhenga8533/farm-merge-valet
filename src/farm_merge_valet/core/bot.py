@@ -29,8 +29,8 @@ from farm_merge_valet.core.board import (
     BoardGrid,
     Cell,
     CellKind,
-    CollectionTargetKind,
     GridCoord,
+    InteractionTargetKind,
     ItemRef,
     MergeAction,
     MergeActionKind,
@@ -76,7 +76,7 @@ _STRUCTURE_BLUEPRINTS = frozenset(
 
 
 class Phase(Enum):
-    COLLECT_TILES = auto()
+    INTERACT_TILES = auto()
     SHOPS = auto()
     CLAIM_CRATES = auto()
     MERGE = auto()
@@ -94,8 +94,8 @@ class _PendingAction:
 
 
 @dataclass(frozen=True)
-class _CollectAction:
-    kind: CollectionTargetKind
+class _InteractionAction:
+    kind: InteractionTargetKind
     coord: GridCoord
     blueprint_id: str
     object_id: int | None
@@ -103,8 +103,8 @@ class _CollectAction:
 
 
 @dataclass
-class _PendingCollection:
-    action: _CollectAction
+class _PendingInteraction:
+    action: _InteractionAction
     initial_state: LiveCellState
     scene_id: int | None
     submitted_at: float
@@ -139,14 +139,14 @@ class Bot:
         self.phase = Phase.CLAIM_CRATES
         self._blueprint_items: dict[str, ItemRef] = {}
         self._blueprint_policy_keys: dict[str, str] = {}
-        self._collectable_ids: frozenset[str] = frozenset()
+        self._direct_interaction_ids: frozenset[str] = frozenset()
         self._max_item_tiers: dict[tuple[str, str] | tuple[str, str, str | None], int] = {}
         self.board = BoardGrid()
         self._live_cells: dict[GridCoord, LiveCellState] = {}
         self._pending_action: _PendingAction | None = None
-        self._pending_collection: _PendingCollection | None = None
+        self._pending_interaction: _PendingInteraction | None = None
         self._pending_shop_action: _PendingShopAction | None = None
-        self._next_collection_action_at = 0.0
+        self._next_interaction_action_at = 0.0
         self._action_failures: dict[tuple, int] = {}
         self._action_retry_at: dict[tuple, float] = {}
         self._next_item_action_at = 0.0
@@ -212,12 +212,12 @@ class Bot:
                 logging.WARNING,
                 "runtime.unavailable",
                 "Game target found, but action runtime is unavailable: %s "
-                "(board=%s, item actions=%s, board collections=%s, crate claims=%s, "
+                "(board=%s, item actions=%s, board interactions=%s, crate claims=%s, "
                 "shop orders=%s, inventory=%s).",
                 self._last_health.detail or "no diagnostic detail",
                 self._last_health.board_available,
                 self._last_health.item_drop_available,
-                self._last_health.collection_available,
+                self._last_health.interaction_available,
                 self._last_health.crate_spawn_available,
                 self._last_health.shop_available,
                 self._last_health.inventory_available,
@@ -231,10 +231,10 @@ class Bot:
                 logging.WARNING,
                 "runtime.partially_ready",
                 "Game runtime is partially ready: %s "
-                "(item actions=%s, board collections=%s, crate claims=%s, shop orders=%s).",
+                "(item actions=%s, board interactions=%s, crate claims=%s, shop orders=%s).",
                 self._last_health.detail,
                 self._last_health.item_drop_available,
-                self._last_health.collection_available,
+                self._last_health.interaction_available,
                 self._last_health.crate_spawn_available,
                 self._last_health.shop_available,
                 scene_id=self._last_health.scene_id,
@@ -248,7 +248,7 @@ class Bot:
             self._blueprint_policy_keys = {
                 game_id: item.tier_policy_key for game_id, item in catalog.items.items()
             }
-            self._collectable_ids = catalog.collectable_ids
+            self._direct_interaction_ids = catalog.direct_interaction_ids
         except (CatalogUnavailableError, OSError, ValueError) as exc:
             log_event(
                 logger,
@@ -358,8 +358,8 @@ class Bot:
             board.set_cell(coord, Cell(_LIVE_STATE_CELL_KIND[blueprint_id]))
         elif blueprint_id in _STRUCTURE_BLUEPRINTS:
             board.set_cell(coord, Cell(CellKind.STRUCTURE))
-        elif blueprint_id in self._collectable_ids and state.collectable:
-            board.set_cell(coord, Cell(CellKind.COLLECTABLE))
+        elif blueprint_id in self._direct_interaction_ids and state.collectable:
+            board.set_cell(coord, Cell(CellKind.INTERACTABLE))
         else:
             board.set_cell(coord, Cell(CellKind.OTHER))
 
@@ -371,9 +371,9 @@ class Bot:
     _ITEM_PRIORITY = {
         ("animals", None): 0,
         ("crops", None): 0,
-        ("building_resources", "stone"): 1,
-        ("building_resources", "wood"): 1,
-        ("building_resources", "tool"): 1,
+        ("resources", "stone"): 1,
+        ("resources", "wood"): 1,
+        ("resources", "tool"): 1,
         ("currencies", "coin"): 2,
         ("currencies", "gem"): 3,
     }
@@ -508,9 +508,9 @@ class Bot:
         }
 
     @staticmethod
-    def _collection_event_context(action: _CollectAction) -> dict[str, object]:
+    def _interaction_event_context(action: _InteractionAction) -> dict[str, object]:
         return {
-            "collection_kind": action.kind.value,
+            "interaction_kind": action.kind.value,
             "coord": action.coord,
             "blueprint_id": action.blueprint_id,
             "object_id": action.object_id,
@@ -522,28 +522,28 @@ class Bot:
             state.blueprint_id is not None and state.producer_kind is not None and state.tier == 4
         )
 
-    def _collection_enabled(self, blueprint_id: str) -> bool:
+    def _interaction_enabled(self, blueprint_id: str) -> bool:
         policy_key = self._blueprint_policy_keys.get(blueprint_id)
         if policy_key is None:
             return False
         policy = settings.item_policy(policy_key)
-        return policy.enabled and policy.collect
+        return policy.enabled and policy.interact
 
-    def _collection_actions(
+    def _interaction_actions(
         self,
-    ) -> tuple[list[_CollectAction], list[_CollectAction], list[_CollectAction]]:
-        immediate: list[_CollectAction] = []
-        depleted: list[_CollectAction] = []
-        ready: list[_CollectAction] = []
+    ) -> tuple[list[_InteractionAction], list[_InteractionAction], list[_InteractionAction]]:
+        immediate: list[_InteractionAction] = []
+        depleted: list[_InteractionAction] = []
+        ready: list[_InteractionAction] = []
         for coord, state in sorted(self._live_cells.items()):
             if state.blueprint_id is None:
                 continue
-            if not self._collection_enabled(state.blueprint_id):
+            if not self._interaction_enabled(state.blueprint_id):
                 continue
-            if state.collectable and state.blueprint_id in self._collectable_ids:
+            if state.collectable and state.blueprint_id in self._direct_interaction_ids:
                 immediate.append(
-                    _CollectAction(
-                        CollectionTargetKind.IMMEDIATE,
+                    _InteractionAction(
+                        InteractionTargetKind.IMMEDIATE,
                         coord,
                         state.blueprint_id,
                         state.object_id,
@@ -554,8 +554,8 @@ class Bot:
                 continue
             if state.producer_state is ProducerState.DEPLETED:
                 depleted.append(
-                    _CollectAction(
-                        CollectionTargetKind.DEPLETED_PRODUCER,
+                    _InteractionAction(
+                        InteractionTargetKind.DEPLETED_PRODUCER,
                         coord,
                         state.blueprint_id,
                         state.object_id,
@@ -564,8 +564,8 @@ class Bot:
                 )
             elif state.producer_state is ProducerState.READY:
                 ready.append(
-                    _CollectAction(
-                        CollectionTargetKind.PRODUCER,
+                    _InteractionAction(
+                        InteractionTargetKind.PRODUCER,
                         coord,
                         state.blueprint_id,
                         state.object_id,
@@ -581,16 +581,16 @@ class Bot:
         return sum(
             self._is_recognized_tier_four_producer(state)
             and state.blueprint_id is not None
-            and self._collection_enabled(state.blueprint_id)
+            and self._interaction_enabled(state.blueprint_id)
             and state.producer_state is ProducerState.COOLING
             for state in self._live_cells.values()
         )
 
-    def _collection_succeeded(self, pending: _PendingCollection) -> bool:
+    def _interaction_succeeded(self, pending: _PendingInteraction) -> bool:
         current = self._live_cells.get(pending.action.coord)
-        if pending.action.kind is CollectionTargetKind.IMMEDIATE:
+        if pending.action.kind is InteractionTargetKind.IMMEDIATE:
             return current is None or current.object_id != pending.action.object_id
-        if pending.action.kind is CollectionTargetKind.PRODUCER:
+        if pending.action.kind is InteractionTargetKind.PRODUCER:
             return (
                 current is None
                 or current.object_id != pending.action.object_id
@@ -602,8 +602,8 @@ class Bot:
             or current.producer_state is not ProducerState.DEPLETED
         )
 
-    def _verify_pending_collection(self, health: RuntimeHealth) -> bool:
-        pending = self._pending_collection
+    def _verify_pending_interaction(self, health: RuntimeHealth) -> bool:
+        pending = self._pending_interaction
         if pending is None:
             return True
         now = time.monotonic()
@@ -611,37 +611,37 @@ class Bot:
         if not health.heartbeat_advancing:
             if age >= _ACTION_SETTLE_SECONDS:
                 self._report_wait(
-                    "submitted board collection is pending while the game heartbeat is frozen",
-                    **self._collection_event_context(pending.action),
+                    "submitted board interaction is pending while the game heartbeat is frozen",
+                    **self._interaction_event_context(pending.action),
                 )
             return False
         if health.scene_id != pending.scene_id and not pending.scene_change_logged:
             log_event(
                 logger,
                 logging.WARNING,
-                "collection.pending_scene_changed",
-                "Runtime scene changed from %s to %s while a board collection was pending; "
+                "interaction.pending_scene_changed",
+                "Runtime scene changed from %s to %s while a board interaction was pending; "
                 "verifying against the reloaded board.",
                 pending.scene_id,
                 health.scene_id,
                 previous_scene_id=pending.scene_id,
                 scene_id=health.scene_id,
-                **self._collection_event_context(pending.action),
+                **self._interaction_event_context(pending.action),
             )
             pending.scene_change_logged = True
-        if self._collection_succeeded(pending):
-            self._pending_collection = None
+        if self._interaction_succeeded(pending):
+            self._pending_interaction = None
             self._last_wait_reason = None
             self._last_idle_reason = None
             log_event(
                 logger,
                 logging.DEBUG,
-                "collection.confirmed",
-                "%s collection confirmed at %s.",
+                "interaction.confirmed",
+                "%s interaction confirmed at %s.",
                 pending.action.kind.value.replace("-", " ").title(),
                 pending.action.coord,
                 elapsed_seconds=age,
-                **self._collection_event_context(pending.action),
+                **self._interaction_event_context(pending.action),
             )
             return True
         current = self._live_cells.get(pending.action.coord)
@@ -653,40 +653,40 @@ class Bot:
         if health.item_action_busy or (not settled and age < _ACTION_MAX_PENDING_SECONDS):
             if age >= _ACTION_SETTLE_SECONDS:
                 self._report_wait(
-                    "the submitted board collection is still resolving",
-                    **self._collection_event_context(pending.action),
+                    "the submitted board interaction is still resolving",
+                    **self._interaction_event_context(pending.action),
                 )
             return False
-        self._pending_collection = None
-        self._next_collection_action_at = now + _ACTION_RETRY_SECONDS
+        self._pending_interaction = None
+        self._next_interaction_action_at = now + _ACTION_RETRY_SECONDS
         log_event(
             logger,
             logging.WARNING,
-            "collection.not_accepted",
-            "%s collection at %s was not accepted after %.1fs; replanning.",
+            "interaction.not_accepted",
+            "%s interaction at %s was not accepted after %.1fs; replanning.",
             pending.action.kind.value.replace("-", " ").title(),
             pending.action.coord,
             age,
             elapsed_seconds=age,
-            **self._collection_event_context(pending.action),
+            **self._interaction_event_context(pending.action),
         )
         return True
 
-    def _submit_collection(self, action: _CollectAction, health: RuntimeHealth) -> bool:
-        if self._pending_action is not None or self._pending_collection is not None:
+    def _submit_interaction(self, action: _InteractionAction, health: RuntimeHealth) -> bool:
+        if self._pending_action is not None or self._pending_interaction is not None:
             return False
         log_event(
             logger,
             logging.DEBUG,
-            "collection.planned",
-            "Planned %s collection for %s at %s.",
+            "interaction.planned",
+            "Planned %s interaction for %s at %s.",
             action.kind.value.replace("-", " "),
             action.blueprint_id,
             action.coord,
             empty_cells=len(self.board.find_empty()),
-            **self._collection_event_context(action),
+            **self._interaction_event_context(action),
         )
-        result = self.runtime.submit_board_collection(
+        result = self.runtime.submit_board_interaction(
             action.coord,
             action.kind,
             action.blueprint_id,
@@ -695,7 +695,7 @@ class Bot:
         if result.status is ActionStatus.SUBMITTED:
             submitted_at = time.monotonic()
             initial_state = self._live_cells[action.coord]
-            self._pending_collection = _PendingCollection(
+            self._pending_interaction = _PendingInteraction(
                 action,
                 initial_state,
                 health.scene_id,
@@ -707,34 +707,34 @@ class Bot:
             log_event(
                 logger,
                 logging.DEBUG,
-                "collection.submitted",
-                "Submitted %s collection for %s at %s; awaiting verification.",
+                "interaction.submitted",
+                "Submitted %s interaction for %s at %s; awaiting verification.",
                 action.kind.value.replace("-", " "),
                 action.blueprint_id,
                 action.coord,
                 scene_id=health.scene_id,
-                **self._collection_event_context(action),
+                **self._interaction_event_context(action),
             )
             return True
         if result.status is ActionStatus.BUSY:
             self._report_wait(
                 "the game is finishing another board interaction",
                 status=result.status.value,
-                **self._collection_event_context(action),
+                **self._interaction_event_context(action),
             )
         elif result.status is ActionStatus.UNAVAILABLE:
             self._report_wait(
-                result.detail or "board collection handler unavailable",
+                result.detail or "board interaction handler unavailable",
                 status=result.status.value,
-                **self._collection_event_context(action),
+                **self._interaction_event_context(action),
             )
         else:
-            self._next_collection_action_at = time.monotonic() + _ACTION_RETRY_SECONDS
+            self._next_interaction_action_at = time.monotonic() + _ACTION_RETRY_SECONDS
             log_event(
                 logger,
                 logging.WARNING,
-                "collection.rejected",
-                "%s collection for %s at %s could not be submitted: %s (%s).",
+                "interaction.rejected",
+                "%s interaction for %s at %s could not be submitted: %s (%s).",
                 action.kind.value.replace("-", " ").title(),
                 action.blueprint_id,
                 action.coord,
@@ -742,7 +742,7 @@ class Bot:
                 result.detail or "no detail",
                 status=result.status.value,
                 detail=result.detail,
-                **self._collection_event_context(action),
+                **self._interaction_event_context(action),
             )
         return False
 
@@ -844,7 +844,7 @@ class Bot:
         return True
 
     def _submit_shop_action(self, action: ShopAction, health: RuntimeHealth) -> bool:
-        if any((self._pending_action, self._pending_collection, self._pending_shop_action)):
+        if any((self._pending_action, self._pending_interaction, self._pending_shop_action)):
             return False
         log_event(
             logger,
@@ -1044,7 +1044,7 @@ class Bot:
         return True
 
     def _submit_merge(self, action: MergeAction, health: RuntimeHealth) -> bool:
-        if self._pending_action is not None or self._pending_collection is not None:
+        if self._pending_action is not None or self._pending_interaction is not None:
             return False
         result = self.runtime.submit_item_drop(action.start, action.end)
         if result.status is ActionStatus.SUBMITTED:
@@ -1105,23 +1105,23 @@ class Bot:
             )
         return False
 
-    def _step_collect_tiles(
+    def _step_interact_tiles(
         self,
         health: RuntimeHealth,
-        immediate: list[_CollectAction],
-        depleted: list[_CollectAction],
-        ready: list[_CollectAction],
+        immediate: list[_InteractionAction],
+        depleted: list[_InteractionAction],
+        ready: list[_InteractionAction],
     ) -> None:
-        if time.monotonic() < self._next_collection_action_at:
+        if time.monotonic() < self._next_interaction_action_at:
             return
         if immediate:
-            self._submit_collection(immediate[0], health)
+            self._submit_interaction(immediate[0], health)
             return
         empty_count = len(self.board.find_empty())
         for action in depleted:
             required = 1 if action.producer_kind is ProducerKind.CROP else 0
             if empty_count >= required:
-                self._submit_collection(action, health)
+                self._submit_interaction(action, health)
                 return
         if depleted:
             self._set_phase(Phase.MERGE)
@@ -1130,11 +1130,11 @@ class Bot:
             else:
                 self._report_wait("one open cell is required to retire a depleted crop")
             return
-        if ready and empty_count >= settings.producer_collect_min_empty_cells:
-            self._submit_collection(ready[0], health)
+        if ready and empty_count >= settings.producer_interact_min_empty_cells:
+            self._submit_interaction(ready[0], health)
             return
         if ready:
-            required = settings.producer_collect_min_empty_cells
+            required = settings.producer_interact_min_empty_cells
             self._set_phase(Phase.MERGE)
             if health.item_drop_available:
                 self._step_merge(health, True, required_empty_cells=required)
@@ -1237,7 +1237,7 @@ class Bot:
             required_empty_cells is not None and len(self.board.find_empty()) < required_empty_cells
         ):
             self._report_wait(
-                f"a producer collection needs {required_empty_cells} open cells and no merge "
+                f"a producer interaction needs {required_empty_cells} open cells and no merge "
                 "can currently create more space",
                 empty_cells=len(self.board.find_empty()),
                 required_empty_cells=required_empty_cells,
@@ -1300,7 +1300,7 @@ class Bot:
                 not health.available
                 or (self.phase is Phase.MERGE and not health.item_drop_available)
                 or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
-                or (self.phase is Phase.COLLECT_TILES and not health.collection_available)
+                or (self.phase is Phase.INTERACT_TILES and not health.interaction_available)
                 or (self.phase is Phase.SHOPS and not health.shop_available)
             )
             if capability_missing:
@@ -1313,7 +1313,7 @@ class Bot:
                     not health.available
                     or (self.phase is Phase.MERGE and not health.item_drop_available)
                     or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
-                    or (self.phase is Phase.COLLECT_TILES and not health.collection_available)
+                    or (self.phase is Phase.INTERACT_TILES and not health.interaction_available)
                     or (self.phase is Phase.SHOPS and not health.shop_available)
                 )
                 if capability_missing:
@@ -1338,7 +1338,7 @@ class Bot:
             return
         if not self._verify_pending_action(health):
             return
-        if not self._verify_pending_collection(health):
+        if not self._verify_pending_interaction(health):
             return
         shop_policy_enabled = self._shop_policy().may_enable_orders
         shop_orders: tuple[ShopOrder, ...] | None = ()
@@ -1369,14 +1369,14 @@ class Bot:
             self._report_wait(f"game heartbeat is not advancing{age}")
             return
         board_needs_merge = self._board_needs_merge()
-        immediate, depleted, ready = self._collection_actions()
+        immediate, depleted, ready = self._interaction_actions()
         if immediate or depleted or ready:
             self._last_cooling_producer_count = None
-            self._set_phase(Phase.COLLECT_TILES)
-            if not health.collection_available:
-                self._report_wait("board collection capability unavailable")
+            self._set_phase(Phase.INTERACT_TILES)
+            if not health.interaction_available:
+                self._report_wait("board interaction capability unavailable")
                 return
-            self._step_collect_tiles(health, immediate, depleted, ready)
+            self._step_interact_tiles(health, immediate, depleted, ready)
             return
         cooling_producers = self._cooling_producer_count()
         if cooling_producers and cooling_producers != self._last_cooling_producer_count:
@@ -1392,7 +1392,7 @@ class Bot:
         if shop_policy_enabled and shop_orders is not None:
             if self._step_shops(health, shop_orders, board_needs_merge):
                 return
-        if self.phase is Phase.COLLECT_TILES:
+        if self.phase is Phase.INTERACT_TILES:
             self._set_phase(Phase.CLAIM_CRATES)
         if self.phase is Phase.CLAIM_CRATES:
             self._step_claim_crates(board_needs_merge)

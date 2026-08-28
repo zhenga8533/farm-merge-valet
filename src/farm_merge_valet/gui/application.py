@@ -749,7 +749,8 @@ class MainWindow(QMainWindow):
 
     def _finish_quit(self) -> None:
         self.tray.hide()
-        self.overlay.close()
+        self.overlay.hide()
+        self.overlay.deleteLater()
         self.close()
         self.deleteLater()
         QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

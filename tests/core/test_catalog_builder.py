@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from farm_merge_valet.core.catalog_builder import build_item_catalog
-from farm_merge_valet.core.item_catalog import TileActionMode
+from farm_merge_valet.core.item_catalog import TileInteractionMode
 
 
 def _metadata(
@@ -29,7 +29,7 @@ def _metadata(
     }
 
 
-def test_catalog_assigns_tile_action_modes_without_enabling_unsafe_clicks() -> None:
+def test_catalog_assigns_tile_interaction_modes_without_enabling_unsafe_clicks() -> None:
     catalog = build_item_catalog(
         {
             "milk": _metadata(components=["ingredient"], alias="ingredient_milk", collectable=True),
@@ -60,16 +60,22 @@ def test_catalog_assigns_tile_action_modes_without_enabling_unsafe_clicks() -> N
             "reward_crate_bronze": _metadata(
                 components=["crateReward"], alias="icon_lootcrate_bronze"
             ),
+            "source_only": _metadata(components=["source"], alias="obj_source"),
         }
     )
 
-    assert catalog.items["milk"].tile_action_mode is TileActionMode.COLLECT
-    assert catalog.items["ticket"].tile_action_mode is TileActionMode.COLLECT
-    assert catalog.items["crate_1"].tile_action_mode is TileActionMode.COLLECT
-    assert catalog.items["coin_1"].tile_action_mode is TileActionMode.COLLECT_OPT_IN
-    assert catalog.items["upgrade_card_1"].tile_action_mode is TileActionMode.UPGRADE
-    assert catalog.items["reward_crate_bronze"].tile_action_mode is TileActionMode.OPEN_REQUIREMENT
-    assert catalog.collectable_ids == frozenset({"milk", "ticket", "crate_1", "coin_1"})
+    assert catalog.items["milk"].tile_interaction_mode is TileInteractionMode.DIRECT
+    assert catalog.items["ticket"].tile_interaction_mode is TileInteractionMode.DIRECT
+    assert catalog.items["crate_1"].tile_interaction_mode is TileInteractionMode.DIRECT
+    assert catalog.items["coin_1"].tile_interaction_mode is TileInteractionMode.DIRECT_OPT_IN
+    assert catalog.items["upgrade_card_1"].tile_interaction_mode is TileInteractionMode.UPGRADE
+    assert (
+        catalog.items["reward_crate_bronze"].tile_interaction_mode
+        is TileInteractionMode.OPEN_REQUIREMENT
+    )
+    assert catalog.items["source_only"].tile_interaction_mode is TileInteractionMode.NONE
+    assert "source-clearable" not in catalog.items["source_only"].traits
+    assert catalog.direct_interaction_ids == frozenset({"milk", "ticket", "crate_1", "coin_1"})
 
 
 def test_catalog_preserves_shop_recipe_cost_duration_and_rewards() -> None:
@@ -150,11 +156,11 @@ def test_catalog_keeps_display_labels_separate_from_runtime_and_asset_names() ->
 
     first = catalog.items["stone_1"]
     assert first.family_id == "stone"
-    assert first.policy_key == "building_resources/stone"
+    assert first.policy_key == "resources/stone"
     assert first.display_name == "Stone"
     assert first.asset_alias == "obj_nature_brickpile_00"
-    assert first.asset_path == "building_resources/stone/stone_1.png"
-    assert first.category == "building_resources"
+    assert first.asset_path == "resources/stone/stone_1.png"
+    assert first.category == "resources"
     assert "shovelable" in first.capabilities
 
 
@@ -199,6 +205,7 @@ def test_catalog_policy_keys_separate_producers_from_their_products() -> None:
     assert catalog.items["cow_1"].policy_key == "animals/cow"
     assert catalog.items["cow_1"].upgrade_target_id == "milk"
     assert catalog.items["milk"].policy_key == "ingredients/milk"
+    assert "unlinked" not in catalog.items["milk"].traits
 
 
 def test_catalog_classifies_supply_crate_tiers_without_component_metadata() -> None:
@@ -213,7 +220,7 @@ def test_catalog_classifies_supply_crate_tiers_without_component_metadata() -> N
         }
     )
 
-    assert catalog.items["crate_1"].category == "supply_crates"
+    assert catalog.items["crate_1"].category == "resources"
 
 
 def test_catalog_preserves_unknown_runtime_content_for_review() -> None:
@@ -250,3 +257,132 @@ def test_catalog_keeps_game_family_ids_but_corrects_display_labels() -> None:
     item = catalog.items["decorative_picknicktable"]
     assert item.family_id == "decorative_picknicktable"
     assert item.display_name == "Picnic Table"
+
+
+def test_catalog_classifies_event_content_by_function_and_adds_event_trait() -> None:
+    catalog = build_item_catalog(
+        {
+            "islandflower_1": _metadata(
+                components=["mergeable"],
+                alias="obj_island_flower_00",
+                graph="islandflower",
+                tier=1,
+                target="islandflower_2",
+                mergeable=True,
+            ),
+            "islandflower_2": _metadata(
+                components=[],
+                alias="obj_island_flower_01",
+                graph="islandflower",
+                tier=2,
+            ),
+            "islandbush_small": _metadata(
+                components=["mapSource", "source"],
+                alias="obj_island_bush_small",
+            ),
+            "golden_christmas_tree_1": _metadata(
+                components=["currency"],
+                alias="obj_golden_tree_00",
+                graph="golden_christmas_tree",
+                tier=1,
+            ),
+        }
+    )
+
+    flower = catalog.items["islandflower_1"]
+    bush = catalog.items["islandbush_small"]
+    currency = catalog.items["golden_christmas_tree_1"]
+    assert (flower.category, flower.display_name) == ("resources", "Island Flower")
+    assert bush.category == "obstacles"
+    assert currency.category == "currencies"
+    assert all("event" in item.traits for item in (flower, bush, currency))
+
+
+def test_catalog_splits_disconnected_nodes_from_a_merge_family() -> None:
+    catalog = build_item_catalog(
+        {
+            "coin_1": _metadata(
+                components=["currency"],
+                alias="obj_coin_00",
+                graph="coin",
+                tier=1,
+                target="coin_2",
+                mergeable=True,
+            ),
+            "coin_2": _metadata(components=["currency"], alias="obj_coin_01", graph="coin", tier=2),
+            "coin_11": _metadata(
+                components=["currency"], alias="obj_coin_10", graph="coin", tier=11
+            ),
+        }
+    )
+
+    assert catalog.items["coin_1"].presentation_key == "currencies/coin"
+    assert catalog.items["coin_2"].presentation_key == "currencies/coin"
+    extra = catalog.items["coin_11"]
+    assert extra.presentation_key == "currencies/coin_11"
+    assert "unlinked" in extra.traits
+
+
+def test_catalog_groups_obstacle_sizes_and_mobility_variants() -> None:
+    catalog = build_item_catalog(
+        {
+            "rock_small": _metadata(components=["mapSource", "source"], alias="obj_rock_small"),
+            "rock_small_moveable": _metadata(
+                components=["mapSource", "source", "movable"], alias="obj_rock_small"
+            ),
+            "rock_large": _metadata(components=["mapSource", "source"], alias="obj_rock_large"),
+        }
+    )
+
+    rows = tuple(catalog.items.values())
+    assert {item.presentation_key for item in rows} == {"obstacles/rock"}
+    assert {item.presentation_group_name for item in rows} == {"Rocks"}
+    assert {item.variant_label for item in rows} == {
+        "Small · Fixed",
+        "Small · Movable",
+        "Large",
+    }
+    assert all("source-clearable" in item.traits for item in rows)
+    assert all(item.tile_interaction_mode is TileInteractionMode.CLEAR for item in rows)
+
+
+def test_catalog_groups_non_mergeable_reward_tiers_without_name_matching() -> None:
+    catalog = build_item_catalog(
+        {
+            "reward_crate_golden_pumpkin_1": _metadata(
+                components=["crateReward"],
+                alias="icon_pumpkin",
+                graph="reward_crate_golden_pumpkin",
+                tier=1,
+            ),
+            "reward_crate_golden_pumpkin_2": _metadata(
+                components=["crateReward"],
+                alias="icon_pumpkin",
+                graph="reward_crate_golden_pumpkin",
+                tier=2,
+            ),
+        }
+    )
+
+    rows = tuple(catalog.items.values())
+    assert {item.presentation_key for item in rows} == {"rewards/reward_crate_golden_pumpkin"}
+    assert all("event" in item.traits and "container" in item.traits for item in rows)
+
+
+def test_catalog_propagates_a_terminal_structure_role_across_its_merge_chain() -> None:
+    catalog = build_item_catalog(
+        {
+            "future_structure_1": _metadata(
+                components=["mergeable"],
+                alias="obj_future_structure_00",
+                target="future_structure",
+                mergeable=True,
+            ),
+            "future_structure": _metadata(components=["building"], alias="obj_future_structure_01"),
+        }
+    )
+
+    assert {item.category for item in catalog.items.values()} == {"structures"}
+    assert {item.presentation_key for item in catalog.items.values()} == {
+        "structures/future_structure"
+    }

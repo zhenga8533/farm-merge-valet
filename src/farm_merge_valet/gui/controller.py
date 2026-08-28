@@ -104,11 +104,12 @@ class ApplicationController(QObject):
         self._shutdown_deadline: float | None = None
         self._unsubscribed = False
         self.hotkeys = HotkeyManager()
+        self.hotkeys.setParent(self)
         self.hotkeys.start_stop_requested.connect(self.toggle_running)
         self.hotkeys.pause_resume_requested.connect(self.toggle_pause)
         self.hotkeys.quit_requested.connect(self.application_quit_requested)
         self.hotkeys.registration_failed.connect(self._hotkey_registration_failed)
-        self._bridge = _LogBridge()
+        self._bridge = _LogBridge(self)
         self._bridge.record_received.connect(self._on_record)
         self.log_handler = GuiEventHandler(self._bridge)
         self._unsubscribe = store.subscribe(self._config_updated)
@@ -500,9 +501,7 @@ class ApplicationController(QObject):
                     )
                 if browser_status.game_loaded:
                     if not discovery_announced:
-                        self.game_sync_status_changed.emit(
-                            "Discovering items, shops, and recipes…"
-                        )
+                        self.game_sync_status_changed.emit("Discovering items, shops, and recipes…")
                         discovery_announced = True
                     try:
                         runtime.discover()
@@ -637,7 +636,7 @@ class ApplicationController(QObject):
             updates["last_activity"] = message
         elif event == "planner.phase_changed":
             updates["phase"] = str(context.get("phase", "—")).replace("_", " ").title()
-        elif event in {"item_action.confirmed", "collection.confirmed", "crate.claim_completed"}:
+        elif event in {"item_action.confirmed", "interaction.confirmed", "crate.claim_completed"}:
             updates["last_activity"] = message
         elif record.levelno >= logging.ERROR:
             updates["last_activity"] = message
@@ -673,6 +672,7 @@ class ApplicationController(QObject):
             self._unsubscribe()
             self._unsubscribed = True
         self.shutdown_complete.emit()
+        self.deleteLater()
 
     def _set_status(self, **changes: object) -> None:
         values = vars(self.status) | changes

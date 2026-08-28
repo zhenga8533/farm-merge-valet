@@ -6,9 +6,10 @@ import json
 import os
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from threading import RLock
+from types import MappingProxyType
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
@@ -46,7 +47,7 @@ class ItemPolicy(BaseModel):
     enabled: bool = True
     merge: bool = True
     prefer_merge_five: bool = True
-    collect: bool = False
+    interact: bool = False
     always_remove: bool = False
 
 
@@ -55,16 +56,40 @@ class ItemPolicyOverride(BaseModel):
     enabled: bool | None = None
     merge: bool | None = None
     prefer_merge_five: bool | None = None
-    collect: bool | None = None
+    interact: bool | None = None
     always_remove: bool | None = None
 
 
-def _item_category_defaults() -> dict[str, ItemPolicyOverride]:
-    return {"ingredients": ItemPolicyOverride(collect=True)}
+_INTERACT_BY_DEFAULT = ItemPolicyOverride(interact=True)
+_RECOMMENDED_ITEM_CATEGORY_DEFAULTS: Mapping[str, ItemPolicyOverride] = MappingProxyType(
+    {
+        "animals": _INTERACT_BY_DEFAULT,
+        "crops": _INTERACT_BY_DEFAULT,
+        "ingredients": _INTERACT_BY_DEFAULT,
+        "obstacles": _INTERACT_BY_DEFAULT,
+    }
+)
+_RECOMMENDED_ITEM_DEFAULTS: Mapping[str, ItemPolicyOverride] = MappingProxyType(
+    {
+        "currencies/ticket": _INTERACT_BY_DEFAULT,
+        "resources/crate": _INTERACT_BY_DEFAULT,
+        "upgrade_cards/upgrade_card/tier/1": _INTERACT_BY_DEFAULT,
+        "upgrade_cards/upgrade_card/tier/3": _INTERACT_BY_DEFAULT,
+    }
+)
 
 
-def _item_specific_defaults() -> dict[str, ItemPolicyOverride]:
-    return {"currencies/ticket": ItemPolicyOverride(collect=True)}
+def _item_policy_resolution_keys(policy_key: str) -> tuple[str, ...]:
+    family_key = item_family_policy_key(policy_key)
+    base_key = item_base_policy_key(family_key)
+    keys = [base_key]
+    if policy_key != family_key:
+        keys.append(f"{base_key}{policy_key.removeprefix(family_key)}")
+    if family_key != base_key:
+        keys.append(family_key)
+    if policy_key not in keys:
+        keys.append(policy_key)
+    return tuple(keys)
 
 
 class AppConfig(BaseModel):
@@ -84,22 +109,18 @@ class AppConfig(BaseModel):
     atlas_cache_dir: Path = Field(default_factory=lambda: user_cache_root() / "atlases")
 
     merge_empty_cell_reserve: int = Field(default=1, ge=0, le=50)
-    producer_collect_min_empty_cells: int = Field(default=4, ge=1, le=50)
+    producer_interact_min_empty_cells: int = Field(default=4, ge=1, le=50)
     prefer_merge_five: bool = True
     item_policy_defaults: ItemPolicy = Field(default_factory=ItemPolicy)
-    item_category_defaults: dict[str, ItemPolicyOverride] = Field(
-        default_factory=_item_category_defaults
-    )
-    item_default_overrides: dict[str, ItemPolicyOverride] = Field(
-        default_factory=_item_specific_defaults
-    )
+    item_category_defaults: dict[str, ItemPolicyOverride] = Field(default_factory=dict)
+    item_default_overrides: dict[str, ItemPolicyOverride] = Field(default_factory=dict)
     item_policy_overrides: dict[str, ItemPolicyOverride] = Field(default_factory=dict)
     shop_default_enabled: bool = True
     recipe_default_enabled: bool = True
     shop_overrides: dict[str, bool] = Field(default_factory=dict)
     recipe_overrides: dict[str, bool] = Field(default_factory=dict)
     items_sort_column: Literal[
-        "item", "category", "enabled", "merge", "merge_five", "collect", "remove"
+        "item", "category", "enabled", "merge", "merge_five", "interact", "remove"
     ] = "item"
     items_sort_descending: bool = False
     shops_sort_column: Literal["item", "type", "enabled"] = "item"
@@ -208,31 +229,28 @@ class AppConfig(BaseModel):
         return self
 
     def item_policy_default(self, policy_key: str, category: str | None = None) -> ItemPolicy:
-        policy_key = item_base_policy_key(item_family_policy_key(policy_key))
+        resolution_keys = _item_policy_resolution_keys(policy_key)
+        base_key = resolution_keys[0]
         values = self.item_policy_defaults.model_dump()
         if not self.prefer_merge_five:
             values["prefer_merge_five"] = False
-        category_key = category or policy_key.partition("/")[0]
+        category_key = category or base_key.partition("/")[0]
+        if recommended := _RECOMMENDED_ITEM_CATEGORY_DEFAULTS.get(category_key):
+            values.update(recommended.model_dump(exclude_none=True))
         if category_override := self.item_category_defaults.get(category_key):
             values.update(category_override.model_dump(exclude_none=True))
-        if item_default := self.item_default_overrides.get(policy_key):
-            values.update(item_default.model_dump(exclude_none=True))
+        for key in resolution_keys:
+            if recommended := _RECOMMENDED_ITEM_DEFAULTS.get(key):
+                values.update(recommended.model_dump(exclude_none=True))
+            if item_default := self.item_default_overrides.get(key):
+                values.update(item_default.model_dump(exclude_none=True))
         return ItemPolicy.model_validate(values)
 
     def item_policy(self, policy_key: str, category: str | None = None) -> ItemPolicy:
-        family_key = item_family_policy_key(policy_key)
-        base_key = item_base_policy_key(family_key)
-        values = self.item_policy_default(base_key, category).model_dump()
-        if override := self.item_policy_overrides.get(base_key):
-            values.update(override.model_dump(exclude_none=True))
-        if family_key != base_key and (
-            variant_override := self.item_policy_overrides.get(family_key)
-        ):
-            values.update(variant_override.model_dump(exclude_none=True))
-        if policy_key != family_key and (
-            tier_override := self.item_policy_overrides.get(policy_key)
-        ):
-            values.update(tier_override.model_dump(exclude_none=True))
+        values = self.item_policy_default(policy_key, category).model_dump()
+        for key in _item_policy_resolution_keys(policy_key):
+            if override := self.item_policy_overrides.get(key):
+                values.update(override.model_dump(exclude_none=True))
         return ItemPolicy.model_validate(values)
 
 
@@ -341,7 +359,7 @@ class ConfigStore:
 
 
 class ConfigProxy:
-    """Live read-through facade for legacy runtime modules during GUI updates."""
+    """Live read-through facade for shared runtime consumers during GUI updates."""
 
     def __init__(self, config: AppConfig) -> None:
         object.__setattr__(self, "_lock", RLock())

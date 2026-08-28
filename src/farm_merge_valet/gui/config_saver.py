@@ -85,6 +85,7 @@ class ConfigSaver(QObject):
         self._active = snapshot
         future = self._executor.submit(self._store.persist, snapshot)
         self._future = future
+
         def complete(completed: Future[AppConfig]) -> None:
             self._bridge.finished.emit(generation, completed, snapshot)
 
