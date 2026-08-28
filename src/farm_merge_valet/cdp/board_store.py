@@ -10,17 +10,13 @@ reads. The same map pass also retains the live supply-crate inventory item.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from threading import Event
-from typing import Any
 
-from farm_merge_valet.cdp.client import (
-    CdpConnectionError,
-    _command_target,
-    evaluate,
-    run_game_frame_operation,
-)
-from farm_merge_valet.core.board import GridCoord, ProducerKind, ProducerState
+from farm_merge_valet.automation.runtime import LiveCellState as _LiveCellState
+from farm_merge_valet.cdp.evaluation import evaluate
+from farm_merge_valet.cdp.targets import run_game_frame_operation
+from farm_merge_valet.cdp.transport import CdpConnectionError, _command_target
+from farm_merge_valet.core.items import GridCoord, ProducerKind, ProducerState
 
 # `_content` holds the cell's Pixi display object and `_neighbors` its
 # adjacency links. The size bounds and keys distinguish the cell map from
@@ -201,22 +197,6 @@ _READ_EXPRESSION = """
 """
 
 
-@dataclass(frozen=True)
-class LiveCellState:
-    """Authoritative content state for one game-board coordinate."""
-
-    has_content: bool
-    blueprint_id: str | None
-    object_id: int | None = None
-    tier: int | None = None
-    collectable: bool = False
-    collectable_ingredient: bool = False
-    producer_kind: ProducerKind | None = None
-    producer_state: ProducerState | None = None
-    item_variant: str | None = None
-    behavior_names: frozenset[str] = frozenset()
-
-
 def _arm_board_store_target(ws_url: str, cancel_event: Event | None) -> str:
     _command_target(ws_url, "Runtime.enable", cancel_event=cancel_event)
     proto = _command_target(
@@ -278,42 +258,6 @@ def _arm_board_store_target(ws_url: str, cancel_event: Event | None) -> str:
             pass
 
 
-def _inspect_board_maps_target(ws_url: str) -> list[dict[str, Any]]:
-    _command_target(ws_url, "Runtime.enable")
-    proto = _command_target(
-        ws_url, "Runtime.evaluate", {"expression": "Map.prototype", "returnByValue": False}
-    )
-    proto_object_id = proto.get("result", {}).get("objectId")
-    if not proto_object_id:
-        return []
-    instances = _command_target(
-        ws_url, "Runtime.queryObjects", {"prototypeObjectId": proto_object_id}, timeout=30
-    )
-    instances_object_id = instances.get("objects", {}).get("objectId")
-    if not instances_object_id:
-        return []
-    try:
-        inspected = _command_target(
-            ws_url,
-            "Runtime.callFunctionOn",
-            {
-                "objectId": instances_object_id,
-                "functionDeclaration": _INSPECT_CELLS_MAPS_EXPRESSION,
-                "returnByValue": True,
-            },
-            timeout=30,
-        )
-        value = inspected.get("result", {}).get("value")
-        return value if isinstance(value, list) else []
-    finally:
-        try:
-            _command_target(
-                ws_url, "Runtime.releaseObject", {"objectId": instances_object_id}, timeout=1
-            )
-        except CdpConnectionError:
-            pass
-
-
 def arm_board_store(
     port: int, page_title: str | None = None, *, cancel_event: Event | None = None
 ) -> str:
@@ -333,15 +277,9 @@ def arm_board_store(
     )
 
 
-def inspect_board_maps(port: int, page_title: str | None = None) -> list[dict[str, Any]]:
-    """Return non-mutating summaries of every cell-shaped map in the game heap."""
-
-    return run_game_frame_operation(port, page_title, _inspect_board_maps_target)
-
-
 def read_board_state(
     port: int, page_title: str | None = None, *, cancel_event: Event | None = None
-) -> dict[GridCoord, LiveCellState] | None:
+) -> dict[GridCoord, _LiveCellState] | None:
     """Every cell's current content, straight from the game's live map.
 
     A cell with no `_content` is an available board slot. A present content
@@ -355,7 +293,7 @@ def read_board_state(
     raw = evaluate(port, _READ_EXPRESSION, page_title, cancel_event=cancel_event)
     if not isinstance(raw, list):
         return None
-    states: dict[GridCoord, LiveCellState] = {}
+    states: dict[GridCoord, _LiveCellState] = {}
     for entry in raw:
         if not isinstance(entry, dict):
             continue
@@ -380,7 +318,7 @@ def read_board_state(
             producer_state = None
         behavior_names = entry.get("behaviorNames")
         item_variant = entry.get("itemVariant")
-        states[(entry["column"], entry["row"])] = LiveCellState(
+        states[(entry["column"], entry["row"])] = _LiveCellState(
             has_content=entry.get("hasContent") is True,
             blueprint_id=blueprint_id if isinstance(blueprint_id, str) else None,
             object_id=object_id if isinstance(object_id, int) else None,

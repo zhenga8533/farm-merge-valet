@@ -1,0 +1,228 @@
+"""Validated application configuration models."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any, Literal, Self
+
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+
+from farm_merge_valet.config.hotkeys import normalize_hotkey
+from farm_merge_valet.config.paths import user_cache_root
+from farm_merge_valet.core.items import item_base_policy_key, item_family_policy_key
+
+CONFIG_SCHEMA_VERSION: Literal[1] = 1
+
+
+class ItemPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    enabled: bool = True
+    merge: bool = True
+    prefer_merge_five: bool = True
+    interact: bool = False
+    always_remove: bool = False
+
+
+class ItemPolicyOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    enabled: bool | None = None
+    merge: bool | None = None
+    prefer_merge_five: bool | None = None
+    interact: bool | None = None
+    always_remove: bool | None = None
+
+
+_INTERACT_BY_DEFAULT = ItemPolicyOverride(interact=True)
+_RECOMMENDED_ITEM_CATEGORY_DEFAULTS: Mapping[str, ItemPolicyOverride] = MappingProxyType(
+    {
+        "animals": _INTERACT_BY_DEFAULT,
+        "crops": _INTERACT_BY_DEFAULT,
+        "ingredients": _INTERACT_BY_DEFAULT,
+        "obstacles": _INTERACT_BY_DEFAULT,
+    }
+)
+_RECOMMENDED_ITEM_DEFAULTS: Mapping[str, ItemPolicyOverride] = MappingProxyType(
+    {
+        "currencies/ticket": _INTERACT_BY_DEFAULT,
+        "resources/crate": _INTERACT_BY_DEFAULT,
+        "upgrade_cards/upgrade_card/tier/1": _INTERACT_BY_DEFAULT,
+        "upgrade_cards/upgrade_card/tier/3": _INTERACT_BY_DEFAULT,
+    }
+)
+
+
+def _item_policy_resolution_keys(policy_key: str) -> tuple[str, ...]:
+    family_key = item_family_policy_key(policy_key)
+    base_key = item_base_policy_key(family_key)
+    keys = [base_key]
+    if policy_key != family_key:
+        keys.append(f"{base_key}{policy_key.removeprefix(family_key)}")
+    if family_key != base_key:
+        keys.append(family_key)
+    if policy_key not in keys:
+        keys.append(policy_key)
+    return tuple(keys)
+
+
+class AppConfig(BaseModel):
+    """Complete validated configuration snapshot used by the GUI and runtime."""
+
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    schema_version: Literal[1] = CONFIG_SCHEMA_VERSION
+    window_title: str = "r/FarmMergeValley"
+    browser: Literal["auto", "chrome", "edge", "brave", "chromium"] = "auto"
+    browser_executable: Path | None = None
+    browser_profile_dir: Path | None = None
+    browser_auto_launch: bool = True
+    game_url: str = "https://www.reddit.com/r/FarmMergeValley/"
+    cdp_port: int = Field(default=9222, ge=1, le=65535)
+    catalog_dir: Path = Field(default_factory=lambda: user_cache_root() / "catalog")
+    atlas_cache_dir: Path = Field(default_factory=lambda: user_cache_root() / "atlases")
+
+    merge_empty_cell_reserve: int = Field(default=1, ge=0, le=50)
+    producer_interact_min_empty_cells: int = Field(default=4, ge=1, le=50)
+    prefer_merge_five: bool = True
+    item_policy_defaults: ItemPolicy = Field(default_factory=ItemPolicy)
+    item_category_defaults: dict[str, ItemPolicyOverride] = Field(default_factory=dict)
+    item_default_overrides: dict[str, ItemPolicyOverride] = Field(default_factory=dict)
+    item_policy_overrides: dict[str, ItemPolicyOverride] = Field(default_factory=dict)
+    shop_default_enabled: bool = True
+    recipe_default_enabled: bool = True
+    shop_overrides: dict[str, bool] = Field(default_factory=dict)
+    recipe_overrides: dict[str, bool] = Field(default_factory=dict)
+    items_sort_column: Literal[
+        "item", "category", "enabled", "merge", "merge_five", "interact", "remove"
+    ] = "item"
+    items_sort_descending: bool = False
+    shops_sort_column: Literal["item", "type", "enabled"] = "item"
+    shops_sort_descending: bool = False
+
+    loop_interval: float = Field(default=1.0, ge=0.01, le=60.0)
+    idle_wait_seconds: float = Field(default=30.0, ge=0.0, le=3600.0)
+    item_action_delay_min: float = Field(default=1.5, ge=0.0, le=60.0)
+    item_action_delay_max: float = Field(default=3.5, ge=0.0, le=60.0)
+    crate_delay_min: float = Field(default=0.05, ge=0.0, le=5.0)
+    crate_delay_max: float = Field(default=0.2, ge=0.0, le=5.0)
+    start_stop_hotkey: str | None = "f8"
+    pause_hotkey: str | None = "f9"
+    quit_hotkey: str | None = "f10"
+    start_paused: bool = False
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
+    discord_webhook_url: SecretStr | None = None
+    webhook_summary_interval: float = Field(default=3600.0, ge=60.0, le=86400.0)
+    webhook_status_interval: float = Field(default=60.0, ge=0.0, le=3600.0)
+
+    theme: Literal["system", "dark", "light"] = "system"
+    start_minimized: bool = False
+    bot_autostart: bool = False
+    close_to_tray: bool = True
+    main_always_on_top: bool = False
+    main_focused_opacity: float = Field(default=1.0, ge=0.25, le=1.0)
+    main_unfocused_opacity: float = Field(default=0.92, ge=0.25, le=1.0)
+    overlay_visible: bool = False
+    overlay_always_on_top: bool = True
+    overlay_click_through: bool = True
+    overlay_focused_opacity: float = Field(default=1.0, ge=0.25, le=1.0)
+    overlay_unfocused_opacity: float = Field(default=0.85, ge=0.25, le=1.0)
+
+    def __init__(self, **data: Any) -> None:
+        data.pop("_env_file", None)
+        super().__init__(**data)
+
+    @field_validator("discord_webhook_url", mode="before")
+    @classmethod
+    def empty_webhook_url_is_disabled(cls, value: object) -> object:
+        if isinstance(value, str):
+            return SecretStr(value) if value.strip() else None
+        return value
+
+    @field_validator("discord_webhook_url")
+    @classmethod
+    def webhook_url_uses_https(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and not value.get_secret_value().startswith("https://"):
+            raise ValueError("Discord webhook URL must use HTTPS")
+        return value
+
+    @field_validator("shop_overrides", "recipe_overrides")
+    @classmethod
+    def validate_game_ids(cls, value: dict[str, bool]) -> dict[str, bool]:
+        if any(not game_id.strip() or game_id != game_id.strip() for game_id in value):
+            raise ValueError("game IDs must be non-empty and have no surrounding whitespace")
+        return value
+
+    @field_validator("item_default_overrides", "item_policy_overrides")
+    @classmethod
+    def validate_policy_keys(
+        cls, value: dict[str, ItemPolicyOverride]
+    ) -> dict[str, ItemPolicyOverride]:
+        if any(not key.strip() or key != key.strip() for key in value):
+            raise ValueError("policy keys must be non-empty and have no surrounding whitespace")
+        return value
+
+    @field_validator("item_category_defaults")
+    @classmethod
+    def validate_item_categories(
+        cls, value: dict[str, ItemPolicyOverride]
+    ) -> dict[str, ItemPolicyOverride]:
+        if any(
+            not category.strip() or category != category.strip() or "/" in category
+            for category in value
+        ):
+            raise ValueError("item categories must be non-empty single path segments")
+        return value
+
+    @field_validator("start_stop_hotkey", "pause_hotkey", "quit_hotkey", mode="before")
+    @classmethod
+    def normalize_hotkeys(cls, value: object) -> object:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("hotkeys must be non-empty strings or null")
+        return normalize_hotkey(value)
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> Self:
+        for name in ("item_action_delay", "crate_delay"):
+            if getattr(self, f"{name}_min") > getattr(self, f"{name}_max"):
+                raise ValueError(f"{name}_min must be less than or equal to {name}_max")
+        normalized_hotkeys = tuple(
+            hotkey
+            for hotkey in (
+                self.start_stop_hotkey,
+                self.pause_hotkey,
+                self.quit_hotkey,
+            )
+            if hotkey is not None
+        )
+        if len(set(normalized_hotkeys)) != len(normalized_hotkeys):
+            raise ValueError("start/stop, pause/resume, and quit hotkeys must be different")
+        return self
+
+    def item_policy_default(self, policy_key: str, category: str | None = None) -> ItemPolicy:
+        resolution_keys = _item_policy_resolution_keys(policy_key)
+        base_key = resolution_keys[0]
+        values = self.item_policy_defaults.model_dump()
+        if not self.prefer_merge_five:
+            values["prefer_merge_five"] = False
+        category_key = category or base_key.partition("/")[0]
+        if recommended := _RECOMMENDED_ITEM_CATEGORY_DEFAULTS.get(category_key):
+            values.update(recommended.model_dump(exclude_none=True))
+        if category_override := self.item_category_defaults.get(category_key):
+            values.update(category_override.model_dump(exclude_none=True))
+        for key in resolution_keys:
+            if recommended := _RECOMMENDED_ITEM_DEFAULTS.get(key):
+                values.update(recommended.model_dump(exclude_none=True))
+            if item_default := self.item_default_overrides.get(key):
+                values.update(item_default.model_dump(exclude_none=True))
+        return ItemPolicy.model_validate(values)
+
+    def item_policy(self, policy_key: str, category: str | None = None) -> ItemPolicy:
+        values = self.item_policy_default(policy_key, category).model_dump()
+        for key in _item_policy_resolution_keys(policy_key):
+            if override := self.item_policy_overrides.get(key):
+                values.update(override.model_dump(exclude_none=True))
+        return ItemPolicy.model_validate(values)

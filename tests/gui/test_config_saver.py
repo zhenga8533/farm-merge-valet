@@ -10,7 +10,7 @@ from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QApplication
 
 from farm_merge_valet.config import AppConfig, ConfigStore
-from farm_merge_valet.gui.config_saver import ConfigSaver
+from farm_merge_valet.gui.services.config_saver import ConfigSaver
 
 
 def _wait_for_signal(app: QApplication, spy: QSignalSpy, timeout: float = 3) -> bool:

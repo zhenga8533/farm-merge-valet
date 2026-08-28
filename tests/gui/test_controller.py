@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -84,15 +85,15 @@ def test_game_sync_refreshes_assets_and_upgrade_progress_in_background(
         release.wait(2)
 
     monkeypatch.setattr(
-        "farm_merge_valet.tools.template_extraction.sync_runtime_assets",
-        refresh,
+        "farm_merge_valet.gui.services.catalog_sync.create_catalog_synchronizer",
+        lambda _config: SimpleNamespace(sync=refresh),
     )
     monkeypatch.setattr(
-        "farm_merge_valet.core.item_catalog.load_item_catalog",
+        "farm_merge_valet.gui.services.catalog_sync.load_item_catalog",
         lambda _path: type("Catalog", (), {"items": {"one": object()}})(),
     )
     monkeypatch.setattr(
-        "farm_merge_valet.cdp.upgrade_progress.read_upgrade_progress",
+        "farm_merge_valet.gui.services.catalog_sync.read_upgrade_progress",
         lambda *_args: progress,
     )
     controller.game_sync_operation_changed.connect(busy_states.append)
@@ -157,14 +158,14 @@ def test_bot_start_refreshes_upgrade_progress_without_synchronizing_assets(
             on_initialized()
 
     monkeypatch.setattr("farm_merge_valet.gui.controller.BrowserManager", BrowserManagerStub)
-    monkeypatch.setattr("farm_merge_valet.gui.controller.Bot", BotStub)
+    monkeypatch.setattr("farm_merge_valet.gui.controller.create_bot", lambda _config: BotStub())
     monkeypatch.setattr(
-        "farm_merge_valet.cdp.upgrade_progress.read_upgrade_progress",
+        "farm_merge_valet.gui.services.catalog_sync.read_upgrade_progress",
         lambda *_args: progress,
     )
     monkeypatch.setattr(
-        "farm_merge_valet.tools.template_extraction.sync_runtime_assets",
-        lambda: asset_syncs.append(True),
+        "farm_merge_valet.gui.services.catalog_sync.create_catalog_synchronizer",
+        lambda _config: SimpleNamespace(sync=lambda: asset_syncs.append(True)),
     )
     controller.upgrade_progress_changed.connect(progress_updates.append)
 
@@ -215,21 +216,23 @@ def test_catalog_setup_launches_game_and_publishes_catalog_before_icons(
 
     catalog = type("Catalog", (), {"items": {"one": object(), "two": object()}})()
     monkeypatch.setattr("farm_merge_valet.gui.controller.BrowserManager", BrowserManagerStub)
-    monkeypatch.setattr("farm_merge_valet.cdp.runtime.GameRuntimeAdapter", RuntimeStub)
     monkeypatch.setattr(
-        "farm_merge_valet.cdp.upgrade_progress.read_upgrade_progress",
+        "farm_merge_valet.gui.services.catalog_sync.GameRuntimeAdapter", RuntimeStub
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.gui.services.catalog_sync.read_upgrade_progress",
         lambda *_args: None,
     )
     monkeypatch.setattr(
-        "farm_merge_valet.core.catalog_store.load_or_refresh_catalog",
-        lambda *_args: catalog,
+        "farm_merge_valet.gui.services.catalog_sync.create_catalog_provider",
+        lambda _config: SimpleNamespace(load=lambda: catalog),
     )
     monkeypatch.setattr(
-        "farm_merge_valet.tools.template_extraction.sync_runtime_assets",
-        lambda: release_icons.wait(2),
+        "farm_merge_valet.gui.services.catalog_sync.create_catalog_synchronizer",
+        lambda _config: SimpleNamespace(sync=lambda: release_icons.wait(2)),
     )
     monkeypatch.setattr(
-        "farm_merge_valet.core.item_catalog.load_item_catalog",
+        "farm_merge_valet.gui.services.catalog_sync.load_item_catalog",
         lambda _path: catalog,
     )
     controller.game_sync_operation_changed.connect(busy_states.append)
@@ -294,23 +297,27 @@ def test_catalog_setup_keeps_catalog_available_when_icon_sync_fails(tmp_path, mo
     failures: list[str] = []
     errors: list[str] = []
     refreshed: list[bool] = []
-    monkeypatch.setattr("farm_merge_valet.gui.controller.BrowserManager", BrowserManagerStub)
-    monkeypatch.setattr("farm_merge_valet.cdp.runtime.GameRuntimeAdapter", RuntimeStub)
     monkeypatch.setattr(
-        "farm_merge_valet.cdp.upgrade_progress.read_upgrade_progress",
+        "farm_merge_valet.gui.services.catalog_sync.BrowserManager", BrowserManagerStub
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.gui.services.catalog_sync.GameRuntimeAdapter", RuntimeStub
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.gui.services.catalog_sync.read_upgrade_progress",
         lambda *_args: None,
     )
     monkeypatch.setattr(
-        "farm_merge_valet.core.catalog_store.load_or_refresh_catalog",
-        lambda *_args: catalog,
+        "farm_merge_valet.gui.services.catalog_sync.create_catalog_provider",
+        lambda _config: SimpleNamespace(load=lambda: catalog),
     )
 
     def fail_icon_sync() -> None:
         raise RuntimeError("game atlases are unavailable")
 
     monkeypatch.setattr(
-        "farm_merge_valet.tools.template_extraction.sync_runtime_assets",
-        fail_icon_sync,
+        "farm_merge_valet.gui.services.catalog_sync.create_catalog_synchronizer",
+        lambda _config: SimpleNamespace(sync=fail_icon_sync),
     )
     controller.game_sync_status_changed.connect(statuses.append)
     controller.catalog_setup_failed.connect(failures.append)
@@ -358,8 +365,10 @@ def test_catalog_setup_reports_when_game_never_finishes_loading(tmp_path, monkey
 
     failures: list[str] = []
     busy_states: list[bool] = []
-    monkeypatch.setattr("farm_merge_valet.gui.controller.BrowserManager", BrowserManagerStub)
-    monkeypatch.setattr("farm_merge_valet.gui.controller._CATALOG_SETUP_TIMEOUT_SECONDS", 0.0)
+    monkeypatch.setattr(
+        "farm_merge_valet.gui.services.catalog_sync.BrowserManager", BrowserManagerStub
+    )
+    monkeypatch.setattr("farm_merge_valet.gui.services.catalog_sync._SETUP_TIMEOUT_SECONDS", 0.0)
     controller.catalog_setup_failed.connect(failures.append)
     controller.game_sync_operation_changed.connect(busy_states.append)
 

@@ -1,8 +1,9 @@
 import logging
 from threading import Event
 
-from farm_merge_valet.cdp.runtime import ActionStatus, GameRuntimeAdapter
-from farm_merge_valet.core.board import InteractionTargetKind
+from farm_merge_valet.automation.runtime import ActionStatus, GameRuntime
+from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
+from farm_merge_valet.core.items import InteractionTargetKind
 from farm_merge_valet.core.shops import ShopOrderState
 
 
@@ -148,7 +149,7 @@ def test_crate_pacing_stops_promptly_when_cancelled(monkeypatch) -> None:
 
 
 def test_discovery_uses_active_gameplay_crate_signal() -> None:
-    from farm_merge_valet.cdp.runtime import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+    from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 
     assert "hudService?._commonEvents?.spawnCrates" in _DISCOVER_EXPRESSION
     assert "crateSubscribers.length > 0" in _DISCOVER_EXPRESSION
@@ -158,7 +159,7 @@ def test_discovery_uses_active_gameplay_crate_signal() -> None:
 
 
 def test_discovery_validates_internal_interaction_handler() -> None:
-    from farm_merge_valet.cdp.runtime import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+    from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 
     assert "typeof value._simulateClick === 'function'" in _DISCOVER_EXPRESSION
     assert "window.__fmvInteractionHandler" in _DISCOVER_EXPRESSION
@@ -166,7 +167,7 @@ def test_discovery_validates_internal_interaction_handler() -> None:
 
 
 def test_discovery_validates_shovel_handler() -> None:
-    from farm_merge_valet.cdp.runtime import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+    from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 
     assert "typeof candidate._onContentRemove === 'function'" in _DISCOVER_EXPRESSION
     assert "window.__fmvShovelHandler" in _DISCOVER_EXPRESSION
@@ -174,7 +175,7 @@ def test_discovery_validates_shovel_handler() -> None:
 
 
 def test_discovery_validates_reward_interaction_handler() -> None:
-    from farm_merge_valet.cdp.runtime import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+    from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 
     assert "typeof candidate._collectReward === 'function'" in _DISCOVER_EXPRESSION
     assert "window.__fmvRewardInteractionHandler" in _DISCOVER_EXPRESSION
@@ -182,7 +183,7 @@ def test_discovery_validates_reward_interaction_handler() -> None:
 
 
 def test_discovery_validates_shop_order_service() -> None:
-    from farm_merge_valet.cdp.runtime import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+    from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 
     assert "typeof orders?.getCurrentOrders === 'function'" in _DISCOVER_EXPRESSION
     assert "typeof orders?.startOrder === 'function'" in _DISCOVER_EXPRESSION
@@ -464,3 +465,7 @@ def test_discovery_rearms_a_stale_cached_board(monkeypatch) -> None:
 
     assert armed == [True]
     assert health.available
+
+
+def test_cdp_adapter_satisfies_runtime_protocol() -> None:
+    assert isinstance(GameRuntimeAdapter(9222), GameRuntime)

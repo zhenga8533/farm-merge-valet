@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
-from farm_merge_valet.cdp.client import evaluate, list_game_frame_resources
+from farm_merge_valet.cdp.evaluation import evaluate
+from farm_merge_valet.cdp.resources import list_game_frame_resources
 
 _READ_ITEM_CATALOG_EXPRESSION = r"""
 (() => {

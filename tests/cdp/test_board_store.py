@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from farm_merge_valet.cdp.board_store import (
-    LiveCellState,
-    _arm_board_store_target,
-    read_board_state,
-)
-from farm_merge_valet.core.board import ProducerKind, ProducerState
+from farm_merge_valet.automation.runtime import LiveCellState
+from farm_merge_valet.cdp.board_store import _arm_board_store_target, read_board_state
+from farm_merge_valet.core.items import ProducerKind, ProducerState
 
 
 def test_read_board_state_preserves_cells_without_content(monkeypatch) -> None:

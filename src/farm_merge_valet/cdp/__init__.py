@@ -1,1 +1,1 @@
-"""Chromium DevTools access to live state, internal actions, and diagnostics."""
+"""Chromium DevTools transport, live state, and internal actions."""

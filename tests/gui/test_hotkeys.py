@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
-
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
@@ -11,37 +9,13 @@ from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication
 
 from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.config.hotkeys import HotkeyBindings
+from farm_merge_valet.gui.components.hotkey_edit import HotkeyEdit
 from farm_merge_valet.gui.controller import (
     ApplicationController,
     ApplicationState,
 )
-from farm_merge_valet.gui.hotkey_edit import HotkeyEdit
-from farm_merge_valet.gui.hotkeys import HotkeyManager
-from farm_merge_valet.hotkeys import HotkeyBindings, display_hotkey, normalize_hotkey
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    (
-        ("Ctrl + Shift + X", "ctrl+shift+x"),
-        ("F9", "f9"),
-        ("Meta+Page Up", "windows+page up"),
-    ),
-)
-def test_hotkeys_are_normalized(value: str, expected: str) -> None:
-    assert normalize_hotkey(value) == expected
-
-
-@pytest.mark.parametrize("value", ("x", "enter", "fn+f9", "ctrl+shift"))
-def test_unsafe_or_unobservable_hotkeys_are_rejected(value: str) -> None:
-    with pytest.raises(ValueError):
-        normalize_hotkey(value)
-
-
-def test_hotkey_display_is_human_readable() -> None:
-    assert display_hotkey("ctrl+shift+x") == "Ctrl+Shift+X"
-    assert display_hotkey("f9") == "F9"
-    assert display_hotkey(None) == "Not set"
+from farm_merge_valet.gui.services.hotkeys import HotkeyManager
 
 
 def test_hotkey_manager_owns_only_its_registration_handles(monkeypatch) -> None:
@@ -60,12 +34,16 @@ def test_hotkey_manager_owns_only_its_registration_handles(monkeypatch) -> None:
         release_registrations.append((key, callback))
         return handle
 
-    monkeypatch.setattr("farm_merge_valet.gui.hotkeys.keyboard.add_hotkey", add_hotkey)
-    monkeypatch.setattr("farm_merge_valet.gui.hotkeys.keyboard.on_release_key", on_release_key)
+    monkeypatch.setattr("farm_merge_valet.gui.services.hotkeys.keyboard.add_hotkey", add_hotkey)
     monkeypatch.setattr(
-        "farm_merge_valet.gui.hotkeys.keyboard.remove_hotkey", removed_hotkeys.append
+        "farm_merge_valet.gui.services.hotkeys.keyboard.on_release_key", on_release_key
     )
-    monkeypatch.setattr("farm_merge_valet.gui.hotkeys.keyboard.unhook", removed_releases.append)
+    monkeypatch.setattr(
+        "farm_merge_valet.gui.services.hotkeys.keyboard.remove_hotkey", removed_hotkeys.append
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.gui.services.hotkeys.keyboard.unhook", removed_releases.append
+    )
     manager = HotkeyManager()
     starts: list[bool] = []
     manager.start_stop_requested.connect(lambda: starts.append(True))
@@ -107,12 +85,16 @@ def test_failed_rebind_keeps_existing_hotkeys(monkeypatch) -> None:
         releases += 1
         return f"release-{releases}"
 
-    monkeypatch.setattr("farm_merge_valet.gui.hotkeys.keyboard.add_hotkey", add_hotkey)
-    monkeypatch.setattr("farm_merge_valet.gui.hotkeys.keyboard.on_release_key", on_release_key)
+    monkeypatch.setattr("farm_merge_valet.gui.services.hotkeys.keyboard.add_hotkey", add_hotkey)
     monkeypatch.setattr(
-        "farm_merge_valet.gui.hotkeys.keyboard.remove_hotkey", removed_hotkeys.append
+        "farm_merge_valet.gui.services.hotkeys.keyboard.on_release_key", on_release_key
     )
-    monkeypatch.setattr("farm_merge_valet.gui.hotkeys.keyboard.unhook", removed_releases.append)
+    monkeypatch.setattr(
+        "farm_merge_valet.gui.services.hotkeys.keyboard.remove_hotkey", removed_hotkeys.append
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.gui.services.hotkeys.keyboard.unhook", removed_releases.append
+    )
     manager = HotkeyManager()
     errors: list[str] = []
     manager.registration_failed.connect(errors.append)

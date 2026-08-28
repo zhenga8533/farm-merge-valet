@@ -52,7 +52,7 @@ Important current distinctions:
 `farm-merge-valet assets sync` discovers atlas resources from the loaded game
 through CDP, refreshes the local atlas cache, and compiles the catalog and
 frames. `farm-merge-valet assets compile` rebuilds from that local cache.
-`assets extract <capture.har>` remains a diagnostic fallback. A loaded game
+`assets extract <capture.har>` remains an offline extraction fallback. A loaded game
 is required to refresh semantic metadata; an existing local catalog can be
 reused when only recompiling cached images.
 

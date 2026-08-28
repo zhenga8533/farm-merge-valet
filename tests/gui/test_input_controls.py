@@ -16,14 +16,14 @@ from PySide6.QtWidgets import (
     QStyleOptionSpinBox,
 )
 
-from farm_merge_valet.gui.input_controls import (
+from farm_merge_valet.gui.components.input_controls import (
     FocusAwareComboBox,
     FocusAwareDoubleSpinBox,
     FocusAwareSlider,
     FocusAwareSpinBox,
     SettingsToggle,
 )
-from farm_merge_valet.gui.policy_view import PolicyCheckBox
+from farm_merge_valet.gui.components.policy_view import PolicyCheckBox
 from farm_merge_valet.gui.theme import apply_theme
 
 

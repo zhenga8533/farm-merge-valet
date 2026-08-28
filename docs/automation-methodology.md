@@ -1,7 +1,7 @@
 # Automation Methodology
 
 The bot uses a persistent perceive → plan → internal action → verify loop. The
-game's live cell map is authoritative; screenshots are diagnostic only.
+game's live cell map is authoritative.
 
 ## Runtime acquisition
 
@@ -158,20 +158,6 @@ the intended result, recognizing a different board change, or recording an
 authoritative no-op. Failed actions cool down, and three no-ops for the same
 action pause the bot instead of repeatedly submitting the same drop.
 
-## Diagnostics
-
-`capture` calls `Page.captureScreenshot` on the Reddit target and crops to live
-game-iframe DOM geometry. It does not focus or activate the browser.
-
-Scene calibration maps grid coordinates to pixels relative to that game-only
-capture. `diagnostics positions` marks currently rendered cells by classification
-with a compact legend; there are no dead zones, actionable regions, crate
-exclusions, or pan anchors. `diagnostics live-state` includes runtime capability,
-scene identity, bounded handler-discovery stages, browser background-flag status,
-heartbeat status, interaction capability, and counts of collectable, ready, cooling,
-and depleted objects. Heap-wide board-map candidates are collected only when
-`--include-heap-candidates` is explicitly requested.
-
 The active loop rate-limits repeated capability discovery. Temporary waits,
 individual plans, submissions, confirmations, slow-stage timings, cached
 discovery, and planner transitions are `DEBUG` diagnostics. Runtime readiness,
@@ -191,8 +177,6 @@ It also reduces structured events into a current-status embed. Periodic status
 refreshes edit the existing message, while a newly posted alert or summary is
 followed by deleting and recreating the status so it remains last in the
 channel. The message ID is persisted without storing the webhook URL or token.
-Charts and screenshots can later be attached by the summary renderer without
-changing bot action code.
 
 ## Operational boundaries
 

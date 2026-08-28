@@ -12,7 +12,7 @@ from farm_merge_valet.browser.manager import (
     BrowserStatus,
     SupportTier,
 )
-from farm_merge_valet.config import Settings
+from farm_merge_valet.config import AppConfig
 
 
 def _executable(path: Path) -> Path:
@@ -30,7 +30,7 @@ def test_auto_detection_prefers_supported_chrome_then_edge(tmp_path, monkeypatch
     monkeypatch.setenv("ProgramFiles(x86)", str(program_files_x86))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
 
-    installations = BrowserManager(Settings(_env_file=None)).installations()
+    installations = BrowserManager(AppConfig()).installations()
 
     assert [(item.kind, item.executable) for item in installations] == [
         (BrowserKind.CHROME, chrome),
@@ -41,7 +41,7 @@ def test_auto_detection_prefers_supported_chrome_then_edge(tmp_path, monkeypatch
 
 def test_explicit_brave_is_marked_experimental(tmp_path) -> None:
     executable = _executable(tmp_path / "BraveSoftware/Brave-Browser/Application/brave.exe")
-    settings = Settings(_env_file=None, browser="brave", browser_executable=executable)
+    settings = AppConfig(browser="brave", browser_executable=executable)
 
     installation = BrowserManager(settings).installations()[0]
 
@@ -53,7 +53,7 @@ def test_status_verifies_profile_flags_and_ownership(tmp_path, monkeypatch) -> N
     executable = _executable(tmp_path / "chrome.exe")
     profile = tmp_path / "profile"
     profile.mkdir()
-    settings = Settings(
+    settings = AppConfig(
         _env_file=None,
         browser="chrome",
         browser_executable=executable,
@@ -100,7 +100,7 @@ def test_status_does_not_treat_launcher_as_loaded_game(tmp_path, monkeypatch) ->
     executable = _executable(tmp_path / "chrome.exe")
     profile = tmp_path / "profile"
     profile.mkdir()
-    settings = Settings(
+    settings = AppConfig(
         _env_file=None,
         browser="chrome",
         browser_executable=executable,
@@ -125,7 +125,7 @@ def test_status_does_not_treat_launcher_as_loaded_game(tmp_path, monkeypatch) ->
 
 
 def test_stop_refuses_an_unowned_browser(monkeypatch) -> None:
-    manager = BrowserManager(Settings(_env_file=None))
+    manager = BrowserManager(AppConfig())
     monkeypatch.setattr(
         manager,
         "status",
@@ -139,7 +139,7 @@ def test_stop_refuses_an_unowned_browser(monkeypatch) -> None:
 def test_status_accepts_profile_paths_with_spaces_from_argument_list(tmp_path, monkeypatch) -> None:
     executable = _executable(tmp_path / "Browser App" / "chrome.exe")
     profile = tmp_path / "Managed Profile"
-    settings = Settings(
+    settings = AppConfig(
         _env_file=None,
         browser="chrome",
         browser_executable=executable,
@@ -176,7 +176,7 @@ def test_status_accepts_profile_paths_with_spaces_from_argument_list(tmp_path, m
 def test_launch_writes_marker_and_required_switches(tmp_path, monkeypatch) -> None:
     executable = _executable(tmp_path / "chrome.exe")
     profile = tmp_path / "profile"
-    settings = Settings(
+    settings = AppConfig(
         _env_file=None,
         browser="chrome",
         browser_executable=executable,
@@ -221,7 +221,7 @@ def test_launch_writes_marker_and_required_switches(tmp_path, monkeypatch) -> No
 
 
 def test_stop_closes_only_a_verified_managed_endpoint(monkeypatch) -> None:
-    manager = BrowserManager(Settings(_env_file=None))
+    manager = BrowserManager(AppConfig())
     monkeypatch.setattr(
         manager,
         "status",
@@ -241,7 +241,7 @@ def test_stop_closes_only_a_verified_managed_endpoint(monkeypatch) -> None:
 
 def test_launch_retries_after_profile_handoff_exit(tmp_path, monkeypatch) -> None:
     executable = _executable(tmp_path / "chrome.exe")
-    settings = Settings(
+    settings = AppConfig(
         _env_file=None,
         browser="chrome",
         browser_executable=executable,

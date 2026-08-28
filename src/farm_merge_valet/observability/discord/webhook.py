@@ -1,0 +1,173 @@
+"""Discord webhook delivery and persisted status-message identity."""
+
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+from typing import Literal
+
+import httpx
+
+from farm_merge_valet.observability.logging import log_event
+
+logger = logging.getLogger(__name__)
+
+
+class DiscordWebhookTransportMixin:
+    _url: str
+    _status_state_path: Path
+    _webhook_fingerprint: str
+    _status_message_id: str | None
+
+    def _status_payload(self, now: float) -> dict[str, object]:
+        raise NotImplementedError
+
+    def _load_status_message_id(self) -> str | None:
+        if not self._status_state_path.exists():
+            return None
+        try:
+            raw = json.loads(self._status_state_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "webhook.status_state_read_failed",
+                "Could not read Discord status state: %s.",
+                type(exc).__name__,
+                detail=type(exc).__name__,
+            )
+            return None
+        if not isinstance(raw, dict) or raw.get("webhook") != self._webhook_fingerprint:
+            return None
+        message_id = raw.get("message_id")
+        return message_id if isinstance(message_id, str) and message_id.isdigit() else None
+
+    def _persist_status_message_id(self, message_id: str | None) -> None:
+        try:
+            if message_id is None:
+                self._status_state_path.unlink(missing_ok=True)
+                return
+            self._status_state_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self._status_state_path.with_suffix(".tmp")
+            temporary.write_text(
+                json.dumps({"webhook": self._webhook_fingerprint, "message_id": message_id}),
+                encoding="utf-8",
+            )
+            temporary.replace(self._status_state_path)
+        except OSError as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "webhook.status_state_write_failed",
+                "Could not persist Discord status state: %s.",
+                type(exc).__name__,
+                detail=type(exc).__name__,
+            )
+
+    @staticmethod
+    def _log_delivery_failure(exc: httpx.HTTPError) -> None:
+        detail = (
+            f"HTTP {exc.response.status_code}"
+            if isinstance(exc, httpx.HTTPStatusError)
+            else type(exc).__name__
+        )
+        log_event(
+            logger,
+            logging.WARNING,
+            "webhook.delivery_failed",
+            "Discord webhook delivery failed: %s",
+            detail,
+            detail=detail,
+        )
+
+    def _send(self, client: httpx.Client, payload: dict[str, object]) -> httpx.Response | None:
+        try:
+            response = client.post(
+                self._url,
+                params={"wait": "true"},
+                json=payload,
+            )
+            response.raise_for_status()
+            return response
+        except httpx.HTTPError as exc:
+            self._log_delivery_failure(exc)
+            return None
+
+    def _status_message_url(self) -> str | None:
+        if self._status_message_id is None:
+            return None
+        return f"{self._url.rstrip('/')}/messages/{self._status_message_id}"
+
+    def _create_status(self, client: httpx.Client, now: float) -> bool:
+        response = self._send(client, self._status_payload(now))
+        if response is None:
+            return False
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        message_id = body.get("id") if isinstance(body, dict) else None
+        if not isinstance(message_id, str) or not message_id.isdigit():
+            log_event(
+                logger,
+                logging.WARNING,
+                "webhook.status_id_missing",
+                "Discord did not return an ID for the status message.",
+            )
+            return False
+        self._status_message_id = message_id
+        self._persist_status_message_id(message_id)
+        return True
+
+    def _edit_status(
+        self, client: httpx.Client, now: float
+    ) -> Literal["updated", "missing", "failed"]:
+        status_url = self._status_message_url()
+        if status_url is None:
+            return "missing"
+        try:
+            payload = self._status_payload(now)
+            payload.pop("username", None)
+            response = client.patch(status_url, json=payload)
+            response.raise_for_status()
+            return "updated"
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                self._status_message_id = None
+                self._persist_status_message_id(None)
+                return "missing"
+            self._log_delivery_failure(exc)
+            return "failed"
+        except httpx.HTTPError as exc:
+            self._log_delivery_failure(exc)
+            return "failed"
+
+    def _delete_status(self, client: httpx.Client) -> bool:
+        status_url = self._status_message_url()
+        if status_url is None:
+            return True
+        try:
+            response = client.delete(status_url)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                self._log_delivery_failure(exc)
+                return False
+        except httpx.HTTPError as exc:
+            self._log_delivery_failure(exc)
+            return False
+        self._status_message_id = None
+        self._persist_status_message_id(None)
+        return True
+
+    def _refresh_status(self, client: httpx.Client, now: float, *, replace: bool) -> None:
+        if replace and self._status_message_id is not None:
+            if self._delete_status(client):
+                self._create_status(client, now)
+            else:
+                self._edit_status(client, now)
+            return
+        edit_result = self._edit_status(client, now)
+        if edit_result == "missing":
+            self._create_status(client, now)

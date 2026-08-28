@@ -1,0 +1,129 @@
+"""Adapter-neutral contracts consumed by automation workflows."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from enum import StrEnum
+from threading import Event
+from typing import Protocol, runtime_checkable
+
+from farm_merge_valet.core.items import (
+    GridCoord,
+    InteractionTargetKind,
+    ProducerKind,
+    ProducerState,
+)
+from farm_merge_valet.core.shops import ShopOrder
+
+
+class ActionStatus(StrEnum):
+    SUBMITTED = "submitted"
+    BUSY = "busy"
+    UNAVAILABLE = "unavailable"
+    REJECTED = "rejected"
+    STALE_SOURCE = "stale-source"
+    INVALID_DESTINATION = "invalid-destination"
+    INVALID_TARGET = "invalid-target"
+
+
+class RuntimeConnectionError(RuntimeError):
+    """Raised when an automation runtime cannot be reached."""
+
+
+class RuntimeCancelledError(RuntimeConnectionError):
+    """Raised when an in-flight runtime operation is cancelled."""
+
+
+@dataclass(frozen=True)
+class ActionResult:
+    status: ActionStatus
+    detail: str | None = None
+
+    @property
+    def submitted(self) -> bool:
+        return self.status is ActionStatus.SUBMITTED
+
+
+@dataclass(frozen=True)
+class CrateSpawnResult:
+    status: ActionStatus
+    spawned: int
+    remaining: int | None = None
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
+class RuntimeHealth:
+    available: bool
+    scene_id: int | None
+    board_available: bool
+    item_drop_available: bool
+    crate_spawn_available: bool
+    inventory_available: bool
+    heartbeat: int | None
+    heartbeat_age_ms: float | None
+    heartbeat_advancing: bool
+    heartbeat_installed: bool = False
+    detail: str | None = None
+    item_action_busy: bool = False
+    interaction_available: bool = False
+    shop_available: bool = False
+    removal_available: bool = False
+    reward_interaction_available: bool = False
+
+
+@dataclass(frozen=True)
+class LiveCellState:
+    """Authoritative content state for one game-board coordinate."""
+
+    has_content: bool
+    blueprint_id: str | None
+    object_id: int | None = None
+    tier: int | None = None
+    collectable: bool = False
+    collectable_ingredient: bool = False
+    producer_kind: ProducerKind | None = None
+    producer_state: ProducerState | None = None
+    item_variant: str | None = None
+    behavior_names: frozenset[str] = frozenset()
+
+
+@runtime_checkable
+class GameRuntime(Protocol):
+    """Transport-independent action and state boundary used by the bot."""
+
+    def set_cancel_event(self, cancel_event: Event) -> None: ...
+
+    def discover(self, cancelled: Callable[[], bool] | None = None) -> RuntimeHealth: ...
+
+    def read_runtime_health(self) -> RuntimeHealth: ...
+
+    def read_board_state(self) -> dict[GridCoord, LiveCellState] | None: ...
+
+    def read_background_flag_status(self) -> dict[str, object]: ...
+
+    def submit_item_drop(self, start: GridCoord, end: GridCoord) -> ActionResult: ...
+
+    def submit_board_interaction(
+        self,
+        coord: GridCoord,
+        expected_kind: InteractionTargetKind,
+        expected_blueprint_id: str,
+        expected_object_id: int | None,
+    ) -> ActionResult: ...
+
+    def submit_item_removal(
+        self,
+        coord: GridCoord,
+        expected_blueprint_id: str,
+        expected_object_id: int | None,
+    ) -> ActionResult: ...
+
+    def spawn_supply_crates(self, limit: int) -> CrateSpawnResult: ...
+
+    def read_shop_orders(self) -> tuple[ShopOrder, ...] | None: ...
+
+    def start_shop_order(self, shop_id: str, recipe_id: str) -> ActionResult: ...
+
+    def claim_shop_order(self, shop_id: str, recipe_id: str) -> ActionResult: ...

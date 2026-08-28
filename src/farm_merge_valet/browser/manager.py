@@ -15,16 +15,16 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from farm_merge_valet.cdp.client import (
+from farm_merge_valet.cdp.targets import (
     REQUIRED_BACKGROUND_FLAGS,
-    CdpConnectionError,
     close_browser,
     is_game_frame_url,
     list_targets,
     read_browser_metadata,
 )
-from farm_merge_valet.config import Settings
-from farm_merge_valet.logging_setup import log_event
+from farm_merge_valet.cdp.transport import CdpConnectionError
+from farm_merge_valet.config import AppConfig
+from farm_merge_valet.observability.logging import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +167,7 @@ def _arguments_have_switch(arguments: list[str] | None, command_line: str, switc
 
 
 class BrowserManager:
-    def __init__(self, settings: Settings, browser: BrowserKind | str | None = None) -> None:
+    def __init__(self, settings: AppConfig, browser: BrowserKind | str | None = None) -> None:
         self.settings = settings
         try:
             self.browser = BrowserKind(browser or settings.browser)

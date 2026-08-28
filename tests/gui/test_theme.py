@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication, QLabel
 
-from farm_merge_valet.gui.action_button import ActionButton
+from farm_merge_valet.gui.components.action_button import ActionButton
 from farm_merge_valet.gui.theme import apply_theme
 
 

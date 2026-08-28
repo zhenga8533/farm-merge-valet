@@ -4,7 +4,9 @@ from farm_merge_valet.core.board import (
     BoardGrid,
     Cell,
     CellKind,
-    ItemRef,
+)
+from farm_merge_valet.core.items import ItemRef
+from farm_merge_valet.core.merge_planner import (
     MergeActionKind,
     MoveEffect,
     plan_merge_action,

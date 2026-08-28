@@ -5,8 +5,8 @@ import logging
 
 import pytest
 
-from farm_merge_valet.logging_setup import log_event, logging_sink
-from farm_merge_valet.observability import discord
+from farm_merge_valet.observability.discord import handler as discord
+from farm_merge_valet.observability.logging import log_event, logging_sink
 
 
 class _FakeResponse:

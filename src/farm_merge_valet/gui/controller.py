@@ -4,30 +4,31 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from farm_merge_valet.automation.bot import Bot
 from farm_merge_valet.browser import BrowserManager, BrowserManagerError, BrowserStatus
-from farm_merge_valet.config import AppConfig, ConfigStore, settings
-from farm_merge_valet.core.bot import Bot
-from farm_merge_valet.gui.hotkeys import HotkeyManager
-from farm_merge_valet.hotkeys import HotkeyBindings
-from farm_merge_valet.logging_setup import FMV_CONTEXT_ATTRIBUTE, FMV_EVENT_ATTRIBUTE, log_event
+from farm_merge_valet.composition import create_bot
+from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.config.hotkeys import HotkeyBindings
+from farm_merge_valet.gui.services.background_operation import (
+    BackgroundOperationCancelled,
+    BackgroundOperationRunner,
+)
+from farm_merge_valet.gui.services.catalog_sync import CatalogSyncCallbacks, CatalogSyncService
+from farm_merge_valet.gui.services.hotkeys import HotkeyManager
 from farm_merge_valet.observability.discord import discord_webhook_sink
+from farm_merge_valet.observability.logging import (
+    FMV_CONTEXT_ATTRIBUTE,
+    FMV_EVENT_ATTRIBUTE,
+    log_event,
+)
 
 logger = logging.getLogger(__name__)
-
-_CATALOG_SETUP_TIMEOUT_SECONDS = 120.0
-_CATALOG_SETUP_POLL_SECONDS = 1.0
-
-
-class UtilityOperationCancelled(Exception):
-    """Internal sentinel used to stop background GUI operations during shutdown."""
 
 
 class ApplicationState(StrEnum):
@@ -87,9 +88,6 @@ class ApplicationController(QObject):
     catalog_refreshed = Signal(int)
     assets_refreshed = Signal()
     upgrade_progress_changed = Signal(object)
-    diagnostics_operation_changed = Signal(bool)
-    diagnostics_exported = Signal(str)
-    diagnostics_failed = Signal(str)
     shutdown_complete = Signal()
     _utility_operation_finished = Signal(str, object)
     _bot_finished = Signal(object, bool)
@@ -98,13 +96,10 @@ class ApplicationController(QObject):
         super().__init__()
         self.store = store
         self.config = store.current
-        settings.replace(self.config)
         self.status = ApplicationStatus()
         self._bot: Bot | None = None
         self._worker: threading.Thread | None = None
-        self._utility_worker: threading.Thread | None = None
-        self._utility_cancel = threading.Event()
-        self._utility_completion_pending = False
+        self._operations = BackgroundOperationRunner(self._utility_operation_finished.emit)
         self._stopping = False
         self._shutting_down = False
         self._unsubscribed = False
@@ -128,7 +123,6 @@ class ApplicationController(QObject):
     def _config_updated(self, config: AppConfig) -> None:
         previous = self.config
         self.config = config
-        settings.replace(config)
         browser_changed = any(
             (
                 previous.browser != config.browser,
@@ -221,7 +215,6 @@ class ApplicationController(QObject):
 
     def _run_bot(self) -> None:
         config = self.store.current
-        settings.replace(config)
         failure: str | None = None
         try:
             manager = BrowserManager(config)
@@ -253,12 +246,12 @@ class ApplicationController(QObject):
                 if config.discord_webhook_url is not None
                 else None
             )
-            self._bot = Bot()
+            self._bot = create_bot(config)
             if self._shutting_down or self._stopping:
                 self._bot.request_quit()
 
             def refresh_startup_data() -> None:
-                self._refresh_upgrade_progress(config, source="bot startup")
+                self._catalog_sync_service(config).refresh_upgrade_progress(source="bot startup")
 
             with discord_webhook_sink(
                 webhook,
@@ -333,7 +326,7 @@ class ApplicationController(QObject):
         if self._shutting_down:
             return
         self._shutting_down = True
-        self._utility_cancel.set()
+        self._operations.cancel()
         self.hotkeys.stop()
         if self._bot is None and self._worker is not None and self._worker.is_alive():
             self._stopping = True
@@ -398,169 +391,32 @@ class ApplicationController(QObject):
             self.error.emit("Stop the bot before synchronizing game data and assets.")
             return
         self.game_sync_status_changed.emit("Synchronizing game data and assets…")
-
-        def work() -> str:
-            from farm_merge_valet.core.item_catalog import load_item_catalog
-            from farm_merge_valet.tools.template_extraction import sync_runtime_assets
-
-            config = self.store.current
-            settings.replace(config)
-            self._raise_if_utility_cancelled()
-            target_count = self._refresh_upgrade_progress(config, source="manual synchronization")
-            self._raise_if_utility_cancelled()
-            sync_runtime_assets()
-            self._raise_if_utility_cancelled()
-            catalog = load_item_catalog(config.catalog_dir / "catalog.json")
-            progress = (
-                f"Upgrade targets: {target_count}"
-                if target_count is not None
-                else "Upgrade progress unavailable"
-            )
-            return (
-                f"Game data and assets synchronized · Catalog entries: {len(catalog.items)} "
-                f"· {progress}"
-            )
-
-        self._start_utility_operation("game-sync:manual", work)
-
-    def _refresh_upgrade_progress(self, config: AppConfig, *, source: str) -> int | None:
-        from farm_merge_valet.cdp.client import CdpConnectionError
-        from farm_merge_valet.cdp.upgrade_progress import read_upgrade_progress
-
-        try:
-            progress = read_upgrade_progress(config.cdp_port, config.window_title)
-        except CdpConnectionError as exc:
-            log_event(
-                logger,
-                logging.WARNING,
-                "upgrade_progress.unavailable",
-                "Upgrade progress unavailable during %s: %s",
-                source,
-                exc,
-                source=source,
-                detail=str(exc),
-            )
-            self.upgrade_progress_changed.emit(None)
-            return None
-        self.upgrade_progress_changed.emit(progress)
-        if progress is None:
-            log_event(
-                logger,
-                logging.WARNING,
-                "upgrade_progress.unavailable",
-                "Upgrade progress unavailable during %s.",
-                source,
-                source=source,
-            )
-            return None
-        target_count = len(progress.targets)
-        log_event(
-            logger,
-            logging.INFO,
-            "upgrade_progress.refreshed",
-            "Upgrade progress refreshed during %s (%d targets).",
-            source,
-            target_count,
-            source=source,
-            target_count=target_count,
-        )
-        return target_count
+        service = self._catalog_sync_service(self.store.current)
+        self._start_utility_operation("game-sync:manual", service.synchronize)
 
     def setup_catalog(self) -> None:
         if self.status.state.active:
             self.error.emit("Stop the bot before synchronizing the game catalog.")
             return
+        service = self._catalog_sync_service(self.store.current)
+        self._start_utility_operation("game-sync:onboard", service.set_up)
 
-        def work() -> str:
-            from farm_merge_valet.cdp.client import CdpConnectionError
-            from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
-            from farm_merge_valet.core.catalog_store import (
-                CatalogUnavailableError,
-                load_or_refresh_catalog,
-            )
-            from farm_merge_valet.core.item_catalog import load_item_catalog
-            from farm_merge_valet.tools.template_extraction import sync_runtime_assets
+    def _catalog_sync_service(self, config: AppConfig) -> CatalogSyncService:
+        return CatalogSyncService(
+            config,
+            CatalogSyncCallbacks(
+                raise_if_cancelled=self._raise_if_utility_cancelled,
+                wait=self._wait_for_utility_poll,
+                status_changed=self.game_sync_status_changed.emit,
+                browser_changed=self._catalog_browser_changed,
+                catalog_refreshed=self.catalog_refreshed.emit,
+                upgrade_progress_changed=self.upgrade_progress_changed.emit,
+            ),
+        )
 
-            config = self.store.current
-            self._raise_if_utility_cancelled()
-            self.game_sync_status_changed.emit("Preparing the managed browser…")
-            settings.replace(config)
-            manager = BrowserManager(config)
-            browser_status = manager.ensure_running()
-            self.browser_status_changed.emit(self._browser_status_text(browser_status))
-            self.browser_state_changed.emit(browser_status)
-            self.game_sync_status_changed.emit("Waiting for the game to finish loading…")
-
-            deadline = time.monotonic() + _CATALOG_SETUP_TIMEOUT_SECONDS
-            last_error: Exception | None = None
-            runtime = GameRuntimeAdapter(config.cdp_port, config.window_title)
-            catalog = None
-            discovery_announced = False
-            while time.monotonic() < deadline:
-                self._raise_if_utility_cancelled()
-                browser_status = manager.status()
-                if not browser_status.running:
-                    raise BrowserManagerError(
-                        browser_status.detail
-                        or "The managed browser closed during synchronization."
-                    )
-                if not browser_status.compatible:
-                    raise BrowserManagerError(
-                        browser_status.detail
-                        or "The managed browser is not compatible with catalog synchronization."
-                    )
-                if browser_status.game_loaded:
-                    if not discovery_announced:
-                        self.game_sync_status_changed.emit("Discovering items, shops, and recipes…")
-                        discovery_announced = True
-                    try:
-                        runtime.discover()
-                        catalog = load_or_refresh_catalog(
-                            config.catalog_dir,
-                            config.cdp_port,
-                            config.window_title,
-                        )
-                    except (
-                        CatalogUnavailableError,
-                        CdpConnectionError,
-                        OSError,
-                        ValueError,
-                    ) as exc:
-                        last_error = exc
-                    if catalog is not None and catalog.items:
-                        break
-                self._wait_for_utility_poll(_CATALOG_SETUP_POLL_SECONDS)
-            if catalog is None or not catalog.items:
-                detail = f" Last result: {last_error}" if last_error is not None else ""
-                raise RuntimeError(
-                    "The game catalog did not become available. Keep the managed game open "
-                    f"and finish any sign-in or loading steps, then try again.{detail}"
-                )
-
-            self._raise_if_utility_cancelled()
-            self.catalog_refreshed.emit(len(catalog.items))
-            self.game_sync_status_changed.emit(
-                f"Catalog ready · {len(catalog.items)} entries · Synchronizing icons…"
-            )
-            self._refresh_upgrade_progress(config, source="initial synchronization")
-            self._raise_if_utility_cancelled()
-            try:
-                sync_runtime_assets()
-            except (CdpConnectionError, OSError, RuntimeError, ValueError) as exc:
-                return f"Catalog ready · Icons were not synchronized: {exc}"
-            self._raise_if_utility_cancelled()
-            refreshed = load_item_catalog(config.catalog_dir / "catalog.json")
-            return f"Game catalog ready · Entries: {len(refreshed.items)} · Icons synchronized"
-
-        self._start_utility_operation("game-sync:onboard", work)
-
-    def export_diagnostics(self, output: Path, logs: str) -> None:
-        def work() -> Path:
-            from farm_merge_valet.diagnostics import export_support_bundle
-
-            return export_support_bundle(self.store.current, output, logs=logs)
-
-        self._start_utility_operation("diagnostics:export", work)
+    def _catalog_browser_changed(self, status: BrowserStatus) -> None:
+        self.browser_status_changed.emit(self._browser_status_text(status))
+        self.browser_state_changed.emit(status)
 
     def _start_utility_operation(
         self,
@@ -571,53 +427,31 @@ class ApplicationController(QObject):
     ) -> bool:
         if self._shutting_down:
             return False
-        if self._utility_worker is not None and self._utility_worker.is_alive():
+        if self._operations.running:
             if report_busy_error:
                 self.error.emit("Another background operation is already in progress.")
             return False
         category = operation.partition(":")[0]
         self._set_utility_busy(category, True)
-        self._utility_cancel.clear()
-        self._utility_completion_pending = True
-
-        def run() -> None:
-            try:
-                self._raise_if_utility_cancelled()
-                result = work()
-                self._raise_if_utility_cancelled()
-            except Exception as exc:
-                result = exc
-            self._utility_operation_finished.emit(operation, result)
-
-        self._utility_worker = threading.Thread(
-            target=run,
-            daemon=True,
-            name=f"fmv-{operation.replace(':', '-')}",
-        )
-        self._utility_worker.start()
-        return True
+        return self._operations.start(operation, work)
 
     def _raise_if_utility_cancelled(self) -> None:
-        if self._utility_cancel.is_set():
-            raise UtilityOperationCancelled
+        self._operations.raise_if_cancelled()
 
     def _wait_for_utility_poll(self, seconds: float) -> None:
-        if self._utility_cancel.wait(seconds):
-            raise UtilityOperationCancelled
+        self._operations.wait(seconds)
 
     def _set_utility_busy(self, category: str, busy: bool) -> None:
         if category == "browser":
             self.browser_operation_changed.emit(busy)
         elif category == "game-sync":
             self.game_sync_operation_changed.emit(busy)
-        elif category == "diagnostics":
-            self.diagnostics_operation_changed.emit(busy)
 
     def _finish_utility_operation(self, operation: str, result: object) -> None:
         category, _, action = operation.partition(":")
-        self._utility_completion_pending = False
+        self._operations.mark_completed()
         self._set_utility_busy(category, False)
-        if isinstance(result, UtilityOperationCancelled):
+        if isinstance(result, BackgroundOperationCancelled):
             self._poll_workers()
             return
         if isinstance(result, Exception):
@@ -628,8 +462,6 @@ class ApplicationController(QObject):
                 self.game_sync_status_changed.emit(message)
                 if action == "onboard":
                     self.catalog_setup_failed.emit(message)
-            elif category == "diagnostics":
-                self.diagnostics_failed.emit(message)
             if not self._shutting_down:
                 self.error.emit(message)
             return
@@ -647,8 +479,6 @@ class ApplicationController(QObject):
         elif category == "game-sync":
             self.game_sync_status_changed.emit(str(result))
             self.assets_refreshed.emit()
-        elif category == "diagnostics":
-            self.diagnostics_exported.emit(str(result))
 
     def _on_record(self, record: logging.LogRecord) -> None:
         formatter = self.log_handler.formatter or logging.Formatter()
@@ -691,8 +521,7 @@ class ApplicationController(QObject):
         if not self._shutting_down:
             return
         bot_running = self._worker is not None and self._worker.is_alive()
-        utility_running = self._utility_worker is not None and self._utility_worker.is_alive()
-        if bot_running or utility_running or self._utility_completion_pending:
+        if bot_running or self._operations.running or self._operations.completion_pending:
             return
         self._state_timer.stop()
         if not self._unsubscribed:

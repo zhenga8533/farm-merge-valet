@@ -4,7 +4,7 @@ import logging
 
 from rich.logging import RichHandler
 
-from farm_merge_valet.logging_setup import (
+from farm_merge_valet.observability.logging import (
     FMV_CONTEXT_ATTRIBUTE,
     FMV_EVENT_ATTRIBUTE,
     configure_logging,

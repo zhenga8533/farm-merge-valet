@@ -4,12 +4,9 @@ from __future__ import annotations
 
 from threading import Event
 
-from farm_merge_valet.cdp.client import (
-    CdpConnectionError,
-    _command_target,
-    evaluate,
-    run_game_frame_operation,
-)
+from farm_merge_valet.cdp.evaluation import evaluate
+from farm_merge_valet.cdp.targets import run_game_frame_operation
+from farm_merge_valet.cdp.transport import CdpConnectionError, _command_target
 
 _FIND_CRATE_ITEM_EXPRESSION = """
 function() {

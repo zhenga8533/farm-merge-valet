@@ -1,0 +1,274 @@
+from __future__ import annotations
+
+import os
+import time
+from dataclasses import replace
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QStyleOptionViewItem,
+)
+
+from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog, RecipeMetadata
+from farm_merge_valet.catalog.store import write_item_catalog
+from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.gui.controller import (
+    ApplicationController,
+)
+from farm_merge_valet.gui.main_window import MainWindow
+
+
+def _catalog() -> ItemCatalog:
+    return ItemCatalog(
+        {
+            "wheat_1": CatalogItem(
+                "wheat_1",
+                "wheat",
+                "crops/wheat",
+                "crops",
+                "Wheat",
+                1,
+                True,
+                "wheat_2",
+                None,
+                None,
+                frozenset({"mergeable"}),
+            ),
+            "milk": CatalogItem(
+                "milk",
+                "milk",
+                "ingredients/milk",
+                "ingredients",
+                "Milk",
+                None,
+                False,
+                None,
+                None,
+                None,
+                frozenset({"collectable", "ingredient"}),
+            ),
+            "coin_1": CatalogItem(
+                "coin_1",
+                "coin",
+                "currencies/coin",
+                "currencies",
+                "Coin",
+                1,
+                False,
+                None,
+                None,
+                None,
+                frozenset({"collectable"}),
+            ),
+        }
+    )
+
+
+def test_missing_catalog_shows_shared_onboarding_and_refreshes_when_discovered(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    controller = ApplicationController(store)
+    window = MainWindow(controller)
+
+    assert not window.items_page.catalog_onboarding.isHidden()
+    assert not window.shops_page.catalog_onboarding.isHidden()
+    assert window.items_page.table.isHidden()
+    assert window.shops_page.tree.isHidden()
+    assert window.items_page.catalog_onboarding.setup_button.text() == ("Open game and synchronize")
+
+    write_item_catalog(catalog_dir / "catalog.json", _catalog())
+    controller.catalog_refreshed.emit(3)
+    app.processEvents()
+
+    assert window.items_page.catalog_onboarding.isHidden()
+    assert window.shops_page.catalog_onboarding.isHidden()
+    assert not window.items_page.table.isHidden()
+    assert not window.shops_page.tree.isHidden()
+    assert window.items_page.table.topLevelItemCount() == 3
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_catalog_pages_populate_lazily_and_ignore_hidden_refreshes(tmp_path, monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    write_item_catalog(catalog_dir / "catalog.json", _catalog())
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    controller = ApplicationController(store)
+    progress_reads: list[bool] = []
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.upgrade_progress.read_upgrade_progress",
+        lambda *_args: progress_reads.append(True),
+    )
+    window = MainWindow(controller, eager_catalog_pages=False)
+
+    assert window.items_page.table.topLevelItemCount() == 0
+    assert window.shops_page.tree.topLevelItemCount() == 0
+    controller.catalog_refreshed.emit(3)
+    app.processEvents()
+    assert window.items_page.table.topLevelItemCount() == 0
+    assert window.shops_page.tree.topLevelItemCount() == 0
+
+    window.navigation.setCurrentRow(1)
+    assert not window.items_page.loading_state.isHidden()
+    time.sleep(0.02)
+    app.processEvents()
+    assert window.items_page.table.topLevelItemCount() == 3
+    assert window.shops_page.tree.topLevelItemCount() == 0
+    assert progress_reads == []
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_item_tiers_sort_numerically(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    coin_1 = _catalog().items["coin_1"]
+    catalog = ItemCatalog(
+        {
+            "coin_1": coin_1,
+            "coin_2": replace(coin_1, game_id="coin_2", tier=2),
+            "coin_10": replace(coin_1, game_id="coin_10", tier=10),
+        }
+    )
+    write_item_catalog(catalog_dir / "catalog.json", catalog)
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+
+    coin = window.items_page.table.topLevelItem(0)
+    assert coin.childCount() == 0
+    window.items_page.search.setText("Tier 2")
+    QTest.qWait(150)
+    assert coin.childCount() == 0
+    assert not coin.isHidden()
+    assert not coin.isExpanded()
+    coin.setExpanded(True)
+    assert [coin.child(index).text(0) for index in range(coin.childCount())] == [
+        "Tier 1",
+        "Tier 2",
+        "Tier 10",
+    ]
+    assert coin.child(0).isHidden()
+    assert not coin.child(1).isHidden()
+    window.items_page.search.clear()
+    assert coin.isExpanded()
+    assert all(not coin.child(index).isHidden() for index in range(coin.childCount()))
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    base = _catalog()
+    wheat = replace(
+        base.items["wheat_1"],
+        asset_alias="wheat",
+        asset_path="crops/wheat/wheat_1.png",
+    )
+    shop = CatalogItem(
+        game_id="bakery",
+        family_id="bakery",
+        policy_key="shops/bakery",
+        category="shops",
+        display_name="Bakery",
+        tier=None,
+        mergeable=False,
+        merge_target=None,
+        asset_alias="bakery",
+        asset_path="shops/bakery/building/bakery.png",
+        capabilities=frozenset({"shop"}),
+        available_recipe_ids=("bread",),
+    )
+    recipe = CatalogItem(
+        game_id="bread",
+        family_id="bread",
+        policy_key="shop_products/bread",
+        category="shop_products",
+        display_name="Bread",
+        tier=None,
+        mergeable=False,
+        merge_target=None,
+        asset_alias="bread",
+        asset_path="shops/bakery/recipes/bread.png",
+        capabilities=frozenset({"recipe"}),
+        recipe=RecipeMetadata("bakery", 60, (), ()),
+    )
+    catalog = ItemCatalog({**base.items, "wheat_1": wheat, "bakery": shop, "bread": recipe})
+    write_item_catalog(catalog_dir / "catalog.json", catalog)
+
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    controller = ApplicationController(store)
+    window = MainWindow(controller)
+
+    wheat_item = next(
+        window.items_page.table.topLevelItem(row)
+        for row in range(window.items_page.table.topLevelItemCount())
+        if window.items_page.table.topLevelItem(row).text(0) == "Wheat"
+    )
+    bakery = window.shops_page.tree.topLevelItem(0)
+    assert wheat_item.icon(0).isNull()
+    assert bakery is not None and bakery.icon(0).isNull()
+    assert bakery.childCount() == 0
+    bakery.setExpanded(True)
+    assert bakery.childCount() == 1 and bakery.child(0).icon(0).isNull()
+
+    for relative_path in (wheat.asset_path, shop.asset_path, recipe.asset_path):
+        assert relative_path is not None
+        path = catalog_dir / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(QColor("#238636"))
+        assert pixmap.save(str(path))
+
+    controller.assets_refreshed.emit()
+    app.processEvents()
+
+    wheat_item = next(
+        window.items_page.table.topLevelItem(row)
+        for row in range(window.items_page.table.topLevelItemCount())
+        if window.items_page.table.topLevelItem(row).text(0) == "Wheat"
+    )
+    assert not wheat_item.icon(0).isNull()
+    assert window.items_page.table.iconSize() == QSize(40, 40)
+    assert wheat_item.sizeHint(0).height() == 52
+    bakery = window.shops_page.tree.topLevelItem(0)
+    assert bakery is not None and not bakery.icon(0).isNull()
+    assert bakery.childCount() == 1 and not bakery.child(0).icon(0).isNull()
+    assert window.shops_page.tree.iconSize() == QSize(100, 54)
+    delegate = window.shops_page.tree.itemDelegate()
+    shop_option = QStyleOptionViewItem()
+    recipe_option = QStyleOptionViewItem()
+    delegate.initStyleOption(shop_option, window.shops_page.tree.indexFromItem(bakery))
+    delegate.initStyleOption(recipe_option, window.shops_page.tree.indexFromItem(bakery.child(0)))
+    assert shop_option.decorationSize == QSize(100, 54)
+    assert recipe_option.decorationSize == QSize(40, 40)
+    assert (
+        window.items_page.table.objectName() == window.shops_page.tree.objectName() == "policyView"
+    )
+    assert window.items_page.table.alternatingRowColors()
+    assert window.shops_page.tree.alternatingRowColors()
+    assert window.items_page.table.selectionBehavior() == window.shops_page.tree.selectionBehavior()
+    shop_badge = window.shops_page.tree.itemWidget(bakery, 1)
+    recipe_badge = window.shops_page.tree.itemWidget(bakery.child(0), 1)
+    assert shop_badge is not None and shop_badge.findChild(QLabel).text() == "Shop"
+    assert recipe_badge is not None and recipe_badge.findChild(QLabel).text() == "Recipe"
+    assert bakery.sizeHint(0).height() == 64
+    assert bakery.child(0).sizeHint(0).height() == 64
+
+    window.quit_application()
+    app.processEvents()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from farm_merge_valet.gui import native_window
+from farm_merge_valet.gui.services import native_window
 
 
 class _FakeUser32:

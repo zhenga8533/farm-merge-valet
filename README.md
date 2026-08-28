@@ -50,17 +50,14 @@ the foreground application, and it does not intentionally pan the game camera.
 
 ```powershell
 farm-merge-valet
-farm-merge-valet diagnostics targets
-farm-merge-valet diagnostics capture
-farm-merge-valet diagnostics positions
-farm-merge-valet diagnostics live-state
-farm-merge-valet diagnostics export
+farm-merge-valet browser status
+farm-merge-valet assets sync
 ```
 
 The command without a subcommand opens the desktop dashboard. Start launches or
 reuses the managed browser and begins automation; Start/Stop and Pause/Resume
 remain available from the dashboard, compact overlay, tray, and global
-shortcuts. The deprecated `run` command remains as a hidden compatibility alias.
+shortcuts.
 The browser manager refuses
 an occupied endpoint with the wrong profile, executable, or switches.
 An ordinary resume validates and reuses the cached scene; heap discovery runs
@@ -72,14 +69,6 @@ combinations and can disable individual shortcuts; laptop Fn behavior remains a
 hardware/firmware concern, so the recorded key is typically F9 rather than
 Fn+F9. Shortcuts fire once per physical key press and re-arm when the key is
 released. Quit is idempotent across keyboard and GUI shutdown paths.
-
-`diagnostics capture` uses `Page.captureScreenshot` and live DOM geometry to save only
-the game iframe without focusing the browser. `diagnostics positions` marks visible cells
-by current classification. `diagnostics live-state` reports board-map candidates,
-runtime capabilities, live shop orders and affordability, scene identity,
-animation-heartbeat state, and whether
-the browser has the required background flags. The potentially expensive
-heap-wide candidate list is omitted unless `--include-heap-candidates` is used.
 
 ## Item catalog and assets
 
@@ -113,7 +102,7 @@ To rebuild from the existing local atlas cache, use:
 farm-merge-valet assets compile
 ```
 
-`assets extract <capture.har>` remains available as a diagnostic fallback.
+`assets extract <capture.har>` remains available as an offline extraction fallback.
 The first catalog build requires a loaded game so the compiler can read the
 authoritative blueprint, merge-graph, building, and recipe metadata. The GUI
 shows compiled sprites beside item families, shops, and recipes when the local
@@ -242,9 +231,8 @@ message; ordinary interval updates edit it in place. Its message ID is stored
 under the per-user application-data directory and reused across runs. Set the
 status interval to `0` to disable periodic edits without disabling event-driven
 updates. Webhook failures are logged locally and never block the bot loop.
-Charts and diagnostic screenshots are reserved for a future summary enhancement.
-One-shot diagnostic and browser-management commands continue writing their
-requested results directly to the terminal or output file.
+Browser-management commands continue writing their requested results directly
+to the terminal.
 
 ## Development
 

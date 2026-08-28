@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from farm_merge_valet.cdp.client import evaluate
+from farm_merge_valet.cdp.evaluation import evaluate
 from farm_merge_valet.core.upgrade_progress import UpgradeProgress, UpgradeTargetProgress
 
 _READ_UPGRADE_PROGRESS_EXPRESSION = r"""
