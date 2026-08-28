@@ -6,14 +6,15 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol
 
-from farm_merge_valet.browser import BrowserManager, BrowserManagerError, BrowserStatus
-from farm_merge_valet.catalog.models import load_item_catalog
+from farm_merge_valet.browser import BrowserManagerError, BrowserStatus
+from farm_merge_valet.catalog.models import ItemCatalog
+from farm_merge_valet.catalog.provider import CatalogProvider
 from farm_merge_valet.catalog.store import CatalogUnavailableError
-from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
+from farm_merge_valet.catalog.sync import CatalogSynchronizer
 from farm_merge_valet.cdp.transport import CdpConnectionError
-from farm_merge_valet.cdp.upgrade_progress import read_upgrade_progress
-from farm_merge_valet.composition import create_catalog_provider, create_catalog_synchronizer
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.core.upgrade_progress import UpgradeProgress
 from farm_merge_valet.observability.logging import log_event
@@ -34,18 +35,44 @@ class CatalogSyncCallbacks:
     upgrade_progress_changed: Callable[[UpgradeProgress | None], None]
 
 
+class BrowserCatalogSession(Protocol):
+    def ensure_running(self) -> BrowserStatus: ...
+
+    def status(self) -> BrowserStatus: ...
+
+
+class RuntimeDiscovery(Protocol):
+    def discover(self) -> object: ...
+
+
+@dataclass(frozen=True)
+class CatalogSyncDependencies:
+    browser_manager_factory: Callable[[AppConfig], BrowserCatalogSession]
+    runtime_factory: Callable[[AppConfig], RuntimeDiscovery]
+    catalog_provider_factory: Callable[[AppConfig], CatalogProvider]
+    catalog_synchronizer_factory: Callable[[AppConfig], CatalogSynchronizer]
+    upgrade_progress_reader: Callable[[int, str], UpgradeProgress | None]
+    catalog_loader: Callable[[Path], ItemCatalog]
+
+
 class CatalogSyncService:
-    def __init__(self, config: AppConfig, callbacks: CatalogSyncCallbacks) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        callbacks: CatalogSyncCallbacks,
+        dependencies: CatalogSyncDependencies,
+    ) -> None:
         self._config = config
         self._callbacks = callbacks
+        self._dependencies = dependencies
 
     def synchronize(self) -> str:
         self._callbacks.raise_if_cancelled()
         target_count = self.refresh_upgrade_progress(source="manual synchronization")
         self._callbacks.raise_if_cancelled()
-        create_catalog_synchronizer(self._config).sync()
+        self._dependencies.catalog_synchronizer_factory(self._config).sync()
         self._callbacks.raise_if_cancelled()
-        catalog = load_item_catalog(self._config.catalog_dir / "catalog.json")
+        catalog = self._dependencies.catalog_loader(self._config.catalog_dir / "catalog.json")
         progress = (
             f"Upgrade targets: {target_count}"
             if target_count is not None
@@ -59,7 +86,7 @@ class CatalogSyncService:
     def set_up(self) -> str:
         self._callbacks.raise_if_cancelled()
         self._callbacks.status_changed("Preparing the managed browser…")
-        manager = BrowserManager(self._config)
+        manager = self._dependencies.browser_manager_factory(self._config)
         browser_status = manager.ensure_running()
         self._callbacks.browser_changed(browser_status)
         self._callbacks.status_changed("Waiting for the game to finish loading…")
@@ -73,17 +100,17 @@ class CatalogSyncService:
         self.refresh_upgrade_progress(source="initial synchronization")
         self._callbacks.raise_if_cancelled()
         try:
-            create_catalog_synchronizer(self._config).sync()
+            self._dependencies.catalog_synchronizer_factory(self._config).sync()
         except (CdpConnectionError, OSError, RuntimeError, ValueError) as exc:
             return f"Catalog ready · Icons were not synchronized: {exc}"
         self._callbacks.raise_if_cancelled()
-        refreshed = load_item_catalog(self._config.catalog_dir / "catalog.json")
+        refreshed = self._dependencies.catalog_loader(self._config.catalog_dir / "catalog.json")
         return f"Game catalog ready · Entries: {len(refreshed.items)} · Icons synchronized"
 
-    def _wait_for_catalog(self, manager: BrowserManager):
+    def _wait_for_catalog(self, manager: BrowserCatalogSession) -> ItemCatalog:
         deadline = time.monotonic() + _SETUP_TIMEOUT_SECONDS
         last_error: Exception | None = None
-        runtime = GameRuntimeAdapter(self._config.cdp_port, self._config.window_title)
+        runtime = self._dependencies.runtime_factory(self._config)
         discovery_announced = False
         while time.monotonic() < deadline:
             self._callbacks.raise_if_cancelled()
@@ -103,7 +130,7 @@ class CatalogSyncService:
                     discovery_announced = True
                 try:
                     runtime.discover()
-                    catalog = create_catalog_provider(self._config).load()
+                    catalog = self._dependencies.catalog_provider_factory(self._config).load()
                 except (CatalogUnavailableError, CdpConnectionError, OSError, ValueError) as exc:
                     last_error = exc
                 else:
@@ -118,7 +145,9 @@ class CatalogSyncService:
 
     def refresh_upgrade_progress(self, *, source: str) -> int | None:
         try:
-            progress = read_upgrade_progress(self._config.cdp_port, self._config.window_title)
+            progress = self._dependencies.upgrade_progress_reader(
+                self._config.cdp_port, self._config.window_title
+            )
         except CdpConnectionError as exc:
             log_event(
                 logger,

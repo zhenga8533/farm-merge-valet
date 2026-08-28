@@ -52,8 +52,9 @@ the shared composition root. Feature implementation belongs to its owning
 package; there is no general-purpose diagnostics module or global settings
 proxy.
 
-The public package entry points are `farm_merge_valet.config`,
-`farm_merge_valet.browser`, `farm_merge_valet.gui.run_application`, and
+The public package entry points are `farm_merge_valet.automation`,
+`farm_merge_valet.config`, `farm_merge_valet.browser`,
+`farm_merge_valet.gui.run_application`, and
 `farm_merge_valet.observability.discord`. CDP modules are internal adapters.
 Former private paths under `core.catalog_*`, `core.bot`, `tools`, and the old
 top-level logging module are intentionally not retained.

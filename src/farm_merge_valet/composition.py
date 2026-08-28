@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from farm_merge_valet.automation.bot import Bot
-from farm_merge_valet.catalog.models import ItemCatalog
+from farm_merge_valet.browser import BrowserManager
+from farm_merge_valet.catalog.models import ItemCatalog, load_item_catalog
 from farm_merge_valet.catalog.provider import CatalogProvider, RefreshingCatalogProvider
 from farm_merge_valet.catalog.store import CatalogUnavailableError
 from farm_merge_valet.catalog.sync import CatalogSynchronizer
@@ -17,7 +18,13 @@ from farm_merge_valet.cdp.resources import (
 )
 from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
 from farm_merge_valet.cdp.transport import CdpConnectionError
+from farm_merge_valet.cdp.upgrade_progress import read_upgrade_progress
 from farm_merge_valet.config import AppConfig
+from farm_merge_valet.gui.services.catalog_sync import (
+    CatalogSyncCallbacks,
+    CatalogSyncDependencies,
+    CatalogSyncService,
+)
 
 
 def create_bot(config: AppConfig) -> Bot:
@@ -61,4 +68,23 @@ def create_catalog_synchronizer(config: AppConfig) -> CatalogSynchronizer:
             config.cdp_port, urls, config.window_title
         ),
         catalog_loader=load_catalog,
+    )
+
+
+def create_catalog_sync_service(
+    config: AppConfig, callbacks: CatalogSyncCallbacks
+) -> CatalogSyncService:
+    return CatalogSyncService(
+        config,
+        callbacks,
+        CatalogSyncDependencies(
+            browser_manager_factory=BrowserManager,
+            runtime_factory=lambda current: GameRuntimeAdapter(
+                current.cdp_port, current.window_title
+            ),
+            catalog_provider_factory=create_catalog_provider,
+            catalog_synchronizer_factory=create_catalog_synchronizer,
+            upgrade_progress_reader=read_upgrade_progress,
+            catalog_loader=load_item_catalog,
+        ),
     )

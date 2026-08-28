@@ -12,7 +12,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from farm_merge_valet.automation.bot import Bot
 from farm_merge_valet.browser import BrowserManager, BrowserManagerError, BrowserStatus
-from farm_merge_valet.composition import create_bot
+from farm_merge_valet.composition import create_bot, create_catalog_sync_service
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.config.hotkeys import HotkeyBindings
 from farm_merge_valet.gui.services.background_operation import (
@@ -402,7 +402,7 @@ class ApplicationController(QObject):
         self._start_utility_operation("game-sync:onboard", service.set_up)
 
     def _catalog_sync_service(self, config: AppConfig) -> CatalogSyncService:
-        return CatalogSyncService(
+        return create_catalog_sync_service(
             config,
             CatalogSyncCallbacks(
                 raise_if_cancelled=self._raise_if_utility_cancelled,
@@ -496,7 +496,7 @@ class ApplicationController(QObject):
             updates["last_activity"] = message
         elif event == "planner.phase_changed":
             updates["phase"] = str(context.get("phase", "—")).replace("_", " ").title()
-        elif event in {"item_action.confirmed", "interaction.confirmed", "crate.claim_completed"}:
+        elif event in {"action.confirmed", "interaction.confirmed", "crate.claim_completed"}:
             updates["last_activity"] = message
         elif record.levelno >= logging.ERROR:
             updates["last_activity"] = message

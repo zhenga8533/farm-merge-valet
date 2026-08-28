@@ -20,7 +20,7 @@ from farm_merge_valet.observability.logging import log_event
 if TYPE_CHECKING:
     from farm_merge_valet.automation.bot import Bot
 
-logger = logging.getLogger("farm_merge_valet.automation.bot")
+logger = logging.getLogger(__name__)
 
 _ACTION_SETTLE_SECONDS = 3.0
 _ACTION_MAX_PENDING_SECONDS = 8.0
