@@ -132,8 +132,11 @@ Policy fields are consumed only by applicable capabilities: non-mergeable
 items ignore `merge` and `prefer_merge_five`, while items without a supported
 primary interaction ignore `interact`. The GUI uses these facts to disable controls that are not relevant to
 an item.
-The `always_remove` field is reserved for a future shovel action and defaults
-to false; configuring it does not currently submit destructive actions.
+The `always_remove` field defaults to false and independently authorizes shovel
+actions for catalog items with the game's `shovelable` capability. The runtime
+validates the scene, coordinate, blueprint, object identity, and capability
+before calling the same removal callback used by the confirmation dialog, then
+confirms the authoritative board change.
 
 Shop automation similarly uses global defaults plus per-ID overrides. Shop and
 recipe policies are independent and both are required, allowing the GUI to

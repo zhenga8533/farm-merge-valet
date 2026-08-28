@@ -162,6 +162,14 @@ def test_discovery_validates_internal_interaction_handler() -> None:
     assert "onGestureTap" in _HEALTH_EXPRESSION
 
 
+def test_discovery_validates_shovel_handler() -> None:
+    from farm_merge_valet.cdp.runtime import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+
+    assert "typeof candidate._onContentRemove === 'function'" in _DISCOVER_EXPRESSION
+    assert "window.__fmvShovelHandler" in _DISCOVER_EXPRESSION
+    assert "services?.shovelService" in _HEALTH_EXPRESSION
+
+
 def test_discovery_validates_shop_order_service() -> None:
     from farm_merge_valet.cdp.runtime import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 
@@ -299,6 +307,31 @@ def test_interaction_returns_structured_invalid_target(monkeypatch) -> None:
     )
 
     assert result.status is ActionStatus.INVALID_TARGET
+
+
+def test_removal_uses_game_shovel_callback_without_confirmation_popup(monkeypatch) -> None:
+    expression = ""
+
+    def capture_expression(_port, value, _title, **_kwargs):
+        nonlocal expression
+        expression = value
+        return {"status": "submitted"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", capture_expression)
+
+    result = GameRuntimeAdapter(9222, "Farm").submit_item_removal((8, 13), "rock_2", 144)
+
+    assert result.status is ActionStatus.SUBMITTED
+    assert "content.hasBehavior?.('shovelable')" in expression
+    assert "const previousContentToRemove = handler._contentToRemove" in expression
+    assert "handler._contentToRemove = content" in expression
+    assert "handler._onContentRemove()" in expression
+    assert "handler._contentToRemove = previousContentToRemove" in expression
+    assert "handler._contentToRemove ||" not in expression
+    assert "rock_2" in expression
+    assert "144" in expression
+    assert "showPopup" not in expression
+    assert "shovel_confirmation" not in expression
 
 
 def test_shop_orders_are_read_with_inventory_and_timer_state(monkeypatch) -> None:

@@ -162,6 +162,7 @@ def test_catalog_keeps_display_labels_separate_from_runtime_and_asset_names() ->
     assert first.asset_path == "resources/stone/stone_1.png"
     assert first.category == "resources"
     assert "shovelable" in first.capabilities
+    assert {"stone_1", "stone_2"} <= catalog.shovelable_ids
 
 
 def test_catalog_does_not_treat_numbered_decorations_as_mergeable() -> None:

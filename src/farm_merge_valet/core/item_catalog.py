@@ -133,6 +133,14 @@ class ItemCatalog:
         )
 
     @property
+    def shovelable_ids(self) -> frozenset[str]:
+        return frozenset(
+            game_id
+            for game_id, item in self.items.items()
+            if "shovelable" in item.capabilities or "shovelable" in item.traits
+        )
+
+    @property
     def uncategorized_ids(self) -> tuple[str, ...]:
         return tuple(
             sorted(

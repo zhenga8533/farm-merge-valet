@@ -36,6 +36,7 @@ class FakeRuntime:
         self.drops: list[tuple[tuple[int, int], tuple[int, int]]] = []
         self.spawn_limits: list[int] = []
         self.interactions: list[tuple[tuple[int, int], InteractionTargetKind, str, int | None]] = []
+        self.removals: list[tuple[tuple[int, int], str, int | None]] = []
         self.started_orders: list[tuple[str, str]] = []
         self.claimed_orders: list[tuple[str, str]] = []
         self.shop_orders: tuple[ShopOrder, ...] = ()
@@ -52,6 +53,10 @@ class FakeRuntime:
         self, coord, expected_kind, expected_blueprint_id, expected_object_id
     ):
         self.interactions.append((coord, expected_kind, expected_blueprint_id, expected_object_id))
+        return ActionResult(ActionStatus.SUBMITTED)
+
+    def submit_item_removal(self, coord, expected_blueprint_id, expected_object_id):
+        self.removals.append((coord, expected_blueprint_id, expected_object_id))
         return ActionResult(ActionStatus.SUBMITTED)
 
     def read_shop_orders(self):
@@ -80,6 +85,7 @@ def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
         item_action_busy=item_action_busy,
         interaction_available=True,
         shop_available=True,
+        removal_available=True,
     )
 
 
@@ -104,6 +110,7 @@ def bare_bot() -> Bot:
     bot._max_item_tiers = {}
     bot._blueprint_policy_keys = {"milk": "ingredients/milk"}
     bot._direct_interaction_ids = frozenset({"milk"})
+    bot._shovelable_ids = frozenset()
     bot._last_health = None
     bot._last_wait_reason = None
     bot._last_wait_log_at = 0.0
@@ -648,6 +655,46 @@ def test_only_enabled_immediate_catalog_items_become_tile_interaction_actions(mo
     assert ready == []
 
 
+def test_remove_policy_plans_shovelable_item_without_interact_policy(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._blueprint_policy_keys = {"rock_1": "obstacles/rock/tier/1"}
+    bot._shovelable_ids = frozenset({"rock_1"})
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.settings.item_policy_overrides",
+        {
+            "obstacles/rock/tier/1": ItemPolicyOverride(
+                interact=False,
+                always_remove=True,
+            )
+        },
+    )
+    bot._live_cells = {(3, 4): LiveCellState(True, "rock_1", 91)}
+
+    immediate, depleted, ready = bot._interaction_actions()
+
+    assert immediate == [_InteractionAction(InteractionTargetKind.REMOVE, (3, 4), "rock_1", 91)]
+    assert depleted == []
+    assert ready == []
+
+    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+
+    assert bot.runtime.removals == [((3, 4), "rock_1", 91)]
+    assert bot.runtime.interactions == []
+    assert bot._pending_interaction is not None
+
+
+def test_remove_policy_never_targets_non_shovelable_item(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._blueprint_policy_keys = {"statue": "decorations/statue"}
+    monkeypatch.setattr(
+        "farm_merge_valet.core.bot.settings.item_policy_overrides",
+        {"decorations/statue": ItemPolicyOverride(always_remove=True)},
+    )
+    bot._live_cells = {(3, 4): LiveCellState(True, "statue", 91)}
+
+    assert bot._interaction_actions() == ([], [], [])
+
+
 def test_collectable_currency_tier_can_be_enabled_independently(monkeypatch) -> None:
     bot = bare_bot()
     bot._direct_interaction_ids = frozenset({"coin_1", "coin_2"})
@@ -856,6 +903,18 @@ def test_pending_product_interaction_confirms_from_authoritative_source_change(
 
     assert bot._pending_interaction is None
     assert any(record.fmv_event == "interaction.confirmed" for record in caplog.records)
+
+
+def test_pending_removal_confirms_from_authoritative_source_change(monkeypatch) -> None:
+    bot = bare_bot()
+    initial = LiveCellState(True, "rock_1", 91)
+    interaction = _InteractionAction(InteractionTargetKind.REMOVE, (3, 4), "rock_1", 91)
+    bot._pending_interaction = _PendingInteraction(interaction, initial, 7, 1.0, initial, 1.0)
+    bot._live_cells[interaction.coord] = LiveCellState(False, None)
+    monkeypatch.setattr("farm_merge_valet.core.bot.time.monotonic", lambda: 2.0)
+
+    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot._pending_interaction is None
 
 
 def test_interaction_noop_cools_down_before_retry(monkeypatch) -> None:

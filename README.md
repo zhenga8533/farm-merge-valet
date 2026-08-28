@@ -133,8 +133,10 @@ Other direct-interaction items remain opt-in. HUD supply crates and shop rewards
 are governed separately.
 Fields that do not match an item's catalog capabilities are ignored, allowing
 the GUI to expose only relevant controls without separate schemas.
-The default-disabled `always_remove` field is reserved for future shovel
-behavior and does not currently trigger removal.
+The default-disabled `always_remove` field authorizes the bot to shovel matching
+catalog items. Removal is available only for items the game marks `shovelable`;
+it uses the game's own confirmed-removal callback and verifies the resulting
+board change without opening the confirmation popup.
 
 The GUI provides per-item, per-shop, and per-recipe “Use default” controls,
 separate item/shop/settings section resets, and a confirmed full reset. Scoped

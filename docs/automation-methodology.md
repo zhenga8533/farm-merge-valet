@@ -120,9 +120,8 @@ merge chains.
 
 Catalog capabilities are descriptive facts from the game. User policy is a
 separate concern keyed by stable family ID, allowing GUI controls to toggle
-families and select merge-5 behavior without changing recognition or
-duplicating asset metadata. A future shovel policy can use the same boundary
-for explicitly authorized deadlock recovery.
+families, select merge-5 behavior, and explicitly authorize shovel actions
+without changing recognition or duplicating asset metadata.
 
 The existing board planner remains coordinate-based and viewport-neutral. It
 prioritizes trigger, degroup, and gather actions; prefers exact merge-5 work;

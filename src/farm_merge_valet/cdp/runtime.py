@@ -66,6 +66,7 @@ class RuntimeHealth:
     item_action_busy: bool = False
     interaction_available: bool = False
     shop_available: bool = False
+    removal_available: bool = False
 
 
 _DISCOVER_EXPRESSION = r"""
@@ -107,6 +108,21 @@ _DISCOVER_EXPRESSION = r"""
   const itemHandler = pickContexts.find((candidate) => dropContexts.has(candidate)) || null;
   const interactionHandler = pickContexts.find(validInteractionHandler) || null;
 
+  const screen = services?.hudService?._screen ||
+    services?.mapGridView?._view || itemHandler;
+  let systemsOwner = screen;
+  for (let depth = 0; systemsOwner && !Array.isArray(systemsOwner._systems) && depth < 8;
+       depth += 1) {
+    systemsOwner = systemsOwner.parent || systemsOwner._parent || null;
+  }
+  const shovelHandler = Array.isArray(systemsOwner?._systems)
+    ? systemsOwner._systems.find((candidate) =>
+        candidate?._services === services &&
+        candidate._services?.shovelService === services?.shovelService &&
+        typeof candidate._onContentRemove === 'function' &&
+        typeof candidate._resetShovelSystem === 'function') || null
+    : null;
+
   // The gameplay HUD owns the authoritative crate event. Visual button states
   // can remain subscribed to inventory updates after their private event set
   // has been disconnected, so require a live gameplay subscriber here.
@@ -121,11 +137,11 @@ _DISCOVER_EXPRESSION = r"""
     typeof orders?.startOrder === 'function' &&
     typeof orders?.onOrderRewarded?.fire === 'function';
 
-  const screen = services?.hudService?._screen || services?.mapGridView?._view || itemHandler;
   window.__fmvGameplayServices = services;
   window.__fmvGameplayMapScreen = screen;
   window.__fmvItemInteractionHandler = itemHandler;
   window.__fmvInteractionHandler = interactionHandler;
+  window.__fmvShovelHandler = shovelHandler;
   window.__fmvCrateSpawnSignal = validCrateSignal;
   window.__fmvOrdersService = validShopOrders ? orders : null;
   window.__fmvRuntimeBoard = board;
@@ -140,6 +156,7 @@ _DISCOVER_EXPRESSION = r"""
   if (!services) missing.push('gameplay-services');
   if (!itemHandler) missing.push('item-interaction-handler');
   if (!interactionHandler) missing.push('tile-interaction-handler');
+  if (!shovelHandler) missing.push('shovel-handler');
   if (!validCrateSignal) missing.push('crate-spawn-signal');
   if (!inventory) missing.push('crate-inventory');
   window.__fmvRuntimeDiscovery = {
@@ -149,6 +166,7 @@ _DISCOVER_EXPRESSION = r"""
     dropSubscribers: subscribers(interaction?.onGestureDrop).length,
     itemDrop: Boolean(itemHandler),
     interaction: Boolean(interactionHandler),
+    removal: Boolean(shovelHandler),
     crateSpawn: Boolean(validCrateSignal),
     crateSubscribers: crateSubscribers.length,
     inventory: Boolean(inventory),
@@ -161,6 +179,7 @@ _DISCOVER_EXPRESSION = r"""
     board: true,
     itemDrop: Boolean(itemHandler),
     interaction: Boolean(interactionHandler),
+    removal: Boolean(shovelHandler),
     crateSpawn: Boolean(validCrateSignal),
     inventory: Boolean(inventory),
     shopOrders: Boolean(validShopOrders),
@@ -186,7 +205,7 @@ _DISCOVERY_DIAGNOSTICS_EXPRESSION = r"""
 (() => window.__fmvRuntimeDiscovery || {
   strategy: 'not-run', services: false, pickSubscribers: 0,
   dropSubscribers: 0, itemDrop: false, crateSpawn: false,
-  interaction: false,
+  interaction: false, removal: false,
   shopOrders: false,
   inventory: Boolean(window.__fmvCrateInventoryItem), missing: ['discovery-not-run'],
 })()
@@ -214,6 +233,7 @@ _HEALTH_EXPRESSION = r"""
   const board = window.__fmvBoardCells;
   const handler = window.__fmvItemInteractionHandler;
   const interactionHandler = window.__fmvInteractionHandler;
+  const shovelHandler = window.__fmvShovelHandler;
   const crateSignal = window.__fmvCrateSpawnSignal;
   const orders = window.__fmvOrdersService;
   const beat = window.__fmvHeartbeat;
@@ -233,6 +253,10 @@ _HEALTH_EXPRESSION = r"""
   const currentInteractionHandler = currentBoard && interactionHandler?._services === services &&
     typeof interactionHandler._simulateClick === 'function' &&
     subscribers(interaction?.onGestureTap).some((entry) => entry?.context === interactionHandler);
+  const currentShovelHandler = currentBoard && shovelHandler?._services === services &&
+    shovelHandler._services?.shovelService === services?.shovelService &&
+    typeof shovelHandler._onContentRemove === 'function' &&
+    typeof shovelHandler._resetShovelSystem === 'function';
   const currentCrateSignal = currentBoard &&
     services?.hudService?._commonEvents?.spawnCrates === crateSignal &&
     typeof crateSignal?.fire === 'function' && subscribers(crateSignal).length > 0;
@@ -248,6 +272,7 @@ _HEALTH_EXPRESSION = r"""
     board: board instanceof Map && currentBoard,
     itemDrop: Boolean(currentItemHandler),
     interaction: Boolean(currentInteractionHandler),
+    removal: Boolean(currentShovelHandler),
     itemActionBusy: Boolean(currentItemHandler && (
       handler.busy || handler.isBusy?.() || handler.dragging || handler._dragging ||
       handler._currentObject || handler._originCell
@@ -522,6 +547,61 @@ def _interaction_expression(
 """
 
 
+def _removal_expression(
+    coord: GridCoord,
+    expected_blueprint_id: str,
+    expected_object_id: int | None,
+    scene_id: int | None,
+) -> str:
+    return f"""
+(() => {{
+  const coord = {_coord(coord)};
+  const expectedBlueprintID = {json.dumps(expected_blueprint_id)};
+  const expectedObjectID = {json.dumps(expected_object_id)};
+  const board = window.__fmvBoardCells;
+  const services = window.__fmvGameplayServices;
+  const handler = window.__fmvShovelHandler;
+  const itemHandler = window.__fmvItemInteractionHandler;
+  const identity = services?.mapGrid || window.__fmvGameplayMapScreen || itemHandler || board;
+  const currentSceneId = identity && window.__fmvRuntimeSceneIds
+    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
+      handler?._services !== services ||
+      handler._services?.shovelService !== services?.shovelService ||
+      typeof handler._onContentRemove !== 'function' ||
+      currentSceneId !== {json.dumps(scene_id)})
+    return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
+  let cell = null;
+  for (const candidate of board.values()) {{
+    if (candidate.column === coord[0] && candidate.row === coord[1]) {{
+      cell = candidate;
+      break;
+    }}
+  }}
+  const content = cell?._content;
+  if (!content || content._blueprintID !== expectedBlueprintID ||
+      (expectedObjectID !== null && content.id !== expectedObjectID))
+    return {{status: 'stale-source'}};
+  if (!content.hasBehavior?.('shovelable'))
+    return {{status: 'invalid-target'}};
+  if (itemHandler?.busy || itemHandler?.isBusy?.() || itemHandler?.dragging ||
+      itemHandler?._dragging || itemHandler?._currentObject || itemHandler?._originCell)
+    return {{status: 'busy'}};
+  const previousContentToRemove = handler._contentToRemove;
+  try {{
+    handler._contentToRemove = content;
+    handler._onContentRemove();
+    return {{status: 'submitted'}};
+  }} catch (error) {{
+    return {{status: 'rejected', detail: String(error?.message || error)}};
+  }} finally {{
+    if (handler._contentToRemove === content)
+      handler._contentToRemove = previousContentToRemove;
+  }}
+}})()
+"""
+
+
 _READ_SHOP_ORDERS_EXPRESSION = r"""
 (() => {
   const board = window.__fmvBoardCells;
@@ -660,6 +740,13 @@ class GameRuntime(Protocol):
         self,
         coord: GridCoord,
         expected_kind: InteractionTargetKind,
+        expected_blueprint_id: str,
+        expected_object_id: int | None,
+    ) -> ActionResult: ...
+
+    def submit_item_removal(
+        self,
+        coord: GridCoord,
         expected_blueprint_id: str,
         expected_object_id: int | None,
     ) -> ActionResult: ...
@@ -805,10 +892,13 @@ class GameRuntimeAdapter:
             self._discovery_detail = "runtime-scene-changed"
         item_drop = raw.get("itemDrop") is True
         interaction = raw.get("interaction") is True
+        removal = raw.get("removal") is True
         crate_spawn = raw.get("crateSpawn") is True
         board = raw.get("board") is True
         return RuntimeHealth(
-            available=board and (item_drop or interaction or crate_spawn) and scene_id is not None,
+            available=board
+            and (item_drop or interaction or removal or crate_spawn)
+            and scene_id is not None,
             scene_id=scene_id,
             board_available=board,
             item_drop_available=item_drop,
@@ -826,10 +916,11 @@ class GameRuntimeAdapter:
             item_action_busy=raw.get("itemActionBusy") is True,
             interaction_available=interaction,
             shop_available=raw.get("shopOrders") is True,
+            removal_available=removal,
         )
 
-    def submit_item_drop(self, start: GridCoord, end: GridCoord) -> ActionResult:
-        raw = self._evaluate(_drop_expression(start, end, self._scene_id))
+    @staticmethod
+    def _action_result(raw: object) -> ActionResult:
         if not isinstance(raw, dict):
             return ActionResult(ActionStatus.UNAVAILABLE, "invalid-runtime-response")
         status_value = raw.get("status")
@@ -844,6 +935,9 @@ class GameRuntimeAdapter:
         return ActionResult(
             status, raw.get("detail") if isinstance(raw.get("detail"), str) else None
         )
+
+    def submit_item_drop(self, start: GridCoord, end: GridCoord) -> ActionResult:
+        return self._action_result(self._evaluate(_drop_expression(start, end, self._scene_id)))
 
     def submit_board_interaction(
         self,
@@ -852,28 +946,33 @@ class GameRuntimeAdapter:
         expected_blueprint_id: str,
         expected_object_id: int | None,
     ) -> ActionResult:
-        raw = self._evaluate(
-            _interaction_expression(
-                coord,
-                expected_kind,
-                expected_blueprint_id,
-                expected_object_id,
-                self._scene_id,
+        return self._action_result(
+            self._evaluate(
+                _interaction_expression(
+                    coord,
+                    expected_kind,
+                    expected_blueprint_id,
+                    expected_object_id,
+                    self._scene_id,
+                )
             )
         )
-        if not isinstance(raw, dict):
-            return ActionResult(ActionStatus.UNAVAILABLE, "invalid-runtime-response")
-        status_value = raw.get("status")
-        try:
-            status = (
-                ActionStatus(status_value)
-                if isinstance(status_value, str)
-                else ActionStatus.UNAVAILABLE
+
+    def submit_item_removal(
+        self,
+        coord: GridCoord,
+        expected_blueprint_id: str,
+        expected_object_id: int | None,
+    ) -> ActionResult:
+        return self._action_result(
+            self._evaluate(
+                _removal_expression(
+                    coord,
+                    expected_blueprint_id,
+                    expected_object_id,
+                    self._scene_id,
+                )
             )
-        except ValueError:
-            status = ActionStatus.UNAVAILABLE
-        return ActionResult(
-            status, raw.get("detail") if isinstance(raw.get("detail"), str) else None
         )
 
     def spawn_supply_crates(self, limit: int) -> CrateSpawnResult:
