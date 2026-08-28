@@ -2,7 +2,39 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QPushButton, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QPushButton, QToolButton, QVBoxLayout, QWidget
+
+
+class DisclosureSection(QWidget):
+    """A keyboard-accessible section that keeps advanced controls out of the main scan path."""
+
+    def __init__(self, title: str, *, expanded: bool = False) -> None:
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.toggle = QToolButton()
+        self.toggle.setObjectName("disclosureButton")
+        self.toggle.setText(title)
+        self.toggle.setAccessibleName(title)
+        self.toggle.setCheckable(True)
+        self.toggle.setChecked(expanded)
+        self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.content = QWidget()
+        self.content.setVisible(expanded)
+        self.toggle.toggled.connect(self._set_expanded)
+        layout.addWidget(self.toggle)
+        layout.addWidget(self.content)
+        self._set_expanded(expanded)
+
+    @property
+    def expanded(self) -> bool:
+        return self.toggle.isChecked()
+
+    def _set_expanded(self, expanded: bool) -> None:
+        self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        self.content.setVisible(expanded)
 
 
 def secondary_button(text: str) -> QPushButton:

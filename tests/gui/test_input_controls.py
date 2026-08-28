@@ -23,6 +23,7 @@ from farm_merge_valet.gui.input_controls import (
     FocusAwareSpinBox,
     SettingsToggle,
 )
+from farm_merge_valet.gui.policy_view import PolicyCheckBox
 from farm_merge_valet.gui.theme import apply_theme
 
 
@@ -145,6 +146,27 @@ def test_settings_toggle_uses_switch_sizing_and_checkbox_behavior() -> None:
     QTest.mouseClick(control, Qt.MouseButton.LeftButton, pos=control.rect().center())
     assert control.isChecked()
 
+    control.close()
+
+
+def test_checked_policy_toggle_has_a_distinct_keyboard_focus_ring() -> None:
+    app = QApplication.instance() or QApplication([])
+    apply_theme(app, "light")
+    control = PolicyCheckBox("Enabled")
+    control.setChecked(True)
+    control.resize(120, 30)
+    control.show()
+    app.processEvents()
+    control.clearFocus()
+    app.processEvents()
+    unfocused = control.grab().toImage()
+
+    control.setFocus(Qt.FocusReason.TabFocusReason)
+    app.processEvents()
+    focused = control.grab().toImage()
+
+    assert control.hasFocus()
+    assert focused != unfocused
     control.close()
 
 

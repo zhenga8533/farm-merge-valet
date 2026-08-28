@@ -26,6 +26,10 @@ _CATALOG_SETUP_TIMEOUT_SECONDS = 120.0
 _CATALOG_SETUP_POLL_SECONDS = 1.0
 
 
+class UtilityOperationCancelled(Exception):
+    """Internal sentinel used to stop background GUI operations during shutdown."""
+
+
 class ApplicationState(StrEnum):
     STOPPED = "Stopped"
     STARTING = "Starting"
@@ -99,9 +103,10 @@ class ApplicationController(QObject):
         self._bot: Bot | None = None
         self._worker: threading.Thread | None = None
         self._utility_worker: threading.Thread | None = None
+        self._utility_cancel = threading.Event()
+        self._utility_completion_pending = False
         self._stopping = False
         self._shutting_down = False
-        self._shutdown_deadline: float | None = None
         self._unsubscribed = False
         self.hotkeys = HotkeyManager()
         self.hotkeys.setParent(self)
@@ -328,8 +333,8 @@ class ApplicationController(QObject):
         if self._shutting_down:
             return
         self._shutting_down = True
+        self._utility_cancel.set()
         self.hotkeys.stop()
-        self._shutdown_deadline = time.monotonic() + 5.0
         if self._bot is None and self._worker is not None and self._worker.is_alive():
             self._stopping = True
             self._set_status(state=ApplicationState.STOPPING)
@@ -400,8 +405,11 @@ class ApplicationController(QObject):
 
             config = self.store.current
             settings.replace(config)
+            self._raise_if_utility_cancelled()
             target_count = self._refresh_upgrade_progress(config, source="manual synchronization")
+            self._raise_if_utility_cancelled()
             sync_runtime_assets()
+            self._raise_if_utility_cancelled()
             catalog = load_item_catalog(config.catalog_dir / "catalog.json")
             progress = (
                 f"Upgrade targets: {target_count}"
@@ -474,6 +482,7 @@ class ApplicationController(QObject):
             from farm_merge_valet.tools.template_extraction import sync_runtime_assets
 
             config = self.store.current
+            self._raise_if_utility_cancelled()
             self.game_sync_status_changed.emit("Preparing the managed browser…")
             settings.replace(config)
             manager = BrowserManager(config)
@@ -488,6 +497,7 @@ class ApplicationController(QObject):
             catalog = None
             discovery_announced = False
             while time.monotonic() < deadline:
+                self._raise_if_utility_cancelled()
                 browser_status = manager.status()
                 if not browser_status.running:
                     raise BrowserManagerError(
@@ -519,7 +529,7 @@ class ApplicationController(QObject):
                         last_error = exc
                     if catalog is not None and catalog.items:
                         break
-                time.sleep(_CATALOG_SETUP_POLL_SECONDS)
+                self._wait_for_utility_poll(_CATALOG_SETUP_POLL_SECONDS)
             if catalog is None or not catalog.items:
                 detail = f" Last result: {last_error}" if last_error is not None else ""
                 raise RuntimeError(
@@ -527,15 +537,18 @@ class ApplicationController(QObject):
                     f"and finish any sign-in or loading steps, then try again.{detail}"
                 )
 
+            self._raise_if_utility_cancelled()
             self.catalog_refreshed.emit(len(catalog.items))
             self.game_sync_status_changed.emit(
                 f"Catalog ready · {len(catalog.items)} entries · Synchronizing icons…"
             )
             self._refresh_upgrade_progress(config, source="initial synchronization")
+            self._raise_if_utility_cancelled()
             try:
                 sync_runtime_assets()
             except (CdpConnectionError, OSError, RuntimeError, ValueError) as exc:
                 return f"Catalog ready · Icons were not synchronized: {exc}"
+            self._raise_if_utility_cancelled()
             refreshed = load_item_catalog(config.catalog_dir / "catalog.json")
             return f"Game catalog ready · Entries: {len(refreshed.items)} · Icons synchronized"
 
@@ -564,12 +577,17 @@ class ApplicationController(QObject):
             return False
         category = operation.partition(":")[0]
         self._set_utility_busy(category, True)
+        self._utility_cancel.clear()
+        self._utility_completion_pending = True
 
         def run() -> None:
             try:
-                self._utility_operation_finished.emit(operation, work())
+                self._raise_if_utility_cancelled()
+                result = work()
+                self._raise_if_utility_cancelled()
             except Exception as exc:
-                self._utility_operation_finished.emit(operation, exc)
+                result = exc
+            self._utility_operation_finished.emit(operation, result)
 
         self._utility_worker = threading.Thread(
             target=run,
@@ -578,6 +596,14 @@ class ApplicationController(QObject):
         )
         self._utility_worker.start()
         return True
+
+    def _raise_if_utility_cancelled(self) -> None:
+        if self._utility_cancel.is_set():
+            raise UtilityOperationCancelled
+
+    def _wait_for_utility_poll(self, seconds: float) -> None:
+        if self._utility_cancel.wait(seconds):
+            raise UtilityOperationCancelled
 
     def _set_utility_busy(self, category: str, busy: bool) -> None:
         if category == "browser":
@@ -589,7 +615,11 @@ class ApplicationController(QObject):
 
     def _finish_utility_operation(self, operation: str, result: object) -> None:
         category, _, action = operation.partition(":")
+        self._utility_completion_pending = False
         self._set_utility_busy(category, False)
+        if isinstance(result, UtilityOperationCancelled):
+            self._poll_workers()
+            return
         if isinstance(result, Exception):
             message = str(result)
             if category == "browser":
@@ -662,10 +692,7 @@ class ApplicationController(QObject):
             return
         bot_running = self._worker is not None and self._worker.is_alive()
         utility_running = self._utility_worker is not None and self._utility_worker.is_alive()
-        deadline_reached = (
-            self._shutdown_deadline is not None and time.monotonic() >= self._shutdown_deadline
-        )
-        if (bot_running or utility_running) and not deadline_reached:
+        if bot_running or utility_running or self._utility_completion_pending:
             return
         self._state_timer.stop()
         if not self._unsubscribed:

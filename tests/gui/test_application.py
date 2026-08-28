@@ -542,6 +542,18 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         button.text() for button in window.settings_page.findChildren(QPushButton)
     }
     assert all("_" not in title and "&" not in title for title in section_titles)
+    assert not window.settings_page.automation_advanced_section.expanded
+    assert not window.settings_page.notifications_advanced_section.expanded
+    assert not window.settings_page.appearance_advanced_section.expanded
+    for section in (
+        window.settings_page.automation_advanced_section,
+        window.settings_page.notifications_advanced_section,
+        window.settings_page.appearance_advanced_section,
+    ):
+        assert section.toggle.accessibleName()
+        section.toggle.click()
+        assert section.expanded
+        assert not section.content.isHidden()
     for control in window.settings_page.controls.values():
         accessible = (
             control.display.accessibleName()
@@ -580,6 +592,9 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
         group.title() for group in settings_page.findChildren(QGroupBox)
     }
     assert all(control.accessibleName() for control in window.browser_page.controls.values())
+    assert not window.browser_page.advanced_section.expanded
+    window.browser_page.advanced_section.toggle.click()
+    assert window.browser_page.advanced_section.expanded
 
     window.browser_page._request("cdp_port", 9333)
     window._flush_config()
@@ -998,18 +1013,60 @@ def test_runtime_state_updates_dashboard_overlay_and_tray_controls(tmp_path) -> 
     app.processEvents()
 
 
-def test_invalid_coupled_setting_reverts_the_edited_control(tmp_path) -> None:
+def test_coupled_settings_keep_the_draft_until_the_pair_is_valid(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     store = ConfigStore(tmp_path / "config.json")
     store.replace(AppConfig(close_to_tray=False))
     window = MainWindow(ApplicationController(store))
     minimum = window.settings_page.controls["item_action_delay_min"]
+    maximum = window.settings_page.controls["item_action_delay_max"]
+    assert isinstance(minimum, QDoubleSpinBox)
+    assert isinstance(maximum, QDoubleSpinBox)
 
     minimum.setValue(10.0)
+    minimum.editingFinished.emit()
 
-    assert minimum.value() == AppConfig().item_action_delay_min
+    assert minimum.value() == 10.0
     assert minimum.property("invalid") is True
+    assert maximum.property("invalid") is True
     assert window.saved_label.text().startswith("Invalid:")
+    assert store.current.item_action_delay_min == AppConfig().item_action_delay_min
+
+    maximum.setValue(11.0)
+    maximum.editingFinished.emit()
+    window._flush_config()
+
+    saved = ConfigStore(store.path).load()
+    assert saved.item_action_delay_min == 10.0
+    assert saved.item_action_delay_max == 11.0
+    assert minimum.property("invalid") is False
+    assert maximum.property("invalid") is False
+
+    assert window._replace_config(AppConfig(close_to_tray=False))
+    window.quit_application()
+    app.processEvents()
+
+
+def test_item_policy_columns_fit_the_default_window_width(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    write_item_catalog(catalog_dir / "catalog.json", _catalog())
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    window.resize(1100, 740)
+    window.show()
+    window.navigation.setCurrentRow(window._NAVIGATION.index("Items"))
+    app.processEvents()
+
+    assert window.item_table.horizontalScrollBar().maximum() == 0
+    assert [window.item_table.columnWidth(column) for column in range(2, 7)] == [
+        92,
+        78,
+        88,
+        92,
+        88,
+    ]
 
     window.quit_application()
     app.processEvents()

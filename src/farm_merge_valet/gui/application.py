@@ -28,19 +28,17 @@ from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.gui.action_button import ActionButton
 from farm_merge_valet.gui.assets import CatalogIconLoader
 from farm_merge_valet.gui.config_saver import ConfigSaver
-from farm_merge_valet.gui.config_sections import ConfigSection, reset_config_section
+from farm_merge_valet.gui.config_sections import SECTION_FIELDS, ConfigSection, reset_config_section
+from farm_merge_valet.gui.configuration_pages import BrowserPage, LogsPage, SettingsPage
 from farm_merge_valet.gui.controller import (
     ApplicationController,
     ApplicationState,
     ApplicationStatus,
 )
+from farm_merge_valet.gui.page_base import ConfigEdit
 from farm_merge_valet.gui.pages import (
-    BrowserPage,
-    ConfigEdit,
     DashboardPage,
     ItemsPage,
-    LogsPage,
-    SettingsPage,
     ShopsPage,
 )
 from farm_merge_valet.gui.theme import apply_theme, refresh_widget_theme
@@ -58,39 +56,15 @@ _APPEARANCE_FIELDS = {
     "overlay_unfocused_opacity",
 }
 _HOTKEY_FIELDS = {"start_stop_hotkey", "pause_hotkey", "quit_hotkey"}
-_ITEM_FIELDS = {
-    "catalog_dir",
-    "item_policy_defaults",
-    "item_category_defaults",
-    "item_default_overrides",
-    "item_policy_overrides",
-    "prefer_merge_five",
-    "items_sort_column",
-    "items_sort_descending",
-}
+_VIEW_FIELDS = set(SECTION_FIELDS[ConfigSection.VIEW])
+_ITEM_VIEW_FIELDS = {field for field in _VIEW_FIELDS if field.startswith("items_")}
+_SHOP_VIEW_FIELDS = {field for field in _VIEW_FIELDS if field.startswith("shops_")}
+_ITEM_FIELDS = set(SECTION_FIELDS[ConfigSection.ITEMS]) | _ITEM_VIEW_FIELDS | {"catalog_dir"}
 _ITEM_POLICY_FIELDS = _ITEM_FIELDS - {"items_sort_column", "items_sort_descending"}
-_SHOP_FIELDS = {
-    "catalog_dir",
-    "shop_default_enabled",
-    "recipe_default_enabled",
-    "shop_overrides",
-    "recipe_overrides",
-    "shops_sort_column",
-    "shops_sort_descending",
-}
+_SHOP_FIELDS = set(SECTION_FIELDS[ConfigSection.SHOPS]) | _SHOP_VIEW_FIELDS | {"catalog_dir"}
 _SHOP_POLICY_FIELDS = _SHOP_FIELDS - {"shops_sort_column", "shops_sort_descending"}
-_BROWSER_FIELDS = {
-    "browser",
-    "browser_executable",
-    "browser_profile_dir",
-    "browser_auto_launch",
-    "game_url",
-    "window_title",
-    "cdp_port",
-    "catalog_dir",
-    "atlas_cache_dir",
-}
-_SETTINGS_FIELDS = set(AppConfig.model_fields) - _ITEM_FIELDS - _SHOP_FIELDS - _BROWSER_FIELDS
+_BROWSER_FIELDS = set(SECTION_FIELDS[ConfigSection.BROWSER])
+_SETTINGS_FIELDS = set(SECTION_FIELDS[ConfigSection.SETTINGS])
 
 
 def _app_icon() -> QIcon:

@@ -209,9 +209,15 @@ QDoubleSpinBox::up-arrow, QDoubleSpinBox::down-arrow {{
 QLineEdit[invalid="true"], QComboBox[invalid="true"],
 QSpinBox[invalid="true"], QDoubleSpinBox[invalid="true"] {{ border: 2px solid #cf222e; }}
 QPushButton:focus, QLineEdit:focus, QComboBox:focus,
-QSpinBox:focus, QDoubleSpinBox:focus, QAbstractItemView:focus {{
+QSpinBox:focus, QDoubleSpinBox:focus, QAbstractItemView:focus,
+QToolButton#disclosureButton:focus {{
     border: 2px solid {colors.selected};
 }}
+QToolButton#disclosureButton {{
+    background: {colors.surface}; color: {colors.text}; border: 1px solid {colors.border};
+    border-radius: 8px; padding: 9px 12px; text-align: left; font-weight: 600;
+}}
+QToolButton#disclosureButton:hover {{ background: {colors.surface_subtle}; }}
 QSlider::groove:horizontal {{
     height: 6px; background: {colors.border}; border-radius: 3px;
 }}

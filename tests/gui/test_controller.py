@@ -373,3 +373,70 @@ def test_catalog_setup_reports_when_game_never_finishes_loading(tmp_path, monkey
     assert failures and "did not become available" in failures[0]
     controller.shutdown()
     app.processEvents()
+
+
+def test_shutdown_waits_for_utility_completion_before_deleting_controller(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig())
+    controller = ApplicationController(store)
+    started = threading.Event()
+    release = threading.Event()
+    shutdown_events: list[bool] = []
+    busy_states: list[bool] = []
+
+    def work() -> str:
+        started.set()
+        release.wait(2)
+        return "finished"
+
+    controller.shutdown_complete.connect(lambda: shutdown_events.append(True))
+    controller.browser_operation_changed.connect(busy_states.append)
+    assert controller._start_utility_operation("browser:refresh", work)
+    assert started.wait(1)
+
+    controller.shutdown()
+    deadline = time.monotonic() + 0.2
+    while time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+
+    assert shutdown_events == []
+    assert busy_states == [True]
+
+    release.set()
+    deadline = time.monotonic() + 2
+    while not shutdown_events and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+
+    assert shutdown_events == [True]
+    assert busy_states == [True, False]
+
+
+def test_shutdown_interrupts_cooperative_utility_waits(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig())
+    controller = ApplicationController(store)
+    started = threading.Event()
+    shutdown_events: list[bool] = []
+
+    def work() -> str:
+        started.set()
+        controller._wait_for_utility_poll(30)
+        return "unreachable"
+
+    controller.shutdown_complete.connect(lambda: shutdown_events.append(True))
+    assert controller._start_utility_operation("game-sync:onboard", work)
+    assert started.wait(1)
+
+    started_at = time.monotonic()
+    controller.shutdown()
+    deadline = time.monotonic() + 2
+    while not shutdown_events and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+
+    assert shutdown_events == [True]
+    assert time.monotonic() - started_at < 1

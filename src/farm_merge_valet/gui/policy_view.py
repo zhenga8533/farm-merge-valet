@@ -204,6 +204,13 @@ class PolicyCheckBox(QCheckBox):
         painter.setBrush(fill)
         painter.drawRoundedRect(box, 4, 4)
 
+        if self.hasFocus():
+            focus = QColor(palette.color(QPalette.ColorRole.Highlight))
+            focus.setAlpha(190)
+            painter.setPen(QPen(focus, 2.0))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 5, 5)
+
         mark_pen = QPen(QColor("#ffffff"), 2.0)
         mark_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         mark_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -304,7 +311,6 @@ def configure_policy_view(view: QAbstractItemView) -> None:
     view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
     view.setTextElideMode(Qt.TextElideMode.ElideRight)
-    view.setStyleSheet("outline: 0;")
     if isinstance(view, QTableWidget):
         view.setShowGrid(False)
         view.verticalHeader().setVisible(False)
