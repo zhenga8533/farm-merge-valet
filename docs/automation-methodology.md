@@ -143,6 +143,13 @@ Drag and drop are sent directly to the item handler so map-pan subscribers canno
 move the camera between coordinate resolution and submission. Resolved item
 actions are separated by a configurable randomized delay.
 
+Collectable currency rewards are resolved through the active gameplay reward
+system. The adapter validates the scene, coordinate, blueprint, object identity,
+currency and collectable behaviors, and non-empty reward data before calling the
+same `_collectReward` handler used by the item's Claim button. The confirmation
+popout is not created, and the next authoritative board read confirms removal of
+the source object.
+
 Submissions return one of `submitted`, `busy`, `unavailable`, `rejected`,
 `stale-source`, `invalid-target`, or `invalid-destination`. A submitted action stays pending while
 the heartbeat is frozen, the interaction handler is busy, or the target reloads.

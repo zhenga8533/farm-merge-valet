@@ -67,6 +67,7 @@ class RuntimeHealth:
     interaction_available: bool = False
     shop_available: bool = False
     removal_available: bool = False
+    reward_interaction_available: bool = False
 
 
 _DISCOVER_EXPRESSION = r"""
@@ -115,13 +116,17 @@ _DISCOVER_EXPRESSION = r"""
        depth += 1) {
     systemsOwner = systemsOwner.parent || systemsOwner._parent || null;
   }
-  const shovelHandler = Array.isArray(systemsOwner?._systems)
-    ? systemsOwner._systems.find((candidate) =>
+  const gameplaySystems = Array.isArray(systemsOwner?._systems) ? systemsOwner._systems : [];
+  const shovelHandler = gameplaySystems.find((candidate) =>
         candidate?._services === services &&
         candidate._services?.shovelService === services?.shovelService &&
         typeof candidate._onContentRemove === 'function' &&
-        typeof candidate._resetShovelSystem === 'function') || null
-    : null;
+        typeof candidate._resetShovelSystem === 'function') || null;
+  const rewardInteractionHandler = gameplaySystems.find((candidate) =>
+    candidate?._services === services &&
+    typeof candidate._collectObject === 'function' &&
+    typeof candidate._collectReward === 'function' &&
+    typeof candidate.onItemCollect?.fire === 'function') || null;
 
   // The gameplay HUD owns the authoritative crate event. Visual button states
   // can remain subscribed to inventory updates after their private event set
@@ -142,6 +147,7 @@ _DISCOVER_EXPRESSION = r"""
   window.__fmvItemInteractionHandler = itemHandler;
   window.__fmvInteractionHandler = interactionHandler;
   window.__fmvShovelHandler = shovelHandler;
+  window.__fmvRewardInteractionHandler = rewardInteractionHandler;
   window.__fmvCrateSpawnSignal = validCrateSignal;
   window.__fmvOrdersService = validShopOrders ? orders : null;
   window.__fmvRuntimeBoard = board;
@@ -157,6 +163,7 @@ _DISCOVER_EXPRESSION = r"""
   if (!itemHandler) missing.push('item-interaction-handler');
   if (!interactionHandler) missing.push('tile-interaction-handler');
   if (!shovelHandler) missing.push('shovel-handler');
+  if (!rewardInteractionHandler) missing.push('reward-interaction-handler');
   if (!validCrateSignal) missing.push('crate-spawn-signal');
   if (!inventory) missing.push('crate-inventory');
   window.__fmvRuntimeDiscovery = {
@@ -167,6 +174,7 @@ _DISCOVER_EXPRESSION = r"""
     itemDrop: Boolean(itemHandler),
     interaction: Boolean(interactionHandler),
     removal: Boolean(shovelHandler),
+    rewardInteraction: Boolean(rewardInteractionHandler),
     crateSpawn: Boolean(validCrateSignal),
     crateSubscribers: crateSubscribers.length,
     inventory: Boolean(inventory),
@@ -180,6 +188,7 @@ _DISCOVER_EXPRESSION = r"""
     itemDrop: Boolean(itemHandler),
     interaction: Boolean(interactionHandler),
     removal: Boolean(shovelHandler),
+    rewardInteraction: Boolean(rewardInteractionHandler),
     crateSpawn: Boolean(validCrateSignal),
     inventory: Boolean(inventory),
     shopOrders: Boolean(validShopOrders),
@@ -205,7 +214,7 @@ _DISCOVERY_DIAGNOSTICS_EXPRESSION = r"""
 (() => window.__fmvRuntimeDiscovery || {
   strategy: 'not-run', services: false, pickSubscribers: 0,
   dropSubscribers: 0, itemDrop: false, crateSpawn: false,
-  interaction: false, removal: false,
+  interaction: false, removal: false, rewardInteraction: false,
   shopOrders: false,
   inventory: Boolean(window.__fmvCrateInventoryItem), missing: ['discovery-not-run'],
 })()
@@ -234,6 +243,7 @@ _HEALTH_EXPRESSION = r"""
   const handler = window.__fmvItemInteractionHandler;
   const interactionHandler = window.__fmvInteractionHandler;
   const shovelHandler = window.__fmvShovelHandler;
+  const rewardInteractionHandler = window.__fmvRewardInteractionHandler;
   const crateSignal = window.__fmvCrateSpawnSignal;
   const orders = window.__fmvOrdersService;
   const beat = window.__fmvHeartbeat;
@@ -257,6 +267,11 @@ _HEALTH_EXPRESSION = r"""
     shovelHandler._services?.shovelService === services?.shovelService &&
     typeof shovelHandler._onContentRemove === 'function' &&
     typeof shovelHandler._resetShovelSystem === 'function';
+  const currentRewardInteractionHandler = currentBoard &&
+    rewardInteractionHandler?._services === services &&
+    typeof rewardInteractionHandler._collectObject === 'function' &&
+    typeof rewardInteractionHandler._collectReward === 'function' &&
+    typeof rewardInteractionHandler.onItemCollect?.fire === 'function';
   const currentCrateSignal = currentBoard &&
     services?.hudService?._commonEvents?.spawnCrates === crateSignal &&
     typeof crateSignal?.fire === 'function' && subscribers(crateSignal).length > 0;
@@ -273,6 +288,7 @@ _HEALTH_EXPRESSION = r"""
     itemDrop: Boolean(currentItemHandler),
     interaction: Boolean(currentInteractionHandler),
     removal: Boolean(currentShovelHandler),
+    rewardInteraction: Boolean(currentRewardInteractionHandler),
     itemActionBusy: Boolean(currentItemHandler && (
       handler.busy || handler.isBusy?.() || handler.dragging || handler._dragging ||
       handler._currentObject || handler._originCell
@@ -505,11 +521,14 @@ def _interaction_expression(
   const expectedObjectID = {json.dumps(expected_object_id)};
   const board = window.__fmvBoardCells;
   const handler = window.__fmvInteractionHandler;
+  const rewardHandler = window.__fmvRewardInteractionHandler;
+  const services = window.__fmvGameplayServices;
   const identity = window.__fmvGameplayServices?.mapGrid ||
     window.__fmvGameplayMapScreen || handler || board;
   const currentSceneId = identity && window.__fmvRuntimeSceneIds
     ? window.__fmvRuntimeSceneIds.get(identity) : null;
-  if (!board || window.__fmvRuntimeBoard !== board || !handler ||
+  if (!board || window.__fmvRuntimeBoard !== board ||
+      (expectedKind !== 'reward' && !handler) ||
       currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
   let cell = null;
@@ -527,6 +546,10 @@ def _interaction_expression(
     ['animal', 'crop'].includes(content.getBehavior?.('harvestable')?._data?.harvestableType);
   const valid = expectedKind === 'immediate'
     ? content.hasBehavior?.('collectable')
+    : expectedKind === 'reward'
+      ? content.hasBehavior?.('collectable') && content.hasBehavior?.('currency') &&
+        Array.isArray(content.getBehavior?.('collectable')?.reward) &&
+        content.getBehavior('collectable').reward.length > 0
     : expectedKind === 'producer'
       ? producer && !content.hasBehavior?.('cooldown') &&
         !content.hasBehavior?.('depleted')
@@ -534,11 +557,19 @@ def _interaction_expression(
         ? producer && content.hasBehavior?.('depleted')
         : false;
   if (!valid) return {{status: 'invalid-target'}};
-  if (handler.busy || handler.isBusy?.() || handler.dragging || handler._dragging ||
-      handler._currentObject || handler._originCell)
+  if (handler?.busy || handler?.isBusy?.() || handler?.dragging || handler?._dragging ||
+      handler?._currentObject || handler?._originCell)
     return {{status: 'busy'}};
   try {{
-    handler._simulateClick(content);
+    if (expectedKind === 'reward') {{
+      if (rewardHandler?._services !== services ||
+          typeof rewardHandler._collectReward !== 'function' ||
+          typeof rewardHandler.onItemCollect?.fire !== 'function')
+        return {{status: 'unavailable', detail: 'reward-interaction-handler-not-found'}};
+      rewardHandler._collectReward(content);
+    }} else {{
+      handler._simulateClick(content);
+    }}
     return {{status: 'submitted'}};
   }} catch (error) {{
     return {{status: 'rejected', detail: String(error?.message || error)}};
@@ -893,11 +924,12 @@ class GameRuntimeAdapter:
         item_drop = raw.get("itemDrop") is True
         interaction = raw.get("interaction") is True
         removal = raw.get("removal") is True
+        reward_interaction = raw.get("rewardInteraction") is True
         crate_spawn = raw.get("crateSpawn") is True
         board = raw.get("board") is True
         return RuntimeHealth(
             available=board
-            and (item_drop or interaction or removal or crate_spawn)
+            and (item_drop or interaction or removal or reward_interaction or crate_spawn)
             and scene_id is not None,
             scene_id=scene_id,
             board_available=board,
@@ -917,6 +949,7 @@ class GameRuntimeAdapter:
             interaction_available=interaction,
             shop_available=raw.get("shopOrders") is True,
             removal_available=removal,
+            reward_interaction_available=reward_interaction,
         )
 
     @staticmethod

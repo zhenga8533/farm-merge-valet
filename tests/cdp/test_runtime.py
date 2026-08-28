@@ -14,6 +14,7 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
                 "board": True,
                 "itemDrop": True,
                 "interaction": True,
+                "rewardInteraction": True,
                 "crateSpawn": True,
                 "inventory": True,
                 "heartbeat": 10,
@@ -24,6 +25,7 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
                 "board": True,
                 "itemDrop": True,
                 "interaction": True,
+                "rewardInteraction": True,
                 "crateSpawn": True,
                 "inventory": True,
                 "heartbeat": 11,
@@ -40,6 +42,7 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
     assert health.heartbeat_advancing
     assert health.item_action_busy
     assert health.interaction_available
+    assert health.reward_interaction_available
 
 
 def test_scene_change_invalidates_cached_identity(monkeypatch) -> None:
@@ -168,6 +171,14 @@ def test_discovery_validates_shovel_handler() -> None:
     assert "typeof candidate._onContentRemove === 'function'" in _DISCOVER_EXPRESSION
     assert "window.__fmvShovelHandler" in _DISCOVER_EXPRESSION
     assert "services?.shovelService" in _HEALTH_EXPRESSION
+
+
+def test_discovery_validates_reward_interaction_handler() -> None:
+    from farm_merge_valet.cdp.runtime import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+
+    assert "typeof candidate._collectReward === 'function'" in _DISCOVER_EXPRESSION
+    assert "window.__fmvRewardInteractionHandler" in _DISCOVER_EXPRESSION
+    assert "rewardInteractionHandler?._services === services" in _HEALTH_EXPRESSION
 
 
 def test_discovery_validates_shop_order_service() -> None:
@@ -307,6 +318,28 @@ def test_interaction_returns_structured_invalid_target(monkeypatch) -> None:
     )
 
     assert result.status is ActionStatus.INVALID_TARGET
+
+
+def test_reward_interaction_uses_claim_callback_without_opening_popout(monkeypatch) -> None:
+    expression = ""
+
+    def capture_expression(_port, value, _title, **_kwargs):
+        nonlocal expression
+        expression = value
+        return {"status": "submitted"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", capture_expression)
+
+    result = GameRuntimeAdapter(9222, "Farm").submit_board_interaction(
+        (66, 62), InteractionTargetKind.REWARD, "gem_1", 730
+    )
+
+    assert result.status is ActionStatus.SUBMITTED
+    assert "content.hasBehavior?.('currency')" in expression
+    assert "content.getBehavior?.('collectable')?.reward" in expression
+    assert "rewardHandler._collectReward(content)" in expression
+    assert "rewardHandler._collectObject(content)" not in expression
+    assert "showPopout" not in expression
 
 
 def test_removal_uses_game_shovel_callback_without_confirmation_popup(monkeypatch) -> None:

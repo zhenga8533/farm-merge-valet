@@ -84,6 +84,7 @@ def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
         advancing,
         item_action_busy=item_action_busy,
         interaction_available=True,
+        reward_interaction_available=True,
         shop_available=True,
         removal_available=True,
     )
@@ -110,6 +111,7 @@ def bare_bot() -> Bot:
     bot._max_item_tiers = {}
     bot._blueprint_policy_keys = {"milk": "ingredients/milk"}
     bot._direct_interaction_ids = frozenset({"milk"})
+    bot._reward_interaction_ids = frozenset()
     bot._shovelable_ids = frozenset()
     bot._last_health = None
     bot._last_wait_reason = None
@@ -697,7 +699,7 @@ def test_remove_policy_never_targets_non_shovelable_item(monkeypatch) -> None:
 
 def test_collectable_currency_tier_can_be_enabled_independently(monkeypatch) -> None:
     bot = bare_bot()
-    bot._direct_interaction_ids = frozenset({"coin_1", "coin_2"})
+    bot._reward_interaction_ids = frozenset({"coin_1", "coin_2"})
     bot._blueprint_policy_keys = {
         "coin_1": "currencies/coin/tier/1",
         "coin_2": "currencies/coin/tier/2",
@@ -714,8 +716,14 @@ def test_collectable_currency_tier_can_be_enabled_independently(monkeypatch) -> 
     immediate, depleted, ready = bot._interaction_actions()
 
     assert [action.blueprint_id for action in immediate] == ["coin_2"]
+    assert immediate[0].kind is InteractionTargetKind.REWARD
     assert depleted == []
     assert ready == []
+
+    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+
+    assert bot.runtime.interactions == [((2, 0), InteractionTargetKind.REWARD, "coin_2", 11)]
+    assert bot._pending_interaction is not None
 
 
 def test_ingredient_and_producer_interaction_default_on() -> None:

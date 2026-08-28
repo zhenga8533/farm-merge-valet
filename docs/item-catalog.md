@@ -87,11 +87,13 @@ aliases retain any spelling used by the game; player-facing spelling belongs in
 `display_name`.
 
 Each catalog item also derives a tile-interaction mode from semantic runtime
-metadata. The modes distinguish direct and opt-in interaction, obstacle clearing,
-upgrade application, requirement-based rewards, and non-actionable content. Any
-item carrying the game's `collectable` capability is eligible for the verified
-direct-interaction path; source obstacles use the clear mode. The policy default
-determines whether the applicable action is automated.
+metadata. The modes distinguish direct interaction, confirmed currency rewards,
+obstacle clearing, upgrade application, requirement-based rewards, and
+non-actionable content. Collectable ingredients, tickets, and ordinary supply
+crates use the verified click path. Collectable currency items—including coins,
+energy, and gems—use the game callback behind their Claim button. Source
+obstacles use the clear mode. The policy default determines whether the
+applicable action is automated.
 
 Crop and animal upgrade progress is read from the game's authoritative
 `UpgradeCardModel`. Each target records its highest applied tier; that tier and

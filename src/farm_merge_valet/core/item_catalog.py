@@ -18,6 +18,7 @@ class TileInteractionMode(StrEnum):
     NONE = "none"
     DIRECT = "direct"
     DIRECT_OPT_IN = "direct-opt-in"
+    REWARD = "reward"
     CLEAR = "clear"
     UPGRADE = "upgrade"
     OPEN_REQUIREMENT = "open-requirement"
@@ -93,6 +94,8 @@ class CatalogItem:
             or "container" in self.traits
         ):
             return TileInteractionMode.DIRECT
+        if "currency" in self.capabilities:
+            return TileInteractionMode.REWARD
         return TileInteractionMode.DIRECT_OPT_IN
 
     @property
@@ -130,6 +133,14 @@ class ItemCatalog:
             for game_id, item in self.items.items()
             if item.tile_interaction_mode
             in {TileInteractionMode.DIRECT, TileInteractionMode.DIRECT_OPT_IN}
+        )
+
+    @property
+    def reward_interaction_ids(self) -> frozenset[str]:
+        return frozenset(
+            game_id
+            for game_id, item in self.items.items()
+            if item.tile_interaction_mode is TileInteractionMode.REWARD
         )
 
     @property

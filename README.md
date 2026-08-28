@@ -161,8 +161,10 @@ unavailable capability; there is no mouse-input fallback.
 Game-marked `collectable` board tiles—including ground ingredients, train tickets, currencies,
 energy, gems, and ordinary supply crates—can be configured per tier and are
 interacted with before any producer or HUD supply claim. Ingredients, tickets,
-and ordinary supply crates are enabled by default; the other direct-interaction
-types are opt-in.
+and ordinary supply crates use the game's internal click handler. Currency
+rewards use the exact callback behind their Claim button without opening the
+confirmation popout. One-click items are enabled by default; currency rewards
+remain opt-in.
 Exhausted animals are retired into coins, while exhausted crops are
 retired only with an open cell available for their two tier-1 replacements. A
 ready tier-4 producer preempts crates and is harvested only after the configured

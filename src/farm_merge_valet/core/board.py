@@ -48,6 +48,7 @@ class CellKind(Enum):
 
 class InteractionTargetKind(StrEnum):
     IMMEDIATE = "immediate"
+    REWARD = "reward"
     REMOVE = "remove"
     PRODUCER = "producer"
     DEPLETED_PRODUCER = "depleted-producer"

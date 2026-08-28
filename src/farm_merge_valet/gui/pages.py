@@ -710,6 +710,7 @@ class ItemsPage(AppPage):
         supports_interact = item.tile_interaction_mode in {
             TileInteractionMode.DIRECT,
             TileInteractionMode.DIRECT_OPT_IN,
+            TileInteractionMode.REWARD,
             TileInteractionMode.CLEAR,
         } or (item.category in {"animals", "crops"} and item.tier == 4)
         return (
@@ -747,6 +748,7 @@ class ItemsPage(AppPage):
             in {
                 TileInteractionMode.DIRECT,
                 TileInteractionMode.DIRECT_OPT_IN,
+                TileInteractionMode.REWARD,
                 TileInteractionMode.CLEAR,
             }
             or (item.category in {"animals", "crops"} and item.tier == 4)

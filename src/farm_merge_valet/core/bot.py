@@ -140,6 +140,7 @@ class Bot:
         self._blueprint_items: dict[str, ItemRef] = {}
         self._blueprint_policy_keys: dict[str, str] = {}
         self._direct_interaction_ids: frozenset[str] = frozenset()
+        self._reward_interaction_ids: frozenset[str] = frozenset()
         self._shovelable_ids: frozenset[str] = frozenset()
         self._max_item_tiers: dict[tuple[str, str] | tuple[str, str, str | None], int] = {}
         self.board = BoardGrid()
@@ -213,12 +214,13 @@ class Bot:
                 logging.WARNING,
                 "runtime.unavailable",
                 "Game target found, but action runtime is unavailable: %s "
-                "(board=%s, item actions=%s, board interactions=%s, removals=%s, crate claims=%s, "
-                "shop orders=%s, inventory=%s).",
+                "(board=%s, item actions=%s, board interactions=%s, reward interactions=%s, "
+                "removals=%s, crate claims=%s, shop orders=%s, inventory=%s).",
                 self._last_health.detail or "no diagnostic detail",
                 self._last_health.board_available,
                 self._last_health.item_drop_available,
                 self._last_health.interaction_available,
+                self._last_health.reward_interaction_available,
                 self._last_health.removal_available,
                 self._last_health.crate_spawn_available,
                 self._last_health.shop_available,
@@ -233,11 +235,12 @@ class Bot:
                 logging.WARNING,
                 "runtime.partially_ready",
                 "Game runtime is partially ready: %s "
-                "(item actions=%s, board interactions=%s, removals=%s, crate claims=%s, "
-                "shop orders=%s).",
+                "(item actions=%s, board interactions=%s, reward interactions=%s, removals=%s, "
+                "crate claims=%s, shop orders=%s).",
                 self._last_health.detail,
                 self._last_health.item_drop_available,
                 self._last_health.interaction_available,
+                self._last_health.reward_interaction_available,
                 self._last_health.removal_available,
                 self._last_health.crate_spawn_available,
                 self._last_health.shop_available,
@@ -253,6 +256,7 @@ class Bot:
                 game_id: item.tier_policy_key for game_id, item in catalog.items.items()
             }
             self._direct_interaction_ids = catalog.direct_interaction_ids
+            self._reward_interaction_ids = catalog.reward_interaction_ids
             self._shovelable_ids = catalog.shovelable_ids
         except (CatalogUnavailableError, OSError, ValueError) as exc:
             log_event(
@@ -363,7 +367,10 @@ class Bot:
             board.set_cell(coord, Cell(_LIVE_STATE_CELL_KIND[blueprint_id]))
         elif blueprint_id in _STRUCTURE_BLUEPRINTS:
             board.set_cell(coord, Cell(CellKind.STRUCTURE))
-        elif blueprint_id in self._direct_interaction_ids and state.collectable:
+        elif (
+            blueprint_id in self._direct_interaction_ids
+            or blueprint_id in self._reward_interaction_ids
+        ) and state.collectable:
             board.set_cell(coord, Cell(CellKind.INTERACTABLE))
         else:
             board.set_cell(coord, Cell(CellKind.OTHER))
@@ -561,6 +568,16 @@ class Bot:
                 continue
             if not policy.interact:
                 continue
+            if state.collectable and state.blueprint_id in self._reward_interaction_ids:
+                immediate.append(
+                    _InteractionAction(
+                        InteractionTargetKind.REWARD,
+                        coord,
+                        state.blueprint_id,
+                        state.object_id,
+                    )
+                )
+                continue
             if state.collectable and state.blueprint_id in self._direct_interaction_ids:
                 immediate.append(
                     _InteractionAction(
@@ -614,6 +631,7 @@ class Bot:
         current = self._live_cells.get(pending.action.coord)
         if pending.action.kind in {
             InteractionTargetKind.IMMEDIATE,
+            InteractionTargetKind.REWARD,
             InteractionTargetKind.REMOVE,
         }:
             return current is None or current.object_id != pending.action.object_id
@@ -1336,7 +1354,11 @@ class Bot:
                 or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
                 or (
                     self.phase is Phase.INTERACT_TILES
-                    and not (health.interaction_available or health.removal_available)
+                    and not (
+                        health.interaction_available
+                        or health.reward_interaction_available
+                        or health.removal_available
+                    )
                 )
                 or (self.phase is Phase.SHOPS and not health.shop_available)
             )
@@ -1352,7 +1374,11 @@ class Bot:
                     or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
                     or (
                         self.phase is Phase.INTERACT_TILES
-                        and not (health.interaction_available or health.removal_available)
+                        and not (
+                            health.interaction_available
+                            or health.reward_interaction_available
+                            or health.removal_available
+                        )
                     )
                     or (self.phase is Phase.SHOPS and not health.shop_available)
                 )
@@ -1414,17 +1440,16 @@ class Bot:
             self._last_cooling_producer_count = None
             self._set_phase(Phase.INTERACT_TILES)
             next_action = immediate[0] if immediate else (depleted[0] if depleted else ready[0])
-            capability_available = (
-                health.removal_available
-                if next_action.kind is InteractionTargetKind.REMOVE
-                else health.interaction_available
-            )
+            if next_action.kind is InteractionTargetKind.REMOVE:
+                capability_available = health.removal_available
+                capability = "item removal"
+            elif next_action.kind is InteractionTargetKind.REWARD:
+                capability_available = health.reward_interaction_available
+                capability = "reward interaction"
+            else:
+                capability_available = health.interaction_available
+                capability = "board interaction"
             if not capability_available:
-                capability = (
-                    "item removal"
-                    if next_action.kind is InteractionTargetKind.REMOVE
-                    else "board interaction"
-                )
                 self._report_wait(f"{capability} capability unavailable")
                 return
             self._step_interact_tiles(health, immediate, depleted, ready)

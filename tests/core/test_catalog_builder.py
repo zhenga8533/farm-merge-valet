@@ -67,7 +67,7 @@ def test_catalog_assigns_tile_interaction_modes_without_enabling_unsafe_clicks()
     assert catalog.items["milk"].tile_interaction_mode is TileInteractionMode.DIRECT
     assert catalog.items["ticket"].tile_interaction_mode is TileInteractionMode.DIRECT
     assert catalog.items["crate_1"].tile_interaction_mode is TileInteractionMode.DIRECT
-    assert catalog.items["coin_1"].tile_interaction_mode is TileInteractionMode.DIRECT_OPT_IN
+    assert catalog.items["coin_1"].tile_interaction_mode is TileInteractionMode.REWARD
     assert catalog.items["upgrade_card_1"].tile_interaction_mode is TileInteractionMode.UPGRADE
     assert (
         catalog.items["reward_crate_bronze"].tile_interaction_mode
@@ -75,7 +75,8 @@ def test_catalog_assigns_tile_interaction_modes_without_enabling_unsafe_clicks()
     )
     assert catalog.items["source_only"].tile_interaction_mode is TileInteractionMode.NONE
     assert "source-clearable" not in catalog.items["source_only"].traits
-    assert catalog.direct_interaction_ids == frozenset({"milk", "ticket", "crate_1", "coin_1"})
+    assert catalog.direct_interaction_ids == frozenset({"milk", "ticket", "crate_1"})
+    assert catalog.reward_interaction_ids == frozenset({"coin_1"})
 
 
 def test_catalog_preserves_shop_recipe_cost_duration_and_rewards() -> None:
