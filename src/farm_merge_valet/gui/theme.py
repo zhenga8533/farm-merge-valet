@@ -155,13 +155,10 @@ QPushButton QLabel#actionButtonLabel:enabled {{
 }}
 QPushButton[secondary="true"] QLabel#actionButtonLabel:enabled {{ color: {colors.text}; }}
 QPushButton QLabel#shortcutKeycap:enabled {{
-    background: rgba(255, 255, 255, 38); color: white;
-    border: 1px solid rgba(255, 255, 255, 90); border-radius: 4px;
-    padding: 1px 5px; font-family: "Cascadia Mono", Consolas, monospace;
+    background: {colors.input}; color: {colors.muted};
+    border: 1px solid {colors.border}; border-radius: 4px;
+    padding: 0; font-family: "Cascadia Mono", Consolas, monospace;
     font-size: 8pt; font-weight: 600;
-}}
-QPushButton[secondary="true"] QLabel#shortcutKeycap:enabled {{
-    background: {colors.surface_subtle}; color: {colors.muted}; border-color: {colors.border};
 }}
 QPushButton QLabel#actionButtonLabel:disabled,
 QPushButton QLabel#shortcutKeycap:disabled {{ color: {colors.disabled_text}; }}
@@ -214,10 +211,17 @@ QToolButton#disclosureButton:focus {{
     border: 2px solid {colors.selected};
 }}
 QToolButton#disclosureButton {{
-    background: {colors.surface}; color: {colors.text}; border: 1px solid {colors.border};
-    border-radius: 8px; padding: 9px 12px; text-align: left; font-weight: 600;
+    background: transparent; color: {colors.text}; border: none;
+    border-radius: 7px; padding: 10px 12px; text-align: left; font-weight: 600;
 }}
 QToolButton#disclosureButton:hover {{ background: {colors.surface_subtle}; }}
+QFrame#advancedSection {{
+    background: {colors.surface}; border: 1px solid {colors.border}; border-radius: 8px;
+}}
+QFrame#advancedSectionContent {{
+    background: transparent; border: none; border-top: 1px solid {colors.border};
+    border-radius: 0;
+}}
 QSlider::groove:horizontal {{
     height: 6px; background: {colors.border}; border-radius: 3px;
 }}

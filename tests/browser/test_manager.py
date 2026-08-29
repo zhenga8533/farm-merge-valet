@@ -83,8 +83,8 @@ def test_status_verifies_profile_flags_and_ownership(tmp_path, monkeypatch) -> N
         },
     )
     monkeypatch.setattr(
-        "farm_merge_valet.browser.manager.list_targets",
-        lambda _port: [{"url": "https://playfmv-test.devvit.net/index.html"}],
+        "farm_merge_valet.browser.manager.has_game_target_pair",
+        lambda _port, _title: True,
     )
 
     status = manager.status()
@@ -117,8 +117,8 @@ def test_status_does_not_treat_launcher_as_loaded_game(tmp_path, monkeypatch) ->
         },
     )
     monkeypatch.setattr(
-        "farm_merge_valet.browser.manager.list_targets",
-        lambda _port: [{"url": "https://playfmv-test.devvit.net/launcher/launcher.html"}],
+        "farm_merge_valet.browser.manager.has_game_target_pair",
+        lambda _port, _title: False,
     )
 
     assert not manager.status().game_loaded
@@ -165,7 +165,10 @@ def test_status_accepts_profile_paths_with_spaces_from_argument_list(tmp_path, m
             "arguments": arguments,
         },
     )
-    monkeypatch.setattr("farm_merge_valet.browser.manager.list_targets", lambda _port: [])
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.has_game_target_pair",
+        lambda _port, _title: False,
+    )
 
     status = manager.status()
 

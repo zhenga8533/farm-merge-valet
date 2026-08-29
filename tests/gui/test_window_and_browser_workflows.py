@@ -94,9 +94,22 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
         group.title() for group in settings_page.findChildren(QGroupBox)
     }
     assert all(control.accessibleName() for control in window.browser_page.controls.values())
-    assert not window.browser_page.advanced_section.expanded
-    window.browser_page.advanced_section.toggle.click()
-    assert window.browser_page.advanced_section.expanded
+    browser_groups = {group.title(): group for group in window.browser_page.findChildren(QGroupBox)}
+    for section in (
+        window.browser_page.browser_advanced_section,
+        window.browser_page.assets_advanced_section,
+    ):
+        assert not section.expanded
+        assert section.objectName() == "advancedSection"
+        assert section.content.objectName() == "advancedSectionContent"
+        section.toggle.click()
+        assert section.expanded
+    assert browser_groups["Managed browser"].isAncestorOf(
+        window.browser_page.browser_advanced_section
+    )
+    assert browser_groups["Game data and assets"].isAncestorOf(
+        window.browser_page.assets_advanced_section
+    )
 
     window.browser_page._request("cdp_port", 9333)
     window._flush_config()

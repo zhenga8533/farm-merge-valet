@@ -235,23 +235,28 @@ def _select_target_pair(
         for target in targets
         if target.get("type") == "page" and _REDDIT_PAGE_URL_MARKER in str(target.get("url", ""))
     }
-    title_matches = {
-        id_: target
-        for id_, target in reddit_pages.items()
-        if title_filter is not None and title_filter in str(target.get("title", "")).casefold()
-    }
-    pages = title_matches or {
-        id_: target
-        for id_, target in reddit_pages.items()
-        if title_filter is None or title_filter in str(target.get("url", "")).casefold()
-    }
-    pairs: list[tuple[str, str]] = []
+    candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for frame in targets:
         if frame.get("type") != "iframe" or not is_game_frame_url(frame.get("url", "")):
             continue
-        page = pages.get(frame.get("parentId"))
+        page = reddit_pages.get(frame.get("parentId"))
+        if page is not None:
+            candidates.append((frame, page))
+
+    title_matches = [
+        pair
+        for pair in candidates
+        if title_filter is not None and title_filter in str(pair[1].get("title", "")).casefold()
+    ]
+    matches = title_matches or [
+        pair
+        for pair in candidates
+        if title_filter is None or title_filter in str(pair[1].get("url", "")).casefold()
+    ]
+    pairs: list[tuple[str, str]] = []
+    for frame, page in matches:
         frame_ws = frame.get("webSocketDebuggerUrl")
-        page_ws = page.get("webSocketDebuggerUrl") if page else None
+        page_ws = page.get("webSocketDebuggerUrl")
         if frame_ws and page_ws:
             pairs.append(
                 (_normalize_local_ws_url(str(frame_ws)), _normalize_local_ws_url(str(page_ws)))
@@ -270,6 +275,15 @@ def _select_target_pair(
         "paired with a matching Reddit page is open. Has the game been loaded (clicked "
         "'Play'), and does the configured page target match that tab?"
     )
+
+
+def has_game_target_pair(port: int, page_title: str | None = None) -> bool:
+    """Return whether exactly one usable game iframe and Reddit page pair is open."""
+    try:
+        _select_target_pair(_load_targets(port), page_title)
+    except CdpConnectionError:
+        return False
+    return True
 
 
 def _target_pair(port: int, page_title: str | None = None) -> _TargetPair:

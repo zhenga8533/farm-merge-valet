@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from farm_merge_valet.automation.bot import Bot
 from farm_merge_valet.browser import BrowserManager
 from farm_merge_valet.catalog.models import ItemCatalog, load_item_catalog
@@ -20,11 +22,12 @@ from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
 from farm_merge_valet.cdp.transport import CdpConnectionError
 from farm_merge_valet.cdp.upgrade_progress import read_upgrade_progress
 from farm_merge_valet.config import AppConfig
-from farm_merge_valet.gui.services.catalog_sync import (
-    CatalogSyncCallbacks,
-    CatalogSyncDependencies,
-    CatalogSyncService,
-)
+
+if TYPE_CHECKING:
+    from farm_merge_valet.gui.services.catalog_sync import (
+        CatalogSyncCallbacks,
+        CatalogSyncService,
+    )
 
 
 def create_bot(config: AppConfig) -> Bot:
@@ -74,6 +77,11 @@ def create_catalog_synchronizer(config: AppConfig) -> CatalogSynchronizer:
 def create_catalog_sync_service(
     config: AppConfig, callbacks: CatalogSyncCallbacks
 ) -> CatalogSyncService:
+    from farm_merge_valet.gui.services.catalog_sync import (
+        CatalogSyncDependencies,
+        CatalogSyncService,
+    )
+
     return CatalogSyncService(
         config,
         callbacks,

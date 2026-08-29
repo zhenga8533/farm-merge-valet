@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QPushButton, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QPushButton, QToolButton, QVBoxLayout, QWidget
 
 
-class DisclosureSection(QWidget):
+class DisclosureSection(QFrame):
     """A keyboard-accessible section that keeps advanced controls out of the main scan path."""
 
     def __init__(self, title: str, *, expanded: bool = False) -> None:
         super().__init__()
+        self.setObjectName("advancedSection")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -21,7 +22,8 @@ class DisclosureSection(QWidget):
         self.toggle.setCheckable(True)
         self.toggle.setChecked(expanded)
         self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.content = QWidget()
+        self.content = QFrame()
+        self.content.setObjectName("advancedSectionContent")
         self.content.setVisible(expanded)
         self.toggle.toggled.connect(self._set_expanded)
         layout.addWidget(self.toggle)
@@ -35,6 +37,9 @@ class DisclosureSection(QWidget):
     def _set_expanded(self, expanded: bool) -> None:
         self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
         self.content.setVisible(expanded)
+        self.setProperty("expanded", expanded)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
 
 def secondary_button(text: str) -> QPushButton:

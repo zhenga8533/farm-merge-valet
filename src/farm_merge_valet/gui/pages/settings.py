@@ -67,18 +67,17 @@ class SettingsPage(ConfigFormPage):
         sections.setContentsMargins(4, 4, 4, 4)
         sections.setSpacing(14)
 
-        automation, form = settings_section("Automation")
-        self._add_int(form, "Reserved empty cells", "merge_empty_cell_reserve", 0, 50)
+        automation, automation_form = settings_section("Automation")
+        self._add_int(automation_form, "Reserved empty cells", "merge_empty_cell_reserve", 0, 50)
         self._add_int(
-            form,
+            automation_form,
             "Producer interaction open cells",
             "producer_interact_min_empty_cells",
             1,
             50,
         )
-        sections.addWidget(automation)
 
-        automation_advanced, form = disclosure_section("Advanced automation timing")
+        automation_advanced, form = disclosure_section("Advanced timing")
         self._add_float(form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)
         self._add_float(form, "Loop interval (seconds)", "loop_interval", 0.01, 60, 0.1)
         self._add_float(form, "Item delay minimum", "item_action_delay_min", 0, 60, 0.1)
@@ -86,7 +85,8 @@ class SettingsPage(ConfigFormPage):
         self._add_float(form, "Crate delay minimum", "crate_delay_min", 0, 5, 0.05)
         self._add_float(form, "Crate delay maximum", "crate_delay_max", 0, 5, 0.05)
         self.automation_advanced_section = automation_advanced
-        sections.addWidget(automation_advanced)
+        automation_form.addRow(automation_advanced)
+        sections.addWidget(automation)
 
         controls, form = settings_section("Controls and startup")
         self._add_hotkey(form, "Start / stop", "start_stop_hotkey")
@@ -101,7 +101,7 @@ class SettingsPage(ConfigFormPage):
             self._add_toggle(form, label, field)
         sections.addWidget(controls)
 
-        notifications, form = settings_section("Notifications")
+        notifications, notifications_form = settings_section("Notifications")
         webhook = QLineEdit()
         webhook.setEchoMode(QLineEdit.EchoMode.Password)
         webhook.setPlaceholderText("Optional Discord webhook URL")
@@ -112,16 +112,16 @@ class SettingsPage(ConfigFormPage):
             lambda: self._request("discord_webhook_url", webhook.text().strip() or None)
         )
         self.controls["discord_webhook_url"] = webhook
-        self._add_form_row(form, "Discord webhook", webhook)
-        sections.addWidget(notifications)
+        self._add_form_row(notifications_form, "Discord webhook", webhook)
 
-        notifications_advanced, form = disclosure_section("Advanced notification timing")
+        notifications_advanced, form = disclosure_section("Advanced timing")
         self._add_float(form, "Webhook status interval", "webhook_status_interval", 0, 3600, 1)
         self._add_float(form, "Webhook summary interval", "webhook_summary_interval", 60, 86400, 1)
         self.notifications_advanced_section = notifications_advanced
-        sections.addWidget(notifications_advanced)
+        notifications_form.addRow(notifications_advanced)
+        sections.addWidget(notifications)
 
-        appearance, form = settings_section("Appearance")
+        appearance, appearance_form = settings_section("Appearance")
         theme = FocusAwareComboBox()
         theme.set_choices((("System default", "system"), ("Dark", "dark"), ("Light", "light")))
         theme.set_current_value(config.theme)
@@ -130,10 +130,9 @@ class SettingsPage(ConfigFormPage):
             lambda _index: self._request("theme", str(theme.current_value()))
         )
         self.controls["theme"] = theme
-        self._add_form_row(form, "Theme", theme)
-        sections.addWidget(appearance)
+        self._add_form_row(appearance_form, "Theme", theme)
 
-        appearance_advanced, form = disclosure_section("Advanced window appearance")
+        appearance_advanced, form = disclosure_section("Advanced window behavior")
         for field, label in (
             ("main_always_on_top", "Dashboard always on top"),
             ("overlay_always_on_top", "Overlay always on top"),
@@ -145,7 +144,8 @@ class SettingsPage(ConfigFormPage):
         self._add_opacity(form, "Overlay inactive opacity", "overlay_unfocused_opacity")
         self._add_opacity(form, "Overlay focused opacity", "overlay_focused_opacity")
         self.appearance_advanced_section = appearance_advanced
-        sections.addWidget(appearance_advanced)
+        appearance_form.addRow(appearance_advanced)
+        sections.addWidget(appearance)
 
         application, form = settings_section("Application")
         version = QLabel(__version__)

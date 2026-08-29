@@ -21,6 +21,9 @@ class ActionButton(QPushButton):
         self.action_label.setObjectName("actionButtonLabel")
         self.shortcut_label = QLabel()
         self.shortcut_label.setObjectName("shortcutKeycap")
+        self.shortcut_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.shortcut_label.setContentsMargins(5, 1, 5, 1)
+        self.shortcut_label.setMinimumHeight(20)
         for label in (self.action_label, self.shortcut_label):
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 

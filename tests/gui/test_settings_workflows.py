@@ -150,7 +150,8 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     assert settings_page is not None
     assert window.minimumWidth() == 1000
 
-    section_titles = {group.title() for group in settings_page.findChildren(QGroupBox)}
+    section_groups = {group.title(): group for group in settings_page.findChildren(QGroupBox)}
+    section_titles = set(section_groups)
     labels = {label.text() for label in settings_page.findChildren(QLabel)}
 
     assert section_titles == {
@@ -174,10 +175,21 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         window.settings_page.notifications_advanced_section,
         window.settings_page.appearance_advanced_section,
     ):
+        assert section.objectName() == "advancedSection"
+        assert section.content.objectName() == "advancedSectionContent"
         assert section.toggle.accessibleName()
         section.toggle.click()
         assert section.expanded
         assert not section.content.isHidden()
+    assert section_groups["Automation"].isAncestorOf(
+        window.settings_page.automation_advanced_section
+    )
+    assert section_groups["Notifications"].isAncestorOf(
+        window.settings_page.notifications_advanced_section
+    )
+    assert section_groups["Appearance"].isAncestorOf(
+        window.settings_page.appearance_advanced_section
+    )
     for control in window.settings_page.controls.values():
         accessible = (
             control.display.accessibleName()

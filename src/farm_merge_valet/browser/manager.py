@@ -18,8 +18,7 @@ from urllib.request import urlopen
 from farm_merge_valet.cdp.targets import (
     REQUIRED_BACKGROUND_FLAGS,
     close_browser,
-    is_game_frame_url,
-    list_targets,
+    has_game_target_pair,
     read_browser_metadata,
 )
 from farm_merge_valet.cdp.transport import CdpConnectionError
@@ -285,10 +284,7 @@ class BrowserManager:
             executable, self.settings.browser_executable
         )
         try:
-            game_loaded = any(
-                is_game_frame_url(target.get("url", ""))
-                for target in list_targets(self.settings.cdp_port)
-            )
+            game_loaded = has_game_target_pair(self.settings.cdp_port, self.settings.window_title)
         except CdpConnectionError:
             game_loaded = False
         managed = self._marker_matches(profile_dir, kind, executable)

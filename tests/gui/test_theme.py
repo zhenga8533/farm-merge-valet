@@ -134,9 +134,17 @@ def test_action_button_labels_preserve_state_contrast(
     app.processEvents()
 
     assert primary.action_label.palette().color(QPalette.ColorRole.WindowText).name() == "#ffffff"
-    assert primary.shortcut_label.palette().color(QPalette.ColorRole.WindowText).name() == "#ffffff"
+    assert primary.shortcut_label.palette().color(QPalette.ColorRole.WindowText).name() == muted
     assert secondary.action_label.palette().color(QPalette.ColorRole.WindowText).name() == text
     assert secondary.shortcut_label.palette().color(QPalette.ColorRole.WindowText).name() == muted
+    keycap_margins = []
+    for keycap in (primary.shortcut_label, secondary.shortcut_label):
+        margins = keycap.contentsMargins()
+        keycap_margins.append((margins.left(), margins.top(), margins.right(), margins.bottom()))
+        assert margins.left() == margins.right()
+        assert margins.top() == margins.bottom()
+        assert keycap.minimumHeight() == 20
+    assert keycap_margins[0] == keycap_margins[1]
     assert (
         unavailable.action_label.palette().color(QPalette.ColorRole.WindowText).name() == disabled
     )

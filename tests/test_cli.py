@@ -1,6 +1,23 @@
+import subprocess
+import sys
+
 from typer.testing import CliRunner
 
 from farm_merge_valet.cli import app
+
+
+def test_cli_imports_in_a_fresh_process(tmp_path) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "farm_merge_valet", "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Automation tool for Farm Merge Valley" in result.stdout
 
 
 def test_help_groups_user_workflows() -> None:

@@ -78,6 +78,31 @@ def test_select_target_pair_accepts_page_url_filter_and_ignores_helper_frames() 
     )
 
 
+def test_select_target_pair_ignores_title_match_without_game_frame() -> None:
+    game_page = {
+        **_page("game", "Farm Merge Valley"),
+        "url": "https://www.reddit.com/r/FarmMergeValley/",
+    }
+    unrelated_page = {
+        **_page("post", "Visit a farm! : r/FarmMergeValley"),
+        "url": "https://www.reddit.com/user/example/comments/post",
+    }
+    targets = [
+        game_page,
+        _frame("game-frame", "game"),
+        unrelated_page,
+        {
+            **_frame("screenshot", "post"),
+            "url": "https://playfmv-example.devvit.net/screenshot/screenshot.html",
+        },
+    ]
+
+    assert _select_target_pair(targets, "r/FarmMergeValley") == (
+        "ws://frame/game-frame",
+        "ws://page/game",
+    )
+
+
 def test_local_websocket_urls_use_numeric_loopback() -> None:
     assert (
         _normalize_local_ws_url("ws://localhost:9222/devtools/page/abc")
