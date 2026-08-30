@@ -17,6 +17,7 @@ from farm_merge_valet.cdp.evaluation import evaluate
 from farm_merge_valet.cdp.targets import run_game_frame_operation
 from farm_merge_valet.cdp.transport import CdpConnectionError, _command_target
 from farm_merge_valet.core.items import GridCoord, ProducerKind, ProducerState
+from farm_merge_valet.core.obstacles import ObstacleState
 
 # `_content` holds the cell's Pixi display object and `_neighbors` its
 # adjacency links. The size bounds and keys distinguish the cell map from
@@ -165,6 +166,14 @@ _READ_EXPRESSION = """
       ? Array.from(content._behaviors.keys()) : [];
     const harvestable = content?.getBehavior?.('harvestable');
     const upgradeCard = content?.getBehavior?.('upgradeCard');
+    const mapSource = content?.getBehavior?.('mapSource');
+    const hitpoints = content?.getBehavior?.('hitpoints');
+    const resourceGate = content?.getBehavior?.('resourceGate');
+    const effectiveCost = resourceGate &&
+      window.__fmvObstacleClearHandler?._getTotalCost?.(resourceGate);
+    const energyCost = (Array.isArray(effectiveCost) ? effectiveCost : resourceGate?._data?.cost)
+      ?.find((item) => item?.key === 'energy')?.amount;
+    const requiredWorkers = resourceGate?._data?.workers;
     const harvestableType = harvestable?._data?.harvestableType;
     const producerKind = harvestableType === 'animal' || harvestableType === 'crop'
       ? harvestableType : null;
@@ -190,6 +199,18 @@ _READ_EXPRESSION = """
       itemVariant: typeof upgradeCard?._data?.targetObjectTreeIngredient === 'string'
         ? upgradeCard._data.targetObjectTreeIngredient : null,
       behaviorNames: behaviors.filter((name) => typeof name === 'string'),
+      obstacle: mapSource && hitpoints && Number.isInteger(hitpoints._data?.current) &&
+        Number.isInteger(hitpoints._data?.max) &&
+        (Number.isInteger(energyCost) || content.hasBehavior?.('resourceGatePaid'))
+        ? {
+          stagesRemaining: hitpoints._data.current,
+          totalStages: hitpoints._data.max,
+          energyCost,
+          requiredWorkers,
+          movable: Boolean(content.hasBehavior?.('movable')),
+          clearing: Boolean(content.hasBehavior?.('resourceGatePaid')),
+        }
+        : null,
     });
   }
   return out;
@@ -318,6 +339,41 @@ def read_board_state(
             producer_state = None
         behavior_names = entry.get("behaviorNames")
         item_variant = entry.get("itemVariant")
+        obstacle_value = entry.get("obstacle")
+        obstacle = None
+        if isinstance(obstacle_value, dict):
+            stages_remaining = obstacle_value.get("stagesRemaining")
+            total_stages = obstacle_value.get("totalStages")
+            energy_cost = obstacle_value.get("energyCost")
+            required_workers = obstacle_value.get("requiredWorkers")
+            valid_cost = energy_cost is None or (
+                isinstance(energy_cost, int)
+                and not isinstance(energy_cost, bool)
+                and energy_cost >= 0
+            )
+            valid_workers = required_workers is None or (
+                isinstance(required_workers, int)
+                and not isinstance(required_workers, bool)
+                and required_workers >= 0
+            )
+            if (
+                isinstance(stages_remaining, int)
+                and not isinstance(stages_remaining, bool)
+                and stages_remaining >= 0
+                and isinstance(total_stages, int)
+                and not isinstance(total_stages, bool)
+                and total_stages > 0
+                and valid_cost
+                and valid_workers
+            ):
+                obstacle = ObstacleState(
+                    stages_remaining=stages_remaining,
+                    total_stages=total_stages,
+                    energy_cost=energy_cost,
+                    movable=obstacle_value.get("movable") is True,
+                    clearing=obstacle_value.get("clearing") is True,
+                    required_workers=required_workers,
+                )
         states[(entry["column"], entry["row"])] = _LiveCellState(
             has_content=entry.get("hasContent") is True,
             blueprint_id=blueprint_id if isinstance(blueprint_id, str) else None,
@@ -331,5 +387,6 @@ def read_board_state(
             behavior_names=frozenset(
                 value for value in behavior_names or [] if isinstance(value, str)
             ),
+            obstacle=obstacle,
         )
     return states

@@ -5,7 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPalette, QPen, QWheelEvent
+from PySide6.QtGui import (
+    QColor,
+    QPainter,
+    QPaintEvent,
+    QPalette,
+    QPen,
+    QWheelEvent,
+)
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -183,7 +190,10 @@ class SettingsToggle(QCheckBox):
                 QPalette.ColorRole.Base,
             )
 
-        painter.setPen(Qt.PenStyle.NoPen)
+        control_border = palette.color(QPalette.ColorRole.Light)
+        painter.setPen(
+            Qt.PenStyle.NoPen if self.isChecked() or not self.isEnabled() else QPen(control_border)
+        )
         painter.setBrush(track_color)
         painter.drawRoundedRect(track, 9.0, 9.0)
         knob_size = 12.0
@@ -194,10 +204,13 @@ class SettingsToggle(QCheckBox):
             else track.left() + knob_inset
         )
         knob_top = track.top() + (track.height() - knob_size) / 2
+        painter.setPen(
+            Qt.PenStyle.NoPen if self.isChecked() or not self.isEnabled() else QPen(control_border)
+        )
         painter.setBrush(knob_color)
         painter.drawEllipse(QRectF(knob_left, knob_top, knob_size, knob_size))
 
-        if self.hasFocus():
+        if self.property("keyboardFocus") is True:
             focus_color = QColor(palette.color(QPalette.ColorRole.Highlight))
             focus_color.setAlpha(170)
             focus_pen = QPen(focus_color, 2.0)

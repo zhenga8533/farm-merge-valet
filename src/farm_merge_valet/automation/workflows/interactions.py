@@ -13,6 +13,7 @@ from farm_merge_valet.core.items import (
     ProducerKind,
     ProducerState,
 )
+from farm_merge_valet.core.obstacles import ObstacleState
 from farm_merge_valet.observability.logging import log_event
 
 if TYPE_CHECKING:
@@ -33,6 +34,7 @@ class InteractionAction:
     blueprint_id: str
     object_id: int | None
     producer_kind: ProducerKind | None = None
+    obstacle: ObstacleState | None = None
 
 
 @dataclass
@@ -59,6 +61,15 @@ class InteractionWorkflow:
             InteractionTargetKind.REMOVE,
         }:
             return current is None or current.object_id != pending.action.object_id
+        if pending.action.kind in {
+            InteractionTargetKind.CLEAR,
+            InteractionTargetKind.OBSTACLE_LOOT,
+        }:
+            return (
+                current is None
+                or current.object_id != pending.action.object_id
+                or current.obstacle != pending.initial_state.obstacle
+            )
         if pending.action.kind is InteractionTargetKind.PRODUCER:
             return (
                 current is None

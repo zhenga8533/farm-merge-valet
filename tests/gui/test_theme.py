@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
 
 from farm_merge_valet.gui.components.action_button import ActionButton
 from farm_merge_valet.gui.theme import apply_theme
@@ -76,8 +76,36 @@ def test_form_controls_share_application_owned_affordances() -> None:
     assert "QComboBox::down-arrow { image: none" in stylesheet
     assert "QSlider::groove:horizontal" in stylesheet
     assert "QSlider::handle:horizontal" in stylesheet
+    assert "border: 1px solid palette(light)" in stylesheet
+    assert app.palette().color(QPalette.ColorRole.Light).name() == "#8c959f"
+    assert ":focus" not in stylesheet
+    assert 'QPushButton[keyboardFocus="true"]' in stylesheet
 
     app.setStyleSheet("")
+
+
+def test_focus_indicator_tracks_input_modality_for_standard_controls() -> None:
+    app = QApplication.instance() or QApplication([])
+    apply_theme(app, "light")
+
+    for control in (QPushButton("Action"), QLineEdit()):
+        control.show()
+        app.processEvents()
+        control.clearFocus()
+
+        control.setFocus(Qt.FocusReason.MouseFocusReason)
+        app.processEvents()
+        assert control.property("keyboardFocus") is False
+
+        control.clearFocus()
+        control.setFocus(Qt.FocusReason.TabFocusReason)
+        app.processEvents()
+        assert control.property("keyboardFocus") is True
+
+        control.clearFocus()
+        app.processEvents()
+        assert control.property("keyboardFocus") is False
+        control.close()
 
 
 def test_theme_switches_reuse_one_palette_driven_stylesheet() -> None:

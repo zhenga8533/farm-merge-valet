@@ -6,7 +6,14 @@ from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPaintEvent, QPalette, QPen
+from PySide6.QtGui import (
+    QColor,
+    QPainter,
+    QPainterPath,
+    QPaintEvent,
+    QPalette,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -176,15 +183,27 @@ class LazyPolicyBranches:
 
 
 class PolicyCheckBox(QCheckBox):
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+
     def sizeHint(self) -> QSize:
         text_width = self.fontMetrics().horizontalAdvance(self.text())
         return QSize(22 + (text_width + 8 if text_width else 0), 22)
+
+    def _indicator_rect(self) -> QRect:
+        box_size = 16
+        return QRect(
+            (22 - box_size) // 2,
+            (self.height() - box_size) // 2,
+            box_size,
+            box_size,
+        )
 
     def paintEvent(self, _event: QPaintEvent) -> None:
         app = QApplication.instance()
         palette = app.palette() if isinstance(app, QApplication) else self.palette()
         primary = palette.color(QPalette.ColorRole.Link)
-        border = palette.color(QPalette.ColorRole.Mid)
+        border = palette.color(QPalette.ColorRole.Light)
         surface = palette.color(QPalette.ColorRole.Base)
         text = palette.color(QPalette.ColorRole.Text)
         disabled = palette.color(QPalette.ColorRole.Midlight)
@@ -193,18 +212,16 @@ class PolicyCheckBox(QCheckBox):
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        box_size = 16
-        box_x = 1
-        box_y = (self.height() - box_size) // 2
-        box = QRect(box_x, box_y, box_size, box_size)
+        box = self._indicator_rect()
         checked = self.checkState() is not Qt.CheckState.Unchecked
         fill = primary if checked else surface
-        outline = primary if checked or self.underMouse() or self.hasFocus() else border
+        keyboard_focus = self.property("keyboardFocus") is True
+        outline = primary if checked or self.underMouse() or keyboard_focus else border
         painter.setPen(QPen(outline, 1.4))
         painter.setBrush(fill)
         painter.drawRoundedRect(box, 4, 4)
 
-        if self.hasFocus():
+        if keyboard_focus:
             focus = QColor(palette.color(QPalette.ColorRole.Highlight))
             focus.setAlpha(190)
             painter.setPen(QPen(focus, 2.0))

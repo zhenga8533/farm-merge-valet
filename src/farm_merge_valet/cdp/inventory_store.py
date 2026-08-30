@@ -11,7 +11,10 @@ from farm_merge_valet.cdp.transport import CdpConnectionError, _command_target
 _FIND_CRATE_ITEM_EXPRESSION = """
 function() {
   const current = window.__fmvCrateInventoryItem;
-  if (current && Number.isInteger(current.amount) && current.amount >= 0) {
+  const currentEnergy = window.__fmvEnergyInventoryItem;
+  if (current && currentEnergy &&
+      Number.isInteger(current.amount) && current.amount >= 0 &&
+      Number.isInteger(currentEnergy.amount) && currentEnergy.amount >= 0) {
     return { status: 'already-captured', amount: current.amount };
   }
 
@@ -25,6 +28,9 @@ function() {
         !Number.isInteger(item.amount) || item.amount < 0
       ) continue;
       window.__fmvCrateInventoryItem = item;
+      const energy = inventoryItems.get('energy');
+      if (energy && energy._key === 'energy' && Number.isInteger(energy.amount) &&
+          energy.amount >= 0) window.__fmvEnergyInventoryItem = energy;
       return { status: 'found', amount: item.amount };
     } catch (e) {}
   }
@@ -41,13 +47,32 @@ _READ_CRATE_COUNT_EXPRESSION = """
 })()
 """
 
+_READ_ENERGY_EXPRESSION = """
+(() => {
+  const item = window.__fmvEnergyInventoryItem;
+  return item && Number.isInteger(item.amount) && item.amount >= 0
+    ? item.amount
+    : null;
+})()
+"""
+
 
 def _arm_crate_inventory_target(ws_url: str, cancel_event: Event | None) -> str:
     _command_target(ws_url, "Runtime.enable", cancel_event=cancel_event)
     captured = _command_target(
         ws_url,
         "Runtime.evaluate",
-        {"expression": _READ_CRATE_COUNT_EXPRESSION, "returnByValue": True},
+        {
+            "expression": """
+(() => {
+  const crates = window.__fmvCrateInventoryItem;
+  const energy = window.__fmvEnergyInventoryItem;
+  return crates && energy && Number.isInteger(crates.amount) && crates.amount >= 0 &&
+    Number.isInteger(energy.amount) && energy.amount >= 0 ? crates.amount : null;
+})()
+""",
+            "returnByValue": True,
+        },
         cancel_event=cancel_event,
     )
     captured_amount = captured.get("result", {}).get("value")
@@ -115,4 +140,12 @@ def arm_crate_inventory(
 def read_crate_count(port: int, page_title: str | None = None) -> int | None:
     """Return the current spendable supply count, including reward overflow."""
     value = evaluate(port, _READ_CRATE_COUNT_EXPRESSION, page_title)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def read_energy(
+    port: int, page_title: str | None = None, *, cancel_event: Event | None = None
+) -> int | None:
+    """Return the current spendable obstacle-clearing energy."""
+    value = evaluate(port, _READ_ENERGY_EXPRESSION, page_title, cancel_event=cancel_event)
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None

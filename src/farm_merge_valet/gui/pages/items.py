@@ -156,10 +156,8 @@ class ItemsPage(AppPage):
         self.bulk_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.bulk_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self.bulk_header.resizeSection(1, 108)
-        policy_widths = {2: 92, 3: 78, 4: 88, 5: 92, 6: 88}
-        for column, width in policy_widths.items():
-            self.bulk_header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
-            self.bulk_header.resizeSection(column, width)
+        for column in range(2, 7):
+            self.bulk_header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         configure_policy_view(self.table)
         self.table.setIndentation(22)
         self.table.setRootIsDecorated(True)

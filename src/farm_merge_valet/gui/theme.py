@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtGui import QColor, QFocusEvent, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
 
@@ -19,6 +19,7 @@ class _Colors:
     text: str
     muted: str
     border: str
+    control_border: str
     primary: str
     primary_hover: str
     danger: str
@@ -39,6 +40,7 @@ _DARK = _Colors(
     text="#e6edf3",
     muted="#a5afba",
     border="#30363d",
+    control_border="#6e7681",
     primary="#238636",
     primary_hover="#2ea043",
     danger="#da3633",
@@ -59,6 +61,7 @@ _LIGHT = _Colors(
     text="#1f2328",
     muted="#57606a",
     border="#d0d7de",
+    control_border="#8c959f",
     primary="#1f883d",
     primary_hover="#1a7f37",
     danger="#cf222e",
@@ -79,6 +82,7 @@ _PALETTE_COLORS = _Colors(
     text="palette(text)",
     muted="palette(placeholder-text)",
     border="palette(mid)",
+    control_border="palette(light)",
     primary="palette(link)",
     primary_hover="palette(link-visited)",
     danger="#cf222e",
@@ -90,6 +94,36 @@ _PALETTE_COLORS = _Colors(
     scroll_hover="palette(shadow)",
     scroll_pressed="palette(highlight)",
 )
+
+_VISIBLE_FOCUS_REASONS = {
+    Qt.FocusReason.TabFocusReason,
+    Qt.FocusReason.BacktabFocusReason,
+    Qt.FocusReason.ShortcutFocusReason,
+    Qt.FocusReason.OtherFocusReason,
+}
+
+
+class _KeyboardFocusFilter(QObject):
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if not isinstance(watched, QWidget):
+            return False
+        if event.type() == QEvent.Type.FocusIn and isinstance(event, QFocusEvent):
+            self._set_visible_focus(watched, event.reason() in _VISIBLE_FOCUS_REASONS)
+        elif event.type() == QEvent.Type.FocusOut:
+            self._set_visible_focus(watched, False)
+        return False
+
+    @staticmethod
+    def _set_visible_focus(widget: QWidget, visible: bool) -> None:
+        if widget.property("keyboardFocus") is visible:
+            return
+        widget.setProperty("keyboardFocus", visible)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        widget.update()
+
+
+_keyboard_focus_filter: _KeyboardFocusFilter | None = None
 
 
 def _scrollbars(colors: _Colors) -> str:
@@ -166,7 +200,7 @@ QPushButton QLabel#shortcutKeycap:disabled {{
     background: transparent; border-color: {colors.disabled_text};
 }}
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
-    background: {colors.input}; border: 1px solid {colors.border}; border-radius: 6px; padding: 6px;
+    background: {colors.input}; border: 1px solid {colors.control_border}; border-radius: 6px; padding: 6px;
 }}
 QComboBox {{ padding-right: 38px; }}
 QComboBox::drop-down {{
@@ -205,9 +239,10 @@ QDoubleSpinBox::up-arrow, QDoubleSpinBox::down-arrow {{
 }}
 QLineEdit[invalid="true"], QComboBox[invalid="true"],
 QSpinBox[invalid="true"], QDoubleSpinBox[invalid="true"] {{ border: 2px solid #cf222e; }}
-QPushButton:focus, QLineEdit:focus, QComboBox:focus,
-QSpinBox:focus, QDoubleSpinBox:focus, QAbstractItemView:focus,
-QToolButton#disclosureButton:focus {{
+QPushButton[keyboardFocus="true"], QLineEdit[keyboardFocus="true"],
+QComboBox[keyboardFocus="true"], QSpinBox[keyboardFocus="true"],
+QDoubleSpinBox[keyboardFocus="true"], QAbstractItemView[keyboardFocus="true"],
+QToolButton#disclosureButton[keyboardFocus="true"] {{
     border: 2px solid {colors.selected};
 }}
 QToolButton#disclosureButton {{
@@ -232,7 +267,8 @@ QSlider::handle:horizontal {{
     background: {colors.input}; border: 2px solid {colors.selected};
     width: 14px; margin: -6px 0; border-radius: 9px;
 }}
-QSlider::handle:horizontal:hover, QSlider:focus::handle:horizontal {{
+QSlider::handle:horizontal:hover,
+QSlider[keyboardFocus="true"]::handle:horizontal {{
     background: {colors.surface_subtle};
 }}
 QSlider:disabled::sub-page:horizontal {{ background: {colors.disabled}; }}
@@ -321,6 +357,11 @@ def _system_colors(app: QApplication) -> _Colors:
 
 
 def apply_theme(app: QApplication, theme: str) -> None:
+    global _keyboard_focus_filter
+
+    if _keyboard_focus_filter is None or _keyboard_focus_filter.parent() is not app:
+        _keyboard_focus_filter = _KeyboardFocusFilter(app)
+        app.installEventFilter(_keyboard_focus_filter)
     colors = _DARK if theme == "dark" else _LIGHT if theme == "light" else _system_colors(app)
     palette = QPalette()
     for role, color in (
@@ -337,6 +378,7 @@ def apply_theme(app: QApplication, theme: str) -> None:
         (QPalette.ColorRole.HighlightedText, "#ffffff"),
         (QPalette.ColorRole.PlaceholderText, colors.muted),
         (QPalette.ColorRole.Mid, colors.border),
+        (QPalette.ColorRole.Light, colors.control_border),
         (QPalette.ColorRole.Midlight, colors.disabled),
         (QPalette.ColorRole.Dark, colors.scroll),
         (QPalette.ColorRole.Shadow, colors.scroll_hover),

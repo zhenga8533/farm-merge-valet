@@ -4,6 +4,7 @@ from threading import Event
 from farm_merge_valet.automation.runtime import ActionStatus, GameRuntime
 from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
 from farm_merge_valet.core.items import InteractionTargetKind
+from farm_merge_valet.core.obstacles import WorkerState
 from farm_merge_valet.core.shops import ShopOrderState
 
 
@@ -79,6 +80,15 @@ def test_structured_drop_result(monkeypatch) -> None:
 
     assert result.status is ActionStatus.STALE_SOURCE
     assert result.detail == "gone"
+
+
+def test_read_workers_returns_total_and_available_counts(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.evaluate",
+        lambda *_args, **_kwargs: {"total": 3, "available": 2},
+    )
+
+    assert GameRuntimeAdapter(9222, "Farm").read_workers() == WorkerState(3, 2)
 
 
 def test_crate_result_reports_partial_count(monkeypatch) -> None:
@@ -180,6 +190,14 @@ def test_discovery_validates_reward_interaction_handler() -> None:
     assert "typeof candidate._collectReward === 'function'" in _DISCOVER_EXPRESSION
     assert "window.__fmvRewardInteractionHandler" in _DISCOVER_EXPRESSION
     assert "rewardInteractionHandler?._services === services" in _HEALTH_EXPRESSION
+
+
+def test_discovery_validates_obstacle_clear_handler() -> None:
+    from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+
+    assert "typeof candidate._attemptPayment === 'function'" in _DISCOVER_EXPRESSION
+    assert "window.__fmvObstacleClearHandler" in _DISCOVER_EXPRESSION
+    assert "obstacleClearHandler?._services === services" in _HEALTH_EXPRESSION
 
 
 def test_discovery_validates_shop_order_service() -> None:
@@ -341,6 +359,52 @@ def test_reward_interaction_uses_claim_callback_without_opening_popout(monkeypat
     assert "rewardHandler._collectReward(content)" in expression
     assert "rewardHandler._collectObject(content)" not in expression
     assert "showPopout" not in expression
+
+
+def test_obstacle_clear_uses_resource_gate_payment_handler(monkeypatch) -> None:
+    expression = ""
+
+    def capture_expression(_port, value, _title, **_kwargs):
+        nonlocal expression
+        expression = value
+        return {"status": "submitted"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", capture_expression)
+
+    result = GameRuntimeAdapter(9222, "Farm").submit_board_interaction(
+        (61, 58), InteractionTargetKind.CLEAR, "rock_medium", 1681
+    )
+
+    assert result.status is ActionStatus.SUBMITTED
+    assert "content.hasBehavior?.('mapSource')" in expression
+    assert "content.hasBehavior?.('resourceGatePaid')" in expression
+    assert "obstacleHandler._getTotalCost(gate)" in expression
+    assert "energy.amount < energyCost" in expression
+    assert "gameWorkers.hasEnoughWorkers(requiredWorkers)" in expression
+    assert "insufficient-workers" in expression
+    assert "await obstacleHandler._attemptPayment(content, position, gate)" in expression
+    assert "showPopout" not in expression
+
+
+def test_obstacle_loot_uses_verified_tile_interaction(monkeypatch) -> None:
+    expression = ""
+
+    def capture_expression(_port, value, _title, **_kwargs):
+        nonlocal expression
+        expression = value
+        return {"status": "submitted"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", capture_expression)
+
+    result = GameRuntimeAdapter(9222, "Farm").submit_board_interaction(
+        (61, 60), InteractionTargetKind.OBSTACLE_LOOT, "rock_medium", 688
+    )
+
+    assert result.status is ActionStatus.SUBMITTED
+    assert "content.hasBehavior?.('resourceGatePaid')" in expression
+    assert "content.hasBehavior?.('lootable')" in expression
+    assert "content.getBehavior('lootable').loot.length > 0" in expression
+    assert "handler._simulateClick(content)" in expression
 
 
 def test_removal_uses_game_shovel_callback_without_confirmation_popup(monkeypatch) -> None:

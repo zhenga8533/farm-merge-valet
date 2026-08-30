@@ -372,7 +372,7 @@ def test_item_bulk_toggle_targets_full_catalog_independent_of_filter(tmp_path) -
     app.processEvents()
 
 
-def test_item_policy_columns_fit_the_default_window_width(tmp_path) -> None:
+def test_policy_table_headers_fit_controls_and_sort_indicators(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     catalog_dir = tmp_path / "catalog"
     write_item_catalog(catalog_dir / "catalog.json", _catalog())
@@ -381,17 +381,16 @@ def test_item_policy_columns_fit_the_default_window_width(tmp_path) -> None:
     window = MainWindow(ApplicationController(store))
     window.resize(1100, 740)
     window.show()
-    window.navigation.setCurrentRow(window._NAVIGATION.index("Items"))
-    app.processEvents()
-
-    assert window.items_page.table.horizontalScrollBar().maximum() == 0
-    assert [window.items_page.table.columnWidth(column) for column in range(2, 7)] == [
-        92,
-        78,
-        88,
-        92,
-        88,
-    ]
+    for page_name, header in (
+        ("Items", window.items_page.bulk_header),
+        ("Shops", window.shops_page.bulk_header),
+    ):
+        window.navigation.setCurrentRow(window._NAVIGATION.index(page_name))
+        app.processEvents()
+        for column, control in header._controls.items():
+            assert control.width() >= control.sizeHint().width()
+            section_right = header.sectionViewportPosition(column) + header.sectionSize(column)
+            assert control.geometry().right() < section_right - 14
 
     window.quit_application()
     app.processEvents()

@@ -3,6 +3,7 @@ from __future__ import annotations
 from farm_merge_valet.automation.runtime import LiveCellState
 from farm_merge_valet.cdp.board_store import _arm_board_store_target, read_board_state
 from farm_merge_valet.core.items import ProducerKind, ProducerState
+from farm_merge_valet.core.obstacles import ObstacleState
 
 
 def test_read_board_state_preserves_cells_without_content(monkeypatch) -> None:
@@ -99,3 +100,31 @@ def test_live_producer_state_uses_active_cooldown_not_preview() -> None:
 
     assert "hasBehavior?.('cooldown')" in _READ_EXPRESSION
     assert "hasBehavior?.('cooldownPreview')" not in _READ_EXPRESSION
+
+
+def test_read_board_state_preserves_obstacle_progress_and_cost(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.board_store.evaluate",
+        lambda *_args, **_kwargs: [
+            {
+                "column": 6,
+                "row": 7,
+                "hasContent": True,
+                "blueprintID": "rock_medium",
+                "objectID": 32,
+                "obstacle": {
+                    "stagesRemaining": 4,
+                    "totalStages": 5,
+                    "energyCost": 10,
+                    "requiredWorkers": 1,
+                    "movable": False,
+                    "clearing": True,
+                },
+            }
+        ],
+    )
+
+    state = read_board_state(9222, "Farm")
+
+    assert state is not None
+    assert state[(6, 7)].obstacle == ObstacleState(4, 5, 10, False, True, 1)

@@ -63,6 +63,11 @@ _DISCOVER_EXPRESSION = r"""
     typeof candidate._collectObject === 'function' &&
     typeof candidate._collectReward === 'function' &&
     typeof candidate.onItemCollect?.fire === 'function') || null;
+  const obstacleClearHandler = gameplaySystems.find((candidate) =>
+    candidate?._services === services &&
+    typeof candidate._attemptPayment === 'function' &&
+    typeof candidate._getTotalCost === 'function' &&
+    candidate._popoutStore) || null;
 
   // The gameplay HUD owns the authoritative crate event. Visual button states
   // can remain subscribed to inventory updates after their private event set
@@ -84,6 +89,7 @@ _DISCOVER_EXPRESSION = r"""
   window.__fmvInteractionHandler = interactionHandler;
   window.__fmvShovelHandler = shovelHandler;
   window.__fmvRewardInteractionHandler = rewardInteractionHandler;
+  window.__fmvObstacleClearHandler = obstacleClearHandler;
   window.__fmvCrateSpawnSignal = validCrateSignal;
   window.__fmvOrdersService = validShopOrders ? orders : null;
   window.__fmvRuntimeBoard = board;
@@ -100,6 +106,7 @@ _DISCOVER_EXPRESSION = r"""
   if (!interactionHandler) missing.push('tile-interaction-handler');
   if (!shovelHandler) missing.push('shovel-handler');
   if (!rewardInteractionHandler) missing.push('reward-interaction-handler');
+  if (!obstacleClearHandler) missing.push('obstacle-clear-handler');
   if (!validCrateSignal) missing.push('crate-spawn-signal');
   if (!inventory) missing.push('crate-inventory');
   window.__fmvRuntimeDiscovery = {
@@ -111,6 +118,7 @@ _DISCOVER_EXPRESSION = r"""
     interaction: Boolean(interactionHandler),
     removal: Boolean(shovelHandler),
     rewardInteraction: Boolean(rewardInteractionHandler),
+    obstacleClear: Boolean(obstacleClearHandler),
     crateSpawn: Boolean(validCrateSignal),
     crateSubscribers: crateSubscribers.length,
     inventory: Boolean(inventory),
@@ -125,6 +133,7 @@ _DISCOVER_EXPRESSION = r"""
     interaction: Boolean(interactionHandler),
     removal: Boolean(shovelHandler),
     rewardInteraction: Boolean(rewardInteractionHandler),
+    obstacleClear: Boolean(obstacleClearHandler),
     crateSpawn: Boolean(validCrateSignal),
     inventory: Boolean(inventory),
     shopOrders: Boolean(validShopOrders),
@@ -151,6 +160,7 @@ _DISCOVERY_DIAGNOSTICS_EXPRESSION = r"""
   strategy: 'not-run', services: false, pickSubscribers: 0,
   dropSubscribers: 0, itemDrop: false, crateSpawn: false,
   interaction: false, removal: false, rewardInteraction: false,
+  obstacleClear: false,
   shopOrders: false,
   inventory: Boolean(window.__fmvCrateInventoryItem), missing: ['discovery-not-run'],
 })()
@@ -180,6 +190,7 @@ _HEALTH_EXPRESSION = r"""
   const interactionHandler = window.__fmvInteractionHandler;
   const shovelHandler = window.__fmvShovelHandler;
   const rewardInteractionHandler = window.__fmvRewardInteractionHandler;
+  const obstacleClearHandler = window.__fmvObstacleClearHandler;
   const crateSignal = window.__fmvCrateSpawnSignal;
   const orders = window.__fmvOrdersService;
   const beat = window.__fmvHeartbeat;
@@ -208,6 +219,11 @@ _HEALTH_EXPRESSION = r"""
     typeof rewardInteractionHandler._collectObject === 'function' &&
     typeof rewardInteractionHandler._collectReward === 'function' &&
     typeof rewardInteractionHandler.onItemCollect?.fire === 'function';
+  const currentObstacleClearHandler = currentBoard &&
+    obstacleClearHandler?._services === services &&
+    typeof obstacleClearHandler._attemptPayment === 'function' &&
+    typeof obstacleClearHandler._getTotalCost === 'function' &&
+    obstacleClearHandler._popoutStore;
   const currentCrateSignal = currentBoard &&
     services?.hudService?._commonEvents?.spawnCrates === crateSignal &&
     typeof crateSignal?.fire === 'function' && subscribers(crateSignal).length > 0;
@@ -225,6 +241,7 @@ _HEALTH_EXPRESSION = r"""
     interaction: Boolean(currentInteractionHandler),
     removal: Boolean(currentShovelHandler),
     rewardInteraction: Boolean(currentRewardInteractionHandler),
+    obstacleClear: Boolean(currentObstacleClearHandler),
     itemActionBusy: Boolean(currentItemHandler && (
       handler.busy || handler.isBusy?.() || handler.dragging || handler._dragging ||
       handler._currentObject || handler._originCell
@@ -450,7 +467,7 @@ def _interaction_expression(
     scene_id: int | None,
 ) -> str:
     return f"""
-(() => {{
+(async () => {{
   const coord = {_coord(coord)};
   const expectedKind = {json.dumps(expected_kind.value)};
   const expectedBlueprintID = {json.dumps(expected_blueprint_id)};
@@ -458,13 +475,15 @@ def _interaction_expression(
   const board = window.__fmvBoardCells;
   const handler = window.__fmvInteractionHandler;
   const rewardHandler = window.__fmvRewardInteractionHandler;
+  const obstacleHandler = window.__fmvObstacleClearHandler;
   const services = window.__fmvGameplayServices;
   const identity = window.__fmvGameplayServices?.mapGrid ||
     window.__fmvGameplayMapScreen || handler || board;
   const currentSceneId = identity && window.__fmvRuntimeSceneIds
     ? window.__fmvRuntimeSceneIds.get(identity) : null;
   if (!board || window.__fmvRuntimeBoard !== board ||
-      (expectedKind !== 'reward' && !handler) ||
+      (expectedKind !== 'reward' && expectedKind !== 'clear' && !handler) ||
+      (expectedKind === 'clear' && !obstacleHandler) ||
       currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
   let cell = null;
@@ -486,6 +505,15 @@ def _interaction_expression(
       ? content.hasBehavior?.('collectable') && content.hasBehavior?.('currency') &&
         Array.isArray(content.getBehavior?.('collectable')?.reward) &&
         content.getBehavior('collectable').reward.length > 0
+    : expectedKind === 'clear'
+      ? content.hasBehavior?.('mapSource') && content.hasBehavior?.('hitpoints') &&
+        content.hasBehavior?.('resourceGate') &&
+        !content.hasBehavior?.('resourceGatePaid')
+    : expectedKind === 'obstacle-loot'
+      ? content.hasBehavior?.('mapSource') && content.hasBehavior?.('hitpoints') &&
+        content.hasBehavior?.('resourceGatePaid') && content.hasBehavior?.('lootable') &&
+        Array.isArray(content.getBehavior?.('lootable')?.loot) &&
+        content.getBehavior('lootable').loot.length > 0
     : expectedKind === 'producer'
       ? producer && !content.hasBehavior?.('cooldown') &&
         !content.hasBehavior?.('depleted')
@@ -503,6 +531,31 @@ def _interaction_expression(
           typeof rewardHandler.onItemCollect?.fire !== 'function')
         return {{status: 'unavailable', detail: 'reward-interaction-handler-not-found'}};
       rewardHandler._collectReward(content);
+    }} else if (expectedKind === 'clear') {{
+      if (obstacleHandler?._services !== services)
+        return {{status: 'unavailable', detail: 'obstacle-clear-handler-not-found'}};
+      const gate = content.getBehavior('resourceGate');
+      const position = content.getBehavior('gridPosition');
+      const effectiveCost = obstacleHandler._getTotalCost(gate);
+      const energyCost = effectiveCost?.find((item) => item?.key === 'energy')?.amount;
+      const requiredWorkers = gate?._data?.workers;
+      const energy = window.__fmvEnergyInventoryItem;
+      const gameWorkers = services?.gameWorkers;
+      if (!position || !Number.isInteger(energyCost) || energyCost < 0 ||
+          !Number.isInteger(requiredWorkers) || requiredWorkers < 0)
+        return {{status: 'invalid-target', detail: 'obstacle-state-invalid'}};
+      if (!energy || !Number.isInteger(energy.amount))
+        return {{status: 'unavailable', detail: 'energy-state-unavailable'}};
+      if (energy.amount < energyCost)
+        return {{status: 'rejected', detail: 'insufficient-energy'}};
+      if (typeof gameWorkers?.hasEnoughWorkers !== 'function')
+        return {{status: 'unavailable', detail: 'worker-state-unavailable'}};
+      if (!gameWorkers.hasEnoughWorkers(requiredWorkers))
+        return {{status: 'rejected', detail: 'insufficient-workers'}};
+      await obstacleHandler._attemptPayment(content, position, gate);
+      if (content.getBehavior?.('resourceGate') === gate &&
+          !content.hasBehavior?.('resourceGatePaid'))
+        return {{status: 'rejected', detail: 'clear-did-not-start'}};
     }} else {{
       handler._simulateClick(content);
     }}
@@ -511,6 +564,23 @@ def _interaction_expression(
     return {{status: 'rejected', detail: String(error?.message || error)}};
   }}
 }})()
+"""
+
+_READ_WORKERS_EXPRESSION = r"""
+(() => {
+  const gameWorkers = window.__fmvGameplayServices?.gameWorkers;
+  const roster = gameWorkers?._model?.workers;
+  if (!Array.isArray(roster) || typeof gameWorkers.hasEnoughWorkers !== 'function') return null;
+  try {
+    let available = 0;
+    while (available < roster.length && gameWorkers.hasEnoughWorkers(available + 1)) {
+      available += 1;
+    }
+    return {total: roster.length, available};
+  } catch (_error) {
+    return null;
+  }
+})()
 """
 
 

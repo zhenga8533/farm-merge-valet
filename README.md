@@ -160,6 +160,14 @@ ready tier-4 producer preempts crates and is harvested only after the configured
 minimum number of cells is open. When space is insufficient, the bot merges and
 defers crates; if no merge can help, it waits without repeatedly clicking.
 
+Obstacle clearing uses live energy, total and available workers, hit points,
+stage cost, and mobility rather than hardcoded cost tables. It prioritizes fixed
+before movable, in-progress before untouched, and fewer-stage obstacles before
+larger ones. A higher-priority obstacle without enough energy or free workers
+waits instead of spending resources on a lower-priority one.
+When a paid stage finishes, its live `lootable` output is claimed through the
+game's tile-interaction pipeline before that obstacle is considered again.
+
 Shop automation reads each active shop's fixed current recipe, live ingredient
 inventory, production timer, and rewards. It can start affordable orders and
 claim completed rewards without opening shop UI or moving the camera. Ingredient

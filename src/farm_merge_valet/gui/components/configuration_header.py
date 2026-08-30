@@ -15,7 +15,6 @@ class ConfigurationHeader(QWidget):
         super().__init__()
         self.actions_layout = QHBoxLayout(self)
         self.actions_layout.setContentsMargins(0, 0, 0, 0)
-        self.actions_layout.addWidget(QLabel("Configuration"))
         self.status_label = QLabel("Saved")
         self.status_label.setObjectName("saveStatus")
         self.status_label.setAccessibleName("Configuration status")

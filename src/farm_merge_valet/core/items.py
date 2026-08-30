@@ -26,6 +26,8 @@ def item_base_policy_key(policy_key: str) -> str:
 class InteractionTargetKind(StrEnum):
     IMMEDIATE = "immediate"
     REWARD = "reward"
+    CLEAR = "clear"
+    OBSTACLE_LOOT = "obstacle-loot"
     REMOVE = "remove"
     PRODUCER = "producer"
     DEPLETED_PRODUCER = "depleted-producer"

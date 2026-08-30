@@ -54,8 +54,9 @@ is present, and ready for retirement when depleted. The visual
 `cooldownPreview` behavior is not used as authoritative state because it
 persists after the timer for a second harvest has completed.
 
-The interaction phase handles direct board tiles first, then retires depleted
-producers, then harvests ready producers. Depleted animals convert in place;
+The interaction phase handles direct board tiles first, then affordable
+obstacle stages, retires depleted producers, and finally harvests ready
+producers. Depleted animals convert in place;
 depleted crops require one open cell for their two tier-1 replacements. A ready
 producer requires the configured minimum open-cell count (four by default).
 If the requirement is not met, merge work preempts interaction and supply
@@ -70,6 +71,26 @@ replaced. A pending interaction follows the same heartbeat and no-duplicate
 rules as an item drop. The game may handle several matching objects from one accepted
 click; the next authoritative read discards stale candidates and replans from
 the resulting board.
+
+Obstacle clearing reads the current energy balance, total and available worker
+counts, and each source's live hit points, stage count, current energy and
+worker cost, mobility, and paid/clearing state.
+Only the highest-priority ready obstacle is considered: fixed before movable,
+then already-started before untouched, then fewer total stages before more. If
+that obstacle lacks energy or available workers, the bot does not fall through
+and spend resources on a lower-priority obstacle; other work may continue while
+energy regenerates or workers become free. A paid stage is left alone until the
+game exposes its `lootable` output. That output is then claimed through the
+normal tile-interaction pipeline, after which the next resource gate can be
+planned.
+
+Clearing calls the game's resource-gate payment handler after revalidating the
+scene, coordinate, object identity, obstacle behaviors, stage cost, live energy,
+and worker availability. The game remains responsible for deducting energy,
+reserving a worker,
+running the timer, spawning rewards, advancing hit points, and removing the
+finished obstacle. Submission is confirmed by an authoritative obstacle-state
+or object-identity change.
 
 ## Claim crates
 
@@ -186,6 +207,6 @@ network or server-side interruption, and backend connectivity is not detected
 separately yet. Global pause/quit hotkeys and Ctrl+C remain available as inbound
 controls without being part of game interaction.
 
-Future phases may clear obstacles, visit friends, and handle expansions or
-events. Network-dependent phases should add explicit backend-connectivity
+Future phases may visit friends and handle expansions or events.
+Network-dependent phases should add explicit backend-connectivity
 monitoring when implemented.

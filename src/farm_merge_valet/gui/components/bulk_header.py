@@ -10,6 +10,10 @@ from PySide6.QtWidgets import QApplication, QHeaderView, QWidget
 
 from farm_merge_valet.gui.components.policy_view import PolicyCheckBox
 
+_CONTROL_LEFT_MARGIN = 8
+_SORT_INDICATOR_RESERVE = 22
+_HEADER_VERTICAL_PADDING = 6
+
 
 class _BulkCheckBox(PolicyCheckBox):
     def nextCheckState(self) -> None:
@@ -29,10 +33,11 @@ class BulkToggleHeader(QHeaderView):
         self.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.setHighlightSections(False)
         self.setSortIndicatorShown(False)
-        self.setMinimumHeight(42)
+        self.setMinimumHeight(58)
+        self._labels = dict(labels)
         self._controls: dict[int, _BulkCheckBox] = {}
         for column, label in labels.items():
-            control = _BulkCheckBox(label, self.viewport())
+            control = _BulkCheckBox("", self.viewport())
             control.setProperty("policyToggle", True)
             control.setTristate(True)
             control.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -59,12 +64,25 @@ class BulkToggleHeader(QHeaderView):
         if control is None:
             return size
         hint = control.sizeHint()
-        return QSize(max(size.width(), hint.width() + 24), max(size.height(), hint.height() + 12))
+        label_width = self.fontMetrics().horizontalAdvance(self._labels[logical_index])
+        required_width = max(
+            hint.width() + (_CONTROL_LEFT_MARGIN * 2),
+            label_width + (_CONTROL_LEFT_MARGIN * 2) + _SORT_INDICATOR_RESERVE,
+        )
+        required_height = (
+            self.fontMetrics().height() + hint.height() + (_HEADER_VERTICAL_PADDING * 3)
+        )
+        return QSize(max(size.width(), required_width), max(size.height(), required_height))
 
     def sizeHint(self) -> QSize:
         size = super().sizeHint()
         height = max(
-            (control.sizeHint().height() + 12 for control in self._controls.values()),
+            (
+                self.fontMetrics().height()
+                + control.sizeHint().height()
+                + (_HEADER_VERTICAL_PADDING * 3)
+                for control in self._controls.values()
+            ),
             default=0,
         )
         return QSize(size.width(), max(size.height(), height))
@@ -79,9 +97,18 @@ class BulkToggleHeader(QHeaderView):
 
     def paintSection(self, painter: QPainter, rect: QRect, logical_index: int) -> None:
         super().paintSection(painter, rect, logical_index)
+        label = self._labels.get(logical_index)
+        if label is not None:
+            label_rect = rect.adjusted(
+                _CONTROL_LEFT_MARGIN,
+                _HEADER_VERTICAL_PADDING,
+                -_SORT_INDICATOR_RESERVE,
+                -(self._controls[logical_index].sizeHint().height() + _HEADER_VERTICAL_PADDING),
+            )
+            painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
         if logical_index != self.sortIndicatorSection():
             return
-        center = QPoint(rect.right() - 13, rect.center().y())
+        center = QPoint(rect.right() - 13, rect.top() + 13)
         ascending = self.sortIndicatorOrder() is Qt.SortOrder.AscendingOrder
         vertical = -2 if ascending else 2
         app = QApplication.instance()
@@ -101,4 +128,10 @@ class BulkToggleHeader(QHeaderView):
     def _position_controls(self) -> None:
         for column, control in self._controls.items():
             left = self.sectionViewportPosition(column)
-            control.setGeometry(left + 8, 0, max(0, self.sectionSize(column) - 22), self.height())
+            hint = control.sizeHint()
+            control.setGeometry(
+                left + max(0, (self.sectionSize(column) - hint.width()) // 2),
+                self.height() - hint.height() - _HEADER_VERTICAL_PADDING,
+                hint.width(),
+                hint.height(),
+            )

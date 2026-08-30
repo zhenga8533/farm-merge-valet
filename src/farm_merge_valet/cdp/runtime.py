@@ -16,7 +16,7 @@ from farm_merge_valet.automation.runtime import (
 )
 from farm_merge_valet.cdp.board_store import arm_board_store, read_board_state
 from farm_merge_valet.cdp.evaluation import apply_background_overrides, evaluate
-from farm_merge_valet.cdp.inventory_store import arm_crate_inventory
+from farm_merge_valet.cdp.inventory_store import arm_crate_inventory, read_energy
 from farm_merge_valet.cdp.scripts import (
     _BOARD_ARMED_EXPRESSION,
     _DISCOVER_EXPRESSION,
@@ -24,6 +24,7 @@ from farm_merge_valet.cdp.scripts import (
     _HEALTH_EXPRESSION,
     _HEARTBEAT_EXPRESSION,
     _READ_SHOP_ORDERS_EXPRESSION,
+    _READ_WORKERS_EXPRESSION,
     _crate_expression,
     _drop_expression,
     _interaction_expression,
@@ -33,6 +34,7 @@ from farm_merge_valet.cdp.scripts import (
 )
 from farm_merge_valet.cdp.targets import read_background_flag_status
 from farm_merge_valet.core.items import GridCoord, InteractionTargetKind
+from farm_merge_valet.core.obstacles import WorkerState
 from farm_merge_valet.core.shops import ShopIngredient, ShopOrder, ShopOrderState
 from farm_merge_valet.observability.logging import log_event
 
@@ -75,6 +77,26 @@ class GameRuntimeAdapter:
             cancel_event=self._cancel_event,
         )
 
+    def read_energy(self) -> int | None:
+        return read_energy(self.port, self.page_title, cancel_event=self._cancel_event)
+
+    def read_workers(self) -> WorkerState | None:
+        raw = self._evaluate(_READ_WORKERS_EXPRESSION)
+        if not isinstance(raw, dict):
+            return None
+        total = raw.get("total")
+        available = raw.get("available")
+        if (
+            not isinstance(total, int)
+            or isinstance(total, bool)
+            or total < 0
+            or not isinstance(available, int)
+            or isinstance(available, bool)
+            or not 0 <= available <= total
+        ):
+            return None
+        return WorkerState(total=total, available=available)
+
     def read_background_flag_status(self) -> dict[str, object]:
         return read_background_flag_status(self.port, cancel_event=self._cancel_event)
 
@@ -112,7 +134,12 @@ class GameRuntimeAdapter:
             arm_board_store(self.port, self.page_title, cancel_event=self._cancel_event)
         if is_cancelled():
             return self.read_runtime_health()
-        if self._evaluate("Boolean(window.__fmvCrateInventoryItem)") is not True:
+        if (
+            self._evaluate(
+                "Boolean(window.__fmvCrateInventoryItem && window.__fmvEnergyInventoryItem)"
+            )
+            is not True
+        ):
             arm_crate_inventory(self.port, self.page_title, cancel_event=self._cancel_event)
         if is_cancelled():
             return self.read_runtime_health()
@@ -208,6 +235,7 @@ class GameRuntimeAdapter:
             shop_available=raw.get("shopOrders") is True,
             removal_available=removal,
             reward_interaction_available=reward_interaction,
+            obstacle_clear_available=raw.get("obstacleClear") is True,
         )
 
     @staticmethod

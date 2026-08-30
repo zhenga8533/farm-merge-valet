@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from farm_merge_valet.cdp.inventory_store import _arm_crate_inventory_target, read_crate_count
+from farm_merge_valet.cdp.inventory_store import (
+    _FIND_CRATE_ITEM_EXPRESSION,
+    _arm_crate_inventory_target,
+    read_crate_count,
+    read_energy,
+)
 
 
 @pytest.mark.parametrize("amount", [0, 40, 1000])
@@ -41,3 +46,13 @@ def test_arm_crate_inventory_releases_query_object(monkeypatch) -> None:
 
     assert _arm_crate_inventory_target("ws://game", None) == "found (12 available)"
     assert methods[-1] == "Runtime.releaseObject"
+
+
+def test_inventory_discovery_retains_energy_from_the_same_map(monkeypatch) -> None:
+    assert "inventoryItems.get('energy')" in _FIND_CRATE_ITEM_EXPRESSION
+    assert "window.__fmvEnergyInventoryItem = energy" in _FIND_CRATE_ITEM_EXPRESSION
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.inventory_store.evaluate", lambda *_args, **_kwargs: 37
+    )
+
+    assert read_energy(9222, "Farm") == 37

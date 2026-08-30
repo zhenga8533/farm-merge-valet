@@ -32,6 +32,7 @@ from farm_merge_valet.core.items import (
     ProducerState,
 )
 from farm_merge_valet.core.merge_planner import MergeAction, MergeActionKind, MoveEffect
+from farm_merge_valet.core.obstacles import ObstacleState, WorkerState
 from farm_merge_valet.core.shops import ShopOrder
 
 
@@ -257,6 +258,103 @@ def test_remove_policy_never_targets_non_shovelable_item(monkeypatch) -> None:
         {"decorations/statue": ItemPolicyOverride(always_remove=True)},
     )
     bot._live_cells = {(3, 4): LiveCellState(True, "statue", 91)}
+
+    assert bot._interaction_actions() == ([], [], [])
+
+
+def test_affordable_obstacle_clear_is_planned_and_submitted(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._clearable_ids = frozenset({"rock_medium"})
+    bot._blueprint_policy_keys = {"rock_medium": "obstacles/rock_medium"}
+    bot._energy = 10
+    bot._workers = WorkerState(1, 1)
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"obstacles/rock_medium": ItemPolicyOverride(interact=True)},
+    )
+    obstacle = ObstacleState(4, 5, 10, False, required_workers=1)
+    bot._live_cells = {(3, 4): LiveCellState(True, "rock_medium", 91, obstacle=obstacle)}
+
+    immediate, depleted, ready = bot._interaction_actions()
+
+    assert immediate == [
+        InteractionAction(
+            InteractionTargetKind.CLEAR,
+            (3, 4),
+            "rock_medium",
+            91,
+            obstacle=obstacle,
+        )
+    ]
+    assert depleted == []
+    assert ready == []
+
+    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+
+    assert bot.runtime.interactions == [((3, 4), InteractionTargetKind.CLEAR, "rock_medium", 91)]
+
+
+def test_ready_obstacle_loot_is_planned_without_energy_or_workers(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._clearable_ids = frozenset({"rock_medium"})
+    bot._blueprint_policy_keys = {"rock_medium": "obstacles/rock_medium"}
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"obstacles/rock_medium": ItemPolicyOverride(interact=True)},
+    )
+    obstacle = ObstacleState(4, 5, None, False, clearing=True)
+    bot._live_cells = {
+        (3, 4): LiveCellState(
+            True,
+            "rock_medium",
+            91,
+            behavior_names=frozenset({"mapSource", "resourceGatePaid", "lootable"}),
+            obstacle=obstacle,
+        )
+    }
+
+    immediate, depleted, ready = bot._interaction_actions()
+
+    assert immediate == [
+        InteractionAction(
+            InteractionTargetKind.OBSTACLE_LOOT,
+            (3, 4),
+            "rock_medium",
+            91,
+            obstacle=obstacle,
+        )
+    ]
+    assert depleted == []
+    assert ready == []
+
+    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+
+    assert bot.runtime.interactions == [
+        ((3, 4), InteractionTargetKind.OBSTACLE_LOOT, "rock_medium", 91)
+    ]
+
+
+def test_unaffordable_obstacle_does_not_create_interaction(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._clearable_ids = frozenset({"rock_medium"})
+    bot._blueprint_policy_keys = {"rock_medium": "obstacles/rock_medium"}
+    bot._energy = 9
+    bot._workers = WorkerState(1, 1)
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"obstacles/rock_medium": ItemPolicyOverride(interact=True)},
+    )
+    bot._live_cells = {
+        (3, 4): LiveCellState(
+            True,
+            "rock_medium",
+            91,
+            obstacle=ObstacleState(4, 5, 10, False, required_workers=1),
+        )
+    }
 
     assert bot._interaction_actions() == ([], [], [])
 
@@ -492,6 +590,65 @@ def test_pending_removal_confirms_from_authoritative_source_change(monkeypatch) 
         interaction, initial, 7, 1.0, initial, 1.0
     )
     bot._live_cells[interaction.coord] = LiveCellState(False, None)
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
+
+    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot._interaction_workflow.pending is None
+
+
+def test_pending_obstacle_clear_confirms_from_stage_state_change(monkeypatch) -> None:
+    bot = bare_bot()
+    obstacle = ObstacleState(4, 5, 10, False)
+    initial = LiveCellState(True, "rock_medium", 91, obstacle=obstacle)
+    interaction = InteractionAction(
+        InteractionTargetKind.CLEAR,
+        (3, 4),
+        "rock_medium",
+        91,
+        obstacle=obstacle,
+    )
+    bot._interaction_workflow.pending = PendingInteraction(
+        interaction, initial, 7, 1.0, initial, 1.0
+    )
+    bot._live_cells[interaction.coord] = LiveCellState(
+        True,
+        "rock_medium",
+        91,
+        obstacle=ObstacleState(4, 5, None, False, True),
+    )
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
+
+    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot._interaction_workflow.pending is None
+
+
+def test_pending_obstacle_loot_confirms_from_next_resource_gate(monkeypatch) -> None:
+    bot = bare_bot()
+    obstacle = ObstacleState(4, 5, None, False, clearing=True)
+    initial = LiveCellState(
+        True,
+        "rock_medium",
+        91,
+        behavior_names=frozenset({"mapSource", "resourceGatePaid", "lootable"}),
+        obstacle=obstacle,
+    )
+    interaction = InteractionAction(
+        InteractionTargetKind.OBSTACLE_LOOT,
+        (3, 4),
+        "rock_medium",
+        91,
+        obstacle=obstacle,
+    )
+    bot._interaction_workflow.pending = PendingInteraction(
+        interaction, initial, 7, 1.0, initial, 1.0
+    )
+    bot._live_cells[interaction.coord] = LiveCellState(
+        True,
+        "rock_medium",
+        91,
+        behavior_names=frozenset({"mapSource", "resourceGate"}),
+        obstacle=ObstacleState(4, 5, 10, False, required_workers=1),
+    )
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
 
     assert bot._verify_pending_interaction(health(advancing=True))

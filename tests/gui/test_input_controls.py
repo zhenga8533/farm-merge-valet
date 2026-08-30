@@ -167,7 +167,33 @@ def test_checked_policy_toggle_has_a_distinct_keyboard_focus_ring() -> None:
 
     assert control.hasFocus()
     assert focused != unfocused
+    indicator = control._indicator_rect()
+    assert indicator.left() == 22 - indicator.right() - 1
     control.close()
+
+
+def test_custom_toggles_only_paint_focus_for_keyboard_navigation() -> None:
+    app = QApplication.instance() or QApplication([])
+    apply_theme(app, "light")
+
+    for control in (PolicyCheckBox(), SettingsToggle()):
+        control.show()
+        app.processEvents()
+        control.clearFocus()
+        app.processEvents()
+        unfocused = control.grab().toImage()
+
+        control.setFocus(Qt.FocusReason.MouseFocusReason)
+        app.processEvents()
+        mouse_focused = control.grab().toImage()
+        control.clearFocus()
+        control.setFocus(Qt.FocusReason.TabFocusReason)
+        app.processEvents()
+        keyboard_focused = control.grab().toImage()
+
+        assert mouse_focused == unfocused
+        assert keyboard_focused != unfocused
+        control.close()
 
 
 @pytest.mark.parametrize("theme", ("light", "dark"))

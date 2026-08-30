@@ -14,6 +14,7 @@ from farm_merge_valet.core.items import (
     ProducerKind,
     ProducerState,
 )
+from farm_merge_valet.core.obstacles import ObstacleState, WorkerState
 from farm_merge_valet.core.shops import ShopOrder
 
 
@@ -71,6 +72,7 @@ class RuntimeHealth:
     shop_available: bool = False
     removal_available: bool = False
     reward_interaction_available: bool = False
+    obstacle_clear_available: bool = False
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,7 @@ class LiveCellState:
     producer_state: ProducerState | None = None
     item_variant: str | None = None
     behavior_names: frozenset[str] = frozenset()
+    obstacle: ObstacleState | None = None
 
 
 @runtime_checkable
@@ -100,6 +103,10 @@ class GameRuntime(Protocol):
     def read_runtime_health(self) -> RuntimeHealth: ...
 
     def read_board_state(self) -> dict[GridCoord, LiveCellState] | None: ...
+
+    def read_energy(self) -> int | None: ...
+
+    def read_workers(self) -> WorkerState | None: ...
 
     def read_background_flag_status(self) -> dict[str, object]: ...
 

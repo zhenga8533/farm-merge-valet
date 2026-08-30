@@ -46,6 +46,7 @@ from farm_merge_valet.core.merge_planner import (
     MergeActionKind,
     plan_merge_actions,
 )
+from farm_merge_valet.core.obstacles import ObstacleCandidate, WorkerState, plan_obstacle_clear
 from farm_merge_valet.core.shops import (
     ShopAction,
     ShopOrder,
@@ -106,10 +107,13 @@ class Bot:
         self._blueprint_policy_keys: dict[str, str] = {}
         self._direct_interaction_ids: frozenset[str] = frozenset()
         self._reward_interaction_ids: frozenset[str] = frozenset()
+        self._clearable_ids: frozenset[str] = frozenset()
         self._shovelable_ids: frozenset[str] = frozenset()
         self._max_item_tiers: dict[tuple[str, str] | tuple[str, str, str | None], int] = {}
         self.board = BoardGrid()
         self._live_cells: dict[GridCoord, LiveCellState] = {}
+        self._energy: int | None = None
+        self._workers: WorkerState | None = None
         self._merge_workflow = MergeWorkflow()
         self._interaction_workflow = InteractionWorkflow()
         self._shop_workflow = ShopWorkflow()
@@ -218,6 +222,7 @@ class Bot:
             }
             self._direct_interaction_ids = catalog.direct_interaction_ids
             self._reward_interaction_ids = catalog.reward_interaction_ids
+            self._clearable_ids = catalog.clearable_ids
             self._shovelable_ids = catalog.shovelable_ids
         except (CatalogUnavailableError, OSError, ValueError) as exc:
             log_event(
@@ -304,6 +309,16 @@ class Bot:
             self._set_live_cell(board, coord, state)
         self.board = board
         self._live_cells = raw
+        read_energy = getattr(self.runtime, "read_energy", None)
+        try:
+            self._energy = read_energy() if callable(read_energy) else None
+        except RuntimeConnectionError:
+            self._energy = None
+        read_workers = getattr(self.runtime, "read_workers", None)
+        try:
+            self._workers = read_workers() if callable(read_workers) else None
+        except RuntimeConnectionError:
+            self._workers = None
         return True
 
     def sync_board_from_live_state(self) -> bool:
@@ -477,15 +492,27 @@ class Bot:
             "end": action.end,
         }
 
-    @staticmethod
-    def _interaction_event_context(action: InteractionAction) -> dict[str, object]:
-        return {
+    def _interaction_event_context(self, action: InteractionAction) -> dict[str, object]:
+        context: dict[str, object] = {
             "interaction_kind": action.kind.value,
             "coord": action.coord,
             "blueprint_id": action.blueprint_id,
             "object_id": action.object_id,
             "producer_kind": action.producer_kind.value if action.producer_kind else None,
         }
+        if action.obstacle is not None:
+            workers = getattr(self, "_workers", None)
+            context.update(
+                obstacle_movable=action.obstacle.movable,
+                obstacle_in_progress=action.obstacle.in_progress,
+                obstacle_stages_remaining=action.obstacle.stages_remaining,
+                obstacle_total_stages=action.obstacle.total_stages,
+                energy_cost=action.obstacle.energy_cost,
+                required_workers=action.obstacle.required_workers,
+                workers_available=workers.available if workers else None,
+                workers_total=workers.total if workers else None,
+            )
+        return context
 
     def _is_recognized_tier_four_producer(self, state: LiveCellState) -> bool:
         return bool(
@@ -503,6 +530,7 @@ class Bot:
         self,
     ) -> tuple[list[InteractionAction], list[InteractionAction], list[InteractionAction]]:
         immediate: list[InteractionAction] = []
+        obstacles: list[ObstacleCandidate] = []
         depleted: list[InteractionAction] = []
         ready: list[InteractionAction] = []
         for coord, state in sorted(self._live_cells.items()):
@@ -525,6 +553,33 @@ class Bot:
                 )
                 continue
             if not policy.interact:
+                continue
+            if (
+                state.blueprint_id in getattr(self, "_clearable_ids", frozenset())
+                and state.obstacle is not None
+            ):
+                if (
+                    state.obstacle.clearing
+                    and "lootable" in state.behavior_names
+                ):
+                    immediate.append(
+                        InteractionAction(
+                            InteractionTargetKind.OBSTACLE_LOOT,
+                            coord,
+                            state.blueprint_id,
+                            state.object_id,
+                            obstacle=state.obstacle,
+                        )
+                    )
+                    continue
+                obstacles.append(
+                    ObstacleCandidate(
+                        coord,
+                        state.blueprint_id,
+                        state.object_id,
+                        state.obstacle,
+                    )
+                )
                 continue
             if state.collectable and state.blueprint_id in self._reward_interaction_ids:
                 immediate.append(
@@ -568,10 +623,30 @@ class Bot:
                         state.producer_kind,
                     )
                 )
-        producer_order = {ProducerKind.ANIMAL: 0, ProducerKind.CROP: 1, None: 2}
-        immediate.sort(
-            key=lambda action: (action.kind is not InteractionTargetKind.REMOVE, action.coord)
+        obstacle = plan_obstacle_clear(
+            obstacles,
+            getattr(self, "_energy", None),
+            getattr(self, "_workers", None),
         )
+        if obstacle is not None:
+            immediate.append(
+                InteractionAction(
+                    InteractionTargetKind.CLEAR,
+                    obstacle.coord,
+                    obstacle.blueprint_id,
+                    obstacle.object_id,
+                    obstacle=obstacle.state,
+                )
+            )
+        producer_order = {ProducerKind.ANIMAL: 0, ProducerKind.CROP: 1, None: 2}
+        immediate_order = {
+            InteractionTargetKind.REMOVE: 0,
+            InteractionTargetKind.IMMEDIATE: 1,
+            InteractionTargetKind.REWARD: 1,
+            InteractionTargetKind.OBSTACLE_LOOT: 1,
+            InteractionTargetKind.CLEAR: 2,
+        }
+        immediate.sort(key=lambda action: (immediate_order[action.kind], action.coord))
         depleted.sort(key=lambda action: (producer_order[action.producer_kind], action.coord))
         ready.sort(key=lambda action: (producer_order[action.producer_kind], action.coord))
         return immediate, depleted, ready
@@ -816,6 +891,9 @@ class Bot:
             elif next_action.kind is InteractionTargetKind.REWARD:
                 capability_available = health.reward_interaction_available
                 capability = "reward interaction"
+            elif next_action.kind is InteractionTargetKind.CLEAR:
+                capability_available = health.obstacle_clear_available
+                capability = "obstacle clearing"
             else:
                 capability_available = health.interaction_available
                 capability = "board interaction"
