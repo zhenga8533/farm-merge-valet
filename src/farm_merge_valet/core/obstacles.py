@@ -35,10 +35,18 @@ class WorkerState:
     available: int
 
 
-def obstacle_priority(candidate: ObstacleCandidate) -> tuple[bool, bool, int, GridCoord]:
-    """Fixed, started, and lower-stage-count obstacles sort first."""
+def obstacle_priority(
+    candidate: ObstacleCandidate,
+) -> tuple[bool, bool, int, int, GridCoord]:
+    """Fixed, started, lower-tier, and nearer-completion obstacles sort first."""
     state = candidate.state
-    return state.movable, not state.in_progress, state.total_stages, candidate.coord
+    return (
+        state.movable,
+        not state.in_progress,
+        state.total_stages,
+        state.stages_remaining,
+        candidate.coord,
+    )
 
 
 def plan_obstacle_clear(

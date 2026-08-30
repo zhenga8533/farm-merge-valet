@@ -46,7 +46,12 @@ from farm_merge_valet.core.merge_planner import (
     MergeActionKind,
     plan_merge_actions,
 )
-from farm_merge_valet.core.obstacles import ObstacleCandidate, WorkerState, plan_obstacle_clear
+from farm_merge_valet.core.obstacles import (
+    ObstacleCandidate,
+    WorkerState,
+    obstacle_priority,
+    plan_obstacle_clear,
+)
 from farm_merge_valet.core.shops import (
     ShopAction,
     ShopOrder,
@@ -114,6 +119,7 @@ class Bot:
         self._live_cells: dict[GridCoord, LiveCellState] = {}
         self._energy: int | None = None
         self._workers: WorkerState | None = None
+        self._obstacle_focus: tuple[GridCoord, int | None] | None = None
         self._merge_workflow = MergeWorkflow()
         self._interaction_workflow = InteractionWorkflow()
         self._shop_workflow = ShopWorkflow()
@@ -531,6 +537,32 @@ class Bot:
         policy = self.config.item_policy(policy_key)
         return policy.enabled and policy.interact
 
+    def _focused_obstacle(self, candidates: list[ObstacleCandidate]) -> ObstacleCandidate | None:
+        focus = getattr(self, "_obstacle_focus", None)
+        if focus is not None:
+            focused_coord, focused_object_id = focus
+            for candidate in candidates:
+                if candidate.coord == focused_coord and candidate.object_id == focused_object_id:
+                    return candidate
+
+            current = self._live_cells.get(focused_coord)
+            current_blueprint_id = current.blueprint_id if current is not None else None
+            if (
+                current is not None
+                and current.object_id == focused_object_id
+                and current_blueprint_id is not None
+                and current_blueprint_id in getattr(self, "_clearable_ids", frozenset())
+                and self._interaction_enabled(current_blueprint_id)
+            ):
+                return None
+            self._obstacle_focus = None
+
+        if not candidates:
+            return None
+        selected = min(candidates, key=obstacle_priority)
+        self._obstacle_focus = selected.coord, selected.object_id
+        return selected
+
     def _interaction_actions(
         self,
     ) -> tuple[list[InteractionAction], list[InteractionAction], list[InteractionAction]]:
@@ -563,26 +595,6 @@ class Bot:
                 state.blueprint_id in getattr(self, "_clearable_ids", frozenset())
                 and state.obstacle is not None
             ):
-                if (
-                    state.obstacle.clearing
-                    and "lootable" in state.behavior_names
-                ):
-                    immediate.append(
-                        InteractionAction(
-                            InteractionTargetKind.OBSTACLE_LOOT,
-                            coord,
-                            state.blueprint_id,
-                            state.object_id,
-                            obstacle=state.obstacle,
-                            output_capacity=self._interaction_workflow.output_capacity_for(
-                                coord,
-                                state.object_id,
-                                state.claim_output_capacity,
-                            ),
-                            output_ids=state.claim_output_ids,
-                        )
-                    )
-                    continue
                 obstacles.append(
                     ObstacleCandidate(
                         coord,
@@ -640,21 +652,44 @@ class Bot:
                         output_ids=state.claim_output_ids,
                     )
                 )
-        obstacle = plan_obstacle_clear(
-            obstacles,
-            getattr(self, "_energy", None),
-            getattr(self, "_workers", None),
-        )
-        if obstacle is not None:
+        focused_obstacle = self._focused_obstacle(obstacles)
+        if (
+            focused_obstacle is not None
+            and focused_obstacle.state.clearing
+            and "lootable" in self._live_cells[focused_obstacle.coord].behavior_names
+        ):
+            focused_state = self._live_cells[focused_obstacle.coord]
             immediate.append(
                 InteractionAction(
-                    InteractionTargetKind.CLEAR,
-                    obstacle.coord,
-                    obstacle.blueprint_id,
-                    obstacle.object_id,
-                    obstacle=obstacle.state,
+                    InteractionTargetKind.OBSTACLE_LOOT,
+                    focused_obstacle.coord,
+                    focused_obstacle.blueprint_id,
+                    focused_obstacle.object_id,
+                    obstacle=focused_obstacle.state,
+                    output_capacity=self._interaction_workflow.output_capacity_for(
+                        focused_obstacle.coord,
+                        focused_obstacle.object_id,
+                        focused_state.claim_output_capacity,
+                    ),
+                    output_ids=focused_state.claim_output_ids,
                 )
             )
+        elif focused_obstacle is not None:
+            obstacle = plan_obstacle_clear(
+                [focused_obstacle],
+                getattr(self, "_energy", None),
+                getattr(self, "_workers", None),
+            )
+            if obstacle is not None:
+                immediate.append(
+                    InteractionAction(
+                        InteractionTargetKind.CLEAR,
+                        obstacle.coord,
+                        obstacle.blueprint_id,
+                        obstacle.object_id,
+                        obstacle=obstacle.state,
+                    )
+                )
         producer_order = {ProducerKind.ANIMAL: 0, ProducerKind.CROP: 1, None: 2}
         immediate_order = {
             InteractionTargetKind.REMOVE: 0,

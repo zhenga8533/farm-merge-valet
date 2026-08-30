@@ -164,12 +164,12 @@ value is retained as a fallback when live reward metadata is unavailable.
 
 Obstacle clearing uses live energy, total and available workers, hit points,
 stage cost, and mobility rather than hardcoded cost tables. It prioritizes fixed
-before movable, in-progress before untouched, and fewer-stage obstacles before
-larger ones. A higher-priority obstacle without enough energy or free workers
-waits instead of spending resources on a lower-priority one.
-When a paid stage finishes, its live `lootable` output is claimed through the
-game's tile-interaction pipeline before that obstacle is considered again. Its
-exact remaining loot count drives the same merge-first, partial-claim workflow.
+before movable, in-progress before untouched, fewer-stage obstacles before
+larger ones, and then fewer remaining stages. Once selected, an obstacle stays
+focused through payment, its worker timer, loot collection, and subsequent
+stages. A focused obstacle without enough energy or free workers waits instead
+of spending resources on another one. Its exact remaining loot count drives the
+same merge-first, partial-claim workflow.
 
 Shop automation reads each active shop's fixed current recipe, live ingredient
 inventory, production timer, and rewards. It can start affordable orders and

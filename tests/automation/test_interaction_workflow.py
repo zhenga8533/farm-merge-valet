@@ -131,6 +131,8 @@ def bare_bot() -> Bot:
     bot._direct_interaction_ids = frozenset({"milk"})
     bot._reward_interaction_ids = frozenset()
     bot._shovelable_ids = frozenset()
+    bot._clearable_ids = frozenset()
+    bot._obstacle_focus = None
     bot._last_health = None
     bot._last_wait_reason = None
     bot._last_wait_log_at = 0.0
@@ -365,6 +367,113 @@ def test_unaffordable_obstacle_does_not_create_interaction(monkeypatch) -> None:
     assert bot._interaction_actions() == ([], [], [])
 
 
+def test_obstacle_focus_stays_through_wait_loot_and_next_stage(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._clearable_ids = frozenset({"rock_small", "rock_medium"})
+    bot._blueprint_policy_keys = {
+        "rock_small": "obstacles/rock_small",
+        "rock_medium": "obstacles/rock_medium",
+    }
+    bot._energy = 50
+    bot._workers = WorkerState(1, 1)
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {
+            "obstacles/rock_small": ItemPolicyOverride(interact=True),
+            "obstacles/rock_medium": ItemPolicyOverride(interact=True),
+        },
+    )
+    other = ObstacleState(5, 5, 5, False, required_workers=1)
+    bot._live_cells = {
+        (3, 4): LiveCellState(
+            True,
+            "rock_small",
+            91,
+            obstacle=ObstacleState(2, 3, 5, False, required_workers=1),
+        ),
+        (5, 6): LiveCellState(True, "rock_medium", 92, obstacle=other),
+    }
+
+    immediate, _, _ = bot._interaction_actions()
+    assert [(action.kind, action.coord) for action in immediate] == [
+        (InteractionTargetKind.CLEAR, (3, 4))
+    ]
+
+    paid_stage = ObstacleState(2, 3, None, False, clearing=True)
+    bot._live_cells[(3, 4)] = LiveCellState(
+        True,
+        "rock_small",
+        91,
+        behavior_names=frozenset({"mapSource", "resourceGatePaid"}),
+        obstacle=paid_stage,
+    )
+    assert bot._interaction_actions() == ([], [], [])
+    assert bot._obstacle_focus == ((3, 4), 91)
+
+    bot._live_cells[(3, 4)] = LiveCellState(
+        True,
+        "rock_small",
+        91,
+        behavior_names=frozenset({"mapSource", "resourceGatePaid", "lootable"}),
+        obstacle=paid_stage,
+    )
+    immediate, _, _ = bot._interaction_actions()
+    assert [(action.kind, action.coord) for action in immediate] == [
+        (InteractionTargetKind.OBSTACLE_LOOT, (3, 4))
+    ]
+
+    bot._live_cells[(3, 4)] = LiveCellState(
+        True,
+        "rock_small",
+        91,
+        obstacle=ObstacleState(1, 3, 10, False, required_workers=1),
+    )
+    immediate, _, _ = bot._interaction_actions()
+    assert [(action.kind, action.coord) for action in immediate] == [
+        (InteractionTargetKind.CLEAR, (3, 4))
+    ]
+
+    del bot._live_cells[(3, 4)]
+    immediate, _, _ = bot._interaction_actions()
+    assert [(action.kind, action.coord) for action in immediate] == [
+        (InteractionTargetKind.CLEAR, (5, 6))
+    ]
+    assert bot._obstacle_focus == ((5, 6), 92)
+
+
+def test_obstacle_focus_survives_temporary_missing_stage_state(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._clearable_ids = frozenset({"rock_small", "rock_medium"})
+    bot._blueprint_policy_keys = {
+        "rock_small": "obstacles/rock_small",
+        "rock_medium": "obstacles/rock_medium",
+    }
+    bot._energy = 50
+    bot._workers = WorkerState(1, 1)
+    bot._obstacle_focus = ((3, 4), 91)
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {
+            "obstacles/rock_small": ItemPolicyOverride(interact=True),
+            "obstacles/rock_medium": ItemPolicyOverride(interact=True),
+        },
+    )
+    bot._live_cells = {
+        (3, 4): LiveCellState(True, "rock_small", 91),
+        (5, 6): LiveCellState(
+            True,
+            "rock_medium",
+            92,
+            obstacle=ObstacleState(4, 5, 5, False, required_workers=1),
+        ),
+    }
+
+    assert bot._interaction_actions() == ([], [], [])
+    assert bot._obstacle_focus == ((3, 4), 91)
+
+
 def test_collectable_currency_tier_can_be_enabled_independently(monkeypatch) -> None:
     bot = bare_bot()
     bot._reward_interaction_ids = frozenset({"coin_1", "coin_2"})
@@ -470,9 +579,7 @@ def test_ready_producer_claims_partially_when_no_merge_can_make_target_space() -
 
     bot._step_interact_tiles(health(advancing=True), [], [], [interaction])
 
-    assert bot.runtime.interactions == [
-        ((4, 4), InteractionTargetKind.PRODUCER, "cow_4", 22)
-    ]
+    assert bot.runtime.interactions == [((4, 4), InteractionTargetKind.PRODUCER, "cow_4", 22)]
 
 
 def test_ready_producer_is_interacted_with_with_required_space(monkeypatch) -> None:
@@ -696,9 +803,7 @@ def test_pending_obstacle_loot_confirms_from_next_resource_gate(monkeypatch) -> 
     assert bot._interaction_workflow.pending is None
 
 
-def test_pending_producer_claim_accepts_new_output_as_partial_progress(
-    monkeypatch, caplog
-) -> None:
+def test_pending_producer_claim_accepts_new_output_as_partial_progress(monkeypatch, caplog) -> None:
     bot = bare_bot()
     initial = LiveCellState(
         True,
@@ -738,9 +843,7 @@ def test_pending_producer_claim_accepts_new_output_as_partial_progress(
     assert bot._interaction_workflow.pending is None
     assert bot._interaction_workflow.next_action_at == 0.0
     assert bot._interaction_workflow.output_capacity_for((3, 4), 91, 7) == 6
-    assert any(
-        record.fmv_event == "interaction.partially_confirmed" for record in caplog.records
-    )
+    assert any(record.fmv_event == "interaction.partially_confirmed" for record in caplog.records)
 
 
 def test_pending_obstacle_claim_accepts_partial_loot_output(monkeypatch) -> None:

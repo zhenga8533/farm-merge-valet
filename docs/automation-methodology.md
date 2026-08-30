@@ -79,16 +79,19 @@ source transition nor expected output is treated as a genuine no-op.
 Obstacle clearing reads the current energy balance, total and available worker
 counts, and each source's live hit points, stage count, current energy and
 worker cost, mobility, and paid/clearing state.
-Only the highest-priority ready obstacle is considered: fixed before movable,
-then already-started before untouched, then fewer total stages before more. If
-that obstacle lacks energy or available workers, the bot does not fall through
-and spend resources on a lower-priority obstacle; other work may continue while
-energy regenerates or workers become free. A paid stage is left alone until the
-game exposes its `lootable` output. That output is then claimed through the
-normal tile-interaction pipeline. Its exact loot list supplies the preferred
-space target and expected reward IDs. Partial output is confirmed and retried
-after merge work; after all output is claimed, the next resource gate can be
-planned.
+Only the highest-priority obstacle is selected: fixed before movable, then
+already-started before untouched, then fewer total stages, fewer remaining
+stages, and board coordinate. That obstacle remains focused through resource
+payment, its worker timer, loot collection, and every subsequent stage. It is
+released only when the object disappears, changes identity, or is no longer
+eligible for interaction. If it lacks energy or available workers, the bot does
+not fall through and spend resources on another obstacle; other work may
+continue while energy regenerates or workers become free. A paid stage is left
+alone until the game exposes its `lootable` output. That output is then claimed
+through the normal tile-interaction pipeline. Its exact loot list supplies the
+preferred space target and expected reward IDs. Partial output is confirmed and
+retried after merge work; after all output is claimed, the same obstacle's next
+resource gate can be planned.
 
 Clearing calls the game's resource-gate payment handler after revalidating the
 scene, coordinate, object identity, obstacle behaviors, stage cost, live energy,
