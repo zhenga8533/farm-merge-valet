@@ -305,6 +305,8 @@ def test_ready_obstacle_loot_is_planned_without_energy_or_workers(monkeypatch) -
         {"obstacles/rock_medium": ItemPolicyOverride(interact=True)},
     )
     obstacle = ObstacleState(4, 5, None, False, clearing=True)
+    for x in range(4):
+        bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
     bot._live_cells = {
         (3, 4): LiveCellState(
             True,
@@ -312,6 +314,8 @@ def test_ready_obstacle_loot_is_planned_without_energy_or_workers(monkeypatch) -
             91,
             behavior_names=frozenset({"mapSource", "resourceGatePaid", "lootable"}),
             obstacle=obstacle,
+            claim_output_capacity=4,
+            claim_output_ids=frozenset({"stone_1"}),
         )
     }
 
@@ -324,6 +328,8 @@ def test_ready_obstacle_loot_is_planned_without_energy_or_workers(monkeypatch) -
             "rock_medium",
             91,
             obstacle=obstacle,
+            output_capacity=4,
+            output_ids=frozenset({"stone_1"}),
         )
     ]
     assert depleted == []
@@ -401,6 +407,8 @@ def test_ingredient_and_producer_interaction_default_on() -> None:
             4,
             producer_kind=ProducerKind.ANIMAL,
             producer_state=ProducerState.READY,
+            claim_output_capacity=7,
+            claim_output_ids=frozenset({"milk", "upgrade_card_1"}),
         ),
     }
 
@@ -409,9 +417,11 @@ def test_ingredient_and_producer_interaction_default_on() -> None:
     assert [action.blueprint_id for action in immediate] == ["milk"]
     assert depleted == []
     assert [action.blueprint_id for action in ready] == ["cow_4"]
+    assert ready[0].output_capacity == 7
+    assert ready[0].output_ids == frozenset({"milk", "upgrade_card_1"})
 
 
-def test_ready_producer_merges_and_defers_crates_below_space_threshold(monkeypatch) -> None:
+def test_ready_producer_merges_toward_dynamic_output_capacity() -> None:
     bot = bare_bot()
     action = InteractionAction(
         InteractionTargetKind.PRODUCER,
@@ -419,19 +429,50 @@ def test_ready_producer_merges_and_defers_crates_below_space_threshold(monkeypat
         "cow_4",
         22,
         ProducerKind.ANIMAL,
+        output_capacity=7,
+        output_ids=frozenset({"milk", "upgrade_card_1"}),
     )
     for x in range(3):
         bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
     calls = []
+    bot._merge_actions_for_policy = lambda: [object()]
     bot._step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
-    monkeypatch.setattr(bot.config, "producer_interact_min_empty_cells", 4)
 
     bot._step_interact_tiles(health(advancing=True), [], [], [action])
 
     assert bot.phase is Phase.MERGE
-    assert calls == [4]
+    assert calls == [7]
     assert bot.runtime.interactions == []
     assert bot.runtime.spawn_limits == []
+
+
+def test_ready_producer_claims_partially_when_no_merge_can_make_target_space() -> None:
+    bot = bare_bot()
+    interaction = InteractionAction(
+        InteractionTargetKind.PRODUCER,
+        (4, 4),
+        "cow_4",
+        22,
+        ProducerKind.ANIMAL,
+        output_capacity=7,
+        output_ids=frozenset({"milk"}),
+    )
+    bot._live_cells[interaction.coord] = LiveCellState(
+        True,
+        "cow_4",
+        22,
+        4,
+        producer_kind=ProducerKind.ANIMAL,
+        producer_state=ProducerState.READY,
+    )
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
+
+    bot._step_interact_tiles(health(advancing=True), [], [], [interaction])
+
+    assert bot.runtime.interactions == [
+        ((4, 4), InteractionTargetKind.PRODUCER, "cow_4", 22)
+    ]
 
 
 def test_ready_producer_is_interacted_with_with_required_space(monkeypatch) -> None:
@@ -653,6 +694,118 @@ def test_pending_obstacle_loot_confirms_from_next_resource_gate(monkeypatch) -> 
 
     assert bot._verify_pending_interaction(health(advancing=True))
     assert bot._interaction_workflow.pending is None
+
+
+def test_pending_producer_claim_accepts_new_output_as_partial_progress(
+    monkeypatch, caplog
+) -> None:
+    bot = bare_bot()
+    initial = LiveCellState(
+        True,
+        "cow_4",
+        91,
+        producer_kind=ProducerKind.ANIMAL,
+        producer_state=ProducerState.READY,
+    )
+    interaction = InteractionAction(
+        InteractionTargetKind.PRODUCER,
+        (3, 4),
+        "cow_4",
+        91,
+        ProducerKind.ANIMAL,
+        output_capacity=7,
+        output_ids=frozenset({"milk", "upgrade_card_1"}),
+    )
+    bot._interaction_workflow.pending = PendingInteraction(
+        interaction,
+        initial,
+        7,
+        1.0,
+        initial,
+        1.0,
+        frozenset({10}),
+    )
+    bot._live_cells = {
+        interaction.coord: initial,
+        (5, 5): LiveCellState(True, "milk", 10),
+        (6, 5): LiveCellState(True, "milk", 11),
+    }
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
+
+    with caplog.at_level(logging.DEBUG):
+        assert bot._verify_pending_interaction(health(advancing=True))
+
+    assert bot._interaction_workflow.pending is None
+    assert bot._interaction_workflow.next_action_at == 0.0
+    assert bot._interaction_workflow.output_capacity_for((3, 4), 91, 7) == 6
+    assert any(
+        record.fmv_event == "interaction.partially_confirmed" for record in caplog.records
+    )
+
+
+def test_pending_obstacle_claim_accepts_partial_loot_output(monkeypatch) -> None:
+    bot = bare_bot()
+    obstacle = ObstacleState(4, 5, None, False, clearing=True)
+    initial = LiveCellState(
+        True,
+        "rock_medium",
+        91,
+        behavior_names=frozenset({"mapSource", "resourceGatePaid", "lootable"}),
+        obstacle=obstacle,
+    )
+    interaction = InteractionAction(
+        InteractionTargetKind.OBSTACLE_LOOT,
+        (3, 4),
+        "rock_medium",
+        91,
+        obstacle=obstacle,
+        output_capacity=4,
+        output_ids=frozenset({"stone_1"}),
+    )
+    bot._interaction_workflow.pending = PendingInteraction(
+        interaction, initial, 7, 1.0, initial, 1.0
+    )
+    bot._live_cells = {
+        interaction.coord: initial,
+        (5, 5): LiveCellState(True, "stone_1", 100),
+        (6, 5): LiveCellState(True, "stone_1", 101),
+    }
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
+
+    assert bot._verify_pending_interaction(health(advancing=True))
+
+    assert bot._interaction_workflow.pending is None
+    assert bot._interaction_workflow.output_capacity_for((3, 4), 91, 4) == 2
+
+
+def test_pending_producer_without_output_or_transition_remains_a_noop(monkeypatch) -> None:
+    bot = bare_bot()
+    initial = LiveCellState(
+        True,
+        "cow_4",
+        91,
+        producer_kind=ProducerKind.ANIMAL,
+        producer_state=ProducerState.READY,
+    )
+    interaction = InteractionAction(
+        InteractionTargetKind.PRODUCER,
+        (3, 4),
+        "cow_4",
+        91,
+        ProducerKind.ANIMAL,
+        output_capacity=7,
+        output_ids=frozenset({"milk"}),
+    )
+    bot._interaction_workflow.pending = PendingInteraction(
+        interaction, initial, 7, 1.0, initial, 1.0
+    )
+    bot._live_cells = {interaction.coord: initial}
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 5.0)
+
+    assert bot._verify_pending_interaction(health(advancing=True))
+
+    assert bot._interaction_workflow.pending is None
+    assert bot._interaction_workflow.next_action_at == 15.0
 
 
 def test_interaction_noop_cools_down_before_retry(monkeypatch) -> None:

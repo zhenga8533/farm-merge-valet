@@ -159,12 +159,35 @@ _READ_EXPRESSION = """
 (() => {
   const cells = window.__fmvBoardCells;
   if (!cells) return null;
+  const services = window.__fmvGameplayServices;
+  const rootServices = services?.ordersService?._recipes?._services;
+  const blueprints = rootServices?.blueprintCollection?._blueprints;
+  const rewardCapacity = (value) => {
+    if (!Array.isArray(value) || value.length === 0) return 0;
+    if (value.every((entry) => entry && typeof entry === 'object' &&
+        (Number.isFinite(entry.chance) || Array.isArray(entry.items)))) {
+      return value.length;
+    }
+    return Math.max(0, ...value.map(rewardCapacity));
+  };
+  const rewardIDs = (value, output = new Set()) => {
+    if (Array.isArray(value)) {
+      for (const entry of value) rewardIDs(entry, output);
+    } else if (typeof value === 'string') {
+      output.add(value);
+    } else if (value && typeof value === 'object') {
+      if (typeof value.key === 'string') output.add(value.key);
+      for (const entry of Object.values(value)) rewardIDs(entry, output);
+    }
+    return output;
+  };
   const out = [];
   for (const cell of cells.values()) {
     const content = cell._content;
     const behaviors = content?._behaviors instanceof Map
       ? Array.from(content._behaviors.keys()) : [];
     const harvestable = content?.getBehavior?.('harvestable');
+    const lootable = content?.getBehavior?.('lootable');
     const upgradeCard = content?.getBehavior?.('upgradeCard');
     const mapSource = content?.getBehavior?.('mapSource');
     const hitpoints = content?.getBehavior?.('hitpoints');
@@ -177,6 +200,14 @@ _READ_EXPRESSION = """
     const harvestableType = harvestable?._data?.harvestableType;
     const producerKind = harvestableType === 'animal' || harvestableType === 'crop'
       ? harvestableType : null;
+    const harvestReward = producerKind && blueprints instanceof Map
+      ? blueprints.get(content?._blueprintID)?.components?.harvestable?.harvestReward
+      : null;
+    const obstacleLoot = Array.isArray(lootable?.loot) ? lootable.loot : null;
+    const claimReward = obstacleLoot || harvestReward;
+    const claimOutputCapacity = obstacleLoot
+      ? obstacleLoot.length
+      : producerKind ? rewardCapacity(harvestReward) : null;
     let producerState = null;
     if (producerKind) {
       if (content.hasBehavior?.('depleted')) producerState = 'depleted';
@@ -199,6 +230,8 @@ _READ_EXPRESSION = """
       itemVariant: typeof upgradeCard?._data?.targetObjectTreeIngredient === 'string'
         ? upgradeCard._data.targetObjectTreeIngredient : null,
       behaviorNames: behaviors.filter((name) => typeof name === 'string'),
+      claimOutputCapacity,
+      claimOutputIDs: Array.from(rewardIDs(claimReward)),
       obstacle: mapSource && hitpoints && Number.isInteger(hitpoints._data?.current) &&
         Number.isInteger(hitpoints._data?.max) &&
         (Number.isInteger(energyCost) || content.hasBehavior?.('resourceGatePaid'))
@@ -338,6 +371,14 @@ def read_board_state(
         except ValueError:
             producer_state = None
         behavior_names = entry.get("behaviorNames")
+        claim_output_capacity = entry.get("claimOutputCapacity")
+        if (
+            not isinstance(claim_output_capacity, int)
+            or isinstance(claim_output_capacity, bool)
+            or claim_output_capacity <= 0
+        ):
+            claim_output_capacity = None
+        claim_output_ids = entry.get("claimOutputIDs")
         item_variant = entry.get("itemVariant")
         obstacle_value = entry.get("obstacle")
         obstacle = None
@@ -388,5 +429,9 @@ def read_board_state(
                 value for value in behavior_names or [] if isinstance(value, str)
             ),
             obstacle=obstacle,
+            claim_output_capacity=claim_output_capacity,
+            claim_output_ids=frozenset(
+                value for value in claim_output_ids or [] if isinstance(value, str)
+            ),
         )
     return states

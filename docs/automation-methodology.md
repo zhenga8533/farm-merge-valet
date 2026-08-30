@@ -58,19 +58,23 @@ The interaction phase handles direct board tiles first, then affordable
 obstacle stages, retires depleted producers, and finally harvests ready
 producers. Depleted animals convert in place;
 depleted crops require one open cell for their two tier-1 replacements. A ready
-producer requires the configured minimum open-cell count (four by default).
-If the requirement is not met, merge work preempts interaction and supply
-crates. With no productive merge available, the bot waits and keeps observing.
+producer's preferred open-cell target is derived from the maximum output count
+in its live reward metadata. The configured open-cell count (four by default)
+is used only when that metadata is unavailable. If the target is not met, merge
+work preempts interaction and supply crates. When no productive merge remains,
+the bot claims into any available space rather than waiting indefinitely.
 
 Interaction uses the active tile handler's internal object-click pipeline.
 The adapter validates the scene, coordinate, object identity, blueprint, and
 expected behaviors immediately before submission. A direct interaction is
-confirmed when the source object leaves; harvesting is confirmed by a producer
-lifecycle transition; retirement is confirmed when the tier-4 producer is
-replaced. A pending interaction follows the same heartbeat and no-duplicate
-rules as an item drop. The game may handle several matching objects from one accepted
-click; the next authoritative read discards stale candidates and replans from
-the resulting board.
+confirmed when the source object leaves; harvesting is complete after a
+producer lifecycle transition and partially complete when a new expected reward
+object appears while the producer remains ready. Partial progress reduces the
+remembered output count, allows merge work to reclaim space, and schedules the
+same source again without a warning or retry cooldown. Retirement is confirmed
+when the tier-4 producer is replaced. A pending interaction follows the same
+heartbeat and no-duplicate rules as an item drop. Only a click with neither a
+source transition nor expected output is treated as a genuine no-op.
 
 Obstacle clearing reads the current energy balance, total and available worker
 counts, and each source's live hit points, stage count, current energy and
@@ -81,7 +85,9 @@ that obstacle lacks energy or available workers, the bot does not fall through
 and spend resources on a lower-priority obstacle; other work may continue while
 energy regenerates or workers become free. A paid stage is left alone until the
 game exposes its `lootable` output. That output is then claimed through the
-normal tile-interaction pipeline, after which the next resource gate can be
+normal tile-interaction pipeline. Its exact loot list supplies the preferred
+space target and expected reward IDs. Partial output is confirmed and retried
+after merge work; after all output is claimed, the next resource gate can be
 planned.
 
 Clearing calls the game's resource-gate payment handler after revalidating the

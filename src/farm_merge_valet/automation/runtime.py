@@ -90,6 +90,8 @@ class LiveCellState:
     item_variant: str | None = None
     behavior_names: frozenset[str] = frozenset()
     obstacle: ObstacleState | None = None
+    claim_output_capacity: int | None = None
+    claim_output_ids: frozenset[str] = frozenset()
 
 
 @runtime_checkable

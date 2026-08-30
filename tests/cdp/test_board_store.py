@@ -78,6 +78,8 @@ def test_read_board_state_preserves_collectable_semantics(monkeypatch) -> None:
                 "producerKind": "animal",
                 "producerState": "cooling",
                 "behaviorNames": ["animal", "harvestable", "cooldownPreview"],
+                "claimOutputCapacity": 7,
+                "claimOutputIDs": ["milk", "upgrade_card_1"],
             },
         ],
     )
@@ -92,6 +94,8 @@ def test_read_board_state_preserves_collectable_semantics(monkeypatch) -> None:
     assert state[(6, 7)].producer_kind is ProducerKind.ANIMAL
     assert state[(6, 7)].tier == 4
     assert state[(6, 7)].producer_state is ProducerState.COOLING
+    assert state[(6, 7)].claim_output_capacity == 7
+    assert state[(6, 7)].claim_output_ids == frozenset({"milk", "upgrade_card_1"})
     assert "cooldownPreview" in state[(6, 7)].behavior_names
 
 
@@ -112,6 +116,8 @@ def test_read_board_state_preserves_obstacle_progress_and_cost(monkeypatch) -> N
                 "hasContent": True,
                 "blueprintID": "rock_medium",
                 "objectID": 32,
+                "claimOutputCapacity": 4,
+                "claimOutputIDs": ["stone_1"],
                 "obstacle": {
                     "stagesRemaining": 4,
                     "totalStages": 5,
@@ -128,3 +134,13 @@ def test_read_board_state_preserves_obstacle_progress_and_cost(monkeypatch) -> N
 
     assert state is not None
     assert state[(6, 7)].obstacle == ObstacleState(4, 5, 10, False, True, 1)
+    assert state[(6, 7)].claim_output_capacity == 4
+    assert state[(6, 7)].claim_output_ids == frozenset({"stone_1"})
+
+
+def test_board_reader_derives_claim_capacity_from_live_rewards() -> None:
+    from farm_merge_valet.cdp.board_store import _READ_EXPRESSION
+
+    assert "rewardCapacity(harvestReward)" in _READ_EXPRESSION
+    assert "obstacleLoot.length" in _READ_EXPRESSION
+    assert "claimOutputIDs" in _READ_EXPRESSION

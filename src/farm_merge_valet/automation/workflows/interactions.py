@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from farm_merge_valet.automation.runtime import ActionStatus, LiveCellState, RuntimeHealth
@@ -35,6 +35,8 @@ class InteractionAction:
     object_id: int | None
     producer_kind: ProducerKind | None = None
     obstacle: ObstacleState | None = None
+    output_capacity: int | None = None
+    output_ids: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -45,6 +47,7 @@ class PendingInteraction:
     submitted_at: float
     last_state: LiveCellState | None
     last_change_at: float
+    initial_output_object_ids: frozenset[int] = frozenset()
     scene_change_logged: bool = False
 
 
@@ -52,6 +55,26 @@ class PendingInteraction:
 class InteractionWorkflow:
     pending: PendingInteraction | None = None
     next_action_at: float = 0.0
+    remaining_output_capacity: dict[tuple[GridCoord, int | None], int] = field(
+        default_factory=dict
+    )
+
+    @staticmethod
+    def _output_key(action: InteractionAction) -> tuple[GridCoord, int | None]:
+        return action.coord, action.object_id
+
+    def output_capacity_for(
+        self,
+        coord: GridCoord,
+        object_id: int | None,
+        observed_capacity: int | None,
+    ) -> int | None:
+        remaining = self.remaining_output_capacity.get((coord, object_id))
+        if remaining is None:
+            return observed_capacity
+        if observed_capacity is None:
+            return remaining
+        return min(remaining, observed_capacity)
 
     def _interaction_succeeded(self, bot: Bot, pending: PendingInteraction) -> bool:
         current = bot._live_cells.get(pending.action.coord)
@@ -61,10 +84,14 @@ class InteractionWorkflow:
             InteractionTargetKind.REMOVE,
         }:
             return current is None or current.object_id != pending.action.object_id
-        if pending.action.kind in {
-            InteractionTargetKind.CLEAR,
-            InteractionTargetKind.OBSTACLE_LOOT,
-        }:
+        if pending.action.kind is InteractionTargetKind.OBSTACLE_LOOT:
+            return (
+                current is None
+                or current.object_id != pending.action.object_id
+                or "lootable" not in current.behavior_names
+                or current.obstacle != pending.initial_state.obstacle
+            )
+        if pending.action.kind is InteractionTargetKind.CLEAR:
             return (
                 current is None
                 or current.object_id != pending.action.object_id
@@ -81,6 +108,21 @@ class InteractionWorkflow:
             or current.object_id != pending.action.object_id
             or current.producer_state is not ProducerState.DEPLETED
         )
+
+    @staticmethod
+    def _output_progress_count(bot: Bot, pending: PendingInteraction) -> int:
+        if pending.action.kind not in {
+            InteractionTargetKind.PRODUCER,
+            InteractionTargetKind.OBSTACLE_LOOT,
+        }:
+            return 0
+        current_output_ids = frozenset(
+            state.object_id
+            for state in bot._live_cells.values()
+            if state.object_id is not None
+            and state.blueprint_id in pending.action.output_ids
+        )
+        return len(current_output_ids - pending.initial_output_object_ids)
 
     def _verify_pending_interaction(self, bot: Bot, health: RuntimeHealth) -> bool:
         pending = self.pending
@@ -109,18 +151,37 @@ class InteractionWorkflow:
                 **bot._interaction_event_context(pending.action),
             )
             pending.scene_change_logged = True
-        if bot._interaction_succeeded(pending):
+        completed = bot._interaction_succeeded(pending)
+        output_progress_count = self._output_progress_count(bot, pending)
+        partially_completed = not completed and output_progress_count > 0
+        if completed or partially_completed:
+            output_key = self._output_key(pending.action)
+            if completed:
+                self.remaining_output_capacity.pop(output_key, None)
+            else:
+                attempted_capacity = (
+                    pending.action.output_capacity
+                    or bot.config.producer_interact_min_empty_cells
+                )
+                self.remaining_output_capacity[output_key] = max(
+                    1, attempted_capacity - output_progress_count
+                )
             self.pending = None
             bot._last_wait_reason = None
             bot._last_idle_reason = None
             log_event(
                 logger,
                 logging.DEBUG,
-                "interaction.confirmed",
-                "%s interaction confirmed at %s.",
+                "interaction.partially_confirmed"
+                if partially_completed
+                else "interaction.confirmed",
+                "%s interaction %s at %s.",
                 pending.action.kind.value.replace("-", " ").title(),
+                "made partial progress" if partially_completed else "confirmed",
                 pending.action.coord,
                 elapsed_seconds=age,
+                output_progress_count=output_progress_count,
+                remaining_output_capacity=self.remaining_output_capacity.get(output_key),
                 **bot._interaction_event_context(pending.action),
             )
             return True
@@ -184,6 +245,11 @@ class InteractionWorkflow:
         if result.status is ActionStatus.SUBMITTED:
             submitted_at = bot._now()
             initial_state = bot._live_cells[action.coord]
+            initial_output_object_ids = frozenset(
+                state.object_id
+                for state in bot._live_cells.values()
+                if state.object_id is not None and state.blueprint_id in action.output_ids
+            )
             self.pending = PendingInteraction(
                 action,
                 initial_state,
@@ -191,6 +257,7 @@ class InteractionWorkflow:
                 submitted_at,
                 initial_state,
                 submitted_at,
+                initial_output_object_ids,
             )
             bot._last_wait_reason = None
             log_event(
@@ -235,6 +302,50 @@ class InteractionWorkflow:
             )
         return False
 
+    def _step_output_claim(
+        self,
+        bot: Bot,
+        health: RuntimeHealth,
+        action: InteractionAction,
+    ) -> None:
+        empty_count = len(bot.board.find_empty())
+        desired_empty_cells = (
+            action.output_capacity or bot.config.producer_interact_min_empty_cells
+        )
+        if empty_count >= desired_empty_cells:
+            bot._submit_interaction(action, health)
+            return
+        if bot._merge_actions_for_policy():
+            bot._set_phase(bot.phase.__class__.MERGE)
+            if health.item_drop_available:
+                bot._step_merge(health, True, required_empty_cells=desired_empty_cells)
+            else:
+                bot._report_wait(
+                    "an output is ready but item merging is unavailable",
+                    empty_cells=empty_count,
+                    desired_empty_cells=desired_empty_cells,
+                )
+            return
+        if empty_count > 0:
+            log_event(
+                logger,
+                logging.DEBUG,
+                "interaction.partial_space_claim",
+                "Claiming %s at %s with %d of %d desired open cells; no merge can "
+                "currently create more space.",
+                action.blueprint_id,
+                action.coord,
+                empty_count,
+                desired_empty_cells,
+                empty_cells=empty_count,
+                desired_empty_cells=desired_empty_cells,
+                **bot._interaction_event_context(action),
+            )
+            bot._submit_interaction(action, health)
+            return
+        bot._set_phase(bot.phase.__class__.MERGE)
+        bot._step_merge(health, True, required_empty_cells=1)
+
     def _step_interact_tiles(
         self,
         bot: Bot,
@@ -246,7 +357,11 @@ class InteractionWorkflow:
         if bot._now() < self.next_action_at:
             return
         if immediate:
-            bot._submit_interaction(immediate[0], health)
+            action = immediate[0]
+            if action.kind is InteractionTargetKind.OBSTACLE_LOOT:
+                self._step_output_claim(bot, health, action)
+            else:
+                bot._submit_interaction(action, health)
             return
         empty_count = len(bot.board.find_empty())
         for action in depleted:
@@ -261,19 +376,7 @@ class InteractionWorkflow:
             else:
                 bot._report_wait("one open cell is required to retire a depleted crop")
             return
-        if ready and empty_count >= bot.config.producer_interact_min_empty_cells:
-            bot._submit_interaction(ready[0], health)
-            return
         if ready:
-            required = bot.config.producer_interact_min_empty_cells
-            bot._set_phase(bot.phase.__class__.MERGE)
-            if health.item_drop_available:
-                bot._step_merge(health, True, required_empty_cells=required)
-            else:
-                bot._report_wait(
-                    f"a producer is ready but {required} open cells are required",
-                    empty_cells=empty_count,
-                    required_empty_cells=required,
-                )
+            self._step_output_claim(bot, health, ready[0])
             return
         bot._set_phase(bot.phase.__class__.CLAIM_CRATES)

@@ -281,8 +281,8 @@ class MergeWorkflow:
             required_empty_cells is not None and len(bot.board.find_empty()) < required_empty_cells
         ):
             bot._report_wait(
-                f"a producer interaction needs {required_empty_cells} open cells and no merge "
-                "can currently create more space",
+                f"an output claim needs {required_empty_cells} open cells and no merge can "
+                "currently create more space",
                 empty_cells=len(bot.board.find_empty()),
                 required_empty_cells=required_empty_cells,
             )

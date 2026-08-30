@@ -512,6 +512,11 @@ class Bot:
                 workers_available=workers.available if workers else None,
                 workers_total=workers.total if workers else None,
             )
+        if action.output_capacity is not None:
+            context.update(
+                output_capacity=action.output_capacity,
+                output_ids=sorted(action.output_ids),
+            )
         return context
 
     def _is_recognized_tier_four_producer(self, state: LiveCellState) -> bool:
@@ -569,6 +574,12 @@ class Bot:
                             state.blueprint_id,
                             state.object_id,
                             obstacle=state.obstacle,
+                            output_capacity=self._interaction_workflow.output_capacity_for(
+                                coord,
+                                state.object_id,
+                                state.claim_output_capacity,
+                            ),
+                            output_ids=state.claim_output_ids,
                         )
                     )
                     continue
@@ -621,6 +632,12 @@ class Bot:
                         state.blueprint_id,
                         state.object_id,
                         state.producer_kind,
+                        output_capacity=self._interaction_workflow.output_capacity_for(
+                            coord,
+                            state.object_id,
+                            state.claim_output_capacity,
+                        ),
+                        output_ids=state.claim_output_ids,
                     )
                 )
         obstacle = plan_obstacle_clear(
