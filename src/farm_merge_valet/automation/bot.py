@@ -563,6 +563,23 @@ class Bot:
         self._obstacle_focus = selected.coord, selected.object_id
         return selected
 
+    def _obstacle_to_clear(self, candidates: list[ObstacleCandidate]) -> ObstacleCandidate | None:
+        focused = self._focused_obstacle(candidates)
+        if focused is None:
+            return None
+
+        energy = getattr(self, "_energy", None)
+        workers = getattr(self, "_workers", None)
+        if not focused.state.clearing:
+            return plan_obstacle_clear([focused], energy, workers)
+        if workers is None or workers.available == 0:
+            return None
+
+        selected = plan_obstacle_clear(candidates, energy, workers)
+        if selected is not None:
+            self._obstacle_focus = selected.coord, selected.object_id
+        return selected
+
     def _interaction_actions(
         self,
     ) -> tuple[list[InteractionAction], list[InteractionAction], list[InteractionAction]]:
@@ -652,42 +669,39 @@ class Bot:
                         output_ids=state.claim_output_ids,
                     )
                 )
-        focused_obstacle = self._focused_obstacle(obstacles)
-        if (
-            focused_obstacle is not None
-            and focused_obstacle.state.clearing
-            and "lootable" in self._live_cells[focused_obstacle.coord].behavior_names
-        ):
-            focused_state = self._live_cells[focused_obstacle.coord]
+        lootable_obstacles = [
+            obstacle
+            for obstacle in obstacles
+            if obstacle.state.clearing
+            and "lootable" in self._live_cells[obstacle.coord].behavior_names
+        ]
+        for obstacle in sorted(lootable_obstacles, key=obstacle_priority):
+            state = self._live_cells[obstacle.coord]
             immediate.append(
                 InteractionAction(
                     InteractionTargetKind.OBSTACLE_LOOT,
-                    focused_obstacle.coord,
-                    focused_obstacle.blueprint_id,
-                    focused_obstacle.object_id,
-                    obstacle=focused_obstacle.state,
+                    obstacle.coord,
+                    obstacle.blueprint_id,
+                    obstacle.object_id,
+                    obstacle=obstacle.state,
                     output_capacity=self._interaction_workflow.output_capacity_for(
-                        focused_obstacle.coord,
-                        focused_obstacle.object_id,
-                        focused_state.claim_output_capacity,
+                        obstacle.coord,
+                        obstacle.object_id,
+                        state.claim_output_capacity,
                     ),
-                    output_ids=focused_state.claim_output_ids,
+                    output_ids=state.claim_output_ids,
                 )
             )
-        elif focused_obstacle is not None:
-            obstacle = plan_obstacle_clear(
-                [focused_obstacle],
-                getattr(self, "_energy", None),
-                getattr(self, "_workers", None),
-            )
-            if obstacle is not None:
+        if not lootable_obstacles:
+            clear_candidate = self._obstacle_to_clear(obstacles)
+            if clear_candidate is not None:
                 immediate.append(
                     InteractionAction(
                         InteractionTargetKind.CLEAR,
-                        obstacle.coord,
-                        obstacle.blueprint_id,
-                        obstacle.object_id,
-                        obstacle=obstacle.state,
+                        clear_candidate.coord,
+                        clear_candidate.blueprint_id,
+                        clear_candidate.object_id,
+                        obstacle=clear_candidate.state,
                     )
                 )
         producer_order = {ProducerKind.ANIMAL: 0, ProducerKind.CROP: 1, None: 2}

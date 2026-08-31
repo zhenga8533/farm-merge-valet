@@ -401,6 +401,7 @@ def test_obstacle_focus_stays_through_wait_loot_and_next_stage(monkeypatch) -> N
     ]
 
     paid_stage = ObstacleState(2, 3, None, False, clearing=True)
+    bot._workers = WorkerState(1, 0)
     bot._live_cells[(3, 4)] = LiveCellState(
         True,
         "rock_small",
@@ -423,6 +424,7 @@ def test_obstacle_focus_stays_through_wait_loot_and_next_stage(monkeypatch) -> N
         (InteractionTargetKind.OBSTACLE_LOOT, (3, 4))
     ]
 
+    bot._workers = WorkerState(1, 1)
     bot._live_cells[(3, 4)] = LiveCellState(
         True,
         "rock_small",
@@ -440,6 +442,90 @@ def test_obstacle_focus_stays_through_wait_loot_and_next_stage(monkeypatch) -> N
         (InteractionTargetKind.CLEAR, (5, 6))
     ]
     assert bot._obstacle_focus == ((5, 6), 92)
+
+
+def test_paid_obstacle_does_not_block_an_available_worker(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._clearable_ids = frozenset({"rock_small", "rock_medium"})
+    bot._blueprint_policy_keys = {
+        "rock_small": "obstacles/rock_small",
+        "rock_medium": "obstacles/rock_medium",
+    }
+    bot._energy = 50
+    bot._workers = WorkerState(1, 1)
+    bot._obstacle_focus = ((3, 4), 91)
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {
+            "obstacles/rock_small": ItemPolicyOverride(interact=True),
+            "obstacles/rock_medium": ItemPolicyOverride(interact=True),
+        },
+    )
+    paid = ObstacleState(1, 3, 15, False, clearing=True, required_workers=1)
+    ready = ObstacleState(4, 5, 10, False, required_workers=1)
+    bot._live_cells = {
+        (3, 4): LiveCellState(
+            True,
+            "rock_small",
+            91,
+            behavior_names=frozenset({"mapSource", "resourceGatePaid"}),
+            obstacle=paid,
+        ),
+        (5, 6): LiveCellState(True, "rock_medium", 92, obstacle=ready),
+    }
+
+    immediate, _, _ = bot._interaction_actions()
+
+    assert [(action.kind, action.coord) for action in immediate] == [
+        (InteractionTargetKind.CLEAR, (5, 6))
+    ]
+    assert bot._obstacle_focus == ((5, 6), 92)
+
+
+def test_all_lootable_obstacles_are_planned_before_another_clear(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._clearable_ids = frozenset({"rock_small", "rock_medium"})
+    bot._blueprint_policy_keys = {
+        "rock_small": "obstacles/rock_small",
+        "rock_medium": "obstacles/rock_medium",
+    }
+    bot._energy = 50
+    bot._workers = WorkerState(2, 1)
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {
+            "obstacles/rock_small": ItemPolicyOverride(interact=True),
+            "obstacles/rock_medium": ItemPolicyOverride(interact=True),
+        },
+    )
+    finished = ObstacleState(1, 3, None, False, clearing=True, required_workers=1)
+    ready = ObstacleState(5, 5, 5, False, required_workers=1)
+    bot._live_cells = {
+        (3, 4): LiveCellState(
+            True,
+            "rock_small",
+            91,
+            behavior_names=frozenset({"mapSource", "resourceGatePaid", "lootable"}),
+            obstacle=finished,
+        ),
+        (4, 4): LiveCellState(
+            True,
+            "rock_small",
+            93,
+            behavior_names=frozenset({"mapSource", "resourceGatePaid", "lootable"}),
+            obstacle=finished,
+        ),
+        (5, 6): LiveCellState(True, "rock_medium", 92, obstacle=ready),
+    }
+
+    immediate, _, _ = bot._interaction_actions()
+
+    assert [(action.kind, action.coord) for action in immediate] == [
+        (InteractionTargetKind.OBSTACLE_LOOT, (3, 4)),
+        (InteractionTargetKind.OBSTACLE_LOOT, (4, 4)),
+    ]
 
 
 def test_obstacle_focus_survives_temporary_missing_stage_state(monkeypatch) -> None:
