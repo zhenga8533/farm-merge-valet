@@ -8,8 +8,9 @@ without moving the mouse or typing into the game.
 
 The current loop can interact with enabled ground items, harvest and retire enabled
 tier-4 producers, fulfill shop orders, claim supply crates, and plan
-merge-3/merge-5 actions including swaps. Obstacle clearing and visits are not
-implemented yet.
+merge-3/merge-5 actions including swaps. It also clears enabled obstacles using
+live energy and worker availability, and claims their staged output. Farm visits
+are not implemented yet.
 
 ## Setup
 
@@ -221,7 +222,9 @@ timings, cached discovery, and planner phase transitions are `DEBUG` details.
 `WARNING` identifies recoverable failures; `ERROR` identifies a condition that
 pauses or prevents safe operation. While idle, the bot uses the configured
 polling interval but suppresses repeated logs until the state changes or
-the idle log's longer reminder interval elapses.
+the idle log's longer reminder interval elapses. If the focused obstacle is
+waiting for energy or workers, the idle message reports that constraint instead
+of describing the state only in terms of crates and merge actions.
 
 All long-running operational records use one Python logging pipeline. The
 console, dashboard, compact overlay, and webhook are independent sinks attached

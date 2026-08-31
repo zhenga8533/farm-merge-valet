@@ -202,6 +202,9 @@ user controls, crate-batch results, and transitions into a genuinely idle state
 use `INFO`; recoverable failures use `WARNING`; unsafe terminal conditions use
 `ERROR`. When no interaction, crate, or item action can be planned, the loop uses the
 configured idle delay before checking authoritative state again.
+When the highest-priority focused obstacle cannot start, the idle diagnostic
+reports its missing energy or available-worker requirement rather than implying
+that the absence of crates and merge actions is the only reason for waiting.
 
 Operational records are emitted once with readable text, a stable `fmv_event`
 identifier, and structured `fmv_context`. The console and GUI subscribe as

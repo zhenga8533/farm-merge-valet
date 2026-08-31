@@ -110,8 +110,8 @@ Facebook/TikTok community posts, and direct in-app observation (marked
 - After the final harvest, animals retire into coins. Crops retire into two
   tier-1 items of the same crop, requiring one additional open cell.
 - The current live runtime reports a 3600-second regeneration duration. Yield
-  can vary and may be affected by upgrade cards, so automation should preserve
-  several open cells rather than assuming one fixed output count.
+  can vary and may be affected by upgrade cards, so collecting the full output
+  in one interaction can require several open cells.
 
 ## Train Tickets & Visiting
 
