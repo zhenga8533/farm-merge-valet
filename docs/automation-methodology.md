@@ -86,9 +86,11 @@ already-started before untouched, then fewer total stages, fewer remaining
 stages, and board coordinate. All paid stages exposing `lootable` output are
 claimed through the normal tile-interaction pipeline before another stage is
 started. While no worker is available, the focused obstacle remains unchanged.
-If the game reports a worker as available while that obstacle is still marked
-paid, the paid stage is not charged again and does not block the available
-worker from starting the next eligible obstacle. An unaffordable non-clearing
+If a paid obstacle has no fresh resource gate, that stage is not charged again
+and does not block an available worker from starting the next eligible
+obstacle. The paid marker can persist after loot is collected; when a fresh
+resource gate is also present, the obstacle is ready for its next stage and
+remains eligible under the normal priority order. An unaffordable non-clearing
 focused obstacle still waits rather than falling through to a lower-priority
 one. Each obstacle's exact loot list supplies the
 preferred space target and expected reward IDs. Partial output is confirmed and

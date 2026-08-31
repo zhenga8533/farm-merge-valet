@@ -241,7 +241,9 @@ _READ_EXPRESSION = """
           energyCost,
           requiredWorkers,
           movable: Boolean(content.hasBehavior?.('movable')),
-          clearing: Boolean(content.hasBehavior?.('resourceGatePaid')),
+          clearing: Boolean(
+            content.hasBehavior?.('resourceGatePaid') && !resourceGate
+          ),
         }
         : null,
     });

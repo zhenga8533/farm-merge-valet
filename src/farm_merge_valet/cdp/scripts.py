@@ -522,8 +522,7 @@ def _interaction_expression(
         content.getBehavior('collectable').reward.length > 0
     : expectedKind === 'clear'
       ? content.hasBehavior?.('mapSource') && content.hasBehavior?.('hitpoints') &&
-        content.hasBehavior?.('resourceGate') &&
-        !content.hasBehavior?.('resourceGatePaid')
+        content.hasBehavior?.('resourceGate')
     : expectedKind === 'obstacle-loot'
       ? content.hasBehavior?.('mapSource') && content.hasBehavior?.('hitpoints') &&
         content.hasBehavior?.('resourceGatePaid') && content.hasBehavior?.('lootable') &&
@@ -568,8 +567,7 @@ def _interaction_expression(
       if (!gameWorkers.hasEnoughWorkers(requiredWorkers))
         return {{status: 'rejected', detail: 'insufficient-workers'}};
       await obstacleHandler._attemptPayment(content, position, gate);
-      if (content.getBehavior?.('resourceGate') === gate &&
-          !content.hasBehavior?.('resourceGatePaid'))
+      if (content.getBehavior?.('resourceGate') === gate)
         return {{status: 'rejected', detail: 'clear-did-not-start'}};
     }} else {{
       handler._simulateClick(content);

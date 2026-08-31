@@ -138,6 +138,12 @@ def test_read_board_state_preserves_obstacle_progress_and_cost(monkeypatch) -> N
     assert state[(6, 7)].claim_output_ids == frozenset({"stone_1"})
 
 
+def test_fresh_obstacle_gate_is_not_hidden_by_previous_paid_marker() -> None:
+    from farm_merge_valet.cdp.board_store import _READ_EXPRESSION
+
+    assert "content.hasBehavior?.('resourceGatePaid') && !resourceGate" in _READ_EXPRESSION
+
+
 def test_board_reader_derives_claim_capacity_from_live_rewards() -> None:
     from farm_merge_valet.cdp.board_store import _READ_EXPRESSION
 

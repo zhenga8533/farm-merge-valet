@@ -416,11 +416,13 @@ def test_obstacle_clear_uses_resource_gate_payment_handler(monkeypatch) -> None:
     assert result.status is ActionStatus.SUBMITTED
     assert "content.hasBehavior?.('mapSource')" in expression
     assert "content.hasBehavior?.('resourceGatePaid')" in expression
+    assert "!content.hasBehavior?.('resourceGatePaid')" not in expression
     assert "obstacleHandler._getTotalCost(gate)" in expression
     assert "energy.amount < energyCost" in expression
     assert "gameWorkers.hasEnoughWorkers(requiredWorkers)" in expression
     assert "insufficient-workers" in expression
     assert "await obstacleHandler._attemptPayment(content, position, gate)" in expression
+    assert "content.getBehavior?.('resourceGate') === gate" in expression
     assert "showPopout" not in expression
 
 
