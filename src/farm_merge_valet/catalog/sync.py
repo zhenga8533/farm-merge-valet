@@ -170,6 +170,8 @@ def _high_quality_atlas_candidates(loaded_urls: list[str]) -> list[str]:
         query,
         fragment,
     ), highest_loaded_page in numbered_groups.items():
+        # A higher-resolution atlas can split each loaded sheet across roughly
+        # twice as many pages; the extra probes establish the actual boundary.
         probe_count = (highest_loaded_page + 1) * 2 + 2
         for index in range(probe_count):
             page_path = (PurePosixPath(parent) / f"{base}-{index}.png").as_posix()

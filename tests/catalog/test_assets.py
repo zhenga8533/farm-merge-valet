@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 
@@ -9,6 +11,7 @@ from farm_merge_valet.catalog.assets import (
     _atlas_cache_priority,
     attach_catalog_variants,
     compile_catalog_assets,
+    load_cached_atlases,
 )
 from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog
 from farm_merge_valet.catalog.sync import (
@@ -65,6 +68,43 @@ def test_cached_atlases_prefer_high_quality_frames() -> None:
     ]
 
     assert sorted(paths, key=_atlas_cache_priority) == [paths[1], paths[2], paths[0]]
+
+
+def test_asset_compiler_uses_high_quality_duplicate_frame(tmp_path: Path) -> None:
+    atlas_cache = tmp_path / "atlases"
+    atlas_cache.mkdir()
+    manifest = {"frames": {"coin": {"frame": {"x": 0, "y": 0, "w": 1, "h": 1}}}}
+    for quality, pixel in (("low", 10), ("high", 200)):
+        stem = f"atlases_{quality}_map"
+        (atlas_cache / f"{stem}.json").write_text(json.dumps(manifest), encoding="utf-8")
+        image = np.full((1, 1, 4), pixel, dtype=np.uint8)
+        assert cv2.imwrite(str(atlas_cache / f"{stem}.png"), image)
+    catalog = ItemCatalog(
+        {
+            "coin": CatalogItem(
+                game_id="coin",
+                family_id="coin",
+                policy_key="currencies/coin",
+                category="currencies",
+                display_name="Coin",
+                tier=1,
+                mergeable=True,
+                merge_target=None,
+                asset_alias="coin",
+                asset_path="currencies/coin/coin.png",
+                capabilities=frozenset({"mergeable"}),
+            )
+        }
+    )
+
+    compile_catalog_assets(load_cached_atlases(atlas_cache), catalog, tmp_path / "compiled")
+
+    compiled = cv2.imread(
+        str(tmp_path / "compiled" / "currencies" / "coin" / "coin.png"),
+        cv2.IMREAD_UNCHANGED,
+    )
+    assert compiled is not None
+    assert compiled.tolist() == [[([200] * 4)]]
 
 
 def test_variant_discovery_does_not_cross_numbered_family_boundaries(tmp_path: Path) -> None:

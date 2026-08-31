@@ -662,9 +662,7 @@ def test_output_space_request_remains_in_merge_phase_between_actions(caplog) -> 
 
     bot._step_interact_tiles(health(advancing=True), [], [], [interaction])
     caplog.clear()
-    handled = bot._continue_output_space_request(
-        health(advancing=True), [], [], [interaction]
-    )
+    handled = bot._continue_output_space_request(health(advancing=True), [], [], [interaction])
 
     assert handled is True
     assert bot.phase is Phase.MERGE
@@ -701,12 +699,7 @@ def test_output_space_request_yields_to_higher_priority_interaction() -> None:
     immediate = InteractionAction(InteractionTargetKind.IMMEDIATE, (1, 1), "milk", 30)
     bot._interaction_workflow.output_space_request = requested
 
-    assert (
-        bot._interaction_workflow.requested_output_claim(
-            [immediate], [], [requested]
-        )
-        is None
-    )
+    assert bot._interaction_workflow.requested_output_claim([immediate], [], [requested]) is None
     assert bot._interaction_workflow.output_space_request == requested
 
 
@@ -724,9 +717,7 @@ def test_output_space_request_ends_when_capacity_is_reached() -> None:
     for x in range(3):
         bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
 
-    handled = bot._continue_output_space_request(
-        health(advancing=True), [], [], [requested]
-    )
+    handled = bot._continue_output_space_request(health(advancing=True), [], [], [requested])
 
     assert handled is False
     assert bot._interaction_workflow.output_space_request is None

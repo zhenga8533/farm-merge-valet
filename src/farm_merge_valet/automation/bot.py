@@ -580,6 +580,46 @@ class Bot:
             self._obstacle_focus = selected.coord, selected.object_id
         return selected
 
+    def _obstacle_idle_reason(self) -> tuple[str, dict[str, object]] | None:
+        focus = getattr(self, "_obstacle_focus", None)
+        if focus is None:
+            return None
+        coord, object_id = focus
+        live = self._live_cells.get(coord)
+        if live is None or live.object_id != object_id or live.obstacle is None:
+            return None
+        obstacle = live.obstacle
+        if obstacle.clearing:
+            return None
+
+        energy = getattr(self, "_energy", None)
+        workers = getattr(self, "_workers", None)
+        context: dict[str, object] = {
+            "coord": coord,
+            "blueprint_id": live.blueprint_id,
+            "energy_cost": obstacle.energy_cost,
+            "energy_available": energy,
+            "required_workers": obstacle.required_workers,
+            "workers_available": workers.available if workers is not None else None,
+        }
+        if obstacle.energy_cost is None or energy is None:
+            return f"waiting for energy data for the focused obstacle at {coord}", context
+        if obstacle.required_workers is None or workers is None:
+            return f"waiting for worker data for the focused obstacle at {coord}", context
+        if energy < obstacle.energy_cost:
+            return (
+                f"focused obstacle at {coord} needs {obstacle.energy_cost} energy; "
+                f"{energy} available",
+                context,
+            )
+        if workers.available < obstacle.required_workers:
+            return (
+                f"focused obstacle at {coord} needs {obstacle.required_workers} available "
+                f"worker(s); {workers.available} available",
+                context,
+            )
+        return None
+
     def _interaction_actions(
         self,
     ) -> tuple[list[InteractionAction], list[InteractionAction], list[InteractionAction]]:
@@ -781,14 +821,10 @@ class Bot:
         depleted: list[InteractionAction],
         ready: list[InteractionAction],
     ) -> bool:
-        requested = self._interaction_workflow.requested_output_claim(
-            immediate, depleted, ready
-        )
+        requested = self._interaction_workflow.requested_output_claim(immediate, depleted, ready)
         if requested is None:
             return False
-        required_empty_cells = self._interaction_workflow.required_output_space(
-            self, requested
-        )
+        required_empty_cells = self._interaction_workflow.required_output_space(self, requested)
         if required_empty_cells is None:
             self._interaction_workflow.output_space_request = None
             return False
@@ -862,7 +898,12 @@ class Bot:
             self._report_wait(result.detail or "crate claim capability unavailable")
         elif result.remaining == 0 and not merge_actions_available:
             self._last_crate_claim_limit = None
-            self._defer_idle("no supply crates or merge actions are currently available")
+            obstacle_wait = self._obstacle_idle_reason()
+            if obstacle_wait is None:
+                self._defer_idle("no supply crates or merge actions are currently available")
+            else:
+                reason, context = obstacle_wait
+                self._defer_idle(reason, **context)
         elif result.status is ActionStatus.REJECTED:
             self._report_wait(result.detail or "crate spawn was not accepted")
         if result.remaining == 0 and merge_actions_available:

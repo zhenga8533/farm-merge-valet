@@ -56,7 +56,7 @@ def read_game_frame_resources(
     *,
     cancel_event: Event | None = None,
 ) -> dict[str, bytes]:
-    """Read already-loaded resources from Chrome's page cache through CDP."""
+    """Read cached resources and fetch missing URLs inside the game frame."""
 
     def read(ws_url: str) -> dict[str, bytes]:
         _command_target(ws_url, "Page.enable", cancel_event=cancel_event)

@@ -56,9 +56,7 @@ class InteractionWorkflow:
     pending: PendingInteraction | None = None
     next_action_at: float = 0.0
     output_space_request: InteractionAction | None = None
-    remaining_output_capacity: dict[tuple[GridCoord, int | None], int] = field(
-        default_factory=dict
-    )
+    remaining_output_capacity: dict[tuple[GridCoord, int | None], int] = field(default_factory=dict)
 
     @staticmethod
     def _output_key(action: InteractionAction) -> tuple[GridCoord, int | None]:
@@ -95,11 +93,7 @@ class InteractionWorkflow:
         if requested is None:
             return None
         current = next(
-            (
-                action
-                for action in (*immediate, *ready)
-                if self._same_target(action, requested)
-            ),
+            (action for action in (*immediate, *ready) if self._same_target(action, requested)),
             None,
         )
         if current is None:
@@ -112,9 +106,7 @@ class InteractionWorkflow:
 
     @staticmethod
     def required_output_space(bot: Bot, action: InteractionAction) -> int | None:
-        desired_empty_cells = (
-            action.output_capacity or bot.config.producer_interact_min_empty_cells
-        )
+        desired_empty_cells = action.output_capacity or bot.config.producer_interact_min_empty_cells
         empty_count = len(bot.board.find_empty())
         if empty_count >= desired_empty_cells:
             return None
@@ -165,8 +157,7 @@ class InteractionWorkflow:
         current_output_ids = frozenset(
             state.object_id
             for state in bot._live_cells.values()
-            if state.object_id is not None
-            and state.blueprint_id in pending.action.output_ids
+            if state.object_id is not None and state.blueprint_id in pending.action.output_ids
         )
         return len(current_output_ids - pending.initial_output_object_ids)
 
@@ -206,8 +197,7 @@ class InteractionWorkflow:
                 self.remaining_output_capacity.pop(output_key, None)
             else:
                 attempted_capacity = (
-                    pending.action.output_capacity
-                    or bot.config.producer_interact_min_empty_cells
+                    pending.action.output_capacity or bot.config.producer_interact_min_empty_cells
                 )
                 self.remaining_output_capacity[output_key] = max(
                     1, attempted_capacity - output_progress_count
@@ -359,9 +349,7 @@ class InteractionWorkflow:
         action: InteractionAction,
     ) -> None:
         empty_count = len(bot.board.find_empty())
-        desired_empty_cells = (
-            action.output_capacity or bot.config.producer_interact_min_empty_cells
-        )
+        desired_empty_cells = action.output_capacity or bot.config.producer_interact_min_empty_cells
         if empty_count >= desired_empty_cells:
             self.output_space_request = None
             bot._submit_interaction(action, health)

@@ -72,9 +72,10 @@ Variant discovery uses exact numbered-family and building-state identities so
 similarly prefixed, unrelated game assets cannot be grouped together.
 Compilation fails if a declared alias is missing and removes stale PNGs.
 
-The desktop GUI fits each sprite inside a 40-by-40 item-icon box while
-preserving its aspect ratio. Wide stacks, tall crops, and square currencies are
-therefore not stretched into a common shape.
+The desktop GUI fits catalog-item and recipe sprites inside 40-by-40 icon boxes,
+while shop building previews use a 100-by-54 box. Both preserve the source
+aspect ratio, so wide stacks, tall crops, and square currencies are not
+stretched into a common shape.
 
 Generated game metadata, downloaded atlases, and compiled sprites are ignored
 and excluded from packages and releases. The repository contains only the
