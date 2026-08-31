@@ -40,7 +40,9 @@ function() {
 
 _READ_CRATE_COUNT_EXPRESSION = """
 (() => {
-  const item = window.__fmvCrateInventoryItem;
+  const item = window.__fmvGameplayServices?.ordersService?._inventory
+    ?.getInventoryItem?.('crates');
+  if (item?._key === 'crates') window.__fmvCrateInventoryItem = item;
   return item && Number.isInteger(item.amount) && item.amount >= 0
     ? item.amount
     : null;

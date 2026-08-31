@@ -297,6 +297,7 @@ class GameRuntimeAdapter:
     def spawn_supply_crates(self, limit: int) -> CrateSpawnResult:
         spawned = 0
         remaining: int | None = None
+        available_before: int | None = None
         last_status = ActionStatus.REJECTED
         detail: str | None = None
         claim_limit = max(0, int(limit))
@@ -320,6 +321,13 @@ class GameRuntimeAdapter:
                 last_status = ActionStatus.UNAVAILABLE
             spawned += max(0, int(raw.get("spawned", 0)))
             remaining = raw.get("remaining") if isinstance(raw.get("remaining"), int) else None
+            raw_available_before = raw.get("availableBefore")
+            if (
+                available_before is None
+                and isinstance(raw_available_before, int)
+                and not isinstance(raw_available_before, bool)
+            ):
+                available_before = raw_available_before
             detail = raw.get("detail") if isinstance(raw.get("detail"), str) else None
             if last_status is not ActionStatus.SUBMITTED or remaining == 0:
                 break
@@ -335,6 +343,7 @@ class GameRuntimeAdapter:
             spawned,
             remaining,
             detail,
+            available_before,
         )
 
     def read_shop_orders(self) -> tuple[ShopOrder, ...] | None:

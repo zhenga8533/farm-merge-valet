@@ -94,8 +94,18 @@ def test_read_workers_returns_total_and_available_counts(monkeypatch) -> None:
 def test_crate_result_reports_partial_count(monkeypatch) -> None:
     responses = iter(
         [
-            {"status": "submitted", "spawned": 2, "remaining": 5},
-            {"status": "rejected", "spawned": 0, "remaining": 5},
+            {
+                "status": "submitted",
+                "spawned": 2,
+                "remaining": 5,
+                "availableBefore": 7,
+            },
+            {
+                "status": "rejected",
+                "spawned": 0,
+                "remaining": 5,
+                "availableBefore": 5,
+            },
         ]
     )
     monkeypatch.setattr(
@@ -109,6 +119,7 @@ def test_crate_result_reports_partial_count(monkeypatch) -> None:
     assert result.status is ActionStatus.SUBMITTED
     assert result.spawned == 2
     assert result.remaining == 5
+    assert result.available_before == 7
 
 
 def test_crate_submission_waits_for_authoritative_state_change(monkeypatch) -> None:
@@ -165,7 +176,34 @@ def test_discovery_uses_active_gameplay_crate_signal() -> None:
     assert "crateSubscribers.length > 0" in _DISCOVER_EXPRESSION
     assert "_commonEvents?.spawnCrates === crateSignal" in _HEALTH_EXPRESSION
     assert "subscribers(crateSignal).length > 0" in _HEALTH_EXPRESSION
+    assert "orders?._inventory?.getInventoryItem?.('crates')" in _DISCOVER_EXPRESSION
+    assert "services?.ordersService?._inventory?.getInventoryItem?.('crates')" in (
+        _HEALTH_EXPRESSION
+    )
     assert "inventory?.onAnimateChanges" not in _DISCOVER_EXPRESSION
+
+
+def test_crate_claim_rebinds_inventory_from_active_scene(monkeypatch) -> None:
+    expression = ""
+
+    def capture_expression(_port, value, _title, **_kwargs):
+        nonlocal expression
+        expression = value
+        return {
+            "status": "rejected",
+            "spawned": 0,
+            "remaining": 0,
+            "availableBefore": 0,
+            "detail": "no-supply-crates",
+        }
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", capture_expression)
+
+    result = GameRuntimeAdapter(9222, "Farm").spawn_supply_crates(5)
+
+    assert result.available_before == 0
+    assert "services?.ordersService?._inventory?.getInventoryItem?.('crates')" in expression
+    assert "window.__fmvCrateInventoryItem = inventory" in expression
 
 
 def test_discovery_validates_internal_interaction_handler() -> None:

@@ -103,14 +103,17 @@ or object-identity change.
 
 ## Claim crates
 
-The bot derives a claim limit from live inventory, empty board cells, and the
-configured merge-space reserve. It fires the HUD's live internal crate event
-sequentially up to that limit. Inventory and empty space are rechecked after
-every accepted spawn. Each claim waits for an authoritative inventory or board
-change before another is submitted, so zero inventory, zero space, delayed
-updates, and partial completion are reported exactly. There is no configurable
-click batch size. A short randomized delay between accepted claims preserves
-normal rapid-click cadence without submitting claims concurrently.
+The bot derives a claim-capacity limit from empty board cells and the configured
+merge-space reserve. It fires the HUD's live internal crate event sequentially
+up to the lesser of that capacity and the available inventory. Each attempt
+resolves the crate item from the active scene's inventory service instead of
+trusting a retained object from an earlier scene. Inventory and empty space are
+rechecked after every accepted spawn. Each claim waits for an authoritative
+inventory or board change before another is submitted, so zero inventory, zero
+space, delayed updates, and partial completion are reported exactly. Claim logs
+distinguish detected crate inventory from board capacity. There is no
+configurable click batch size. A short randomized delay between accepted claims
+preserves normal rapid-click cadence without submitting claims concurrently.
 
 ## Shop orders
 

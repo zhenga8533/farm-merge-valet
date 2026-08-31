@@ -156,10 +156,12 @@ confirmation popout. One-click items are enabled by default; currency rewards
 remain opt-in.
 Exhausted animals are retired into coins, while exhausted crops are
 retired only with an open cell available for their two tier-1 replacements. A
-ready tier-4 producer preempts crates. The bot derives its preferred free-space
-target from the producer's reward rolls, merging toward that target when
-possible. If no merge can create more room, it claims into any open space and
-continues after confirming the partial output. The configured producer-space
+ready tier-4 producer preempts crates. Supply claims resolve inventory from the
+active game scene on every attempt, and logs report detected inventory
+separately from available board capacity. The bot derives its preferred
+free-space target from the producer's reward rolls, merging toward that target
+when possible. If no merge can create more room, it claims into any open space
+and continues after confirming the partial output. The configured producer-space
 value is retained as a fallback when live reward metadata is unavailable.
 
 Obstacle clearing uses live energy, total and available workers, hit points,

@@ -4,6 +4,7 @@ import pytest
 
 from farm_merge_valet.cdp.inventory_store import (
     _FIND_CRATE_ITEM_EXPRESSION,
+    _READ_CRATE_COUNT_EXPRESSION,
     _arm_crate_inventory_target,
     read_crate_count,
     read_energy,
@@ -22,6 +23,11 @@ def test_read_crate_count_rejects_invalid_values(monkeypatch, value: object) -> 
     monkeypatch.setattr("farm_merge_valet.cdp.inventory_store.evaluate", lambda *_args: value)
 
     assert read_crate_count(9222, "Farm") is None
+
+
+def test_read_crate_count_uses_active_scene_inventory() -> None:
+    assert "ordersService?._inventory" in _READ_CRATE_COUNT_EXPRESSION
+    assert "getInventoryItem?.('crates')" in _READ_CRATE_COUNT_EXPRESSION
 
 
 def test_arm_crate_inventory_releases_query_object(monkeypatch) -> None:

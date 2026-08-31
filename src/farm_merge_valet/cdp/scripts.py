@@ -9,7 +9,6 @@ from farm_merge_valet.core.items import GridCoord, InteractionTargetKind
 _DISCOVER_EXPRESSION = r"""
 (() => {
   const board = window.__fmvBoardCells;
-  const inventory = window.__fmvCrateInventoryItem;
   if (!(board instanceof Map)) return {status: 'unavailable', detail: 'board-map-not-found'};
   const subscribers = (signal) => Array.isArray(signal?._subscribers)
     ? signal._subscribers : [];
@@ -77,6 +76,9 @@ _DISCOVER_EXPRESSION = r"""
   const validCrateSignal = typeof crateSignal?.fire === 'function' &&
     crateSubscribers.length > 0 ? crateSignal : null;
   const orders = services?.ordersService;
+  const inventory = orders?._inventory?.getInventoryItem?.('crates');
+  const validInventory = inventory?._key === 'crates' &&
+    Number.isInteger(inventory.amount) && inventory.amount >= 0 ? inventory : null;
   const validShopOrders = orders?._isActive !== false &&
     typeof orders?.getCurrentOrders === 'function' &&
     typeof orders?.getOrderByBuilding === 'function' &&
@@ -91,6 +93,7 @@ _DISCOVER_EXPRESSION = r"""
   window.__fmvRewardInteractionHandler = rewardInteractionHandler;
   window.__fmvObstacleClearHandler = obstacleClearHandler;
   window.__fmvCrateSpawnSignal = validCrateSignal;
+  window.__fmvCrateInventoryItem = validInventory;
   window.__fmvOrdersService = validShopOrders ? orders : null;
   window.__fmvRuntimeBoard = board;
   window.__fmvRuntimeSceneIds ||= new WeakMap();
@@ -108,7 +111,7 @@ _DISCOVER_EXPRESSION = r"""
   if (!rewardInteractionHandler) missing.push('reward-interaction-handler');
   if (!obstacleClearHandler) missing.push('obstacle-clear-handler');
   if (!validCrateSignal) missing.push('crate-spawn-signal');
-  if (!inventory) missing.push('crate-inventory');
+  if (!validInventory) missing.push('crate-inventory');
   window.__fmvRuntimeDiscovery = {
     strategy: 'bounded-signal-anchors',
     services: Boolean(services),
@@ -121,7 +124,7 @@ _DISCOVER_EXPRESSION = r"""
     obstacleClear: Boolean(obstacleClearHandler),
     crateSpawn: Boolean(validCrateSignal),
     crateSubscribers: crateSubscribers.length,
-    inventory: Boolean(inventory),
+    inventory: Boolean(validInventory),
     shopOrders: Boolean(validShopOrders),
     missing,
   };
@@ -135,7 +138,7 @@ _DISCOVER_EXPRESSION = r"""
     rewardInteraction: Boolean(rewardInteractionHandler),
     obstacleClear: Boolean(obstacleClearHandler),
     crateSpawn: Boolean(validCrateSignal),
-    inventory: Boolean(inventory),
+    inventory: Boolean(validInventory),
     shopOrders: Boolean(validShopOrders),
     detail: missing.length ? `${missing.join(',')}-not-found` : null,
     discovery: window.__fmvRuntimeDiscovery,
@@ -227,6 +230,10 @@ _HEALTH_EXPRESSION = r"""
   const currentCrateSignal = currentBoard &&
     services?.hudService?._commonEvents?.spawnCrates === crateSignal &&
     typeof crateSignal?.fire === 'function' && subscribers(crateSignal).length > 0;
+  const inventory = services?.ordersService?._inventory?.getInventoryItem?.('crates');
+  const currentInventory = currentBoard && inventory?._key === 'crates' &&
+    Number.isInteger(inventory.amount) && inventory.amount >= 0;
+  if (currentInventory) window.__fmvCrateInventoryItem = inventory;
   const currentShopOrders = currentBoard && services?.ordersService === orders &&
     orders?._isActive !== false && typeof orders?.getCurrentOrders === 'function' &&
     typeof orders?.startOrder === 'function' &&
@@ -247,7 +254,7 @@ _HEALTH_EXPRESSION = r"""
       handler._currentObject || handler._originCell
     )),
     crateSpawn: Boolean(currentCrateSignal),
-    inventory: Boolean(window.__fmvCrateInventoryItem),
+    inventory: Boolean(currentInventory),
     shopOrders: Boolean(currentShopOrders),
     heartbeat: beat ? beat.frame : null,
     heartbeatAgeMs: beat ? Math.max(0, performance.now() - beat.timestamp) : null,
@@ -399,25 +406,32 @@ def _crate_expression(limit: int, scene_id: int | None) -> str:
 (async () => {{
   const board = window.__fmvBoardCells;
   const signal = window.__fmvCrateSpawnSignal;
-  const inventory = window.__fmvCrateInventoryItem;
-  const identity = window.__fmvGameplayServices?.mapGrid ||
+  const services = window.__fmvGameplayServices;
+  const identity = services?.mapGrid ||
     window.__fmvGameplayMapScreen || window.__fmvItemInteractionHandler || board;
   const currentSceneId = identity && window.__fmvRuntimeSceneIds
     ? window.__fmvRuntimeSceneIds.get(identity) : null;
-  if (!board || window.__fmvRuntimeBoard !== board || !signal || !inventory ||
+  if (!board || window.__fmvRuntimeBoard !== board || !signal ||
       currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', spawned: 0, detail: 'runtime-scene-changed'}};
-  if (window.__fmvGameplayServices?.hudService?._commonEvents?.spawnCrates !== signal)
+  const inventory = services?.ordersService?._inventory?.getInventoryItem?.('crates');
+  if (inventory?._key !== 'crates' ||
+      !Number.isInteger(inventory.amount) || inventory.amount < 0)
+    return {{status: 'unavailable', spawned: 0, detail: 'crate-inventory-not-current'}};
+  window.__fmvCrateInventoryItem = inventory;
+  const availableBefore = inventory.amount;
+  if (services?.hudService?._commonEvents?.spawnCrates !== signal)
     return {{status: 'unavailable', spawned: 0, remaining: inventory.amount,
-      detail: 'crate-signal-not-current'}};
+      availableBefore, detail: 'crate-signal-not-current'}};
   const subscribers = Array.isArray(signal._subscribers) ? signal._subscribers : [];
   if (!subscribers.length)
     return {{status: 'unavailable', spawned: 0, remaining: inventory.amount,
-      detail: 'crate-signal-has-no-subscribers'}};
+      availableBefore, detail: 'crate-signal-has-no-subscribers'}};
   if (subscribers.some((entry) => entry?.context?._executing))
-    return {{status: 'busy', spawned: 0, remaining: inventory.amount}};
+    return {{status: 'busy', spawned: 0, remaining: inventory.amount, availableBefore}};
   if (typeof signal.fire !== 'function')
-    return {{status: 'unavailable', spawned: 0, detail: 'crate-signal-not-found'}};
+    return {{status: 'unavailable', spawned: 0, availableBefore,
+      detail: 'crate-signal-not-found'}};
   let spawned = 0;
   const countEmpty = () => {{
     let count = 0;
@@ -440,20 +454,21 @@ def _crate_expression(limit: int, scene_id: int | None) -> str:
       const empty = countEmpty();
       if (!(amount > 0))
         return {{status: 'rejected', spawned, remaining: amount,
-          detail: 'no-supply-crates'}};
+          availableBefore, detail: 'no-supply-crates'}};
       if (empty === 0)
         return {{status: 'rejected', spawned, remaining: amount,
-          detail: 'no-open-cells'}};
+          availableBefore, detail: 'no-open-cells'}};
       signal.fire({{}});
       if (!await waitForChange(amount, empty))
         return {{status: 'rejected', spawned, remaining: inventory.amount,
-          detail: 'no-authoritative-crate-change'}};
+          availableBefore, detail: 'no-authoritative-crate-change'}};
       spawned += 1;
     }}
-    return {{status: spawned ? 'submitted' : 'rejected', spawned, remaining: inventory.amount}};
+    return {{status: spawned ? 'submitted' : 'rejected', spawned,
+      remaining: inventory.amount, availableBefore}};
   }} catch (error) {{
     return {{status: 'rejected', spawned, remaining: inventory.amount,
-      detail: String(error?.message || error)}};
+      availableBefore, detail: String(error?.message || error)}};
   }}
 }})()
 """
@@ -565,6 +580,7 @@ def _interaction_expression(
   }}
 }})()
 """
+
 
 _READ_WORKERS_EXPRESSION = r"""
 (() => {

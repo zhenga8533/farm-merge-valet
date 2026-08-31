@@ -57,7 +57,12 @@ class FakeRuntime:
 
     def spawn_supply_crates(self, limit):
         self.spawn_limits.append(limit)
-        return CrateSpawnResult(ActionStatus.SUBMITTED, limit, 0)
+        return CrateSpawnResult(
+            ActionStatus.SUBMITTED,
+            limit,
+            0,
+            available_before=limit,
+        )
 
     def submit_board_interaction(
         self, coord, expected_kind, expected_blueprint_id, expected_object_id
@@ -163,6 +168,10 @@ def test_crate_limit_preserves_policy_reserve(monkeypatch, caplog) -> None:
         record.fmv_event: record for record in caplog.records if hasattr(record, "fmv_event")
     }
     assert records["crate.claim_started"].levelno == logging.DEBUG
+    assert records["crate.claim_started"].message == (
+        "Claiming up to 3 of 3 available supply crate(s); board capacity is 3."
+    )
+    assert records["crate.claim_started"].fmv_context["available_crates"] == 3
     assert records["crate.claim_completed"].levelno == logging.INFO
 
 
@@ -174,13 +183,16 @@ def test_exhausted_crates_use_configured_idle_delay(monkeypatch, caplog) -> None
     monkeypatch.setattr(bot.config, "idle_wait_seconds", 30.0)
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 10.0)
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         bot._step_claim_crates(False)
 
     assert bot._next_loop_delay == 30.0
     record = next(record for record in caplog.records if record.fmv_event == "bot.idle")
     assert record.message.endswith("polling every 30s until state changes.")
     assert record.fmv_context["poll_interval_seconds"] == 30.0
+    assert not any(
+        getattr(record, "fmv_event", None) == "crate.claim_started" for record in caplog.records
+    )
 
 
 def test_merge_five_policy_does_not_fall_back_while_space_remains(monkeypatch) -> None:

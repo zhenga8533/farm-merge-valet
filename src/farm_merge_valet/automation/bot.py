@@ -784,21 +784,29 @@ class Bot:
         if limit == 0:
             self._set_phase(Phase.MERGE)
             return
+        result = self.runtime.spawn_supply_crates(limit)
         now = time.monotonic()
-        if limit != self._last_crate_claim_limit or now - self._last_crate_claim_log_at >= 15:
+        if (
+            result.available_before is not None
+            and result.available_before > 0
+            and (limit != self._last_crate_claim_limit or now - self._last_crate_claim_log_at >= 15)
+        ):
+            claim_count = min(limit, result.available_before)
             log_event(
                 logger,
                 logging.DEBUG,
                 "crate.claim_started",
-                "Claiming up to %d supply crate(s).",
+                "Claiming up to %d of %d available supply crate(s); board capacity is %d.",
+                claim_count,
+                result.available_before,
                 limit,
                 claim_limit=limit,
+                available_crates=result.available_before,
                 empty_cells=len(self.board.find_empty()),
                 reserved_empty_cells=reserve,
             )
             self._last_crate_claim_limit = limit
             self._last_crate_claim_log_at = now
-        result = self.runtime.spawn_supply_crates(limit)
         if result.spawned:
             self._last_wait_reason = None
             self._last_idle_reason = None
@@ -820,6 +828,7 @@ class Bot:
         elif result.status is ActionStatus.UNAVAILABLE:
             self._report_wait(result.detail or "crate claim capability unavailable")
         elif result.remaining == 0 and not merge_actions_available:
+            self._last_crate_claim_limit = None
             self._defer_idle("no supply crates or merge actions are currently available")
         elif result.status is ActionStatus.REJECTED:
             self._report_wait(result.detail or "crate spawn was not accepted")

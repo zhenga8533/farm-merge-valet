@@ -52,6 +52,7 @@ class CrateSpawnResult:
     spawned: int
     remaining: int | None = None
     detail: str | None = None
+    available_before: int | None = None
 
 
 @dataclass(frozen=True)
