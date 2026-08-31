@@ -567,8 +567,6 @@ def _interaction_expression(
       if (!gameWorkers.hasEnoughWorkers(requiredWorkers))
         return {{status: 'rejected', detail: 'insufficient-workers'}};
       await obstacleHandler._attemptPayment(content, position, gate);
-      if (content.getBehavior?.('resourceGate') === gate)
-        return {{status: 'rejected', detail: 'clear-did-not-start'}};
     }} else {{
       handler._simulateClick(content);
     }}

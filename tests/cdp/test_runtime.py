@@ -422,7 +422,7 @@ def test_obstacle_clear_uses_resource_gate_payment_handler(monkeypatch) -> None:
     assert "gameWorkers.hasEnoughWorkers(requiredWorkers)" in expression
     assert "insufficient-workers" in expression
     assert "await obstacleHandler._attemptPayment(content, position, gate)" in expression
-    assert "content.getBehavior?.('resourceGate') === gate" in expression
+    assert "clear-did-not-start" not in expression
     assert "showPopout" not in expression
 
 
