@@ -87,7 +87,37 @@ def read_game_frame_resources(
             )
         return contents
 
-    return run_game_frame_operation(port, page_title, read)
+    contents = run_game_frame_operation(port, page_title, read)
+    missing = [url for url in urls if url not in contents]
+    for offset in range(0, len(missing), 4):
+        batch = missing[offset : offset + 4]
+        expression = f"""
+        (async () => {{
+          const urls = {json.dumps(batch)};
+          const values = await Promise.all(urls.map(async url => {{
+            try {{
+              const response = await fetch(url);
+              if (!response.ok) return null;
+              const bytes = new Uint8Array(await response.arrayBuffer());
+              let binary = '';
+              for (let offset = 0; offset < bytes.length; offset += 32768) {{
+                binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+              }}
+              return [url, btoa(binary)];
+            }} catch (_) {{
+              return null;
+            }}
+          }}));
+          return Object.fromEntries(values.filter(Boolean));
+        }})()
+        """
+        raw = evaluate(port, expression, page_title, timeout=30, cancel_event=cancel_event)
+        if not isinstance(raw, dict):
+            continue
+        for url, encoded in raw.items():
+            if isinstance(url, str) and isinstance(encoded, str):
+                contents[url] = base64.b64decode(encoded)
+    return contents
 
 
 def _resource_frame_ids(root: dict[str, Any]) -> dict[str, str]:

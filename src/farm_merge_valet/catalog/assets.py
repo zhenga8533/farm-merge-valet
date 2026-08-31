@@ -88,7 +88,7 @@ def fetch_atlas_urls(png_urls: list[str], cache_dir: Path, *, force: bool = Fals
 
 def load_cached_atlases(cache_dir: Path) -> Atlases:
     atlases: Atlases = {}
-    for json_path in sorted(cache_dir.glob("*.json")):
+    for json_path in sorted(cache_dir.glob("*.json"), key=_atlas_cache_priority):
         png_path = json_path.with_suffix(".png")
         if not png_path.exists():
             continue
@@ -100,6 +100,18 @@ def load_cached_atlases(cache_dir: Path) -> Atlases:
         if image is not None:
             atlases[png_path.stem] = (manifest, image)
     return atlases
+
+
+def _atlas_cache_priority(path: Path) -> tuple[int, str]:
+    quality = next(
+        (
+            priority
+            for priority, marker in enumerate(("_high_", "_medium_", "_low_"))
+            if marker in path.stem
+        ),
+        3,
+    )
+    return quality, path.name
 
 
 def _find_frame(atlases: Atlases, frame_name: str) -> np.ndarray | None:

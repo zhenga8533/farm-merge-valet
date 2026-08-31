@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit, urlunsplit
 
 from farm_merge_valet.catalog.assets import (
@@ -17,6 +19,9 @@ from farm_merge_valet.catalog.assets import (
 )
 from farm_merge_valet.catalog.models import ItemCatalog
 from farm_merge_valet.catalog.store import write_item_catalog
+
+_ATLAS_PAGE_SUFFIX = re.compile(r"^(?P<base>.+)-(?P<index>[0-9]+)$")
+_QUALITY_SEGMENTS = ("/low/", "/medium/")
 
 
 @dataclass(frozen=True)
@@ -37,10 +42,32 @@ class CatalogSynchronizer:
                 "tab and retry."
             )
         print(f"Discovered {len(urls)} loaded game atlas sheets through CDP.")
-        atlases = self._fetch_runtime_atlases(urls, force=force)
+        preferred_urls = self._discover_high_quality_atlases(urls)
+        if preferred_urls:
+            print(f"Discovered {len(preferred_urls)} high-quality atlas sheets.")
+        atlases = self._fetch_runtime_atlases([*preferred_urls, *urls], force=force)
         if not atlases:
             raise RuntimeError("The current game atlas resources could not be downloaded.")
         self._compile_assets(atlases)
+
+    def _discover_high_quality_atlases(self, loaded_urls: list[str]) -> list[str]:
+        candidates = _high_quality_atlas_candidates(loaded_urls)
+        manifests: dict[str, str] = {}
+        for offset in range(0, len(candidates), 20):
+            batch = candidates[offset : offset + 20]
+            manifests.update(self.text_resource_reader([_manifest_url(url) for url in batch]))
+        available = []
+        for png_url in candidates:
+            manifest = manifests.get(_manifest_url(png_url))
+            if manifest is None:
+                continue
+            try:
+                parsed = json.loads(manifest)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict) and isinstance(parsed.get("frames"), dict):
+                available.append(png_url)
+        return available
 
     def compile_cached(self) -> None:
         atlases = load_cached_atlases(self.atlas_cache_dir)
@@ -106,6 +133,48 @@ def _manifest_url(png_url: str) -> str:
     parts = urlsplit(png_url)
     path = parts.path.removesuffix(".png") + ".json"
     return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+
+
+def _high_quality_atlas_candidates(loaded_urls: list[str]) -> list[str]:
+    candidates: set[str] = set()
+    numbered_groups: dict[tuple[str, str, str, str, str, str], int] = {}
+    for url in loaded_urls:
+        parts = urlsplit(url)
+        quality_segment = next(
+            (segment for segment in _QUALITY_SEGMENTS if segment in parts.path), None
+        )
+        if quality_segment is None:
+            continue
+        high_path = parts.path.replace(quality_segment, "/high/", 1)
+        path = PurePosixPath(high_path)
+        match = _ATLAS_PAGE_SUFFIX.fullmatch(path.stem)
+        if match is None:
+            candidates.add(
+                urlunsplit((parts.scheme, parts.netloc, high_path, parts.query, parts.fragment))
+            )
+            continue
+        group = (
+            parts.scheme,
+            parts.netloc,
+            str(path.parent),
+            match.group("base"),
+            parts.query,
+            parts.fragment,
+        )
+        numbered_groups[group] = max(numbered_groups.get(group, -1), int(match.group("index")))
+    for (
+        scheme,
+        netloc,
+        parent,
+        base,
+        query,
+        fragment,
+    ), highest_loaded_page in numbered_groups.items():
+        probe_count = (highest_loaded_page + 1) * 2 + 2
+        for index in range(probe_count):
+            page_path = (PurePosixPath(parent) / f"{base}-{index}.png").as_posix()
+            candidates.add(urlunsplit((scheme, netloc, page_path, query, fragment)))
+    return sorted(candidates)
 
 
 def _report_uncategorized(catalog: ItemCatalog) -> None:

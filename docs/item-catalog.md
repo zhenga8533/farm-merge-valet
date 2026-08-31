@@ -50,8 +50,11 @@ Important current distinctions:
 ## Compiling
 
 `farm-merge-valet assets sync` discovers atlas resources from the loaded game
-through CDP, refreshes the local atlas cache, and compiles the catalog and
-frames. `farm-merge-valet assets compile` rebuilds from that local cache.
+through CDP, discovers the corresponding high-quality atlas multipacks,
+refreshes the local atlas cache, and compiles the catalog and frames. High
+quality frames are preferred, with the loaded game quality retained as a
+fallback when a matching high-quality sheet is unavailable. `farm-merge-valet
+assets compile` rebuilds from that local cache.
 `assets extract <capture.har>` remains an offline extraction fallback. A loaded game
 is required to refresh semantic metadata; an existing local catalog can be
 reused when only recompiling cached images.
@@ -68,6 +71,10 @@ state, alias, and path; consumers never need to infer states from filenames.
 Variant discovery uses exact numbered-family and building-state identities so
 similarly prefixed, unrelated game assets cannot be grouped together.
 Compilation fails if a declared alias is missing and removes stale PNGs.
+
+The desktop GUI fits each sprite inside a 40-by-40 item-icon box while
+preserving its aspect ratio. Wide stacks, tall crops, and square currencies are
+therefore not stretched into a common shape.
 
 Generated game metadata, downloaded atlases, and compiled sprites are ignored
 and excluded from packages and releases. The repository contains only the

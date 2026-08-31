@@ -5,9 +5,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from farm_merge_valet.catalog.assets import attach_catalog_variants, compile_catalog_assets
+from farm_merge_valet.catalog.assets import (
+    _atlas_cache_priority,
+    attach_catalog_variants,
+    compile_catalog_assets,
+)
 from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog
-from farm_merge_valet.catalog.sync import CatalogSynchronizer, _manifest_url
+from farm_merge_valet.catalog.sync import (
+    CatalogSynchronizer,
+    _high_quality_atlas_candidates,
+    _manifest_url,
+)
 
 
 def test_asset_compiler_preserves_atlas_aliases_and_related_states(tmp_path: Path) -> None:
@@ -47,6 +55,16 @@ def test_asset_compiler_preserves_atlas_aliases_and_related_states(tmp_path: Pat
     assert (building_dir / "variants" / "obj_prod_bakery.png").exists()
     assert catalog.variants["shops/bakery"][0].state == "active"
     assert not (tmp_path / "unrelated.png").exists()
+
+
+def test_cached_atlases_prefer_high_quality_frames() -> None:
+    paths = [
+        Path("atlases_low_map.json"),
+        Path("atlases_high_map.json"),
+        Path("atlases_medium_map.json"),
+    ]
+
+    assert sorted(paths, key=_atlas_cache_priority) == [paths[1], paths[2], paths[0]]
 
 
 def test_variant_discovery_does_not_cross_numbered_family_boundaries(tmp_path: Path) -> None:
@@ -143,3 +161,39 @@ def test_manifest_url_preserves_the_game_version_query() -> None:
     assert _manifest_url("https://cdn.test/atlases/map.png?v=42") == (
         "https://cdn.test/atlases/map.json?v=42"
     )
+
+
+def test_high_quality_candidates_include_repacked_multipack_pages() -> None:
+    urls = [
+        "https://cdn.test/atlases/low/map_resources-1.png?v=42",
+        "https://cdn.test/atlases/low/map_resources-2.png?v=42",
+        "https://cdn.test/atlases/low/ui.png?v=42",
+    ]
+
+    candidates = _high_quality_atlas_candidates(urls)
+
+    assert "https://cdn.test/atlases/high/ui.png?v=42" in candidates
+    assert "https://cdn.test/atlases/high/map_resources-0.png?v=42" in candidates
+    assert "https://cdn.test/atlases/high/map_resources-7.png?v=42" in candidates
+
+
+def test_high_quality_discovery_keeps_only_valid_manifests(tmp_path: Path) -> None:
+    available = "https://cdn.test/atlases/high/map_resources-3.json?v=42"
+    synchronizer = CatalogSynchronizer(
+        atlas_cache_dir=tmp_path / "atlases",
+        catalog_dir=tmp_path / "catalog",
+        atlas_url_reader=lambda: [],
+        binary_resource_reader=lambda _urls: {},
+        text_resource_reader=lambda urls: {
+            url: '{"frames": {"coin": {}}}' if url == available else "not found"
+            for url in urls
+            if url == available
+        },
+        catalog_loader=lambda: ItemCatalog({}),
+    )
+
+    discovered = synchronizer._discover_high_quality_atlases(
+        ["https://cdn.test/atlases/low/map_resources-2.png?v=42"]
+    )
+
+    assert discovered == ["https://cdn.test/atlases/high/map_resources-3.png?v=42"]
