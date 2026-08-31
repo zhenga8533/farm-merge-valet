@@ -55,6 +55,7 @@ class PendingInteraction:
 class InteractionWorkflow:
     pending: PendingInteraction | None = None
     next_action_at: float = 0.0
+    output_space_request: InteractionAction | None = None
     remaining_output_capacity: dict[tuple[GridCoord, int | None], int] = field(
         default_factory=dict
     )
@@ -75,6 +76,51 @@ class InteractionWorkflow:
         if observed_capacity is None:
             return remaining
         return min(remaining, observed_capacity)
+
+    @staticmethod
+    def _same_target(left: InteractionAction, right: InteractionAction) -> bool:
+        return (
+            left.kind is right.kind
+            and left.coord == right.coord
+            and left.object_id == right.object_id
+        )
+
+    def requested_output_claim(
+        self,
+        immediate: list[InteractionAction],
+        depleted: list[InteractionAction],
+        ready: list[InteractionAction],
+    ) -> InteractionAction | None:
+        requested = self.output_space_request
+        if requested is None:
+            return None
+        current = next(
+            (
+                action
+                for action in (*immediate, *ready)
+                if self._same_target(action, requested)
+            ),
+            None,
+        )
+        if current is None:
+            self.output_space_request = None
+            return None
+        next_action = immediate[0] if immediate else (None if depleted else ready[0])
+        if next_action is None or not self._same_target(current, next_action):
+            return None
+        return current
+
+    @staticmethod
+    def required_output_space(bot: Bot, action: InteractionAction) -> int | None:
+        desired_empty_cells = (
+            action.output_capacity or bot.config.producer_interact_min_empty_cells
+        )
+        empty_count = len(bot.board.find_empty())
+        if empty_count >= desired_empty_cells:
+            return None
+        if bot._merge_actions_for_policy() or empty_count == 0:
+            return desired_empty_cells
+        return None
 
     def _interaction_succeeded(self, bot: Bot, pending: PendingInteraction) -> bool:
         current = bot._live_cells.get(pending.action.coord)
@@ -243,6 +289,10 @@ class InteractionWorkflow:
                 action.object_id,
             )
         if result.status is ActionStatus.SUBMITTED:
+            if self.output_space_request is not None and self._same_target(
+                action, self.output_space_request
+            ):
+                self.output_space_request = None
             submitted_at = bot._now()
             initial_state = bot._live_cells[action.coord]
             initial_output_object_ids = frozenset(
@@ -313,9 +363,11 @@ class InteractionWorkflow:
             action.output_capacity or bot.config.producer_interact_min_empty_cells
         )
         if empty_count >= desired_empty_cells:
+            self.output_space_request = None
             bot._submit_interaction(action, health)
             return
         if bot._merge_actions_for_policy():
+            self.output_space_request = action
             bot._set_phase(bot.phase.__class__.MERGE)
             if health.item_drop_available:
                 bot._step_merge(health, True, required_empty_cells=desired_empty_cells)
@@ -327,6 +379,7 @@ class InteractionWorkflow:
                 )
             return
         if empty_count > 0:
+            self.output_space_request = None
             log_event(
                 logger,
                 logging.DEBUG,
@@ -343,6 +396,7 @@ class InteractionWorkflow:
             )
             bot._submit_interaction(action, health)
             return
+        self.output_space_request = action
         bot._set_phase(bot.phase.__class__.MERGE)
         bot._step_merge(health, True, required_empty_cells=1)
 

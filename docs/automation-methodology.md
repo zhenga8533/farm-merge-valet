@@ -61,8 +61,10 @@ depleted crops require one open cell for their two tier-1 replacements. A ready
 producer's preferred open-cell target is derived from the maximum output count
 in its live reward metadata. The configured open-cell count (four by default)
 is used only when that metadata is unavailable. If the target is not met, merge
-work preempts interaction and supply crates. When no productive merge remains,
-the bot claims into any available space rather than waiting indefinitely.
+work preempts interaction and supply crates. The workflow retains that space
+request across polling cycles and stays in the merge phase until the target is
+met or no productive merge remains. It then claims into any available space
+rather than waiting indefinitely.
 
 Interaction uses the active tile handler's internal object-click pipeline.
 The adapter validates the scene, coordinate, object identity, blueprint, and

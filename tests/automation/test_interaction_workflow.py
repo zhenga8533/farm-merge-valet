@@ -637,8 +637,99 @@ def test_ready_producer_merges_toward_dynamic_output_capacity() -> None:
 
     assert bot.phase is Phase.MERGE
     assert calls == [7]
+    assert bot._interaction_workflow.output_space_request == action
     assert bot.runtime.interactions == []
     assert bot.runtime.spawn_limits == []
+
+
+def test_output_space_request_remains_in_merge_phase_between_actions(caplog) -> None:
+    bot = bare_bot()
+    caplog.set_level(logging.DEBUG)
+    interaction = InteractionAction(
+        InteractionTargetKind.PRODUCER,
+        (4, 4),
+        "cow_4",
+        22,
+        ProducerKind.ANIMAL,
+        output_capacity=7,
+        output_ids=frozenset({"milk"}),
+    )
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
+    bot._merge_actions_for_policy = lambda: [object()]
+    calls = []
+    bot._step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
+
+    bot._step_interact_tiles(health(advancing=True), [], [], [interaction])
+    caplog.clear()
+    handled = bot._continue_output_space_request(
+        health(advancing=True), [], [], [interaction]
+    )
+
+    assert handled is True
+    assert bot.phase is Phase.MERGE
+    assert calls == [7, 7]
+    assert "Phase MERGE -> INTERACT_TILES" not in caplog.text
+
+
+def test_output_space_request_is_dropped_when_target_changes() -> None:
+    bot = bare_bot()
+    requested = InteractionAction(
+        InteractionTargetKind.PRODUCER,
+        (4, 4),
+        "cow_4",
+        22,
+        ProducerKind.ANIMAL,
+        output_capacity=7,
+    )
+    bot._interaction_workflow.output_space_request = requested
+
+    assert bot._interaction_workflow.requested_output_claim([], [], []) is None
+    assert bot._interaction_workflow.output_space_request is None
+
+
+def test_output_space_request_yields_to_higher_priority_interaction() -> None:
+    bot = bare_bot()
+    requested = InteractionAction(
+        InteractionTargetKind.PRODUCER,
+        (4, 4),
+        "cow_4",
+        22,
+        ProducerKind.ANIMAL,
+        output_capacity=7,
+    )
+    immediate = InteractionAction(InteractionTargetKind.IMMEDIATE, (1, 1), "milk", 30)
+    bot._interaction_workflow.output_space_request = requested
+
+    assert (
+        bot._interaction_workflow.requested_output_claim(
+            [immediate], [], [requested]
+        )
+        is None
+    )
+    assert bot._interaction_workflow.output_space_request == requested
+
+
+def test_output_space_request_ends_when_capacity_is_reached() -> None:
+    bot = bare_bot()
+    requested = InteractionAction(
+        InteractionTargetKind.PRODUCER,
+        (4, 4),
+        "cow_4",
+        22,
+        ProducerKind.ANIMAL,
+        output_capacity=3,
+    )
+    bot._interaction_workflow.output_space_request = requested
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
+
+    handled = bot._continue_output_space_request(
+        health(advancing=True), [], [], [requested]
+    )
+
+    assert handled is False
+    assert bot._interaction_workflow.output_space_request is None
 
 
 def test_ready_producer_claims_partially_when_no_merge_can_make_target_space() -> None:

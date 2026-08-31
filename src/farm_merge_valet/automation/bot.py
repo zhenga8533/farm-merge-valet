@@ -774,6 +774,39 @@ class Bot:
     ) -> None:
         self._interaction_workflow._step_interact_tiles(self, health, immediate, depleted, ready)
 
+    def _continue_output_space_request(
+        self,
+        health: RuntimeHealth,
+        immediate: list[InteractionAction],
+        depleted: list[InteractionAction],
+        ready: list[InteractionAction],
+    ) -> bool:
+        requested = self._interaction_workflow.requested_output_claim(
+            immediate, depleted, ready
+        )
+        if requested is None:
+            return False
+        required_empty_cells = self._interaction_workflow.required_output_space(
+            self, requested
+        )
+        if required_empty_cells is None:
+            self._interaction_workflow.output_space_request = None
+            return False
+        self._set_phase(Phase.MERGE)
+        if health.item_drop_available:
+            self._step_merge(
+                health,
+                True,
+                required_empty_cells=required_empty_cells,
+            )
+        else:
+            self._report_wait(
+                "an output is ready but item merging is unavailable",
+                empty_cells=len(self.board.find_empty()),
+                desired_empty_cells=required_empty_cells,
+            )
+        return True
+
     def _step_claim_crates(self, board_needs_merge: bool) -> None:
         if board_needs_merge:
             self._set_phase(Phase.MERGE)
@@ -956,6 +989,8 @@ class Bot:
             return
         board_needs_merge = self._board_needs_merge()
         immediate, depleted, ready = self._interaction_actions()
+        if self._continue_output_space_request(health, immediate, depleted, ready):
+            return
         if immediate or depleted or ready:
             self._last_cooling_producer_count = None
             self._set_phase(Phase.INTERACT_TILES)
