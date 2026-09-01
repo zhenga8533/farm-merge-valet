@@ -12,6 +12,7 @@ from farm_merge_valet.automation.runtime import (
     CrateSpawnResult,
     LiveCellState,
     RuntimeHealth,
+    TransientOverlayKind,
 )
 from farm_merge_valet.automation.workflows import (
     InteractionWorkflow,
@@ -42,6 +43,7 @@ class FakeRuntime:
         self.claimed_orders: list[tuple[str, str]] = []
         self.shop_orders: tuple[ShopOrder, ...] = ()
         self.board_state: dict[tuple[int, int], LiveCellState] | None = {}
+        self.dismissed_overlays = 0
 
     def set_cancel_event(self, cancel_event):
         self.cancel_event = cancel_event
@@ -51,6 +53,10 @@ class FakeRuntime:
 
     def read_background_flag_status(self):
         return {"available": True, "all_present": True}
+
+    def dismiss_transient_overlay(self):
+        self.dismissed_overlays += 1
+        return ActionResult(ActionStatus.SUBMITTED, "level-up")
 
     def submit_item_drop(self, start, end):
         self.drops.append((start, end))
@@ -87,7 +93,12 @@ class FakeCatalogProvider:
         return ItemCatalog({})
 
 
-def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
+def health(
+    *,
+    advancing: bool,
+    item_action_busy: bool = False,
+    transient_overlay: TransientOverlayKind | None = None,
+) -> RuntimeHealth:
     return RuntimeHealth(
         True,
         7,
@@ -103,6 +114,7 @@ def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
         reward_interaction_available=True,
         shop_available=True,
         removal_available=True,
+        transient_overlay=transient_overlay,
     )
 
 
@@ -351,3 +363,48 @@ def test_frozen_heartbeat_reports_wait_reason(caplog) -> None:
         bot.step()
 
     assert any("heartbeat is not advancing" in message for message in caplog.messages)
+
+
+def test_known_overlay_is_dismissed_before_frozen_heartbeat_and_board_sync(caplog) -> None:
+    class OverlayRuntime(FakeRuntime):
+        def read_runtime_health(self):
+            return health(
+                advancing=False,
+                transient_overlay=TransientOverlayKind.LEVEL_UP,
+            )
+
+    bot = bare_bot()
+    bot.runtime = OverlayRuntime()
+    board_reads = 0
+
+    def sync_board() -> bool:
+        nonlocal board_reads
+        board_reads += 1
+        return True
+
+    bot._sync_board_from_live_state = sync_board
+
+    with caplog.at_level(logging.INFO):
+        bot.step()
+
+    assert bot.runtime.dismissed_overlays == 1
+    assert board_reads == 0
+    assert "Dismissed level-up overlay." in caplog.messages
+
+
+def test_overlay_dismissal_can_be_disabled() -> None:
+    class OverlayRuntime(FakeRuntime):
+        def read_runtime_health(self):
+            return health(
+                advancing=False,
+                transient_overlay=TransientOverlayKind.LEVEL_UP,
+            )
+
+    bot = bare_bot()
+    bot.runtime = OverlayRuntime()
+    bot.config.auto_dismiss_overlays = False
+    bot._sync_board_from_live_state = lambda: True
+
+    bot.step()
+
+    assert bot.runtime.dismissed_overlays == 0

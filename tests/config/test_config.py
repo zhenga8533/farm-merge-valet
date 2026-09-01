@@ -260,6 +260,10 @@ def test_producer_interaction_reserves_four_cells_by_default() -> None:
     assert AppConfig().producer_interact_min_empty_cells == 4
 
 
+def test_reward_overlays_are_dismissed_by_default() -> None:
+    assert AppConfig().auto_dismiss_overlays
+
+
 def test_managed_browser_defaults_to_auto_launch() -> None:
     settings = AppConfig()
 

@@ -28,6 +28,12 @@ class ActionStatus(StrEnum):
     INVALID_TARGET = "invalid-target"
 
 
+class TransientOverlayKind(StrEnum):
+    LEVEL_UP = "level-up"
+    STICKER_PACK_SKIP = "sticker-pack-skip"
+    STICKER_PACK_COLLECT = "sticker-pack-collect"
+
+
 class RuntimeConnectionError(RuntimeError):
     """Raised when an automation runtime cannot be reached."""
 
@@ -76,6 +82,7 @@ class RuntimeHealth:
     obstacle_clear_available: bool = False
     upgrade_interaction_available: bool = False
     reward_container_available: bool = False
+    transient_overlay: TransientOverlayKind | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +122,8 @@ class GameRuntime(Protocol):
     def read_workers(self) -> WorkerState | None: ...
 
     def read_background_flag_status(self) -> dict[str, object]: ...
+
+    def dismiss_transient_overlay(self) -> ActionResult: ...
 
     def submit_item_drop(self, start: GridCoord, end: GridCoord) -> ActionResult: ...
 

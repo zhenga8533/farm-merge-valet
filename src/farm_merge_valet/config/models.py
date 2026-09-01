@@ -85,6 +85,7 @@ class AppConfig(BaseModel):
 
     merge_empty_cell_reserve: int = Field(default=1, ge=0, le=50)
     producer_interact_min_empty_cells: int = Field(default=4, ge=1, le=50)
+    auto_dismiss_overlays: bool = True
     prefer_merge_five: bool = True
     item_policy_defaults: ItemPolicy = Field(default_factory=ItemPolicy)
     item_category_defaults: dict[str, ItemPolicyOverride] = Field(default_factory=dict)

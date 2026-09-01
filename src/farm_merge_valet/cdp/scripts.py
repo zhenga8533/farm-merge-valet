@@ -272,6 +272,35 @@ _HEALTH_EXPRESSION = r"""
     orders?._isActive !== false && typeof orders?.getCurrentOrders === 'function' &&
     typeof orders?.startOrder === 'function' &&
     typeof orders?.onOrderRewarded?.fire === 'function';
+  let stage = scene;
+  while (stage?.parent) stage = stage.parent;
+  const layerRoot = stage?.children?.[0];
+  const popupLayer = layerRoot?.children?.find((child) => child?.name === 'popup');
+  const levelUpPopup = popupLayer?.children?.find((child) =>
+    child?._name === 'LevelUpPopup' && typeof child.close === 'function');
+  const pending = [...(popupLayer?.children || [])];
+  let stickerView = null;
+  for (let visited = 0; pending.length > 0 && visited < 500; visited += 1) {
+    const candidate = pending.shift();
+    if (candidate?._spine && Number.isInteger(candidate._stickerPackTier) &&
+        typeof candidate._animationResolve === 'function') {
+      stickerView = candidate;
+      break;
+    }
+    if (Array.isArray(candidate?.children)) pending.push(...candidate.children);
+  }
+  const liveSkipText = stickerView?._skipText && !stickerView._skipText._destroyed;
+  const stickerSkip = liveSkipText && (
+    typeof stickerView._onSkippedPressed === 'function' ||
+    typeof stickerView._onSkipPressed === 'function');
+  const collectPending = stickerView && !liveSkipText &&
+    stickerView.children?.some((child) =>
+      (child?.name === 'ConsentButton' || child?._name === 'ConsentButton') &&
+      typeof child.destroy === 'function');
+  const transientOverlay = levelUpPopup ? 'level-up'
+    : stickerSkip ? 'sticker-pack-skip'
+    : collectPending ? 'sticker-pack-collect'
+    : null;
   const identity = currentBoard && (services.mapGrid || scene || handler || board);
   const sceneId = identity && window.__fmvRuntimeSceneIds
     ? window.__fmvRuntimeSceneIds.get(identity) : null;
@@ -295,8 +324,88 @@ _HEALTH_EXPRESSION = r"""
     heartbeat: beat ? beat.frame : null,
     heartbeatAgeMs: beat ? Math.max(0, performance.now() - beat.timestamp) : null,
     heartbeatInstalled: Boolean(window.__fmvHeartbeatInstalled && beat),
+    transientOverlay,
   };
 })()
+"""
+
+
+def _dismiss_overlay_expression(scene_id: int | None) -> str:
+    return f"""
+(() => {{
+  const board = window.__fmvBoardCells;
+  const services = window.__fmvGameplayServices;
+  const scene = window.__fmvGameplayMapScreen;
+  const identity = services?.mapGrid || scene || window.__fmvItemInteractionHandler || board;
+  const currentSceneId = identity && window.__fmvRuntimeSceneIds
+    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
+      currentSceneId !== {json.dumps(scene_id)})
+    return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
+
+  let stage = scene;
+  while (stage?.parent) stage = stage.parent;
+  const layerRoot = stage?.children?.[0];
+  const popupLayer = layerRoot?.children?.find((child) => child?.name === 'popup');
+  const levelUpPopup = popupLayer?.children?.find((child) =>
+    child?._name === 'LevelUpPopup' && typeof child.close === 'function');
+  if (levelUpPopup) {{
+    if (levelUpPopup._popupLocked === true ||
+        levelUpPopup._popupInteractionsLocked === true)
+      return {{status: 'busy', detail: 'level-up'}};
+    const inputBlocker = levelUpPopup.children?.find((child) => child?._events?.pointerup);
+    const pointerUp = inputBlocker?._events?.pointerup;
+    const listeners = Array.isArray(pointerUp) ? pointerUp : pointerUp ? [pointerUp] : [];
+    if (!listeners.some((listener) =>
+        listener?.fn === levelUpPopup.close && listener?.context === levelUpPopup))
+      return {{status: 'unavailable', detail: 'level-up-handler-not-current'}};
+    try {{
+      void levelUpPopup.close();
+      return {{status: 'submitted', detail: 'level-up'}};
+    }} catch (error) {{
+      return {{status: 'rejected', detail: String(error?.message || error)}};
+    }}
+  }}
+
+  const pending = [...(popupLayer?.children || [])];
+  let stickerView = null;
+  for (let visited = 0; pending.length > 0 && visited < 500; visited += 1) {{
+    const candidate = pending.shift();
+    if (candidate?._spine && Number.isInteger(candidate._stickerPackTier) &&
+        typeof candidate._animationResolve === 'function') {{
+      stickerView = candidate;
+      break;
+    }}
+    if (Array.isArray(candidate?.children)) pending.push(...candidate.children);
+  }}
+  if (!stickerView) return {{status: 'stale-source', detail: 'no-supported-overlay'}};
+
+  const liveSkipText = stickerView._skipText && !stickerView._skipText._destroyed;
+  const skip = typeof stickerView._onSkippedPressed === 'function'
+    ? stickerView._onSkippedPressed
+    : typeof stickerView._onSkipPressed === 'function'
+      ? stickerView._onSkipPressed : null;
+  if (liveSkipText && skip) {{
+    try {{
+      skip.call(stickerView);
+      return {{status: 'submitted', detail: 'sticker-pack-skip'}};
+    }} catch (error) {{
+      return {{status: 'rejected', detail: String(error?.message || error)}};
+    }}
+  }}
+
+  const collectButton = stickerView.children?.find((child) =>
+    (child?.name === 'ConsentButton' || child?._name === 'ConsentButton') &&
+    typeof child.destroy === 'function');
+  if (!collectButton) return {{status: 'busy', detail: 'sticker-pack-transition'}};
+  try {{
+    collectButton.destroy();
+    stickerView._animationResolve();
+    return {{status: 'submitted', detail: 'sticker-pack-collect'}};
+  }} catch (error) {{
+    return {{status: 'rejected', detail: String(error?.message || error)}};
+  }}
+}})()
 """
 
 

@@ -36,6 +36,12 @@ loop is advancing. The bot may continue observing while it is frozen, but sends
 no actions and queues no retries. This prevents a background-tab suspension
 from being mistaken for an action failure.
 
+A strict, default-enabled reward-overlay
+step runs before this gate: Level Up invokes its native close callback, while
+sticker packs use their native Skip and subsequent Collect transitions. Each
+transition is handled in a separate loop iteration. Other popups and navigation
+screens are not dismissed.
+
 ## Interact with tiles and producers
 
 The live cell read includes semantic behaviors as well as blueprint identity.

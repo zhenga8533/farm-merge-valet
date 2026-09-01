@@ -1041,6 +1041,36 @@ class Bot:
             self._report_wait(str(exc))
             return
         self._last_health = health
+        if self.config.auto_dismiss_overlays and health.transient_overlay is not None:
+            try:
+                result = self.runtime.dismiss_transient_overlay()
+            except RuntimeConnectionError as exc:
+                if not self._interrupt_event.is_set():
+                    self._report_wait(str(exc))
+                return
+            if result.submitted:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "overlay.dismissed",
+                    "Dismissed %s overlay.",
+                    health.transient_overlay.value,
+                    overlay=health.transient_overlay.value,
+                )
+            elif result.status is ActionStatus.BUSY:
+                self._report_wait(result.detail or "reward overlay transition in progress")
+            else:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "overlay.dismiss_failed",
+                    "Could not dismiss %s overlay: %s.",
+                    health.transient_overlay.value,
+                    result.detail or result.status.value,
+                    overlay=health.transient_overlay.value,
+                    detail=result.detail,
+                )
+            return
         board_started = time.monotonic()
         board_synced = self._sync_board_from_live_state()
         self._log_slow_stage("board-state read", board_started)

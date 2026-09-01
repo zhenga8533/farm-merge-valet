@@ -148,6 +148,12 @@ change, or a genuine no-op. Genuine no-ops cool down before retry, and three
 failures of the same action pause the bot. Runtime incompatibility reports an
 unavailable capability; there is no mouse-input fallback.
 
+Known reward overlays are handled before the heartbeat gate because Level Up
+and sticker-pack presentation can pause the game loop. The default-enabled
+`auto_dismiss_overlays` setting uses each screen's native Continue, Skip, and
+Collect callbacks. It does not close shops, settings, missions, confirmations,
+or unknown popups.
+
 Game-marked `collectable` board tiles—including ground ingredients, train tickets, currencies,
 energy, gems, and ordinary supply crates—can be configured per tier and are
 interacted with before any producer or HUD supply claim. Ingredients, tickets,

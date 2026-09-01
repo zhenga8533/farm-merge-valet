@@ -1,7 +1,11 @@
 import logging
 from threading import Event
 
-from farm_merge_valet.automation.runtime import ActionStatus, GameRuntime
+from farm_merge_valet.automation.runtime import (
+    ActionStatus,
+    GameRuntime,
+    TransientOverlayKind,
+)
 from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
 from farm_merge_valet.core.items import InteractionTargetKind
 from farm_merge_valet.core.obstacles import WorkerState
@@ -33,6 +37,7 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
                 "heartbeat": 11,
                 "heartbeatAgeMs": 1,
                 "itemActionBusy": True,
+                "transientOverlay": "sticker-pack-collect",
             },
         ]
     )
@@ -45,6 +50,38 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
     assert health.item_action_busy
     assert health.interaction_available
     assert health.reward_interaction_available
+    assert health.transient_overlay is TransientOverlayKind.STICKER_PACK_COLLECT
+
+
+def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) -> None:
+    expressions: list[str] = []
+
+    def evaluate_expression(_port, expression, _title, **_kwargs):
+        expressions.append(expression)
+        return {"status": "submitted", "detail": "sticker-pack-skip"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", evaluate_expression)
+    adapter = GameRuntimeAdapter(9222, "Farm")
+    adapter._scene_id = 4
+
+    result = adapter.dismiss_transient_overlay()
+
+    assert result.status is ActionStatus.SUBMITTED
+    assert result.detail == "sticker-pack-skip"
+    assert "levelUpPopup.close()" in expressions[0]
+    assert "skip.call(stickerView)" in expressions[0]
+    assert "collectButton.destroy()" in expressions[0]
+    assert "stickerView._animationResolve()" in expressions[0]
+    assert "currentSceneId !== 4" in expressions[0]
+
+
+def test_health_detects_each_supported_reward_overlay_phase() -> None:
+    from farm_merge_valet.cdp.scripts import _HEALTH_EXPRESSION
+
+    assert "child?._name === 'LevelUpPopup'" in _HEALTH_EXPRESSION
+    assert "typeof stickerView._onSkippedPressed === 'function'" in _HEALTH_EXPRESSION
+    assert "child?.name === 'ConsentButton'" in _HEALTH_EXPRESSION
+    assert "sticker-pack-collect" in _HEALTH_EXPRESSION
 
 
 def test_scene_change_invalidates_cached_identity(monkeypatch) -> None:

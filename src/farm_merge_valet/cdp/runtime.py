@@ -13,6 +13,7 @@ from farm_merge_valet.automation.runtime import (
     ActionStatus,
     CrateSpawnResult,
     RuntimeHealth,
+    TransientOverlayKind,
 )
 from farm_merge_valet.cdp.board_store import arm_board_store, read_board_state
 from farm_merge_valet.cdp.evaluation import apply_background_overrides, evaluate
@@ -26,6 +27,7 @@ from farm_merge_valet.cdp.scripts import (
     _READ_SHOP_ORDERS_EXPRESSION,
     _READ_WORKERS_EXPRESSION,
     _crate_expression,
+    _dismiss_overlay_expression,
     _drop_expression,
     _interaction_expression,
     _removal_expression,
@@ -214,6 +216,12 @@ class GameRuntimeAdapter:
         upgrade_interaction = raw.get("upgradeInteraction") is True
         crate_spawn = raw.get("crateSpawn") is True
         board = raw.get("board") is True
+        transient_overlay = None
+        try:
+            if isinstance(raw.get("transientOverlay"), str):
+                transient_overlay = TransientOverlayKind(raw["transientOverlay"])
+        except ValueError:
+            transient_overlay = None
         return RuntimeHealth(
             available=board
             and (
@@ -248,6 +256,7 @@ class GameRuntimeAdapter:
             obstacle_clear_available=raw.get("obstacleClear") is True,
             upgrade_interaction_available=upgrade_interaction,
             reward_container_available=reward_container,
+            transient_overlay=transient_overlay,
         )
 
     @staticmethod
@@ -269,6 +278,9 @@ class GameRuntimeAdapter:
 
     def submit_item_drop(self, start: GridCoord, end: GridCoord) -> ActionResult:
         return self._action_result(self._evaluate(_drop_expression(start, end, self._scene_id)))
+
+    def dismiss_transient_overlay(self) -> ActionResult:
+        return self._action_result(self._evaluate(_dismiss_overlay_expression(self._scene_id)))
 
     def submit_board_interaction(
         self,
