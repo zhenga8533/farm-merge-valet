@@ -69,9 +69,9 @@ def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) ->
     assert result.status is ActionStatus.SUBMITTED
     assert result.detail == "sticker-pack-skip"
     assert "levelUpPopup.close()" in expressions[0]
-    assert "skip.call(stickerView)" in expressions[0]
+    assert "skip.call(stickerSpineView)" in expressions[0]
     assert "collectButton.destroy()" in expressions[0]
-    assert "stickerView._animationResolve()" in expressions[0]
+    assert "stickerRevealView._animationResolve()" in expressions[0]
     assert "currentSceneId !== 4" in expressions[0]
 
 
@@ -79,8 +79,12 @@ def test_health_detects_each_supported_reward_overlay_phase() -> None:
     from farm_merge_valet.cdp.scripts import _HEALTH_EXPRESSION
 
     assert "child?._name === 'LevelUpPopup'" in _HEALTH_EXPRESSION
-    assert "typeof stickerView._onSkippedPressed === 'function'" in _HEALTH_EXPRESSION
+    assert "Array.isArray(child?._viewStack)" in _HEALTH_EXPRESSION
+    assert "child?._packOpeningView" in _HEALTH_EXPRESSION
+    assert "typeof stickerSpineView._onSkippedPressed === 'function'" in _HEALTH_EXPRESSION
     assert "child?.name === 'ConsentButton'" in _HEALTH_EXPRESSION
+    assert "stickerController?._isAnimating === true" in _HEALTH_EXPRESSION
+    assert "sticker-pack-transition" in _HEALTH_EXPRESSION
     assert "sticker-pack-collect" in _HEALTH_EXPRESSION
 
 

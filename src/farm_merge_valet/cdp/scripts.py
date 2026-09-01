@@ -278,28 +278,31 @@ _HEALTH_EXPRESSION = r"""
   const popupLayer = layerRoot?.children?.find((child) => child?.name === 'popup');
   const levelUpPopup = popupLayer?.children?.find((child) =>
     child?._name === 'LevelUpPopup' && typeof child.close === 'function');
-  const pending = [...(popupLayer?.children || [])];
-  let stickerView = null;
-  for (let visited = 0; pending.length > 0 && visited < 500; visited += 1) {
-    const candidate = pending.shift();
-    if (candidate?._spine && Number.isInteger(candidate._stickerPackTier) &&
-        typeof candidate._animationResolve === 'function') {
-      stickerView = candidate;
-      break;
-    }
-    if (Array.isArray(candidate?.children)) pending.push(...candidate.children);
-  }
-  const liveSkipText = stickerView?._skipText && !stickerView._skipText._destroyed;
+  const stickerNavigation = stage?.children?.find((child) =>
+    Array.isArray(child?._viewStack) && child?._packOpeningView);
+  const packOpeningView = stickerNavigation?._packOpeningView;
+  const stickerController = packOpeningView?._currentPackAnimation;
+  const stickerPackActive = stickerNavigation?.visible !== false &&
+    packOpeningView?.visible !== false && packOpeningView?.parent === stickerNavigation &&
+    stickerController?.parent === packOpeningView && stickerController?._isAnimating === true;
+  const stickerSpineView = stickerPackActive ? stickerController._spineAnimation : null;
+  const stickerRevealView = stickerPackActive ? stickerController._revealAnimation : null;
+  const liveSkipText = stickerSpineView?._skipText &&
+    !stickerSpineView._skipText._destroyed;
   const stickerSkip = liveSkipText && (
-    typeof stickerView._onSkippedPressed === 'function' ||
-    typeof stickerView._onSkipPressed === 'function');
-  const collectPending = stickerView && !liveSkipText &&
-    stickerView.children?.some((child) =>
-      (child?.name === 'ConsentButton' || child?._name === 'ConsentButton') &&
-      typeof child.destroy === 'function');
+    typeof stickerSpineView._onSkippedPressed === 'function' ||
+    typeof stickerSpineView._onSkipPressed === 'function');
+  const collectButton = stickerRevealView?.children?.find((child) =>
+    (child?.name === 'ConsentButton' || child?._name === 'ConsentButton') &&
+    child?.visible !== false && child?.renderable !== false &&
+    typeof child.destroy === 'function');
+  const collectPending = stickerRevealView && !liveSkipText &&
+    typeof stickerRevealView._animationResolve === 'function' &&
+    Boolean(collectButton);
   const transientOverlay = levelUpPopup ? 'level-up'
     : stickerSkip ? 'sticker-pack-skip'
     : collectPending ? 'sticker-pack-collect'
+    : stickerPackActive ? 'sticker-pack-transition'
     : null;
   const identity = currentBoard && (services.mapGrid || scene || handler || board);
   const sceneId = identity && window.__fmvRuntimeSceneIds
@@ -367,40 +370,42 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     }}
   }}
 
-  const pending = [...(popupLayer?.children || [])];
-  let stickerView = null;
-  for (let visited = 0; pending.length > 0 && visited < 500; visited += 1) {{
-    const candidate = pending.shift();
-    if (candidate?._spine && Number.isInteger(candidate._stickerPackTier) &&
-        typeof candidate._animationResolve === 'function') {{
-      stickerView = candidate;
-      break;
-    }}
-    if (Array.isArray(candidate?.children)) pending.push(...candidate.children);
-  }}
-  if (!stickerView) return {{status: 'stale-source', detail: 'no-supported-overlay'}};
+  const stickerNavigation = stage?.children?.find((child) =>
+    Array.isArray(child?._viewStack) && child?._packOpeningView);
+  const packOpeningView = stickerNavigation?._packOpeningView;
+  const stickerController = packOpeningView?._currentPackAnimation;
+  const stickerPackActive = stickerNavigation?.visible !== false &&
+    packOpeningView?.visible !== false && packOpeningView?.parent === stickerNavigation &&
+    stickerController?.parent === packOpeningView && stickerController?._isAnimating === true;
+  if (!stickerPackActive)
+    return {{status: 'stale-source', detail: 'no-supported-overlay'}};
 
-  const liveSkipText = stickerView._skipText && !stickerView._skipText._destroyed;
-  const skip = typeof stickerView._onSkippedPressed === 'function'
-    ? stickerView._onSkippedPressed
-    : typeof stickerView._onSkipPressed === 'function'
-      ? stickerView._onSkipPressed : null;
+  const stickerSpineView = stickerController._spineAnimation;
+  const stickerRevealView = stickerController._revealAnimation;
+  const liveSkipText = stickerSpineView?._skipText &&
+    !stickerSpineView._skipText._destroyed;
+  const skip = typeof stickerSpineView?._onSkippedPressed === 'function'
+    ? stickerSpineView._onSkippedPressed
+    : typeof stickerSpineView?._onSkipPressed === 'function'
+      ? stickerSpineView._onSkipPressed : null;
   if (liveSkipText && skip) {{
     try {{
-      skip.call(stickerView);
+      skip.call(stickerSpineView);
       return {{status: 'submitted', detail: 'sticker-pack-skip'}};
     }} catch (error) {{
       return {{status: 'rejected', detail: String(error?.message || error)}};
     }}
   }}
 
-  const collectButton = stickerView.children?.find((child) =>
+  const collectButton = stickerRevealView?.children?.find((child) =>
     (child?.name === 'ConsentButton' || child?._name === 'ConsentButton') &&
+    child?.visible !== false && child?.renderable !== false &&
     typeof child.destroy === 'function');
-  if (!collectButton) return {{status: 'busy', detail: 'sticker-pack-transition'}};
+  if (!collectButton || typeof stickerRevealView._animationResolve !== 'function')
+    return {{status: 'busy', detail: 'sticker-pack-transition'}};
   try {{
     collectButton.destroy();
-    stickerView._animationResolve();
+    stickerRevealView._animationResolve();
     return {{status: 'submitted', detail: 'sticker-pack-collect'}};
   }} catch (error) {{
     return {{status: 'rejected', detail: String(error?.message || error)}};

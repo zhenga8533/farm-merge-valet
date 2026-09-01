@@ -39,8 +39,10 @@ from being mistaken for an action failure.
 A strict, default-enabled reward-overlay
 step runs before this gate: Level Up invokes its native close callback, while
 sticker packs use their native Skip and subsequent Collect transitions. Each
-transition is handled in a separate loop iteration. Other popups and navigation
-screens are not dismissed.
+transition is handled in a separate loop iteration, and intermediate sticker
+animation states block board actions until Collect becomes available. Sticker
+pack state is read from its dedicated top-level navigation view rather than the
+gameplay popup layers. Other popups and navigation screens are not dismissed.
 
 ## Interact with tiles and producers
 

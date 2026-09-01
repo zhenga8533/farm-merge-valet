@@ -31,6 +31,7 @@ class ActionStatus(StrEnum):
 class TransientOverlayKind(StrEnum):
     LEVEL_UP = "level-up"
     STICKER_PACK_SKIP = "sticker-pack-skip"
+    STICKER_PACK_TRANSITION = "sticker-pack-transition"
     STICKER_PACK_COLLECT = "sticker-pack-collect"
 
 
