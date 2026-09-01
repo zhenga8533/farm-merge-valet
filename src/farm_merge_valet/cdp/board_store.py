@@ -5,7 +5,7 @@ The authoritative state exists in live JavaScript objects rather than browser
 storage. `arm_board_store` uses CDP's `Runtime.queryObjects` to find a live
 `Map` whose values have the board-cell shape (`column`, `row`, `_content`, and
 `_neighbors`), then stores a reference at `window.__fmvBoardCells` for later
-reads. The same map pass also retains the live supply-crate inventory item.
+reads. Inventory is resolved later from services anchored to that board.
 """
 
 from __future__ import annotations
@@ -32,18 +32,8 @@ function() {{
   let best = null;
   let bestContentCount = -1;
   let bestRenderableCount = -1;
-  let crateItem = window.__fmvCrateInventoryItem;
   for (const m of this) {{
     try {{
-      if (!crateItem) {{
-        const candidate = m.get('crates');
-        if (
-          candidate && candidate._key === 'crates' &&
-          '_amount' in candidate && '_visibleAmount' in candidate &&
-          'onChanged' in candidate &&
-          Number.isInteger(candidate.amount) && candidate.amount >= 0
-        ) crateItem = candidate;
-      }}
       if (m.size < {_CELL_MAP_MIN_SIZE} || m.size > {_CELL_MAP_MAX_SIZE}) continue;
       const first = m.values().next().value;
       if (!first || typeof first !== 'object') continue;
@@ -75,7 +65,6 @@ function() {{
   }}
   if (!best) return {{ status: 'not-found' }};
   window.__fmvBoardCells = best;
-  if (crateItem) window.__fmvCrateInventoryItem = crateItem;
   return {{
     status: 'found',
     contentCount: bestContentCount,

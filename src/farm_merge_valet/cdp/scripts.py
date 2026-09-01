@@ -99,6 +99,7 @@ _DISCOVER_EXPRESSION = r"""
     crateSubscribers.length > 0 ? crateSignal : null;
   const orders = services?.ordersService;
   const inventory = orders?._inventory?.getInventoryItem?.('crates');
+  const energy = orders?._inventory?.getInventoryItem?.('energy');
   const validInventory = inventory?._key === 'crates' &&
     Number.isInteger(inventory.amount) && inventory.amount >= 0 ? inventory : null;
   const validShopOrders = orders?._isActive !== false &&
@@ -119,6 +120,8 @@ _DISCOVER_EXPRESSION = r"""
   window.__fmvStorageBubblePopHandler = storageBubblePopHandler;
   window.__fmvCrateSpawnSignal = validCrateSignal;
   window.__fmvCrateInventoryItem = validInventory;
+  window.__fmvEnergyInventoryItem = energy?._key === 'energy' &&
+    Number.isInteger(energy.amount) && energy.amount >= 0 ? energy : null;
   window.__fmvOrdersService = validShopOrders ? orders : null;
   window.__fmvRuntimeBoard = board;
   window.__fmvRuntimeSceneIds ||= new WeakMap();

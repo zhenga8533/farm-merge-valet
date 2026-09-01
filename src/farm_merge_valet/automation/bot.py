@@ -17,6 +17,7 @@ from farm_merge_valet.automation.runtime import (
     GameRuntime,
     LiveCellState,
     RuntimeCancelledError,
+    RuntimeCapability,
     RuntimeConnectionError,
     RuntimeHealth,
     StorageBubbleState,
@@ -151,8 +152,7 @@ class Bot:
         self._last_crate_claim_limit: int | None = None
         self._last_crate_claim_log_at = 0.0
         self._last_cooling_producer_count: int | None = None
-        self._capability_retry_at = 0.0
-        self._capability_retry_delay = self.config.loop_interval
+        self._capability_retries: dict[RuntimeCapability, tuple[float, float]] = {}
 
     def update_config(self, config: AppConfig) -> None:
         """Queue a complete configuration snapshot for the next planning iteration."""
@@ -176,8 +176,6 @@ class Bot:
             configure_delays(pending.crate_delay_min, pending.crate_delay_max)
         self.config = pending
         self._next_loop_delay = pending.loop_interval
-        if self._capability_retry_at == 0.0:
-            self._capability_retry_delay = pending.loop_interval
         changed_fields = tuple(
             name
             for name in AppConfig.model_fields
@@ -311,7 +309,20 @@ class Bot:
         for item in self._blueprint_items.values():
             key = item.identity
             self._max_item_tiers[key] = max(item.tier, self._max_item_tiers.get(key, 0))
-        if not self._sync_board_from_live_state():
+        board_read_started = time.monotonic()
+        board_synced = self._sync_board_from_live_state()
+        board_read_elapsed = time.monotonic() - board_read_started
+        log_event(
+            logger,
+            logging.DEBUG,
+            "runtime.initial_board_read",
+            "Initial board read finished in %.3fs.",
+            board_read_elapsed,
+            elapsed_seconds=board_read_elapsed,
+            scene_id=self._last_health.scene_id,
+            available=board_synced,
+        )
+        if not board_synced:
             log_event(
                 logger,
                 logging.WARNING,
@@ -1008,8 +1019,11 @@ class Bot:
             return False
         if self._now() < getattr(self, "_storage_bubble_next_action_at", 0.0):
             return True
-        if not health.storage_bubble_available:
-            self._report_wait("storage-bubble interaction capability unavailable")
+        if not self._ensure_capability(
+            health,
+            RuntimeCapability.STORAGE_BUBBLES,
+            label="storage-bubble interaction",
+        ):
             return True
         bubble = min(bubbles, key=lambda value: value.object_id)
         log_event(
@@ -1115,17 +1129,11 @@ class Bot:
             self._interaction_workflow.output_space_request = None
             return False
         self._set_phase(Phase.MERGE)
-        if health.item_drop_available:
+        if self._ensure_capability(health, RuntimeCapability.MERGE_DROP):
             self._step_merge(
                 health,
                 True,
                 required_empty_cells=required_empty_cells,
-            )
-        else:
-            self._report_wait(
-                "an output is ready but item merging is unavailable",
-                empty_cells=len(self.board.find_empty()),
-                desired_empty_cells=required_empty_cells,
             )
         return True
 
@@ -1233,46 +1241,8 @@ class Bot:
             health_started = time.monotonic()
             health = self.runtime.read_runtime_health()
             self._log_slow_stage("runtime health read", health_started)
-            capability_missing = (
-                not health.available
-                or (self.phase is Phase.MERGE and not health.item_drop_available)
-                or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
-                or (
-                    self.phase is Phase.INTERACT_TILES
-                    and not (
-                        health.interaction_available
-                        or health.reward_interaction_available
-                        or health.removal_available
-                    )
-                )
-                or (self.phase is Phase.SHOPS and not health.shop_available)
-            )
-            if capability_missing:
-                now = time.monotonic()
-                if now < self._capability_retry_at:
-                    self._report_wait(health.detail or "required runtime capability unavailable")
-                    return
-                health = self.runtime.discover()
-                capability_missing = (
-                    not health.available
-                    or (self.phase is Phase.MERGE and not health.item_drop_available)
-                    or (self.phase is Phase.CLAIM_CRATES and not health.crate_spawn_available)
-                    or (
-                        self.phase is Phase.INTERACT_TILES
-                        and not (
-                            health.interaction_available
-                            or health.reward_interaction_available
-                            or health.removal_available
-                        )
-                    )
-                    or (self.phase is Phase.SHOPS and not health.shop_available)
-                )
-                if capability_missing:
-                    self._capability_retry_at = time.monotonic() + self._capability_retry_delay
-                    self._capability_retry_delay = min(10.0, self._capability_retry_delay * 2)
-                else:
-                    self._capability_retry_at = 0.0
-                    self._capability_retry_delay = self.config.loop_interval
+            if not self._ensure_capability(health, RuntimeCapability.BOARD):
+                return
         except RuntimeConnectionError as exc:
             if self._interrupt_event.is_set():
                 return
@@ -1326,8 +1296,7 @@ class Bot:
         shop_policy_enabled = self._shop_policy().may_enable_orders
         shop_orders: tuple[ShopOrder, ...] | None = ()
         if self._shop_workflow.pending is not None:
-            if not health.shop_available:
-                self._report_wait("shop-order capability unavailable")
+            if not self._ensure_capability(health, RuntimeCapability.SHOPS):
                 return
             shop_orders = self.runtime.read_shop_orders()
             if shop_orders is None:
@@ -1339,9 +1308,6 @@ class Bot:
                 self._report_wait("authoritative shop-order state unavailable")
                 shop_orders = ()
         if not self._verify_pending_shop_action(health, shop_orders):
-            return
-        if not health.available:
-            self._report_wait(health.detail or "runtime unavailable")
             return
         if not health.heartbeat_advancing:
             age = (
@@ -1363,25 +1329,24 @@ class Bot:
             self._set_phase(Phase.INTERACT_TILES)
             next_action = immediate[0] if immediate else (depleted[0] if depleted else ready[0])
             if next_action.kind is InteractionTargetKind.REMOVE:
-                capability_available = health.removal_available
+                runtime_capability = RuntimeCapability.REMOVAL
                 capability = "item removal"
             elif next_action.kind is InteractionTargetKind.REWARD:
-                capability_available = health.reward_interaction_available
+                runtime_capability = RuntimeCapability.REWARDS
                 capability = "reward interaction"
             elif next_action.kind is InteractionTargetKind.UPGRADE:
-                capability_available = health.upgrade_interaction_available
+                runtime_capability = RuntimeCapability.UPGRADES
                 capability = "upgrade-card interaction"
             elif next_action.kind is InteractionTargetKind.REWARD_CONTAINER:
-                capability_available = health.reward_container_available
+                runtime_capability = RuntimeCapability.REWARD_CONTAINERS
                 capability = "reward-container interaction"
             elif next_action.kind is InteractionTargetKind.CLEAR:
-                capability_available = health.obstacle_clear_available
+                runtime_capability = RuntimeCapability.OBSTACLE_CLEARING
                 capability = "obstacle clearing"
             else:
-                capability_available = health.interaction_available
+                runtime_capability = RuntimeCapability.TILE_INTERACTION
                 capability = "board interaction"
-            if not capability_available:
-                self._report_wait(f"{capability} capability unavailable")
+            if not self._ensure_capability(health, runtime_capability, label=capability):
                 return
             self._step_interact_tiles(health, immediate, depleted, ready)
             return
@@ -1397,14 +1362,57 @@ class Bot:
             )
         self._last_cooling_producer_count = cooling_producers or None
         if shop_policy_enabled and shop_orders is not None:
+            if not health.supports(RuntimeCapability.SHOPS):
+                if not self._ensure_capability(health, RuntimeCapability.SHOPS):
+                    return
             if self._step_shops(health, shop_orders, board_needs_merge):
                 return
         if self.phase is Phase.INTERACT_TILES:
             self._set_phase(Phase.CLAIM_CRATES)
         if self.phase is Phase.CLAIM_CRATES:
+            if not board_needs_merge and not self._ensure_capability(
+                health, RuntimeCapability.CRATES
+            ):
+                return
             self._step_claim_crates(board_needs_merge)
         else:
+            if not self._ensure_capability(health, RuntimeCapability.MERGE_DROP):
+                return
             self._step_merge(health, board_needs_merge)
+
+    def _ensure_capability(
+        self,
+        health: RuntimeHealth,
+        capability: RuntimeCapability,
+        *,
+        label: str | None = None,
+    ) -> bool:
+        retries = getattr(self, "_capability_retries", None)
+        if retries is None:
+            retries = self._capability_retries = {}
+        if health.supports(capability):
+            retries.pop(capability, None)
+            return True
+        name = label or capability.value.replace("-", " ")
+        now = time.monotonic()
+        retry_at, retry_delay = retries.get(
+            capability, (0.0, self.config.loop_interval)
+        )
+        if now < retry_at:
+            self._report_wait(f"{name} capability unavailable")
+            return False
+        refreshed = self.runtime.discover()
+        if refreshed.supports(capability):
+            retries.pop(capability, None)
+        else:
+            retries[capability] = (
+                time.monotonic() + retry_delay,
+                min(10.0, retry_delay * 2),
+            )
+            self._report_wait(refreshed.detail or f"{name} capability unavailable")
+        # Discovery can replace every scene-bound reference. Replan from a new
+        # authoritative snapshot instead of submitting the action selected above.
+        return False
 
     def _toggle_pause(self) -> None:
         if self.paused:

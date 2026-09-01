@@ -1,15 +1,41 @@
 import logging
-from threading import Event
+from threading import Event, Thread
 
 from farm_merge_valet.automation.runtime import (
     ActionStatus,
     GameRuntime,
+    RuntimeCapability,
+    RuntimeHealth,
     TransientOverlayKind,
 )
 from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
 from farm_merge_valet.core.items import InteractionTargetKind
 from farm_merge_valet.core.obstacles import WorkerState
 from farm_merge_valet.core.shops import ShopOrderState
+
+
+def test_runtime_health_exposes_adapter_neutral_capabilities() -> None:
+    health = RuntimeHealth(
+        True,
+        1,
+        True,
+        True,
+        True,
+        True,
+        1,
+        0.0,
+        True,
+        interaction_available=True,
+        shop_available=True,
+        removal_available=True,
+        reward_interaction_available=True,
+        obstacle_clear_available=True,
+        upgrade_interaction_available=True,
+        reward_container_available=True,
+        storage_bubble_available=True,
+    )
+
+    assert all(health.supports(capability) for capability in RuntimeCapability)
 
 
 def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
@@ -353,12 +379,12 @@ def test_cached_discovery_is_a_debug_diagnostic(monkeypatch, caplog) -> None:
     responses = iter(
         [
             True,
-            True,
             {
                 "status": "unavailable",
                 "sceneId": 4,
                 "detail": "item-interaction-handler-not-found",
             },
+            True,
             {"frame": 1, "ageMs": 0},
             {
                 "sceneId": 4,
@@ -377,17 +403,11 @@ def test_cached_discovery_is_a_debug_diagnostic(monkeypatch, caplog) -> None:
     )
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", lambda *_, **__: next(responses))
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.time.sleep", lambda *_: None)
-    monotonic = iter((10.0, 10.1))
-    monkeypatch.setattr("farm_merge_valet.cdp.runtime.time.monotonic", lambda: next(monotonic))
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.time.monotonic", lambda: 10.0)
     monkeypatch.setattr(
         "farm_merge_valet.cdp.runtime.arm_board_store",
         lambda *_, **__: (_ for _ in ()).throw(AssertionError("cached board should be reused")),
     )
-    monkeypatch.setattr(
-        "farm_merge_valet.cdp.runtime.arm_crate_inventory",
-        lambda *_, **__: (_ for _ in ()).throw(AssertionError("cached inventory should be reused")),
-    )
-
     with caplog.at_level(logging.DEBUG):
         health = GameRuntimeAdapter(9222, "Farm").discover()
 
@@ -402,6 +422,13 @@ def test_cached_discovery_is_a_debug_diagnostic(monkeypatch, caplog) -> None:
         record for record in caplog.records if record.message.startswith("Runtime discovery")
     )
     assert record.levelno == logging.DEBUG
+    timing_events = {
+        record.fmv_event: record.fmv_context
+        for record in caplog.records
+        if hasattr(record, "fmv_event")
+    }
+    assert timing_events["runtime.cache_validation"]["elapsed_seconds"] == 0.0
+    assert timing_events["runtime.handler_refresh"]["elapsed_seconds"] == 0.0
 
 
 def test_drop_uses_confirmed_gesture_pipeline(monkeypatch) -> None:
@@ -695,6 +722,10 @@ def test_discovery_rearms_a_stale_cached_board(monkeypatch) -> None:
     responses = iter(
         [
             False,
+            {"status": "unavailable", "detail": "board-map-not-found"},
+            False,
+            False,
+            {"status": "found", "sceneId": 5, "detail": None},
             True,
             {"status": "found", "sceneId": 5, "detail": None},
             {"frame": 20, "ageMs": 0},
@@ -717,13 +748,72 @@ def test_discovery_rearms_a_stale_cached_board(monkeypatch) -> None:
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", lambda *_, **__: next(responses))
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.time.sleep", lambda *_: None)
     monkeypatch.setattr(
-        "farm_merge_valet.cdp.runtime.arm_board_store", lambda *_, **__: armed.append(True)
+        "farm_merge_valet.cdp.runtime.arm_board_store",
+        lambda *_, **__: armed.append(True) or "found (100/120 cells with content)",
     )
 
     health = GameRuntimeAdapter(9222, "Farm").discover()
 
     assert armed == [True]
     assert health.available
+
+
+def test_concurrent_heap_recovery_is_single_flight_per_target(monkeypatch) -> None:
+    recovered = Event()
+    scan_started = Event()
+    release_scan = Event()
+    scans: list[int] = []
+
+    monkeypatch.setattr(
+        GameRuntimeAdapter,
+        "_evaluate",
+        lambda *_args, **_kwargs: recovered.is_set(),
+    )
+
+    def arm(*_args, **_kwargs):
+        scans.append(1)
+        scan_started.set()
+        assert release_scan.wait(1)
+        recovered.set()
+        return "found (100/120 cells with content)"
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.arm_board_store", arm)
+    adapters = (
+        GameRuntimeAdapter(9333, "Single flight"),
+        GameRuntimeAdapter(9333, "Single flight"),
+    )
+    results: list[bool] = []
+    first = Thread(target=lambda: results.append(adapters[0]._recover_board_from_heap(force=False)))
+    second = Thread(
+        target=lambda: results.append(adapters[1]._recover_board_from_heap(force=False))
+    )
+
+    first.start()
+    assert scan_started.wait(1)
+    second.start()
+    release_scan.set()
+    first.join(1)
+    second.join(1)
+
+    assert scans == [1]
+    assert results == [True, True]
+
+
+def test_failed_heap_recovery_cools_down_but_reload_can_retry(monkeypatch) -> None:
+    scans: list[int] = []
+    adapter = GameRuntimeAdapter(9444, "Recovery cooldown")
+    monkeypatch.setattr(adapter, "_evaluate", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.arm_board_store",
+        lambda *_args, **_kwargs: scans.append(1) or "cells-map-not-found",
+    )
+
+    assert not adapter._recover_board_from_heap(force=False)
+    assert not adapter._recover_board_from_heap(force=False)
+    assert scans == [1]
+
+    assert not adapter._recover_board_from_heap(force=True)
+    assert scans == [1, 1]
 
 
 def test_cdp_adapter_satisfies_runtime_protocol() -> None:

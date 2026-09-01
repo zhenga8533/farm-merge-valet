@@ -6,7 +6,12 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from farm_merge_valet.automation.runtime import ActionStatus, LiveCellState, RuntimeHealth
+from farm_merge_valet.automation.runtime import (
+    ActionStatus,
+    LiveCellState,
+    RuntimeCapability,
+    RuntimeHealth,
+)
 from farm_merge_valet.core.items import (
     GridCoord,
     InteractionTargetKind,
@@ -378,14 +383,8 @@ class InteractionWorkflow:
         if bot._merge_actions_for_policy():
             self.output_space_request = action
             bot._set_phase(bot.phase.__class__.MERGE)
-            if health.item_drop_available:
+            if bot._ensure_capability(health, RuntimeCapability.MERGE_DROP):
                 bot._step_merge(health, True, required_empty_cells=desired_empty_cells)
-            else:
-                bot._report_wait(
-                    "an output is ready but item merging is unavailable",
-                    empty_cells=empty_count,
-                    desired_empty_cells=desired_empty_cells,
-                )
             return
         if action.requires_full_output_space:
             self.output_space_request = action
@@ -447,10 +446,8 @@ class InteractionWorkflow:
                 return
         if depleted:
             bot._set_phase(bot.phase.__class__.MERGE)
-            if health.item_drop_available:
+            if bot._ensure_capability(health, RuntimeCapability.MERGE_DROP):
                 bot._step_merge(health, True, required_empty_cells=1)
-            else:
-                bot._report_wait("one open cell is required to retire a depleted crop")
             return
         if ready:
             self._step_output_claim(bot, health, ready[0])

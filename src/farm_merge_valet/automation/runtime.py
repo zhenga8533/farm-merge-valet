@@ -35,6 +35,20 @@ class TransientOverlayKind(StrEnum):
     STICKER_PACK_COLLECT = "sticker-pack-collect"
 
 
+class RuntimeCapability(StrEnum):
+    BOARD = "board"
+    MERGE_DROP = "merge-drop"
+    TILE_INTERACTION = "tile-interaction"
+    REWARDS = "rewards"
+    REMOVAL = "removal"
+    OBSTACLE_CLEARING = "obstacle-clearing"
+    UPGRADES = "upgrades"
+    REWARD_CONTAINERS = "reward-containers"
+    STORAGE_BUBBLES = "storage-bubbles"
+    CRATES = "crates"
+    SHOPS = "shops"
+
+
 class RuntimeConnectionError(RuntimeError):
     """Raised when an automation runtime cannot be reached."""
 
@@ -85,6 +99,21 @@ class RuntimeHealth:
     reward_container_available: bool = False
     storage_bubble_available: bool = False
     transient_overlay: TransientOverlayKind | None = None
+
+    def supports(self, capability: RuntimeCapability) -> bool:
+        return {
+            RuntimeCapability.BOARD: self.board_available,
+            RuntimeCapability.MERGE_DROP: self.item_drop_available,
+            RuntimeCapability.TILE_INTERACTION: self.interaction_available,
+            RuntimeCapability.REWARDS: self.reward_interaction_available,
+            RuntimeCapability.REMOVAL: self.removal_available,
+            RuntimeCapability.OBSTACLE_CLEARING: self.obstacle_clear_available,
+            RuntimeCapability.UPGRADES: self.upgrade_interaction_available,
+            RuntimeCapability.REWARD_CONTAINERS: self.reward_container_available,
+            RuntimeCapability.STORAGE_BUBBLES: self.storage_bubble_available,
+            RuntimeCapability.CRATES: self.crate_spawn_available and self.inventory_available,
+            RuntimeCapability.SHOPS: self.shop_available,
+        }[capability]
 
 
 @dataclass(frozen=True)

@@ -6,7 +6,7 @@ import logging
 import random
 import time
 from collections.abc import Callable
-from threading import Event
+from threading import Event, Lock
 
 from farm_merge_valet.automation.runtime import (
     ActionResult,
@@ -18,7 +18,7 @@ from farm_merge_valet.automation.runtime import (
 )
 from farm_merge_valet.cdp.board_store import arm_board_store, read_board_state
 from farm_merge_valet.cdp.evaluation import apply_background_overrides, evaluate
-from farm_merge_valet.cdp.inventory_store import arm_crate_inventory, read_energy
+from farm_merge_valet.cdp.inventory_store import read_energy
 from farm_merge_valet.cdp.scripts import (
     _BOARD_ARMED_EXPRESSION,
     _DISCOVER_EXPRESSION,
@@ -49,6 +49,10 @@ logger = logging.getLogger(__name__)
 class GameRuntimeAdapter:
     """Discovers and calls the active game's own interaction pipeline."""
 
+    _recovery_state_lock = Lock()
+    _recovery_locks: dict[tuple[int, str | None], Lock] = {}
+    _recovery_failures: dict[tuple[int, str | None], tuple[int, float]] = {}
+
     def __init__(
         self,
         port: int,
@@ -65,6 +69,7 @@ class GameRuntimeAdapter:
         self._last_heartbeat: int | None = None
         self._discovery_detail: str | None = "runtime-discovery-not-run"
         self._cancel_event: Event | None = None
+        self._reload_recovery_pending = False
 
     def set_cancel_event(self, cancel_event: Event) -> None:
         self._cancel_event = cancel_event
@@ -152,27 +157,48 @@ class GameRuntimeAdapter:
         apply_background_overrides(self.port, self.page_title, cancel_event=self._cancel_event)
         if is_cancelled():
             return self.read_runtime_health()
+        cache_started = time.monotonic()
         cached_board_is_current = self._evaluate(_BOARD_ARMED_EXPRESSION) is True
-        if not cached_board_is_current:
-            log_event(
-                logger,
-                logging.INFO,
-                "runtime.board_cache_stale",
-                "Cached board is absent or stale; locating the active board map.",
-            )
-            arm_board_store(self.port, self.page_title, cancel_event=self._cancel_event)
+        cache_elapsed = time.monotonic() - cache_started
+        log_event(
+            logger,
+            logging.DEBUG,
+            "runtime.cache_validation",
+            "Runtime board cache validation finished in %.3fs (current=%s).",
+            cache_elapsed,
+            cached_board_is_current,
+            elapsed_seconds=cache_elapsed,
+            cached_board=cached_board_is_current,
+        )
         if is_cancelled():
             return self.read_runtime_health()
-        if (
-            self._evaluate(
-                "Boolean(window.__fmvCrateInventoryItem && window.__fmvEnergyInventoryItem)"
-            )
-            is not True
-        ):
-            arm_crate_inventory(self.port, self.page_title, cancel_event=self._cancel_event)
-        if is_cancelled():
-            return self.read_runtime_health()
+        refresh_started = time.monotonic()
         raw = self._evaluate(_DISCOVER_EXPRESSION)
+        refresh_elapsed = time.monotonic() - refresh_started
+        log_event(
+            logger,
+            logging.DEBUG,
+            "runtime.handler_refresh",
+            "Bounded runtime handler refresh finished in %.3fs.",
+            refresh_elapsed,
+            elapsed_seconds=refresh_elapsed,
+        )
+        board_is_current = self._evaluate(_BOARD_ARMED_EXPRESSION) is True
+        if not board_is_current and not is_cancelled():
+            recovered = self._recover_board_from_heap(force=self._reload_recovery_pending)
+            self._reload_recovery_pending = False
+            if recovered and not is_cancelled():
+                refresh_started = time.monotonic()
+                raw = self._evaluate(_DISCOVER_EXPRESSION)
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    "runtime.handler_refresh",
+                    "Post-recovery runtime handler refresh finished in %.3fs.",
+                    time.monotonic() - refresh_started,
+                    elapsed_seconds=time.monotonic() - refresh_started,
+                    post_recovery=True,
+                )
         heartbeat_sample = self._evaluate(_HEARTBEAT_EXPRESSION)
         if isinstance(heartbeat_sample, dict) and isinstance(heartbeat_sample.get("frame"), int):
             self._last_heartbeat = heartbeat_sample["frame"]
@@ -203,6 +229,66 @@ class GameRuntimeAdapter:
             scene_id=health.scene_id,
         )
         return health
+
+    def _recover_board_from_heap(self, *, force: bool) -> bool:
+        key = (self.port, self.page_title)
+        with self._recovery_state_lock:
+            recovery_lock = self._recovery_locks.setdefault(key, Lock())
+        with recovery_lock:
+            if self._evaluate(_BOARD_ARMED_EXPRESSION) is True:
+                return True
+            now = time.monotonic()
+            with self._recovery_state_lock:
+                failures, retry_at = self._recovery_failures.get(key, (0, 0.0))
+            if not force and now < retry_at:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "runtime.heap_recovery_deferred",
+                    "Board heap recovery is cooling down for %.1fs after a failed search.",
+                    retry_at - now,
+                    retry_after_seconds=retry_at - now,
+                    failures=failures,
+                )
+                return False
+            log_event(
+                logger,
+                logging.INFO,
+                "runtime.heap_recovery_started",
+                "Cached board is absent or stale; scanning the heap for the active board.",
+                forced=force,
+            )
+            scan_started = time.monotonic()
+            raw_status = arm_board_store(
+                self.port, self.page_title, cancel_event=self._cancel_event
+            )
+            status = raw_status if isinstance(raw_status, str) else "invalid-board-search-response"
+            elapsed = time.monotonic() - scan_started
+            if status.startswith("found"):
+                self._evaluate(_DISCOVER_EXPRESSION)
+            recovered = status.startswith("found") and self._evaluate(
+                _BOARD_ARMED_EXPRESSION
+            ) is True
+            with self._recovery_state_lock:
+                if recovered:
+                    self._recovery_failures.pop(key, None)
+                else:
+                    failures += 1
+                    cooldown = min(60.0, 2.0 ** min(failures - 1, 6))
+                    self._recovery_failures[key] = (failures, time.monotonic() + cooldown)
+            log_event(
+                logger,
+                logging.INFO if recovered else logging.WARNING,
+                "runtime.heap_recovery_completed",
+                "Board heap recovery finished in %.1fs: %s.",
+                elapsed,
+                status,
+                elapsed_seconds=elapsed,
+                status=status,
+                recovered=recovered,
+                failures=0 if recovered else failures,
+            )
+            return recovered
 
     def inspect_runtime(self) -> dict[str, object]:
         """Return the bounded discovery stages without traversing the JS heap."""
@@ -235,6 +321,7 @@ class GameRuntimeAdapter:
         if self._scene_id is not None and scene_id != self._scene_id:
             self._scene_id = None
             self._discovery_detail = "runtime-scene-changed"
+            self._reload_recovery_pending = True
         item_drop = raw.get("itemDrop") is True
         interaction = raw.get("interaction") is True
         removal = raw.get("removal") is True

@@ -155,8 +155,7 @@ def bare_bot() -> Bot:
     bot._last_crate_claim_limit = None
     bot._last_crate_claim_log_at = 0.0
     bot._last_cooling_producer_count = None
-    bot._capability_retry_at = 0.0
-    bot._capability_retry_delay = 1.0
+    bot._capability_retries = {}
     return bot
 
 
@@ -343,7 +342,7 @@ def test_step_rediscovers_a_capability_missing_from_a_partial_runtime() -> None:
     bot = bare_bot()
     bot.runtime = PartialRuntime()
     bot.phase = Phase.MERGE
-    bot._sync_board_from_live_state = lambda: False
+    bot._sync_board_from_live_state = lambda: True
 
     bot.step()
 
@@ -391,7 +390,7 @@ def test_missing_capability_discovery_uses_backoff() -> None:
 
     bot = bare_bot()
     bot.runtime = MissingRuntime()
-    bot._sync_board_from_live_state = lambda: False
+    bot._sync_board_from_live_state = lambda: True
 
     bot.step()
     bot.step()

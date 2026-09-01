@@ -144,6 +144,7 @@ class CatalogSyncService:
         )
 
     def refresh_upgrade_progress(self, *, source: str) -> int | None:
+        started = time.monotonic()
         try:
             progress = self._dependencies.upgrade_progress_reader(
                 self._config.cdp_port, self._config.window_title
@@ -158,6 +159,7 @@ class CatalogSyncService:
                 exc,
                 source=source,
                 detail=str(exc),
+                elapsed_seconds=time.monotonic() - started,
             )
             self._callbacks.upgrade_progress_changed(None)
             return None
@@ -170,6 +172,7 @@ class CatalogSyncService:
                 "Upgrade progress unavailable during %s.",
                 source,
                 source=source,
+                elapsed_seconds=time.monotonic() - started,
             )
             return None
         target_count = len(progress.targets)
@@ -182,5 +185,6 @@ class CatalogSyncService:
             target_count,
             source=source,
             target_count=target_count,
+            elapsed_seconds=time.monotonic() - started,
         )
         return target_count
