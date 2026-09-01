@@ -154,6 +154,13 @@ and sticker-pack presentation can pause the game loop. The default-enabled
 Collect callbacks. It does not close shops, settings, missions, confirmations,
 or unknown popups.
 
+Detached stored-item bubbles are handled separately by the default-enabled
+`auto_pop_storage_bubbles` setting. When the board has at least one live empty
+cell, the bot invokes the game's native bubble-pop pipeline. A bubble with more
+contents than the available space is allowed to release what fits and remains
+eligible on a later pass; the bot verifies that the bubble disappeared or its
+authoritative content list decreased before continuing.
+
 Game-marked `collectable` board tiles—including ground ingredients, train tickets, currencies,
 energy, gems, and ordinary supply crates—can be configured per tier and are
 interacted with before any producer or HUD supply claim. Ingredients, tickets,

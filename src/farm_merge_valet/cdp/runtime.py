@@ -13,6 +13,7 @@ from farm_merge_valet.automation.runtime import (
     ActionStatus,
     CrateSpawnResult,
     RuntimeHealth,
+    StorageBubbleState,
     TransientOverlayKind,
 )
 from farm_merge_valet.cdp.board_store import arm_board_store, read_board_state
@@ -25,6 +26,7 @@ from farm_merge_valet.cdp.scripts import (
     _HEALTH_EXPRESSION,
     _HEARTBEAT_EXPRESSION,
     _READ_SHOP_ORDERS_EXPRESSION,
+    _READ_STORAGE_BUBBLES_EXPRESSION,
     _READ_WORKERS_EXPRESSION,
     _crate_expression,
     _dismiss_overlay_expression,
@@ -33,6 +35,7 @@ from farm_merge_valet.cdp.scripts import (
     _removal_expression,
     _shop_claim_expression,
     _shop_start_expression,
+    _storage_bubble_pop_expression,
 )
 from farm_merge_valet.cdp.targets import read_background_flag_status
 from farm_merge_valet.core.items import GridCoord, InteractionTargetKind
@@ -98,6 +101,30 @@ class GameRuntimeAdapter:
         ):
             return None
         return WorkerState(total=total, available=available)
+
+    def read_storage_bubbles(self) -> tuple[StorageBubbleState, ...] | None:
+        raw = self._evaluate(_READ_STORAGE_BUBBLES_EXPRESSION)
+        if not isinstance(raw, list):
+            return None
+        bubbles: list[StorageBubbleState] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            object_id = entry.get("objectID")
+            content_ids = entry.get("contentIDs")
+            if (
+                not isinstance(object_id, int)
+                or isinstance(object_id, bool)
+                or not isinstance(content_ids, list)
+            ):
+                continue
+            bubbles.append(
+                StorageBubbleState(
+                    object_id,
+                    tuple(value for value in content_ids if isinstance(value, str)),
+                )
+            )
+        return tuple(bubbles)
 
     def read_background_flag_status(self) -> dict[str, object]:
         return read_background_flag_status(self.port, cancel_event=self._cancel_event)
@@ -213,6 +240,7 @@ class GameRuntimeAdapter:
         removal = raw.get("removal") is True
         reward_interaction = raw.get("rewardInteraction") is True
         reward_container = raw.get("rewardContainer") is True
+        storage_bubble = raw.get("storageBubble") is True
         upgrade_interaction = raw.get("upgradeInteraction") is True
         crate_spawn = raw.get("crateSpawn") is True
         board = raw.get("board") is True
@@ -256,6 +284,7 @@ class GameRuntimeAdapter:
             obstacle_clear_available=raw.get("obstacleClear") is True,
             upgrade_interaction_available=upgrade_interaction,
             reward_container_available=reward_container,
+            storage_bubble_available=storage_bubble,
             transient_overlay=transient_overlay,
         )
 
@@ -281,6 +310,11 @@ class GameRuntimeAdapter:
 
     def dismiss_transient_overlay(self) -> ActionResult:
         return self._action_result(self._evaluate(_dismiss_overlay_expression(self._scene_id)))
+
+    def submit_storage_bubble_pop(self, expected_object_id: int) -> ActionResult:
+        return self._action_result(
+            self._evaluate(_storage_bubble_pop_expression(expected_object_id, self._scene_id))
+        )
 
     def submit_board_interaction(
         self,

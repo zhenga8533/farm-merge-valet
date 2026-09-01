@@ -6,6 +6,7 @@ import logging
 import random
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum, auto
 from queue import Empty, Queue
 from threading import Event, Lock, Thread
@@ -18,6 +19,7 @@ from farm_merge_valet.automation.runtime import (
     RuntimeCancelledError,
     RuntimeConnectionError,
     RuntimeHealth,
+    StorageBubbleState,
 )
 from farm_merge_valet.automation.workflows import (
     InteractionAction,
@@ -83,6 +85,15 @@ _STRUCTURE_BLUEPRINTS = frozenset(
 )
 
 
+@dataclass
+class _PendingStorageBubble:
+    initial_state: StorageBubbleState
+    scene_id: int | None
+    submitted_at: float
+    last_state: StorageBubbleState | None
+    last_change_at: float
+
+
 class Phase(Enum):
     INTERACT_TILES = auto()
     SHOPS = auto()
@@ -121,6 +132,9 @@ class Bot:
         self._live_cells: dict[GridCoord, LiveCellState] = {}
         self._energy: int | None = None
         self._workers: WorkerState | None = None
+        self._storage_bubbles: tuple[StorageBubbleState, ...] | None = None
+        self._pending_storage_bubble: _PendingStorageBubble | None = None
+        self._storage_bubble_next_action_at = 0.0
         self._obstacle_focus: tuple[GridCoord, int | None] | None = None
         self._merge_workflow = MergeWorkflow()
         self._interaction_workflow = InteractionWorkflow()
@@ -329,6 +343,13 @@ class Bot:
             self._workers = read_workers() if callable(read_workers) else None
         except RuntimeConnectionError:
             self._workers = None
+        read_storage_bubbles = getattr(self.runtime, "read_storage_bubbles", None)
+        try:
+            self._storage_bubbles = (
+                read_storage_bubbles() if callable(read_storage_bubbles) else ()
+            )
+        except RuntimeConnectionError:
+            self._storage_bubbles = None
         return True
 
     def sync_board_from_live_state(self) -> bool:
@@ -857,6 +878,140 @@ class Bot:
     def _submit_interaction(self, action: InteractionAction, health: RuntimeHealth) -> bool:
         return self._interaction_workflow._submit_interaction(self, action, health)
 
+    def _verify_pending_storage_bubble(self, health: RuntimeHealth) -> bool:
+        pending = getattr(self, "_pending_storage_bubble", None)
+        if pending is None:
+            return True
+        now = self._now()
+        age = now - pending.submitted_at
+        if self._storage_bubbles is None:
+            self._report_wait("authoritative storage-bubble state unavailable")
+            return False
+        current = next(
+            (
+                bubble
+                for bubble in self._storage_bubbles
+                if bubble.object_id == pending.initial_state.object_id
+            ),
+            None,
+        )
+        if current is None or current.content_ids != pending.initial_state.content_ids:
+            popped_count = len(pending.initial_state.content_ids) - len(
+                current.content_ids if current is not None else ()
+            )
+            self._pending_storage_bubble = None
+            self._storage_bubble_next_action_at = now + random.uniform(
+                self.config.item_action_delay_min,
+                self.config.item_action_delay_max,
+            )
+            self._last_wait_reason = None
+            self._last_idle_reason = None
+            log_event(
+                logger,
+                logging.DEBUG,
+                "storage_bubble.confirmed",
+                "Storage bubble %d pop confirmed; released %d item(s).",
+                pending.initial_state.object_id,
+                max(0, popped_count),
+                object_id=pending.initial_state.object_id,
+                popped_items=max(0, popped_count),
+                remaining_items=len(current.content_ids) if current is not None else 0,
+                elapsed_seconds=age,
+            )
+            return True
+        if not health.heartbeat_advancing:
+            if age >= _ACTION_SETTLE_SECONDS:
+                self._report_wait(
+                    "submitted storage-bubble pop is pending while the game heartbeat is frozen"
+                )
+            return False
+        if current != pending.last_state:
+            pending.last_state = current
+            pending.last_change_at = now
+        stable_for = now - pending.last_change_at
+        if age < _ACTION_MAX_PENDING_SECONDS and (
+            age < _ACTION_SETTLE_SECONDS or stable_for < _ACTION_STABLE_SECONDS
+        ):
+            return False
+        self._pending_storage_bubble = None
+        self._storage_bubble_next_action_at = now + _ACTION_RETRY_SECONDS
+        log_event(
+            logger,
+            logging.WARNING,
+            "storage_bubble.not_accepted",
+            "Storage bubble %d pop was not accepted after %.1fs; replanning.",
+            pending.initial_state.object_id,
+            age,
+            object_id=pending.initial_state.object_id,
+            elapsed_seconds=age,
+        )
+        return True
+
+    def _step_storage_bubbles(self, health: RuntimeHealth) -> bool:
+        if not self.config.auto_pop_storage_bubbles:
+            return False
+        bubbles = tuple(
+            bubble
+            for bubble in (getattr(self, "_storage_bubbles", None) or ())
+            if bubble.content_ids
+        )
+        if not bubbles or not self.board.find_empty():
+            return False
+        if self._now() < getattr(self, "_storage_bubble_next_action_at", 0.0):
+            return True
+        if not health.storage_bubble_available:
+            self._report_wait("storage-bubble interaction capability unavailable")
+            return True
+        bubble = min(bubbles, key=lambda value: value.object_id)
+        log_event(
+            logger,
+            logging.DEBUG,
+            "storage_bubble.planned",
+            "Planned pop for storage bubble %d containing %d item(s).",
+            bubble.object_id,
+            len(bubble.content_ids),
+            object_id=bubble.object_id,
+            contained_items=len(bubble.content_ids),
+            empty_cells=len(self.board.find_empty()),
+        )
+        result = self.runtime.submit_storage_bubble_pop(bubble.object_id)
+        if result.submitted:
+            submitted_at = self._now()
+            self._pending_storage_bubble = _PendingStorageBubble(
+                bubble,
+                health.scene_id,
+                submitted_at,
+                bubble,
+                submitted_at,
+            )
+            self._last_wait_reason = None
+            log_event(
+                logger,
+                logging.DEBUG,
+                "storage_bubble.submitted",
+                "Submitted storage bubble %d pop; awaiting verification.",
+                bubble.object_id,
+                object_id=bubble.object_id,
+                scene_id=health.scene_id,
+            )
+        elif result.status in {ActionStatus.BUSY, ActionStatus.UNAVAILABLE}:
+            self._report_wait(result.detail or "storage-bubble interaction unavailable")
+        else:
+            self._storage_bubble_next_action_at = self._now() + _ACTION_RETRY_SECONDS
+            log_event(
+                logger,
+                logging.WARNING,
+                "storage_bubble.rejected",
+                "Storage bubble %d pop could not be submitted: %s (%s).",
+                bubble.object_id,
+                result.status.value,
+                result.detail or "no detail",
+                object_id=bubble.object_id,
+                status=result.status.value,
+                detail=result.detail,
+            )
+        return True
+
     @staticmethod
     def _shop_order_for_action(
         orders: tuple[ShopOrder, ...], action: ShopAction
@@ -1117,6 +1272,8 @@ class Bot:
             return
         if not self._verify_pending_interaction(health):
             return
+        if not self._verify_pending_storage_bubble(health):
+            return
         shop_policy_enabled = self._shop_policy().may_enable_orders
         shop_orders: tuple[ShopOrder, ...] | None = ()
         if self._shop_workflow.pending is not None:
@@ -1148,6 +1305,9 @@ class Bot:
         board_needs_merge = self._board_needs_merge()
         immediate, depleted, ready = self._interaction_actions()
         if self._continue_output_space_request(health, immediate, depleted, ready):
+            return
+        claim_is_ready = immediate and immediate[0].kind is not InteractionTargetKind.CLEAR
+        if not claim_is_ready and self._step_storage_bubbles(health):
             return
         if immediate or depleted or ready:
             self._last_cooling_producer_count = None

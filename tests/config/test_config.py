@@ -264,6 +264,10 @@ def test_reward_overlays_are_dismissed_by_default() -> None:
     assert AppConfig().auto_dismiss_overlays
 
 
+def test_storage_bubbles_are_popped_by_default() -> None:
+    assert AppConfig().auto_pop_storage_bubbles
+
+
 def test_managed_browser_defaults_to_auto_launch() -> None:
     settings = AppConfig()
 

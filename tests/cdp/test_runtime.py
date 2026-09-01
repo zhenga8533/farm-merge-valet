@@ -294,6 +294,52 @@ def test_discovery_validates_reward_container_handler() -> None:
     assert "rewardContainerHandler?._services === services" in _HEALTH_EXPRESSION
 
 
+def test_discovery_validates_storage_bubble_handlers() -> None:
+    from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+
+    assert "typeof candidate._onBubblePointerDown === 'function'" in _DISCOVER_EXPRESSION
+    assert "typeof candidate._onStorageBubbleTapped === 'function'" in _DISCOVER_EXPRESSION
+    assert "window.__fmvStorageBubbleInteractionHandler" in _DISCOVER_EXPRESSION
+    assert "storageBubbleInteractionHandler?._services === services" in _HEALTH_EXPRESSION
+
+
+def test_storage_bubble_reader_preserves_contents(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.evaluate",
+        lambda *_, **__: [
+            {"objectID": 41, "contentIDs": ["energy_1", "coin_1"]},
+            {"objectID": "invalid", "contentIDs": []},
+        ],
+    )
+
+    bubbles = GameRuntimeAdapter(9222, "Farm").read_storage_bubbles()
+
+    assert bubbles is not None
+    assert len(bubbles) == 1
+    assert bubbles[0].object_id == 41
+    assert bubbles[0].content_ids == ("energy_1", "coin_1")
+
+
+def test_storage_bubble_pop_uses_native_handler_and_revalidates_space(monkeypatch) -> None:
+    expressions: list[str] = []
+
+    def evaluate_expression(_port, expression, _title, **_kwargs):
+        expressions.append(expression)
+        return {"status": "submitted"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", evaluate_expression)
+    adapter = GameRuntimeAdapter(9222, "Farm")
+    adapter._scene_id = 4
+
+    result = adapter.submit_storage_bubble_pop(41)
+
+    assert result.status is ActionStatus.SUBMITTED
+    assert "candidate?.id === expectedObjectID" in expressions[0]
+    assert "services.gridFilter?.getEmptyCells?.().length === 0" in expressions[0]
+    assert "popHandler._onStorageBubbleTapped(bubble)" in expressions[0]
+    assert "currentSceneId !== 4" in expressions[0]
+
+
 def test_discovery_validates_shop_order_service() -> None:
     from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 

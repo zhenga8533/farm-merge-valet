@@ -83,6 +83,7 @@ class RuntimeHealth:
     obstacle_clear_available: bool = False
     upgrade_interaction_available: bool = False
     reward_container_available: bool = False
+    storage_bubble_available: bool = False
     transient_overlay: TransientOverlayKind | None = None
 
 
@@ -90,6 +91,12 @@ class RuntimeHealth:
 class RewardRequirement:
     blueprint_id: str
     amount: int
+
+
+@dataclass(frozen=True)
+class StorageBubbleState:
+    object_id: int
+    content_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -130,9 +137,13 @@ class GameRuntime(Protocol):
 
     def read_workers(self) -> WorkerState | None: ...
 
+    def read_storage_bubbles(self) -> tuple[StorageBubbleState, ...] | None: ...
+
     def read_background_flag_status(self) -> dict[str, object]: ...
 
     def dismiss_transient_overlay(self) -> ActionResult: ...
+
+    def submit_storage_bubble_pop(self, expected_object_id: int) -> ActionResult: ...
 
     def submit_item_drop(self, start: GridCoord, end: GridCoord) -> ActionResult: ...
 

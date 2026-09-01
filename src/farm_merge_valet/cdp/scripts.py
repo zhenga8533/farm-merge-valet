@@ -74,6 +74,16 @@ _DISCOVER_EXPRESSION = r"""
     typeof candidate._openCrate === 'function' &&
     typeof candidate._canSpawnRewards === 'function' &&
     candidate._crateFamily && candidate._keysFamily) || null;
+  const storageBubbleInteractionHandler = gameplaySystems.find((candidate) =>
+    candidate?._services === services &&
+    typeof candidate._onBubblePointerDown === 'function' &&
+    typeof candidate._onBubblePointerUp === 'function' &&
+    candidate._family?._filter?._behaviorTypes?.includes?.('storageBubble') &&
+    candidate._family?._filter?._behaviorTypes?.includes?.('storageBubbleInteractable')) || null;
+  const storageBubblePopHandler = gameplaySystems.find((candidate) =>
+    candidate?._services === services &&
+    typeof candidate._onStorageBubbleTapped === 'function' &&
+    typeof candidate._spawnObject === 'function') || null;
   const upgradeCard = services?.upgradeCard;
   const validUpgradeInteraction = upgradeCard?._services === services &&
     upgradeCard._isActive !== false &&
@@ -105,6 +115,8 @@ _DISCOVER_EXPRESSION = r"""
   window.__fmvRewardInteractionHandler = rewardInteractionHandler;
   window.__fmvObstacleClearHandler = obstacleClearHandler;
   window.__fmvRewardContainerHandler = rewardContainerHandler;
+  window.__fmvStorageBubbleInteractionHandler = storageBubbleInteractionHandler;
+  window.__fmvStorageBubblePopHandler = storageBubblePopHandler;
   window.__fmvCrateSpawnSignal = validCrateSignal;
   window.__fmvCrateInventoryItem = validInventory;
   window.__fmvOrdersService = validShopOrders ? orders : null;
@@ -124,6 +136,8 @@ _DISCOVER_EXPRESSION = r"""
   if (!rewardInteractionHandler) missing.push('reward-interaction-handler');
   if (!obstacleClearHandler) missing.push('obstacle-clear-handler');
   if (!rewardContainerHandler) missing.push('reward-container-handler');
+  if (!storageBubbleInteractionHandler || !storageBubblePopHandler)
+    missing.push('storage-bubble-handler');
   if (!validUpgradeInteraction) missing.push('upgrade-card-handler');
   if (!validCrateSignal) missing.push('crate-spawn-signal');
   if (!validInventory) missing.push('crate-inventory');
@@ -138,6 +152,7 @@ _DISCOVER_EXPRESSION = r"""
     rewardInteraction: Boolean(rewardInteractionHandler),
     obstacleClear: Boolean(obstacleClearHandler),
     rewardContainer: Boolean(rewardContainerHandler),
+    storageBubble: Boolean(storageBubbleInteractionHandler && storageBubblePopHandler),
     upgradeInteraction: Boolean(validUpgradeInteraction),
     crateSpawn: Boolean(validCrateSignal),
     crateSubscribers: crateSubscribers.length,
@@ -155,6 +170,7 @@ _DISCOVER_EXPRESSION = r"""
     rewardInteraction: Boolean(rewardInteractionHandler),
     obstacleClear: Boolean(obstacleClearHandler),
     rewardContainer: Boolean(rewardContainerHandler),
+    storageBubble: Boolean(storageBubbleInteractionHandler && storageBubblePopHandler),
     upgradeInteraction: Boolean(validUpgradeInteraction),
     crateSpawn: Boolean(validCrateSignal),
     inventory: Boolean(validInventory),
@@ -184,6 +200,7 @@ _DISCOVERY_DIAGNOSTICS_EXPRESSION = r"""
   interaction: false, removal: false, rewardInteraction: false,
   obstacleClear: false,
   rewardContainer: false,
+  storageBubble: false,
   upgradeInteraction: false,
   shopOrders: false,
   inventory: Boolean(window.__fmvCrateInventoryItem), missing: ['discovery-not-run'],
@@ -216,6 +233,8 @@ _HEALTH_EXPRESSION = r"""
   const rewardInteractionHandler = window.__fmvRewardInteractionHandler;
   const obstacleClearHandler = window.__fmvObstacleClearHandler;
   const rewardContainerHandler = window.__fmvRewardContainerHandler;
+  const storageBubbleInteractionHandler = window.__fmvStorageBubbleInteractionHandler;
+  const storageBubblePopHandler = window.__fmvStorageBubblePopHandler;
   const crateSignal = window.__fmvCrateSpawnSignal;
   const orders = window.__fmvOrdersService;
   const beat = window.__fmvHeartbeat;
@@ -256,6 +275,16 @@ _HEALTH_EXPRESSION = r"""
     typeof rewardContainerHandler._openCrate === 'function' &&
     typeof rewardContainerHandler._canSpawnRewards === 'function' &&
     rewardContainerHandler._crateFamily && rewardContainerHandler._keysFamily;
+  const currentStorageBubbleHandler = currentBoard &&
+    storageBubbleInteractionHandler?._services === services &&
+    storageBubbleInteractionHandler._isActive !== false &&
+    typeof storageBubbleInteractionHandler._onBubblePointerDown === 'function' &&
+    typeof storageBubbleInteractionHandler._onBubblePointerUp === 'function' &&
+    storageBubbleInteractionHandler._family?._filter?._behaviorTypes?.includes?.(
+      'storageBubbleInteractable') &&
+    storageBubblePopHandler?._services === services &&
+    storageBubblePopHandler._isActive !== false &&
+    typeof storageBubblePopHandler._onStorageBubbleTapped === 'function';
   const upgradeCard = services?.upgradeCard;
   const currentUpgradeInteraction = currentBoard && upgradeCard?._services === services &&
     upgradeCard._isActive !== false &&
@@ -316,6 +345,7 @@ _HEALTH_EXPRESSION = r"""
     rewardInteraction: Boolean(currentRewardInteractionHandler),
     obstacleClear: Boolean(currentObstacleClearHandler),
     rewardContainer: Boolean(currentRewardContainerHandler),
+    storageBubble: Boolean(currentStorageBubbleHandler),
     upgradeInteraction: Boolean(currentUpgradeInteraction),
     itemActionBusy: Boolean(currentItemHandler && (
       handler.busy || handler.isBusy?.() || handler.dragging || handler._dragging ||
@@ -330,6 +360,65 @@ _HEALTH_EXPRESSION = r"""
     transientOverlay,
   };
 })()
+"""
+
+_READ_STORAGE_BUBBLES_EXPRESSION = r"""
+(() => {
+  const board = window.__fmvBoardCells;
+  const services = window.__fmvGameplayServices;
+  const handler = window.__fmvStorageBubbleInteractionHandler;
+  if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
+      handler?._services !== services || handler._isActive === false ||
+      !Array.isArray(handler._family?._gameObjects)) return null;
+  const out = [];
+  for (const bubble of handler._family._gameObjects) {
+    const content = bubble?.getBehavior?.('storageBubble')?.content;
+    if (!Number.isInteger(bubble?.id) || !Array.isArray(content)) continue;
+    out.push({
+      objectID: bubble.id,
+      contentIDs: content.map((item) => item?.blueprint)
+        .filter((blueprintID) => typeof blueprintID === 'string'),
+    });
+  }
+  return out;
+})()
+"""
+
+
+def _storage_bubble_pop_expression(object_id: int, scene_id: int | None) -> str:
+    return f"""
+(() => {{
+  const expectedObjectID = {json.dumps(object_id)};
+  const board = window.__fmvBoardCells;
+  const services = window.__fmvGameplayServices;
+  const interactionHandler = window.__fmvStorageBubbleInteractionHandler;
+  const popHandler = window.__fmvStorageBubblePopHandler;
+  const identity = services?.mapGrid || window.__fmvGameplayMapScreen ||
+    window.__fmvItemInteractionHandler || board;
+  const currentSceneId = identity && window.__fmvRuntimeSceneIds
+    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
+      currentSceneId !== {json.dumps(scene_id)} ||
+      interactionHandler?._services !== services || popHandler?._services !== services)
+    return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
+  const bubble = [...(interactionHandler._family?._gameObjects || [])]
+    .find((candidate) => candidate?.id === expectedObjectID);
+  const storage = bubble?.getBehavior?.('storageBubble');
+  if (!bubble || !bubble.hasBehavior?.('storageBubbleInteractable') ||
+      !Array.isArray(storage?.content) || storage.content.length === 0)
+    return {{status: 'stale-source'}};
+  if (services.gridFilter?.getEmptyCells?.().length === 0)
+    return {{status: 'rejected', detail: 'insufficient-board-space'}};
+  if (popHandler._isActive === false ||
+      typeof popHandler._onStorageBubbleTapped !== 'function')
+    return {{status: 'unavailable', detail: 'storage-bubble-handler-not-current'}};
+  try {{
+    popHandler._onStorageBubbleTapped(bubble);
+    return {{status: 'submitted'}};
+  }} catch (error) {{
+    return {{status: 'rejected', detail: String(error?.message || error)}};
+  }}
+}})()
 """
 
 

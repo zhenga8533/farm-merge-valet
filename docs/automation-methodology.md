@@ -46,6 +46,15 @@ gameplay popup layers. Other popups and navigation screens are not dismissed.
 
 ## Interact with tiles and producers
 
+Detached storage bubbles are not board cells, so they use a dedicated live
+reader and action path. The default-enabled global toggle permits popping only
+when the authoritative board exposes an empty cell. Submission revalidates the
+runtime scene, bubble identity, interactable behavior, non-empty contents, and
+current board space before invoking the game's native storage-bubble handler.
+That handler can partially release a multi-item bubble; removal of the bubble
+or a decrease in its content list confirms progress, after which remaining
+contents can be retried when space is available.
+
 The live cell read includes semantic behaviors as well as blueprint identity.
 Catalog metadata assigns tile interactions to explicit modes: direct,
 direct opt-in, clear, upgrade, requirement, or none. Every object with the

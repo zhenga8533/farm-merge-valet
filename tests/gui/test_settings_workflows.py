@@ -164,6 +164,7 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     assert "Version" in labels
     assert "Start automation paused" in labels
     assert "Automatically dismiss reward overlays" in labels
+    assert "Automatically pop stored items" in labels
     assert "Reset all" in {
         button.text() for button in window.settings_page.findChildren(QPushButton)
     }

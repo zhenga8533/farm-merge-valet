@@ -81,6 +81,11 @@ class SettingsPage(ConfigFormPage):
             "Automatically dismiss reward overlays",
             "auto_dismiss_overlays",
         )
+        self._add_toggle(
+            automation_form,
+            "Automatically pop stored items",
+            "auto_pop_storage_bubbles",
+        )
 
         automation_advanced, form = disclosure_section("Advanced timing")
         self._add_float(form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)

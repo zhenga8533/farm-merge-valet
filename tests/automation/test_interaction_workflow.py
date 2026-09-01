@@ -11,6 +11,7 @@ from farm_merge_valet.automation.runtime import (
     LiveCellState,
     RewardRequirement,
     RuntimeHealth,
+    StorageBubbleState,
 )
 from farm_merge_valet.automation.workflows import (
     InteractionAction,
@@ -47,6 +48,8 @@ class FakeRuntime:
         self.claimed_orders: list[tuple[str, str]] = []
         self.shop_orders: tuple[ShopOrder, ...] = ()
         self.board_state: dict[tuple[int, int], LiveCellState] | None = {}
+        self.storage_bubbles: tuple[StorageBubbleState, ...] = ()
+        self.popped_storage_bubbles: list[int] = []
 
     def set_cancel_event(self, cancel_event):
         self.cancel_event = cancel_event
@@ -56,6 +59,13 @@ class FakeRuntime:
 
     def read_background_flag_status(self):
         return {"available": True, "all_present": True}
+
+    def read_storage_bubbles(self):
+        return self.storage_bubbles
+
+    def submit_storage_bubble_pop(self, expected_object_id):
+        self.popped_storage_bubbles.append(expected_object_id)
+        return ActionResult(ActionStatus.SUBMITTED)
 
     def submit_item_drop(self, start, end):
         self.drops.append((start, end))
@@ -110,6 +120,7 @@ def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
         removal_available=True,
         upgrade_interaction_available=True,
         reward_container_available=True,
+        storage_bubble_available=True,
     )
 
 
@@ -138,6 +149,9 @@ def bare_bot() -> Bot:
     bot._shovelable_ids = frozenset()
     bot._clearable_ids = frozenset()
     bot._obstacle_focus = None
+    bot._storage_bubbles = ()
+    bot._pending_storage_bubble = None
+    bot._storage_bubble_next_action_at = 0.0
     bot._last_health = None
     bot._last_wait_reason = None
     bot._last_wait_log_at = 0.0
@@ -156,6 +170,42 @@ def action(item: ItemRef) -> MergeAction:
     return MergeAction(
         MergeActionKind.GATHER, item, (0, 0), (1, 0), frozenset({(1, 0)}), 5, MoveEffect.MOVE
     )
+
+
+def test_storage_bubble_pop_requires_open_board_space() -> None:
+    bot = bare_bot()
+    bubble = StorageBubbleState(41, ("energy_1",))
+    bot._storage_bubbles = (bubble,)
+
+    assert not bot._step_storage_bubbles(health(advancing=True))
+    assert bot.runtime.popped_storage_bubbles == []
+
+    bot.board.set_cell((1, 1), Cell(CellKind.EMPTY))
+
+    assert bot._step_storage_bubbles(health(advancing=True))
+    assert bot.runtime.popped_storage_bubbles == [41]
+    assert bot._pending_storage_bubble is not None
+
+
+def test_storage_bubble_pop_respects_global_toggle() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(auto_pop_storage_bubbles=False)
+    bot.board.set_cell((1, 1), Cell(CellKind.EMPTY))
+    bot._storage_bubbles = (StorageBubbleState(41, ("energy_1",)),)
+
+    assert not bot._step_storage_bubbles(health(advancing=True))
+    assert bot.runtime.popped_storage_bubbles == []
+
+
+def test_storage_bubble_partial_pop_is_confirmed() -> None:
+    bot = bare_bot()
+    bot.board.set_cell((1, 1), Cell(CellKind.EMPTY))
+    bot._storage_bubbles = (StorageBubbleState(41, ("energy_1", "coin_1")),)
+    bot._step_storage_bubbles(health(advancing=True))
+    bot._storage_bubbles = (StorageBubbleState(41, ("energy_1",)),)
+
+    assert bot._verify_pending_storage_bubble(health(advancing=True))
+    assert bot._pending_storage_bubble is None
 
 
 def test_ground_product_is_interacted_with_before_ready_producer(monkeypatch) -> None:

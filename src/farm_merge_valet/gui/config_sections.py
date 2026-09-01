@@ -44,6 +44,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "merge_empty_cell_reserve",
         "producer_interact_min_empty_cells",
         "auto_dismiss_overlays",
+        "auto_pop_storage_bubbles",
         "loop_interval",
         "idle_wait_seconds",
         "item_action_delay_min",
