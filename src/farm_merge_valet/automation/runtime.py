@@ -75,6 +75,7 @@ class RuntimeHealth:
     reward_interaction_available: bool = False
     obstacle_clear_available: bool = False
     upgrade_interaction_available: bool = False
+    reward_container_available: bool = False
 
 
 @dataclass(frozen=True)

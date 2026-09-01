@@ -115,6 +115,38 @@ def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
     app.processEvents()
 
 
+def test_reward_container_exposes_open_policy_control(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    chest = CatalogItem(
+        "reward_crate_stickerbook",
+        "reward_crate_stickerbook",
+        "rewards/reward_crate_stickerbook",
+        "rewards",
+        "Reward Crate Stickerbook",
+        None,
+        False,
+        None,
+        None,
+        None,
+        frozenset({"clickable", "crateReward", "movable"}),
+        traits=frozenset({"container", "movable"}),
+    )
+    write_item_catalog(catalog_dir / "catalog.json", ItemCatalog({chest.game_id: chest}))
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+
+    row = window.items_page.table.topLevelItem(0)
+    interact = window.items_page.table.itemWidget(row, 5).findChild(QCheckBox)
+
+    assert interact is not None and interact.isEnabled() and interact.isChecked()
+    assert interact.accessibleName().endswith(": open")
+
+    window.quit_application()
+    app.processEvents()
+
+
 def test_item_families_expand_into_independent_tier_policies(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     catalog_dir = tmp_path / "catalog"

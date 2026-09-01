@@ -116,9 +116,9 @@ defaults, item-specific defaults, and finally partial per-key user overrides.
 Automation, merging, and merge-5 default on for current and future merge
 families. `enabled` controls all supported automation for a key, while `merge`
 can exclude an individual family from merge planning only. `interact` controls
-the item's primary action: direct interaction, producer harvesting, upgrade
-application, or obstacle clearing. Ingredients, train tickets, ordinary supply
-crates, crops, animals, obstacles, and upgrade-card tiers 1 and 3 default on.
+the item's primary action: direct interaction, reward-container opening,
+producer harvesting, upgrade application, or obstacle clearing. Ingredients, train tickets, ordinary supply
+crates, reward containers, crops, animals, obstacles, and upgrade-card tiers 1 and 3 default on.
 Other direct-interaction items remain opt-in. HUD supply crates and shop rewards
 are governed separately.
 Fields that do not match an item's catalog capabilities are ignored, allowing
@@ -155,6 +155,9 @@ and ordinary supply crates use the game's internal click handler. Currency
 rewards use the exact callback behind their Claim button without opening the
 confirmation popout. One-click items are enabled by default; currency rewards
 remain opt-in.
+Reward Chests, Stickerbook crates, event crates, and other `crateReward`
+containers expose an Open policy that defaults on. Before opening one, the bot reserves
+space for its complete declared reward list and verifies any required keys.
 Exhausted animals are retired into coins, while exhausted crops are
 retired only with an open cell available for their two tier-1 replacements. A
 ready tier-4 producer preempts crates. Supply claims resolve inventory from the

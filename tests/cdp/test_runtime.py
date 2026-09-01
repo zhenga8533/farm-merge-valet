@@ -245,6 +245,14 @@ def test_discovery_validates_upgrade_card_service() -> None:
     assert "upgradeCard?._services === services" in _HEALTH_EXPRESSION
 
 
+def test_discovery_validates_reward_container_handler() -> None:
+    from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+
+    assert "typeof candidate._getCrateUnlockCostObjects === 'function'" in _DISCOVER_EXPRESSION
+    assert "window.__fmvRewardContainerHandler" in _DISCOVER_EXPRESSION
+    assert "rewardContainerHandler?._services === services" in _HEALTH_EXPRESSION
+
+
 def test_discovery_validates_shop_order_service() -> None:
     from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 
@@ -475,6 +483,31 @@ def test_upgrade_card_uses_authoritative_progress_and_game_service(monkeypatch) 
     assert "upgrade-tier-already-applied" in expression
     assert "upgradeHandler._cellWithCard = cell" in expression
     assert "upgradeHandler.upgradeItemGrade(target, cardTier)" in expression
+
+
+def test_reward_container_validates_full_space_and_requirements_before_opening(
+    monkeypatch,
+) -> None:
+    expression = ""
+
+    def capture_expression(_port, value, _title, **_kwargs):
+        nonlocal expression
+        expression = value
+        return {"status": "submitted"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", capture_expression)
+
+    result = GameRuntimeAdapter(9222, "Farm").submit_board_interaction(
+        (60, 59), InteractionTargetKind.REWARD_CONTAINER, "reward_crate_bronze", 1232
+    )
+
+    assert result.status is ActionStatus.SUBMITTED
+    assert "content.hasBehavior?.('crateReward')" in expression
+    assert "empty < reward.rewards.length" in expression
+    assert "services.gridFilter.hasEnoughItems(requirements)" in expression
+    assert "reward-requirements-changed" in expression
+    assert "object.removeBehaviorByType('mergeable')" in expression
+    assert "rewardContainerHandler._openCrate(content, costObjects)" in expression
 
 
 def test_removal_uses_game_shovel_callback_without_confirmation_popup(monkeypatch) -> None:

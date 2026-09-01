@@ -180,5 +180,34 @@ def test_board_reader_derives_claim_capacity_from_live_rewards() -> None:
     from farm_merge_valet.cdp.board_store import _READ_EXPRESSION
 
     assert "rewardCapacity(harvestReward)" in _READ_EXPRESSION
+
+
+def test_board_reader_derives_reward_container_capacity_and_ids(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.board_store.evaluate",
+        lambda *_args, **_kwargs: [
+            {
+                "column": 4,
+                "row": 8,
+                "hasContent": True,
+                "blueprintID": "reward_crate_stickerbook",
+                "objectID": 55,
+                "claimOutputCapacity": 6,
+                "claimOutputIDs": ["sticker_pack", "energy_1"],
+                "behaviorNames": ["crateReward", "cooldown"],
+            }
+        ],
+    )
+
+    state = read_board_state(9222, "Farm")
+
+    assert state is not None
+    assert state[(4, 8)].claim_output_capacity == 6
+    assert state[(4, 8)].claim_output_ids == frozenset({"sticker_pack", "energy_1"})
+
+    from farm_merge_valet.cdp.board_store import _READ_EXPRESSION
+
+    assert "crateReward?._data?.rewards" in _READ_EXPRESSION
+    assert "crateRewards.length" in _READ_EXPRESSION
     assert "obstacleLoot.length" in _READ_EXPRESSION
     assert "claimOutputIDs" in _READ_EXPRESSION

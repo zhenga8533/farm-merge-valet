@@ -67,6 +67,13 @@ _DISCOVER_EXPRESSION = r"""
     typeof candidate._attemptPayment === 'function' &&
     typeof candidate._getTotalCost === 'function' &&
     candidate._popoutStore) || null;
+  const rewardContainerHandler = gameplaySystems.find((candidate) =>
+    candidate?._services === services &&
+    candidate._isActive !== false &&
+    typeof candidate._getCrateUnlockCostObjects === 'function' &&
+    typeof candidate._openCrate === 'function' &&
+    typeof candidate._canSpawnRewards === 'function' &&
+    candidate._crateFamily && candidate._keysFamily) || null;
   const upgradeCard = services?.upgradeCard;
   const validUpgradeInteraction = upgradeCard?._services === services &&
     upgradeCard._isActive !== false &&
@@ -97,6 +104,7 @@ _DISCOVER_EXPRESSION = r"""
   window.__fmvShovelHandler = shovelHandler;
   window.__fmvRewardInteractionHandler = rewardInteractionHandler;
   window.__fmvObstacleClearHandler = obstacleClearHandler;
+  window.__fmvRewardContainerHandler = rewardContainerHandler;
   window.__fmvCrateSpawnSignal = validCrateSignal;
   window.__fmvCrateInventoryItem = validInventory;
   window.__fmvOrdersService = validShopOrders ? orders : null;
@@ -115,6 +123,7 @@ _DISCOVER_EXPRESSION = r"""
   if (!shovelHandler) missing.push('shovel-handler');
   if (!rewardInteractionHandler) missing.push('reward-interaction-handler');
   if (!obstacleClearHandler) missing.push('obstacle-clear-handler');
+  if (!rewardContainerHandler) missing.push('reward-container-handler');
   if (!validUpgradeInteraction) missing.push('upgrade-card-handler');
   if (!validCrateSignal) missing.push('crate-spawn-signal');
   if (!validInventory) missing.push('crate-inventory');
@@ -128,6 +137,7 @@ _DISCOVER_EXPRESSION = r"""
     removal: Boolean(shovelHandler),
     rewardInteraction: Boolean(rewardInteractionHandler),
     obstacleClear: Boolean(obstacleClearHandler),
+    rewardContainer: Boolean(rewardContainerHandler),
     upgradeInteraction: Boolean(validUpgradeInteraction),
     crateSpawn: Boolean(validCrateSignal),
     crateSubscribers: crateSubscribers.length,
@@ -144,6 +154,7 @@ _DISCOVER_EXPRESSION = r"""
     removal: Boolean(shovelHandler),
     rewardInteraction: Boolean(rewardInteractionHandler),
     obstacleClear: Boolean(obstacleClearHandler),
+    rewardContainer: Boolean(rewardContainerHandler),
     upgradeInteraction: Boolean(validUpgradeInteraction),
     crateSpawn: Boolean(validCrateSignal),
     inventory: Boolean(validInventory),
@@ -172,6 +183,7 @@ _DISCOVERY_DIAGNOSTICS_EXPRESSION = r"""
   dropSubscribers: 0, itemDrop: false, crateSpawn: false,
   interaction: false, removal: false, rewardInteraction: false,
   obstacleClear: false,
+  rewardContainer: false,
   upgradeInteraction: false,
   shopOrders: false,
   inventory: Boolean(window.__fmvCrateInventoryItem), missing: ['discovery-not-run'],
@@ -203,6 +215,7 @@ _HEALTH_EXPRESSION = r"""
   const shovelHandler = window.__fmvShovelHandler;
   const rewardInteractionHandler = window.__fmvRewardInteractionHandler;
   const obstacleClearHandler = window.__fmvObstacleClearHandler;
+  const rewardContainerHandler = window.__fmvRewardContainerHandler;
   const crateSignal = window.__fmvCrateSpawnSignal;
   const orders = window.__fmvOrdersService;
   const beat = window.__fmvHeartbeat;
@@ -236,6 +249,13 @@ _HEALTH_EXPRESSION = r"""
     typeof obstacleClearHandler._attemptPayment === 'function' &&
     typeof obstacleClearHandler._getTotalCost === 'function' &&
     obstacleClearHandler._popoutStore;
+  const currentRewardContainerHandler = currentBoard &&
+    rewardContainerHandler?._services === services &&
+    rewardContainerHandler._isActive !== false &&
+    typeof rewardContainerHandler._getCrateUnlockCostObjects === 'function' &&
+    typeof rewardContainerHandler._openCrate === 'function' &&
+    typeof rewardContainerHandler._canSpawnRewards === 'function' &&
+    rewardContainerHandler._crateFamily && rewardContainerHandler._keysFamily;
   const upgradeCard = services?.upgradeCard;
   const currentUpgradeInteraction = currentBoard && upgradeCard?._services === services &&
     upgradeCard._isActive !== false &&
@@ -263,6 +283,7 @@ _HEALTH_EXPRESSION = r"""
     removal: Boolean(currentShovelHandler),
     rewardInteraction: Boolean(currentRewardInteractionHandler),
     obstacleClear: Boolean(currentObstacleClearHandler),
+    rewardContainer: Boolean(currentRewardContainerHandler),
     upgradeInteraction: Boolean(currentUpgradeInteraction),
     itemActionBusy: Boolean(currentItemHandler && (
       handler.busy || handler.isBusy?.() || handler.dragging || handler._dragging ||
@@ -506,6 +527,7 @@ def _interaction_expression(
   const handler = window.__fmvInteractionHandler;
   const rewardHandler = window.__fmvRewardInteractionHandler;
   const obstacleHandler = window.__fmvObstacleClearHandler;
+  const rewardContainerHandler = window.__fmvRewardContainerHandler;
   const services = window.__fmvGameplayServices;
   const upgradeHandler = services?.upgradeCard;
   const identity = window.__fmvGameplayServices?.mapGrid ||
@@ -513,8 +535,9 @@ def _interaction_expression(
   const currentSceneId = identity && window.__fmvRuntimeSceneIds
     ? window.__fmvRuntimeSceneIds.get(identity) : null;
   if (!board || window.__fmvRuntimeBoard !== board ||
-      (!['reward', 'clear', 'upgrade'].includes(expectedKind) && !handler) ||
+      (!['reward', 'reward-container', 'clear', 'upgrade'].includes(expectedKind) && !handler) ||
       (expectedKind === 'clear' && !obstacleHandler) ||
+      (expectedKind === 'reward-container' && !rewardContainerHandler) ||
       (expectedKind === 'upgrade' && !upgradeHandler) ||
       currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
@@ -540,6 +563,10 @@ def _interaction_expression(
     : expectedKind === 'upgrade'
       ? content.hasBehavior?.('upgradeCard') && Number.isInteger(content.getTier?.()) &&
         typeof content.getBehavior('upgradeCard')?._data?.targetObjectTreeIngredient === 'string'
+    : expectedKind === 'reward-container'
+      ? content.hasBehavior?.('crateReward') && content.hasBehavior?.('cooldown') &&
+        Array.isArray(content.getBehavior('crateReward')?._data?.rewards) &&
+        content.getBehavior('crateReward')._data.rewards.length > 0
     : expectedKind === 'clear'
       ? content.hasBehavior?.('mapSource') && content.hasBehavior?.('hitpoints') &&
         content.hasBehavior?.('resourceGate')
@@ -565,6 +592,37 @@ def _interaction_expression(
           typeof rewardHandler.onItemCollect?.fire !== 'function')
         return {{status: 'unavailable', detail: 'reward-interaction-handler-not-found'}};
       rewardHandler._collectReward(content);
+    }} else if (expectedKind === 'reward-container') {{
+      if (rewardContainerHandler?._services !== services ||
+          rewardContainerHandler._isActive === false ||
+          typeof rewardContainerHandler._getCrateUnlockCostObjects !== 'function' ||
+          typeof rewardContainerHandler._openCrate !== 'function')
+        return {{status: 'unavailable', detail: 'reward-container-handler-not-found'}};
+      if (rewardContainerHandler._currentlySpawningRewards)
+        return {{status: 'busy', detail: 'reward-container-handler-busy'}};
+      const reward = content.getBehavior('crateReward')._data;
+      const requirements = reward.crateRewardUnlockRequirement;
+      if (requirements != null && (!Array.isArray(requirements) ||
+          !requirements.every((item) => typeof item?.blueprintID === 'string' &&
+            Number.isInteger(item.amount) && item.amount > 0)))
+        return {{status: 'invalid-target', detail: 'reward-container-requirements-invalid'}};
+      let empty = 0;
+      for (const candidate of board.values()) if (!candidate._content) empty += 1;
+      if (empty < reward.rewards.length)
+        return {{status: 'rejected', detail: 'insufficient-reward-space'}};
+      if (requirements?.length) {{
+        if (typeof services?.gridFilter?.hasEnoughItems !== 'function')
+          return {{status: 'unavailable', detail: 'reward-requirement-state-unavailable'}};
+        if (!services.gridFilter.hasEnoughItems(requirements))
+          return {{status: 'rejected', detail: 'missing-reward-requirements'}};
+      }}
+      const costObjects = rewardContainerHandler._getCrateUnlockCostObjects(content);
+      const requiredObjectCount = (requirements || [])
+        .reduce((total, item) => total + item.amount, 0);
+      if (!Array.isArray(costObjects) || costObjects.length !== requiredObjectCount)
+        return {{status: 'rejected', detail: 'reward-requirements-changed'}};
+      for (const object of costObjects) object.removeBehaviorByType('mergeable');
+      rewardContainerHandler._openCrate(content, costObjects);
     }} else if (expectedKind === 'upgrade') {{
       if (upgradeHandler?._services !== services || upgradeHandler._isActive === false ||
           typeof upgradeHandler.upgradeItemGrade !== 'function' ||

@@ -108,6 +108,7 @@ def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
         shop_available=True,
         removal_available=True,
         upgrade_interaction_available=True,
+        reward_container_available=True,
     )
 
 
@@ -131,6 +132,7 @@ def bare_bot() -> Bot:
     bot._blueprint_policy_keys = {"milk": "ingredients/milk"}
     bot._direct_interaction_ids = frozenset({"milk"})
     bot._reward_interaction_ids = frozenset()
+    bot._reward_container_ids = frozenset()
     bot._upgrade_interaction_ids = frozenset()
     bot._shovelable_ids = frozenset()
     bot._clearable_ids = frozenset()
@@ -311,6 +313,77 @@ def test_duplicate_upgrade_card_stops_qualifying_after_progress_refresh() -> Non
     }
 
     assert bot._interaction_actions() == ([], [], [])
+
+
+def test_enabled_reward_container_requires_its_exact_output_space(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._blueprint_policy_keys = {"reward_crate_bronze": "rewards/reward_chest/tier/1"}
+    bot._reward_container_ids = frozenset({"reward_crate_bronze"})
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"rewards/reward_chest/tier/1": ItemPolicyOverride(interact=True)},
+    )
+    bot._live_cells = {
+        (3, 4): LiveCellState(
+            True,
+            "reward_crate_bronze",
+            120,
+            1,
+            behavior_names=frozenset({"crateReward", "cooldown"}),
+            claim_output_capacity=7,
+            claim_output_ids=frozenset({"gem_1", "energy_1", "toolbox_small"}),
+        )
+    }
+    for column in range(7):
+        bot.board.set_cell((column, 0), Cell(CellKind.EMPTY))
+
+    immediate, depleted, ready = bot._interaction_actions()
+
+    assert immediate == [
+        InteractionAction(
+            InteractionTargetKind.REWARD_CONTAINER,
+            (3, 4),
+            "reward_crate_bronze",
+            120,
+            output_capacity=7,
+            output_ids=frozenset({"gem_1", "energy_1", "toolbox_small"}),
+            requires_full_output_space=True,
+        )
+    ]
+    assert depleted == []
+    assert ready == []
+
+    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+
+    assert bot.runtime.interactions == [
+        ((3, 4), InteractionTargetKind.REWARD_CONTAINER, "reward_crate_bronze", 120)
+    ]
+
+
+def test_reward_container_waits_when_full_output_space_cannot_be_created(monkeypatch) -> None:
+    bot = bare_bot()
+    action = InteractionAction(
+        InteractionTargetKind.REWARD_CONTAINER,
+        (3, 4),
+        "reward_crate_bronze",
+        120,
+        output_capacity=7,
+        requires_full_output_space=True,
+    )
+    for column in range(3):
+        bot.board.set_cell((column, 0), Cell(CellKind.EMPTY))
+    monkeypatch.setattr(bot, "_merge_actions_for_policy", lambda: [])
+    waits: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        bot, "_report_wait", lambda reason, **context: waits.append((reason, context))
+    )
+
+    bot._step_interact_tiles(health(advancing=True), [action], [], [])
+
+    assert bot.runtime.interactions == []
+    assert bot._interaction_workflow.output_space_request == action
+    assert waits[0][1]["desired_empty_cells"] == 7
 
 
 def test_remove_policy_plans_shovelable_item_without_interact_policy(monkeypatch) -> None:
@@ -1031,6 +1104,37 @@ def test_pending_upgrade_confirms_from_authoritative_progress_change(monkeypatch
         1,
         item_variant="soybeans",
         upgrade_applied_tier=1,
+    )
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
+
+    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot._interaction_workflow.pending is None
+
+
+def test_pending_reward_container_confirms_when_opening_starts(monkeypatch) -> None:
+    bot = bare_bot()
+    initial = LiveCellState(
+        True,
+        "reward_crate_bronze",
+        120,
+        behavior_names=frozenset({"crateReward", "cooldown", "movable"}),
+    )
+    interaction = InteractionAction(
+        InteractionTargetKind.REWARD_CONTAINER,
+        (3, 4),
+        "reward_crate_bronze",
+        120,
+        output_capacity=7,
+        requires_full_output_space=True,
+    )
+    bot._interaction_workflow.pending = PendingInteraction(
+        interaction, initial, 7, 1.0, initial, 1.0
+    )
+    bot._live_cells[interaction.coord] = LiveCellState(
+        True,
+        "reward_crate_bronze",
+        120,
+        behavior_names=frozenset({"crateReward"}),
     )
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
 

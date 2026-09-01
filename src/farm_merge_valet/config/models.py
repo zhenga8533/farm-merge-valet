@@ -41,6 +41,7 @@ _RECOMMENDED_ITEM_CATEGORY_DEFAULTS: Mapping[str, ItemPolicyOverride] = MappingP
         "crops": _INTERACT_BY_DEFAULT,
         "ingredients": _INTERACT_BY_DEFAULT,
         "obstacles": _INTERACT_BY_DEFAULT,
+        "rewards": _INTERACT_BY_DEFAULT,
     }
 )
 _RECOMMENDED_ITEM_DEFAULTS: Mapping[str, ItemPolicyOverride] = MappingProxyType(

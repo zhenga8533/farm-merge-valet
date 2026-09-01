@@ -43,10 +43,19 @@ Catalog metadata assigns tile interactions to explicit modes: direct,
 direct opt-in, clear, upgrade, requirement, or none. Every object with the
 game's `collectable` capability can enter the verified interaction pipeline,
 and its tier policy must also have Interact enabled in the GUI. Ingredients,
-train tickets, ordinary supply-crate tiles, crops, animals, obstacles, and
-upgrade-card tiers 1 and 3 default on. Coins, energy, gems, and newly discovered
-direct-interaction types default off. Requirement-based reward containers remain
-separate interaction types.
+train tickets, ordinary supply-crate tiles, reward containers, crops, animals,
+obstacles, and upgrade-card tiers 1 and 3 default on. Coins, energy, gems, and newly
+discovered direct-interaction types default off. Requirement-based reward containers
+remain a separate interaction type.
+
+Reward Chests, Stickerbook crates, event crates, and other `crateReward`
+containers expose an Open policy. Their live reward list defines an exact board-space
+requirement; unlike producer and obstacle output, chest rewards cannot be claimed
+partially. Merge work therefore continues until the full capacity is available.
+Immediately before opening, the runtime revalidates the scene, object, chest and
+cooldown behaviors, complete output space, and every required key object. It then
+uses the game's chest-opening pipeline, which consumes the keys, runs the opening
+animation, spawns rewards, removes the chest, and records game analytics.
 
 Upgrade cards carry their crop or animal output target in the live board state.
 The same board snapshot reads that target's highest applied tier from the game's

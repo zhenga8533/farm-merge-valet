@@ -210,6 +210,7 @@ class GameRuntimeAdapter:
         interaction = raw.get("interaction") is True
         removal = raw.get("removal") is True
         reward_interaction = raw.get("rewardInteraction") is True
+        reward_container = raw.get("rewardContainer") is True
         upgrade_interaction = raw.get("upgradeInteraction") is True
         crate_spawn = raw.get("crateSpawn") is True
         board = raw.get("board") is True
@@ -220,6 +221,7 @@ class GameRuntimeAdapter:
                 or interaction
                 or removal
                 or reward_interaction
+                or reward_container
                 or upgrade_interaction
                 or crate_spawn
             )
@@ -245,6 +247,7 @@ class GameRuntimeAdapter:
             reward_interaction_available=reward_interaction,
             obstacle_clear_available=raw.get("obstacleClear") is True,
             upgrade_interaction_available=upgrade_interaction,
+            reward_container_available=reward_container,
         )
 
     @staticmethod

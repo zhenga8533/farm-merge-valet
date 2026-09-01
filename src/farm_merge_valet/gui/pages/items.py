@@ -481,6 +481,7 @@ class ItemsPage(AppPage):
             TileInteractionMode.DIRECT_OPT_IN,
             TileInteractionMode.REWARD,
             TileInteractionMode.CLEAR,
+            TileInteractionMode.OPEN_REQUIREMENT,
         } or (item.category in {"animals", "crops"} and item.tier == 4)
         return (
             item.merge_target is not None
@@ -519,6 +520,7 @@ class ItemsPage(AppPage):
                 TileInteractionMode.DIRECT_OPT_IN,
                 TileInteractionMode.REWARD,
                 TileInteractionMode.CLEAR,
+                TileInteractionMode.OPEN_REQUIREMENT,
             }
             or (item.category in {"animals", "crops"} and item.tier == 4)
             or upgrade_interactable,
@@ -747,6 +749,8 @@ class ItemsPage(AppPage):
             return "clear"
         if item.tile_interaction_mode is TileInteractionMode.UPGRADE:
             return "apply"
+        if item.tile_interaction_mode is TileInteractionMode.OPEN_REQUIREMENT:
+            return "open"
         if item.category in {"animals", "crops"}:
             return "harvest"
         return "interact"

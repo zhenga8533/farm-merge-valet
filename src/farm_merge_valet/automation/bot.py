@@ -112,6 +112,7 @@ class Bot:
         self._blueprint_policy_keys: dict[str, str] = {}
         self._direct_interaction_ids: frozenset[str] = frozenset()
         self._reward_interaction_ids: frozenset[str] = frozenset()
+        self._reward_container_ids: frozenset[str] = frozenset()
         self._upgrade_interaction_ids: frozenset[str] = frozenset()
         self._clearable_ids: frozenset[str] = frozenset()
         self._shovelable_ids: frozenset[str] = frozenset()
@@ -229,6 +230,7 @@ class Bot:
             }
             self._direct_interaction_ids = catalog.direct_interaction_ids
             self._reward_interaction_ids = catalog.reward_interaction_ids
+            self._reward_container_ids = catalog.reward_container_ids
             self._upgrade_interaction_ids = catalog.upgrade_interaction_ids
             self._clearable_ids = catalog.clearable_ids
             self._shovelable_ids = catalog.shovelable_ids
@@ -525,6 +527,8 @@ class Bot:
                 output_capacity=action.output_capacity,
                 output_ids=sorted(action.output_ids),
             )
+        if action.requires_full_output_space:
+            context["requires_full_output_space"] = True
         if action.upgrade_target_id is not None:
             context.update(
                 upgrade_target_id=action.upgrade_target_id,
@@ -663,6 +667,20 @@ class Bot:
                 continue
             if not policy.interact:
                 continue
+            if state.blueprint_id in getattr(self, "_reward_container_ids", frozenset()):
+                if state.claim_output_capacity is not None:
+                    immediate.append(
+                        InteractionAction(
+                            InteractionTargetKind.REWARD_CONTAINER,
+                            coord,
+                            state.blueprint_id,
+                            state.object_id,
+                            output_capacity=state.claim_output_capacity,
+                            output_ids=state.claim_output_ids,
+                            requires_full_output_space=True,
+                        )
+                    )
+                continue
             if state.blueprint_id in getattr(self, "_upgrade_interaction_ids", frozenset()):
                 if (
                     state.tier is not None
@@ -782,6 +800,7 @@ class Bot:
             InteractionTargetKind.REMOVE: 0,
             InteractionTargetKind.IMMEDIATE: 1,
             InteractionTargetKind.REWARD: 1,
+            InteractionTargetKind.REWARD_CONTAINER: 1,
             InteractionTargetKind.UPGRADE: 1,
             InteractionTargetKind.OBSTACLE_LOOT: 1,
             InteractionTargetKind.CLEAR: 2,
@@ -1079,6 +1098,9 @@ class Bot:
             elif next_action.kind is InteractionTargetKind.UPGRADE:
                 capability_available = health.upgrade_interaction_available
                 capability = "upgrade-card interaction"
+            elif next_action.kind is InteractionTargetKind.REWARD_CONTAINER:
+                capability_available = health.reward_container_available
+                capability = "reward-container interaction"
             elif next_action.kind is InteractionTargetKind.CLEAR:
                 capability_available = health.obstacle_clear_available
                 capability = "obstacle clearing"

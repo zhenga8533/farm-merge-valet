@@ -39,6 +39,7 @@ class InteractionAction:
     output_ids: frozenset[str] = frozenset()
     upgrade_target_id: str | None = None
     upgrade_applied_tier: int | None = None
+    requires_full_output_space: bool = False
 
 
 @dataclass
@@ -112,6 +113,8 @@ class InteractionWorkflow:
         empty_count = len(bot.board.find_empty())
         if empty_count >= desired_empty_cells:
             return None
+        if action.requires_full_output_space:
+            return desired_empty_cells
         if bot._merge_actions_for_policy() or empty_count == 0:
             return desired_empty_cells
         return None
@@ -133,6 +136,12 @@ class InteractionWorkflow:
                     and pending.initial_state.upgrade_applied_tier is not None
                     and current.upgrade_applied_tier > pending.initial_state.upgrade_applied_tier
                 )
+            )
+        if pending.action.kind is InteractionTargetKind.REWARD_CONTAINER:
+            return (
+                current is None
+                or current.object_id != pending.action.object_id
+                or "cooldown" not in current.behavior_names
             )
         if pending.action.kind is InteractionTargetKind.OBSTACLE_LOOT:
             return (
@@ -378,6 +387,16 @@ class InteractionWorkflow:
                     desired_empty_cells=desired_empty_cells,
                 )
             return
+        if action.requires_full_output_space:
+            self.output_space_request = action
+            bot._set_phase(bot.phase.__class__.MERGE)
+            bot._report_wait(
+                "a reward container needs its full output space before opening",
+                empty_cells=empty_count,
+                desired_empty_cells=desired_empty_cells,
+                **bot._interaction_event_context(action),
+            )
+            return
         if empty_count > 0:
             self.output_space_request = None
             log_event(
@@ -412,7 +431,10 @@ class InteractionWorkflow:
             return
         if immediate:
             action = immediate[0]
-            if action.kind is InteractionTargetKind.OBSTACLE_LOOT:
+            if action.kind in {
+                InteractionTargetKind.OBSTACLE_LOOT,
+                InteractionTargetKind.REWARD_CONTAINER,
+            }:
                 self._step_output_claim(bot, health, action)
             else:
                 bot._submit_interaction(action, health)

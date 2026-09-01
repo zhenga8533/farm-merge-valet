@@ -189,6 +189,7 @@ _READ_EXPRESSION = """
     const harvestable = content?.getBehavior?.('harvestable');
     const lootable = content?.getBehavior?.('lootable');
     const upgradeCard = content?.getBehavior?.('upgradeCard');
+    const crateReward = content?.getBehavior?.('crateReward');
     const upgradeTarget = typeof upgradeCard?._data?.targetObjectTreeIngredient === 'string'
       ? upgradeCard._data.targetObjectTreeIngredient : null;
     const appliedUpgradeTier = upgradeTarget &&
@@ -209,10 +210,14 @@ _READ_EXPRESSION = """
       ? blueprints.get(content?._blueprintID)?.components?.harvestable?.harvestReward
       : null;
     const obstacleLoot = Array.isArray(lootable?.loot) ? lootable.loot : null;
-    const claimReward = obstacleLoot || harvestReward;
+    const crateRewards = Array.isArray(crateReward?._data?.rewards)
+      ? crateReward._data.rewards : null;
+    const claimReward = obstacleLoot || harvestReward || crateRewards;
     const claimOutputCapacity = obstacleLoot
       ? obstacleLoot.length
-      : producerKind ? rewardCapacity(harvestReward) : null;
+      : producerKind
+        ? rewardCapacity(harvestReward)
+        : crateRewards ? crateRewards.length : null;
     let producerState = null;
     if (producerKind) {
       if (content.hasBehavior?.('depleted')) producerState = 'depleted';

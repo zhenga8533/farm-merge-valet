@@ -100,8 +100,9 @@ obstacle clearing, upgrade application, requirement-based rewards, and
 non-actionable content. Collectable ingredients, tickets, and ordinary supply
 crates use the verified click path. Collectable currency items—including coins,
 energy, and gems—use the game callback behind their Claim button. Source
-obstacles use the clear mode. The policy default determines whether the
-applicable action is automated.
+obstacles use the clear mode. Reward Chests, Stickerbook crates, event crates,
+and other items with the game's `crateReward` behavior use the requirement-based
+open mode. The policy default determines whether the applicable action is automated.
 
 Crop and animal upgrade progress is read from the game's authoritative
 `UpgradeCardModel`. Each target records its highest applied tier; that tier and
@@ -135,8 +136,8 @@ enables merge-3 for cows and excludes wheat from merge planning. The overall
 while `merge` controls merge planning specifically.
 Board-item interaction, tier-4 producer harvesting, upgrade application, and
 obstacle clearing additionally require `interact: true`. Ingredients, tickets,
-ordinary supply crates, crops, animals, obstacles, and upgrade-card tiers 1 and
-3 default on; other current and future direct-interaction items default off. Producer and product
+ordinary supply crates, reward containers, crops, animals, obstacles, and
+upgrade-card tiers 1 and 3 default on; other current and future direct-interaction items default off. Producer and product
 keys remain independent—for example, `animals/cow` controls harvesting the
 producer while `ingredients/milk` controls interacting with milk on the board.
 HUD supply claims and shop rewards use their own policies rather than this item

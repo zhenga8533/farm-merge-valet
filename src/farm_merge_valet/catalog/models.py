@@ -160,6 +160,14 @@ class ItemCatalog:
         )
 
     @property
+    def reward_container_ids(self) -> frozenset[str]:
+        return frozenset(
+            game_id
+            for game_id, item in self.items.items()
+            if item.tile_interaction_mode is TileInteractionMode.OPEN_REQUIREMENT
+        )
+
+    @property
     def shovelable_ids(self) -> frozenset[str]:
         return frozenset(
             game_id

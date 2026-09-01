@@ -98,6 +98,8 @@ def test_interaction_defaults_support_category_and_item_specific_policies() -> N
     assert settings.item_policy("crops/wheat").interact
     assert settings.item_policy("animals/cow").interact
     assert settings.item_policy("obstacles/rock").interact
+    assert settings.item_policy("rewards/reward_chest/tier/1").interact
+    assert settings.item_policy("rewards/reward_crate_stickerbook").interact
 
 
 def test_upgrade_card_interaction_defaults_to_tiers_one_and_three_for_every_target() -> None:
