@@ -163,7 +163,10 @@ confirmation popout. One-click items are enabled by default; currency rewards
 remain opt-in.
 Reward Chests, Stickerbook crates, event crates, and other `crateReward`
 containers expose an Open policy that defaults on. Before opening one, the bot reserves
-space for its complete declared reward list and verifies any required keys.
+space for its complete declared reward list. Keyed containers are excluded from
+planning until the live board satisfies their exact requirements, and those
+requirements are revalidated immediately before opening. Requirement-free
+containers remain eligible.
 Exhausted animals are retired into coins, while exhausted crops are
 retired only with an open cell available for their two tier-1 replacements. A
 ready tier-4 producer preempts crates. Supply claims resolve inventory from the
@@ -233,7 +236,9 @@ pauses or prevents safe operation. While idle, the bot uses the configured
 polling interval but suppresses repeated logs until the state changes or
 the idle log's longer reminder interval elapses. If the focused obstacle is
 waiting for energy or workers, the idle message reports that constraint instead
-of describing the state only in terms of crates and merge actions.
+of describing the state only in terms of crates and merge actions. An enabled
+reward container waiting for keys likewise reports its required objects instead
+of producing repeated rejected-interaction warnings.
 
 All long-running operational records use one Python logging pipeline. The
 console, dashboard, compact overlay, and webhook are independent sinks attached

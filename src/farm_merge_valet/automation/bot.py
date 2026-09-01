@@ -981,15 +981,16 @@ class Bot:
         elif result.remaining == 0 and not merge_actions_available:
             self._last_crate_claim_limit = None
             obstacle_wait = self._obstacle_idle_reason()
-            reward_container_wait = self._reward_container_idle_reason()
             if obstacle_wait is not None:
                 reason, context = obstacle_wait
                 self._defer_idle(reason, **context)
-            elif reward_container_wait is not None:
-                reason, context = reward_container_wait
-                self._defer_idle(reason, **context)
             else:
-                self._defer_idle("no supply crates or merge actions are currently available")
+                reward_container_wait = self._reward_container_idle_reason()
+                if reward_container_wait is not None:
+                    reason, context = reward_container_wait
+                    self._defer_idle(reason, **context)
+                else:
+                    self._defer_idle("no supply crates or merge actions are currently available")
         elif result.status is ActionStatus.REJECTED:
             self._report_wait(result.detail or "crate spawn was not accepted")
         if result.remaining == 0 and merge_actions_available:
