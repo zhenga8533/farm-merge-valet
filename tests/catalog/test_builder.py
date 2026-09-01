@@ -77,6 +77,7 @@ def test_catalog_assigns_tile_interaction_modes_without_enabling_unsafe_clicks()
     assert "source-clearable" not in catalog.items["source_only"].traits
     assert catalog.direct_interaction_ids == frozenset({"milk", "ticket", "crate_1"})
     assert catalog.reward_interaction_ids == frozenset({"coin_1"})
+    assert catalog.upgrade_interaction_ids == frozenset({"upgrade_card_1"})
 
 
 def test_catalog_preserves_shop_recipe_cost_duration_and_rewards() -> None:

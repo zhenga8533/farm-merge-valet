@@ -107,6 +107,7 @@ def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
         reward_interaction_available=True,
         shop_available=True,
         removal_available=True,
+        upgrade_interaction_available=True,
     )
 
 
@@ -130,6 +131,7 @@ def bare_bot() -> Bot:
     bot._blueprint_policy_keys = {"milk": "ingredients/milk"}
     bot._direct_interaction_ids = frozenset({"milk"})
     bot._reward_interaction_ids = frozenset()
+    bot._upgrade_interaction_ids = frozenset()
     bot._shovelable_ids = frozenset()
     bot._clearable_ids = frozenset()
     bot._obstacle_focus = None
@@ -220,6 +222,95 @@ def test_only_enabled_immediate_catalog_items_become_tile_interaction_actions(mo
     assert all(action.kind is InteractionTargetKind.IMMEDIATE for action in immediate)
     assert depleted == []
     assert ready == []
+
+
+def test_upgrade_cards_only_apply_unclaimed_tiers_for_enabled_target(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._blueprint_items = {
+        "upgrade_card_1": ItemRef("upgrade_cards", "upgrade_card", 1),
+    }
+    bot._blueprint_policy_keys = {
+        "upgrade_card_1": "upgrade_cards/upgrade_card/tier/1",
+    }
+    bot._upgrade_interaction_ids = frozenset({"upgrade_card_1"})
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {
+            "upgrade_cards/upgrade_card/carrot/tier/1": ItemPolicyOverride(interact=False),
+        },
+    )
+    bot._live_cells = {
+        (1, 0): LiveCellState(
+            True,
+            "upgrade_card_1",
+            101,
+            1,
+            item_variant="soybeans",
+            upgrade_applied_tier=0,
+        ),
+        (2, 0): LiveCellState(
+            True,
+            "upgrade_card_1",
+            102,
+            1,
+            item_variant="soybeans",
+            upgrade_applied_tier=0,
+        ),
+        (3, 0): LiveCellState(
+            True,
+            "upgrade_card_1",
+            103,
+            1,
+            item_variant="egg",
+            upgrade_applied_tier=1,
+        ),
+        (4, 0): LiveCellState(
+            True,
+            "upgrade_card_1",
+            104,
+            1,
+            item_variant="carrot",
+            upgrade_applied_tier=0,
+        ),
+    }
+
+    immediate, depleted, ready = bot._interaction_actions()
+
+    assert [action.coord for action in immediate] == [(1, 0), (2, 0)]
+    assert all(action.kind is InteractionTargetKind.UPGRADE for action in immediate)
+    assert all(action.upgrade_target_id == "soybeans" for action in immediate)
+    assert depleted == []
+    assert ready == []
+
+    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+
+    assert bot.runtime.interactions == [
+        ((1, 0), InteractionTargetKind.UPGRADE, "upgrade_card_1", 101)
+    ]
+
+
+def test_duplicate_upgrade_card_stops_qualifying_after_progress_refresh() -> None:
+    bot = bare_bot()
+    bot._blueprint_items = {
+        "upgrade_card_1": ItemRef("upgrade_cards", "upgrade_card", 1),
+    }
+    bot._blueprint_policy_keys = {
+        "upgrade_card_1": "upgrade_cards/upgrade_card/tier/1",
+    }
+    bot._upgrade_interaction_ids = frozenset({"upgrade_card_1"})
+    bot._live_cells = {
+        (2, 0): LiveCellState(
+            True,
+            "upgrade_card_1",
+            102,
+            1,
+            item_variant="soybeans",
+            upgrade_applied_tier=1,
+        )
+    }
+
+    assert bot._interaction_actions() == ([], [], [])
 
 
 def test_remove_policy_plans_shovelable_item_without_interact_policy(monkeypatch) -> None:
@@ -906,6 +997,41 @@ def test_pending_removal_confirms_from_authoritative_source_change(monkeypatch) 
         interaction, initial, 7, 1.0, initial, 1.0
     )
     bot._live_cells[interaction.coord] = LiveCellState(False, None)
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
+
+    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot._interaction_workflow.pending is None
+
+
+def test_pending_upgrade_confirms_from_authoritative_progress_change(monkeypatch) -> None:
+    bot = bare_bot()
+    initial = LiveCellState(
+        True,
+        "upgrade_card_1",
+        91,
+        1,
+        item_variant="soybeans",
+        upgrade_applied_tier=0,
+    )
+    interaction = InteractionAction(
+        InteractionTargetKind.UPGRADE,
+        (3, 4),
+        "upgrade_card_1",
+        91,
+        upgrade_target_id="soybeans",
+        upgrade_applied_tier=0,
+    )
+    bot._interaction_workflow.pending = PendingInteraction(
+        interaction, initial, 7, 1.0, initial, 1.0
+    )
+    bot._live_cells[interaction.coord] = LiveCellState(
+        True,
+        "upgrade_card_1",
+        91,
+        1,
+        item_variant="soybeans",
+        upgrade_applied_tier=1,
+    )
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
 
     assert bot._verify_pending_interaction(health(advancing=True))

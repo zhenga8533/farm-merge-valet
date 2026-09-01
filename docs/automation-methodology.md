@@ -48,6 +48,15 @@ upgrade-card tiers 1 and 3 default on. Coins, energy, gems, and newly discovered
 direct-interaction types default off. Requirement-based reward containers remain
 separate interaction types.
 
+Upgrade cards carry their crop or animal output target in the live board state.
+The same board snapshot reads that target's highest applied tier from the game's
+upgrade model. An enabled card is eligible only when its card tier is higher.
+Submission revalidates the scene, coordinate, object identity, upgrade behavior,
+target, card tier, and current applied tier before calling the game's upgrade
+service. The source replacement or authoritative tier advancement confirms the
+action. After one of several duplicate cards applies a tier, the refreshed model
+excludes the remaining copies while leaving them available to normal merge policy.
+
 Recognized tier-4 crop and animal items are ready when they are harvestable
 without an active `cooldown` or `depleted` behavior, cooling while `cooldown`
 is present, and ready for retirement when depleted. The visual

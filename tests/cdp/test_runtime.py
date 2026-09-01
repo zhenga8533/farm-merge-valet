@@ -238,6 +238,13 @@ def test_discovery_validates_obstacle_clear_handler() -> None:
     assert "obstacleClearHandler?._services === services" in _HEALTH_EXPRESSION
 
 
+def test_discovery_validates_upgrade_card_service() -> None:
+    from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+
+    assert "typeof upgradeCard.upgradeItemGrade === 'function'" in _DISCOVER_EXPRESSION
+    assert "upgradeCard?._services === services" in _HEALTH_EXPRESSION
+
+
 def test_discovery_validates_shop_order_service() -> None:
     from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 
@@ -445,6 +452,29 @@ def test_obstacle_loot_uses_verified_tile_interaction(monkeypatch) -> None:
     assert "content.hasBehavior?.('lootable')" in expression
     assert "content.getBehavior('lootable').loot.length > 0" in expression
     assert "handler._simulateClick(content)" in expression
+
+
+def test_upgrade_card_uses_authoritative_progress_and_game_service(monkeypatch) -> None:
+    expression = ""
+
+    def capture_expression(_port, value, _title, **_kwargs):
+        nonlocal expression
+        expression = value
+        return {"status": "submitted"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", capture_expression)
+
+    result = GameRuntimeAdapter(9222, "Farm").submit_board_interaction(
+        (66, 58), InteractionTargetKind.UPGRADE, "upgrade_card_1", 1167
+    )
+
+    assert result.status is ActionStatus.SUBMITTED
+    assert "content.hasBehavior?.('upgradeCard')" in expression
+    assert "upgradeHandler._model.getItemTier(target)" in expression
+    assert "appliedTier >= cardTier" in expression
+    assert "upgrade-tier-already-applied" in expression
+    assert "upgradeHandler._cellWithCard = cell" in expression
+    assert "upgradeHandler.upgradeItemGrade(target, cardTier)" in expression
 
 
 def test_removal_uses_game_shovel_callback_without_confirmation_popup(monkeypatch) -> None:

@@ -67,6 +67,11 @@ _DISCOVER_EXPRESSION = r"""
     typeof candidate._attemptPayment === 'function' &&
     typeof candidate._getTotalCost === 'function' &&
     candidate._popoutStore) || null;
+  const upgradeCard = services?.upgradeCard;
+  const validUpgradeInteraction = upgradeCard?._services === services &&
+    upgradeCard._isActive !== false &&
+    typeof upgradeCard.upgradeItemGrade === 'function' &&
+    typeof upgradeCard._model?.getItemTier === 'function';
 
   // The gameplay HUD owns the authoritative crate event. Visual button states
   // can remain subscribed to inventory updates after their private event set
@@ -110,6 +115,7 @@ _DISCOVER_EXPRESSION = r"""
   if (!shovelHandler) missing.push('shovel-handler');
   if (!rewardInteractionHandler) missing.push('reward-interaction-handler');
   if (!obstacleClearHandler) missing.push('obstacle-clear-handler');
+  if (!validUpgradeInteraction) missing.push('upgrade-card-handler');
   if (!validCrateSignal) missing.push('crate-spawn-signal');
   if (!validInventory) missing.push('crate-inventory');
   window.__fmvRuntimeDiscovery = {
@@ -122,6 +128,7 @@ _DISCOVER_EXPRESSION = r"""
     removal: Boolean(shovelHandler),
     rewardInteraction: Boolean(rewardInteractionHandler),
     obstacleClear: Boolean(obstacleClearHandler),
+    upgradeInteraction: Boolean(validUpgradeInteraction),
     crateSpawn: Boolean(validCrateSignal),
     crateSubscribers: crateSubscribers.length,
     inventory: Boolean(validInventory),
@@ -137,6 +144,7 @@ _DISCOVER_EXPRESSION = r"""
     removal: Boolean(shovelHandler),
     rewardInteraction: Boolean(rewardInteractionHandler),
     obstacleClear: Boolean(obstacleClearHandler),
+    upgradeInteraction: Boolean(validUpgradeInteraction),
     crateSpawn: Boolean(validCrateSignal),
     inventory: Boolean(validInventory),
     shopOrders: Boolean(validShopOrders),
@@ -164,6 +172,7 @@ _DISCOVERY_DIAGNOSTICS_EXPRESSION = r"""
   dropSubscribers: 0, itemDrop: false, crateSpawn: false,
   interaction: false, removal: false, rewardInteraction: false,
   obstacleClear: false,
+  upgradeInteraction: false,
   shopOrders: false,
   inventory: Boolean(window.__fmvCrateInventoryItem), missing: ['discovery-not-run'],
 })()
@@ -227,6 +236,11 @@ _HEALTH_EXPRESSION = r"""
     typeof obstacleClearHandler._attemptPayment === 'function' &&
     typeof obstacleClearHandler._getTotalCost === 'function' &&
     obstacleClearHandler._popoutStore;
+  const upgradeCard = services?.upgradeCard;
+  const currentUpgradeInteraction = currentBoard && upgradeCard?._services === services &&
+    upgradeCard._isActive !== false &&
+    typeof upgradeCard.upgradeItemGrade === 'function' &&
+    typeof upgradeCard._model?.getItemTier === 'function';
   const currentCrateSignal = currentBoard &&
     services?.hudService?._commonEvents?.spawnCrates === crateSignal &&
     typeof crateSignal?.fire === 'function' && subscribers(crateSignal).length > 0;
@@ -249,6 +263,7 @@ _HEALTH_EXPRESSION = r"""
     removal: Boolean(currentShovelHandler),
     rewardInteraction: Boolean(currentRewardInteractionHandler),
     obstacleClear: Boolean(currentObstacleClearHandler),
+    upgradeInteraction: Boolean(currentUpgradeInteraction),
     itemActionBusy: Boolean(currentItemHandler && (
       handler.busy || handler.isBusy?.() || handler.dragging || handler._dragging ||
       handler._currentObject || handler._originCell
@@ -492,13 +507,15 @@ def _interaction_expression(
   const rewardHandler = window.__fmvRewardInteractionHandler;
   const obstacleHandler = window.__fmvObstacleClearHandler;
   const services = window.__fmvGameplayServices;
+  const upgradeHandler = services?.upgradeCard;
   const identity = window.__fmvGameplayServices?.mapGrid ||
     window.__fmvGameplayMapScreen || handler || board;
   const currentSceneId = identity && window.__fmvRuntimeSceneIds
     ? window.__fmvRuntimeSceneIds.get(identity) : null;
   if (!board || window.__fmvRuntimeBoard !== board ||
-      (expectedKind !== 'reward' && expectedKind !== 'clear' && !handler) ||
+      (!['reward', 'clear', 'upgrade'].includes(expectedKind) && !handler) ||
       (expectedKind === 'clear' && !obstacleHandler) ||
+      (expectedKind === 'upgrade' && !upgradeHandler) ||
       currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
   let cell = null;
@@ -520,6 +537,9 @@ def _interaction_expression(
       ? content.hasBehavior?.('collectable') && content.hasBehavior?.('currency') &&
         Array.isArray(content.getBehavior?.('collectable')?.reward) &&
         content.getBehavior('collectable').reward.length > 0
+    : expectedKind === 'upgrade'
+      ? content.hasBehavior?.('upgradeCard') && Number.isInteger(content.getTier?.()) &&
+        typeof content.getBehavior('upgradeCard')?._data?.targetObjectTreeIngredient === 'string'
     : expectedKind === 'clear'
       ? content.hasBehavior?.('mapSource') && content.hasBehavior?.('hitpoints') &&
         content.hasBehavior?.('resourceGate')
@@ -545,6 +565,26 @@ def _interaction_expression(
           typeof rewardHandler.onItemCollect?.fire !== 'function')
         return {{status: 'unavailable', detail: 'reward-interaction-handler-not-found'}};
       rewardHandler._collectReward(content);
+    }} else if (expectedKind === 'upgrade') {{
+      if (upgradeHandler?._services !== services || upgradeHandler._isActive === false ||
+          typeof upgradeHandler.upgradeItemGrade !== 'function' ||
+          typeof upgradeHandler._model?.getItemTier !== 'function')
+        return {{status: 'unavailable', detail: 'upgrade-card-handler-not-found'}};
+      const target = content.getBehavior('upgradeCard')._data.targetObjectTreeIngredient;
+      const cardTier = content.getTier();
+      const appliedTier = upgradeHandler._model.getItemTier(target);
+      if (!Number.isInteger(appliedTier) || appliedTier < 0)
+        return {{status: 'unavailable', detail: 'upgrade-progress-unavailable'}};
+      if (appliedTier >= cardTier)
+        return {{status: 'rejected', detail: 'upgrade-tier-already-applied'}};
+      const previousCellWithCard = upgradeHandler._cellWithCard;
+      try {{
+        upgradeHandler._cellWithCard = cell;
+        upgradeHandler.upgradeItemGrade(target, cardTier);
+      }} finally {{
+        if (upgradeHandler._cellWithCard === cell)
+          upgradeHandler._cellWithCard = previousCellWithCard;
+      }}
     }} else if (expectedKind === 'clear') {{
       if (obstacleHandler?._services !== services)
         return {{status: 'unavailable', detail: 'obstacle-clear-handler-not-found'}};

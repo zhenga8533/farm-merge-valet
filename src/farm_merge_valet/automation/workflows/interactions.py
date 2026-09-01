@@ -37,6 +37,8 @@ class InteractionAction:
     obstacle: ObstacleState | None = None
     output_capacity: int | None = None
     output_ids: frozenset[str] = frozenset()
+    upgrade_target_id: str | None = None
+    upgrade_applied_tier: int | None = None
 
 
 @dataclass
@@ -122,6 +124,16 @@ class InteractionWorkflow:
             InteractionTargetKind.REMOVE,
         }:
             return current is None or current.object_id != pending.action.object_id
+        if pending.action.kind is InteractionTargetKind.UPGRADE:
+            return (
+                current is None
+                or current.object_id != pending.action.object_id
+                or (
+                    current.upgrade_applied_tier is not None
+                    and pending.initial_state.upgrade_applied_tier is not None
+                    and current.upgrade_applied_tier > pending.initial_state.upgrade_applied_tier
+                )
+            )
         if pending.action.kind is InteractionTargetKind.OBSTACLE_LOOT:
             return (
                 current is None

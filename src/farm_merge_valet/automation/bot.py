@@ -112,6 +112,7 @@ class Bot:
         self._blueprint_policy_keys: dict[str, str] = {}
         self._direct_interaction_ids: frozenset[str] = frozenset()
         self._reward_interaction_ids: frozenset[str] = frozenset()
+        self._upgrade_interaction_ids: frozenset[str] = frozenset()
         self._clearable_ids: frozenset[str] = frozenset()
         self._shovelable_ids: frozenset[str] = frozenset()
         self._max_item_tiers: dict[tuple[str, str] | tuple[str, str, str | None], int] = {}
@@ -228,6 +229,7 @@ class Bot:
             }
             self._direct_interaction_ids = catalog.direct_interaction_ids
             self._reward_interaction_ids = catalog.reward_interaction_ids
+            self._upgrade_interaction_ids = catalog.upgrade_interaction_ids
             self._clearable_ids = catalog.clearable_ids
             self._shovelable_ids = catalog.shovelable_ids
         except (CatalogUnavailableError, OSError, ValueError) as exc:
@@ -523,6 +525,11 @@ class Bot:
                 output_capacity=action.output_capacity,
                 output_ids=sorted(action.output_ids),
             )
+        if action.upgrade_target_id is not None:
+            context.update(
+                upgrade_target_id=action.upgrade_target_id,
+                upgrade_applied_tier=action.upgrade_applied_tier,
+            )
         return context
 
     def _is_recognized_tier_four_producer(self, state: LiveCellState) -> bool:
@@ -536,6 +543,14 @@ class Bot:
             return False
         policy = self.config.item_policy(policy_key)
         return policy.enabled and policy.interact
+
+    def _live_policy_key(self, state: LiveCellState) -> str | None:
+        if state.blueprint_id is None:
+            return None
+        item = getattr(self, "_blueprint_items", {}).get(state.blueprint_id)
+        if item is not None and state.item_variant is not None:
+            return ItemRef(item.category, item.name, item.tier, state.item_variant).tier_policy_key
+        return self._blueprint_policy_keys.get(state.blueprint_id)
 
     def _focused_obstacle(self, candidates: list[ObstacleCandidate]) -> ObstacleCandidate | None:
         focus = getattr(self, "_obstacle_focus", None)
@@ -630,7 +645,7 @@ class Bot:
         for coord, state in sorted(self._live_cells.items()):
             if state.blueprint_id is None:
                 continue
-            policy_key = self._blueprint_policy_keys.get(state.blueprint_id)
+            policy_key = self._live_policy_key(state)
             if policy_key is None:
                 continue
             policy = self.config.item_policy(policy_key)
@@ -647,6 +662,24 @@ class Bot:
                 )
                 continue
             if not policy.interact:
+                continue
+            if state.blueprint_id in getattr(self, "_upgrade_interaction_ids", frozenset()):
+                if (
+                    state.tier is not None
+                    and state.item_variant is not None
+                    and state.upgrade_applied_tier is not None
+                    and state.tier > state.upgrade_applied_tier
+                ):
+                    immediate.append(
+                        InteractionAction(
+                            InteractionTargetKind.UPGRADE,
+                            coord,
+                            state.blueprint_id,
+                            state.object_id,
+                            upgrade_target_id=state.item_variant,
+                            upgrade_applied_tier=state.upgrade_applied_tier,
+                        )
+                    )
                 continue
             if (
                 state.blueprint_id in getattr(self, "_clearable_ids", frozenset())
@@ -749,6 +782,7 @@ class Bot:
             InteractionTargetKind.REMOVE: 0,
             InteractionTargetKind.IMMEDIATE: 1,
             InteractionTargetKind.REWARD: 1,
+            InteractionTargetKind.UPGRADE: 1,
             InteractionTargetKind.OBSTACLE_LOOT: 1,
             InteractionTargetKind.CLEAR: 2,
         }
@@ -1042,6 +1076,9 @@ class Bot:
             elif next_action.kind is InteractionTargetKind.REWARD:
                 capability_available = health.reward_interaction_available
                 capability = "reward interaction"
+            elif next_action.kind is InteractionTargetKind.UPGRADE:
+                capability_available = health.upgrade_interaction_available
+                capability = "upgrade-card interaction"
             elif next_action.kind is InteractionTargetKind.CLEAR:
                 capability_available = health.obstacle_clear_available
                 capability = "obstacle clearing"

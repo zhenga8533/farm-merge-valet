@@ -74,6 +74,7 @@ class RuntimeHealth:
     removal_available: bool = False
     reward_interaction_available: bool = False
     obstacle_clear_available: bool = False
+    upgrade_interaction_available: bool = False
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,7 @@ class LiveCellState:
     obstacle: ObstacleState | None = None
     claim_output_capacity: int | None = None
     claim_output_ids: frozenset[str] = frozenset()
+    upgrade_applied_tier: int | None = None
 
 
 @runtime_checkable

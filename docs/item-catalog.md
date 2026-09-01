@@ -110,7 +110,10 @@ catalog entries retain the game's upgrade-target identity (for example, the cow
 producer targets `milk`) so the GUI can place card status under the correct
 producer while keeping policy identity aligned with runtime data. The GUI shows
 Applied or Unknown status for unavailable tiers and an interaction checkbox for
-higher tiers. Automatic upgrade-card claiming is not implemented yet.
+higher tiers. Automation applies an enabled card only when its tier is above the
+target's authoritative applied tier. The runtime repeats that check immediately
+before using the game's upgrade service, so duplicate cards and stale board
+snapshots cannot reapply a claimed tier.
 
 ## GUI policy
 

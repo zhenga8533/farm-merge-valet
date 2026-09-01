@@ -189,6 +189,11 @@ _READ_EXPRESSION = """
     const harvestable = content?.getBehavior?.('harvestable');
     const lootable = content?.getBehavior?.('lootable');
     const upgradeCard = content?.getBehavior?.('upgradeCard');
+    const upgradeTarget = typeof upgradeCard?._data?.targetObjectTreeIngredient === 'string'
+      ? upgradeCard._data.targetObjectTreeIngredient : null;
+    const appliedUpgradeTier = upgradeTarget &&
+      typeof services?.upgradeCard?._model?.getItemTier === 'function'
+      ? services.upgradeCard._model.getItemTier(upgradeTarget) : null;
     const mapSource = content?.getBehavior?.('mapSource');
     const hitpoints = content?.getBehavior?.('hitpoints');
     const resourceGate = content?.getBehavior?.('resourceGate');
@@ -227,8 +232,9 @@ _READ_EXPRESSION = """
       ),
       producerKind,
       producerState,
-      itemVariant: typeof upgradeCard?._data?.targetObjectTreeIngredient === 'string'
-        ? upgradeCard._data.targetObjectTreeIngredient : null,
+      itemVariant: upgradeTarget,
+      upgradeAppliedTier: Number.isInteger(appliedUpgradeTier) && appliedUpgradeTier >= 0
+        ? appliedUpgradeTier : null,
       behaviorNames: behaviors.filter((name) => typeof name === 'string'),
       claimOutputCapacity,
       claimOutputIDs: Array.from(rewardIDs(claimReward)),
@@ -382,6 +388,13 @@ def read_board_state(
             claim_output_capacity = None
         claim_output_ids = entry.get("claimOutputIDs")
         item_variant = entry.get("itemVariant")
+        upgrade_applied_tier = entry.get("upgradeAppliedTier")
+        if (
+            not isinstance(upgrade_applied_tier, int)
+            or isinstance(upgrade_applied_tier, bool)
+            or upgrade_applied_tier < 0
+        ):
+            upgrade_applied_tier = None
         obstacle_value = entry.get("obstacle")
         obstacle = None
         if isinstance(obstacle_value, dict):
@@ -427,6 +440,7 @@ def read_board_state(
             producer_kind=producer_kind,
             producer_state=producer_state,
             item_variant=item_variant if isinstance(item_variant, str) else None,
+            upgrade_applied_tier=upgrade_applied_tier,
             behavior_names=frozenset(
                 value for value in behavior_names or [] if isinstance(value, str)
             ),

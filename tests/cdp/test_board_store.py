@@ -99,6 +99,38 @@ def test_read_board_state_preserves_collectable_semantics(monkeypatch) -> None:
     assert "cooldownPreview" in state[(6, 7)].behavior_names
 
 
+def test_read_board_state_preserves_upgrade_card_target_and_applied_tier(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.board_store.evaluate",
+        lambda *_args, **_kwargs: [
+            {
+                "column": 8,
+                "row": 9,
+                "hasContent": True,
+                "blueprintID": "upgrade_card_1",
+                "objectID": 44,
+                "tier": 1,
+                "itemVariant": "soybeans",
+                "upgradeAppliedTier": 0,
+                "behaviorNames": ["upgradeCard", "mergeable"],
+            }
+        ],
+    )
+
+    state = read_board_state(9222, "Farm")
+
+    assert state is not None
+    assert state[(8, 9)].item_variant == "soybeans"
+    assert state[(8, 9)].upgrade_applied_tier == 0
+
+
+def test_board_reader_gets_upgrade_progress_from_authoritative_model() -> None:
+    from farm_merge_valet.cdp.board_store import _READ_EXPRESSION
+
+    assert "services?.upgradeCard?._model?.getItemTier" in _READ_EXPRESSION
+    assert "upgradeAppliedTier" in _READ_EXPRESSION
+
+
 def test_live_producer_state_uses_active_cooldown_not_preview() -> None:
     from farm_merge_valet.cdp.board_store import _READ_EXPRESSION
 

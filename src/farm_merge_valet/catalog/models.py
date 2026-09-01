@@ -152,6 +152,14 @@ class ItemCatalog:
         )
 
     @property
+    def upgrade_interaction_ids(self) -> frozenset[str]:
+        return frozenset(
+            game_id
+            for game_id, item in self.items.items()
+            if item.tile_interaction_mode is TileInteractionMode.UPGRADE
+        )
+
+    @property
     def shovelable_ids(self) -> frozenset[str]:
         return frozenset(
             game_id
