@@ -1060,10 +1060,14 @@ def _shop_claim_expression(shop_id: str, recipe_id: str, scene_id: int | None) -
   if (!rewardSubscribers.some((entry) =>
       typeof entry?.context?._spawnOrderReward === 'function'))
     return {{status: 'unavailable', detail: 'shop-reward-handler-not-found'}};
+  const rootServices = orders._recipes?._services;
+  if (typeof rootServices?.discovery?.onOrderRewarded?.fire !== 'function' ||
+      typeof rootServices?.actions?.emit !== 'function')
+    return {{status: 'unavailable', detail: 'shop-progression-handler-not-found'}};
   try {{
     orders.onOrderRewarded.fire(order);
-    services.discovery?.onOrderRewarded?.fire?.(order);
-    services.actions?.emit?.(`order.rewarded.${{shopID}}.${{recipeID}}`);
+    rootServices.discovery.onOrderRewarded.fire(order);
+    rootServices.actions.emit(`order.rewarded.${{shopID}}.${{recipeID}}`);
     return {{status: 'submitted'}};
   }} catch (error) {{
     const current = orders.getOrderByBuilding?.(shopID);

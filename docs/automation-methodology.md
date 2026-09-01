@@ -176,8 +176,11 @@ Starting uses the game's public order handler, which revalidates the current
 recipe and affordability before deducting ingredients. The public reward method
 pans the camera, so claiming instead emits its authoritative reward signal after
 validating the scene, exact current order, board capacity, and live reward
-subscriber. This retains the game's reward-spawn, order-consumption, discovery,
-analytics, and action paths without changing the viewport. Every submission is
+subscriber. It then fires the order reward signal and the root discovery and
+action-bus events used by analytics and daily-challenge progression. Missing
+progression hooks fail closed before rewards are claimed. This retains the game's
+reward-spawn, order-consumption, discovery, analytics, and action paths without
+changing the viewport. Every submission is
 held pending until authoritative order state confirms the transition; it is not
 duplicated during a frozen heartbeat or reload.
 

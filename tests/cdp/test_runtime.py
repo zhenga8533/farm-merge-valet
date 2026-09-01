@@ -680,6 +680,11 @@ def test_shop_claim_uses_reward_signal_without_camera_pan(monkeypatch) -> None:
 
     assert result.status is ActionStatus.SUBMITTED
     assert "orders.onOrderRewarded.fire(order)" in expression
+    assert "const rootServices = orders._recipes?._services" in expression
+    assert "rootServices.discovery.onOrderRewarded.fire(order)" in expression
+    assert "rootServices.actions.emit(`order.rewarded.${shopID}.${recipeID}`)" in expression
+    assert "shop-progression-handler-not-found" in expression
+    assert "services.actions" not in expression
     assert "_spawnOrderReward" in expression
     assert "emptyCount < rewards.length" in expression
     assert "rewardOrder(" not in expression
