@@ -219,12 +219,15 @@ All end-user configuration lives in the desktop application. Changes validate
 and autosave atomically to `%LOCALAPPDATA%\FarmMergeValet\config.json` on
 Windows (or the platform user-data directory elsewhere). The dashboard exposes
 browser, automation, item/shop policy, timing, hotkey, Discord, logging, theme,
-  tray, opacity, and compact-overlay controls. `.env` and `FMV_*` variables are
-  not read. Invalid configuration is never silently overwritten; startup offers
-  an explicit reset to safe defaults. The Browser page combines status and
-  restart actions with browser, game-connection, and asset-cache configuration.
-  Settings groups automation, startup controls, notifications, and appearance;
-  scoped reset controls preserve unrelated policy sections.
+tray, opacity, and compact-overlay controls. Saved automation, policy, and timing
+changes are adopted by a running bot before its next planning iteration; an idle
+poll is woken immediately. Browser connection, catalog/cache location, Discord
+delivery, and startup-only changes still require the corresponding restart.
+`.env` and `FMV_*` variables are not read. Invalid configuration is never silently
+overwritten; startup offers an explicit reset to safe defaults. The Browser page
+combines status and restart actions with browser, game-connection, and asset-cache
+configuration. Settings groups automation, startup controls, notifications, and
+appearance; scoped reset controls preserve unrelated policy sections.
 
 On a fresh installation, the Items and Shops pages present a shared catalog
 onboarding state instead of empty tables. “Open game and synchronize” prepares

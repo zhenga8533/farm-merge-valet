@@ -128,6 +128,7 @@ class ApplicationController(QObject):
                 previous.browser != config.browser,
                 previous.browser_executable != config.browser_executable,
                 previous.browser_profile_dir != config.browser_profile_dir,
+                previous.browser_auto_launch != config.browser_auto_launch,
                 previous.cdp_port != config.cdp_port,
                 previous.game_url != config.game_url,
                 previous.window_title != config.window_title,
@@ -138,21 +139,18 @@ class ApplicationController(QObject):
                 browser="Restart required",
                 last_activity="Browser settings saved · restart to apply",
             )
-        if self._bot is not None:
-            if (
-                previous.crate_delay_min != config.crate_delay_min
-                or previous.crate_delay_max != config.crate_delay_max
-            ):
-                configure_delays = getattr(self._bot.runtime, "configure_crate_delays", None)
-                if callable(configure_delays):
-                    configure_delays(config.crate_delay_min, config.crate_delay_max)
+        bot = self._bot
+        if bot is not None:
+            bot.update_config(config)
             restart_fields = (
                 previous.discord_webhook_url != config.discord_webhook_url,
                 previous.webhook_summary_interval != config.webhook_summary_interval,
                 previous.webhook_status_interval != config.webhook_status_interval,
+                previous.catalog_dir != config.catalog_dir,
+                previous.atlas_cache_dir != config.atlas_cache_dir,
             )
             if any(restart_fields):
-                self._set_status(last_activity="Settings saved · restart bot to apply controls")
+                self._set_status(last_activity="Settings saved · restart bot to apply")
         hotkeys_changed = any(
             (
                 previous.start_stop_hotkey != config.start_stop_hotkey,
@@ -247,6 +245,9 @@ class ApplicationController(QObject):
                 else None
             )
             self._bot = create_bot(config)
+            latest_config = self.store.current
+            if latest_config != config:
+                self._bot.update_config(latest_config)
             if self._shutting_down or self._stopping:
                 self._bot.request_quit()
 

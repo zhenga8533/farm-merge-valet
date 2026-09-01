@@ -111,6 +111,9 @@ class Bot:
         self.config = config.model_copy(deep=True)
         self.catalog_provider = catalog_provider
         self._interrupt_event = Event()
+        self._loop_wakeup = Event()
+        self._config_lock = Lock()
+        self._pending_config: AppConfig | None = None
         self._resume_requested = Event()
         self.runtime = runtime
         if callable(set_cancel_event := getattr(self.runtime, "set_cancel_event", None)):
@@ -150,6 +153,52 @@ class Bot:
         self._last_cooling_producer_count: int | None = None
         self._capability_retry_at = 0.0
         self._capability_retry_delay = self.config.loop_interval
+
+    def update_config(self, config: AppConfig) -> None:
+        """Queue a complete configuration snapshot for the next planning iteration."""
+        snapshot = config.model_copy(deep=True)
+        with self._config_lock:
+            self._pending_config = snapshot
+        self._loop_wakeup.set()
+
+    def _apply_pending_config(self) -> None:
+        with self._config_lock:
+            pending = self._pending_config
+            self._pending_config = None
+        if pending is None:
+            return
+        previous = self.config
+        configure_delays = getattr(self.runtime, "configure_crate_delays", None)
+        if callable(configure_delays) and (
+            previous.crate_delay_min != pending.crate_delay_min
+            or previous.crate_delay_max != pending.crate_delay_max
+        ):
+            configure_delays(pending.crate_delay_min, pending.crate_delay_max)
+        self.config = pending
+        self._next_loop_delay = pending.loop_interval
+        if self._capability_retry_at == 0.0:
+            self._capability_retry_delay = pending.loop_interval
+        changed_fields = tuple(
+            name
+            for name in AppConfig.model_fields
+            if getattr(previous, name) != getattr(pending, name)
+        )
+        log_event(
+            logger,
+            logging.DEBUG,
+            "bot.config_applied",
+            "Applied updated configuration (%d field(s)).",
+            len(changed_fields),
+            changed_fields=changed_fields,
+        )
+
+    def _wait_for_next_iteration(self, delay: float) -> None:
+        self._loop_wakeup.clear()
+        with self._config_lock:
+            config_pending = self._pending_config is not None
+        if config_pending or self._interrupt_event.is_set():
+            return
+        self._loop_wakeup.wait(delay)
 
     def _set_phase(self, phase: Phase) -> None:
         if phase is not self.phase:
@@ -1369,10 +1418,12 @@ class Bot:
                 )
             else:
                 self._resume_requested.set()
+                self._loop_wakeup.set()
                 log_event(logger, logging.INFO, "bot.resume_requested", "Resume requested.")
         else:
             self.paused = True
             self._interrupt_event.set()
+            self._loop_wakeup.set()
             self._resume_requested.clear()
             log_event(logger, logging.INFO, "bot.paused", "Paused.")
 
@@ -1391,6 +1442,7 @@ class Bot:
             self._quit_requested = True
             self.paused = True
             self._interrupt_event.set()
+            self._loop_wakeup.set()
             self._resume_requested.clear()
             log_event(logger, logging.INFO, "bot.quit_requested", "Quit requested.")
 
@@ -1470,6 +1522,7 @@ class Bot:
             )
         try:
             while not self._quit_requested:
+                self._apply_pending_config()
                 if self.paused:
                     if self._resume_requested.is_set():
                         self._resume_requested.clear()
@@ -1477,7 +1530,8 @@ class Bot:
                         self.paused = False
                         needs_initialization = True
                     else:
-                        time.sleep(0.1)
+                        self._loop_wakeup.wait(0.1)
+                        self._loop_wakeup.clear()
                         continue
                 if needs_initialization:
                     if discovery_thread is None:
@@ -1525,7 +1579,7 @@ class Bot:
                     continue
                 delay = self._next_loop_delay
                 self._next_loop_delay = self.config.loop_interval
-                self._interrupt_event.wait(delay)
+                self._wait_for_next_iteration(delay)
         except KeyboardInterrupt:
             log_event(logger, logging.INFO, "bot.interrupted", "Stopped by user.")
         except Exception:

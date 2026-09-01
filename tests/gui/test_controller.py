@@ -17,6 +17,21 @@ from farm_merge_valet.gui.controller import ApplicationController
 from farm_merge_valet.observability.logging import FMV_CONTEXT_ATTRIBUTE, FMV_EVENT_ATTRIBUTE
 
 
+def test_saved_config_is_forwarded_to_running_bot(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    controller = ApplicationController(store)
+    updates: list[AppConfig] = []
+    controller._bot = SimpleNamespace(update_config=updates.append)
+
+    saved = store.update(loop_interval=0.25, auto_pop_storage_bubbles=False)
+
+    assert updates == [saved]
+    controller._bot = None
+    controller.shutdown()
+    app.processEvents()
+
+
 def test_confirmed_item_action_updates_dashboard_activity(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     store = ConfigStore(tmp_path / "config.json")

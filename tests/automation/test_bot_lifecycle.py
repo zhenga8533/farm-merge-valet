@@ -44,9 +44,13 @@ class FakeRuntime:
         self.shop_orders: tuple[ShopOrder, ...] = ()
         self.board_state: dict[tuple[int, int], LiveCellState] | None = {}
         self.dismissed_overlays = 0
+        self.configured_crate_delays: list[tuple[float, float]] = []
 
     def set_cancel_event(self, cancel_event):
         self.cancel_event = cancel_event
+
+    def configure_crate_delays(self, minimum, maximum):
+        self.configured_crate_delays.append((minimum, maximum))
 
     def read_board_state(self):
         return self.board_state
@@ -128,6 +132,9 @@ def bare_bot() -> Bot:
     bot.phase = Phase.CLAIM_CRATES
     bot.paused = False
     bot._interrupt_event = Event()
+    bot._loop_wakeup = Event()
+    bot._config_lock = Lock()
+    bot._pending_config = None
     bot._resume_requested = Event()
     bot._quit_requested = False
     bot._quit_lock = Lock()
@@ -163,6 +170,48 @@ def test_bot_construction_does_not_load_catalog_eagerly() -> None:
     bot = Bot(AppConfig(), FakeRuntime(), FakeCatalogProvider())
 
     assert bot._blueprint_items == {}
+
+
+def test_config_update_is_applied_as_a_deep_snapshot_at_loop_boundary(caplog) -> None:
+    runtime = FakeRuntime()
+    bot = Bot(AppConfig(), runtime, FakeCatalogProvider())
+    updated = AppConfig(
+        auto_pop_storage_bubbles=False,
+        loop_interval=0.25,
+        crate_delay_min=0.3,
+        crate_delay_max=0.4,
+    )
+
+    bot.update_config(updated)
+    updated.auto_pop_storage_bubbles = True
+
+    assert bot.config.loop_interval == 1.0
+    with caplog.at_level(logging.DEBUG):
+        bot._apply_pending_config()
+
+    assert bot.config.loop_interval == 0.25
+    assert not bot.config.auto_pop_storage_bubbles
+    assert bot._next_loop_delay == 0.25
+    assert runtime.configured_crate_delays == [(0.3, 0.4)]
+    assert "Applied updated configuration (4 field(s))." in caplog.messages
+
+
+def test_latest_config_update_wakes_an_idle_loop_wait() -> None:
+    bot = Bot(AppConfig(), FakeRuntime(), FakeCatalogProvider())
+    waiting = Event()
+
+    def wait_for_iteration() -> None:
+        waiting.set()
+        bot._wait_for_next_iteration(30.0)
+
+    waiter = Thread(target=wait_for_iteration)
+    waiter.start()
+    assert waiting.wait(1)
+
+    bot.update_config(AppConfig(loop_interval=0.25))
+    waiter.join(1)
+
+    assert not waiter.is_alive()
 
 
 def test_phase_transition_is_debug_diagnostic(caplog) -> None:

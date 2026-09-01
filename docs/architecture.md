@@ -18,7 +18,9 @@ GUI / CLI -> automation and catalog services -> core
   browser, CDP, configuration-persistence, or observability code.
 - `automation` owns the bot lifecycle, action-workflow execution, and its
   adapter-neutral runtime contract. `Bot` receives an `AppConfig` snapshot, a
-  runtime, and a catalog provider. Merge, tile-interaction, and shop pending,
+  runtime, and a catalog provider. Saved updates are handed to a running bot as
+  complete snapshots and adopted between planning iterations. Merge,
+  tile-interaction, and shop pending,
   pending action, verification, retry, submission, and phase-execution behavior
   belongs to dedicated workflow objects under `automation.workflows`.
 - `catalog` owns catalog models, taxonomy, labels, construction, persistence,
