@@ -639,6 +639,32 @@ class Bot:
             )
         return None
 
+    def _reward_container_idle_reason(self) -> tuple[str, dict[str, object]] | None:
+        for coord, state in sorted(self._live_cells.items()):
+            if state.blueprint_id not in getattr(self, "_reward_container_ids", frozenset()):
+                continue
+            policy_key = self._live_policy_key(state)
+            if policy_key is None:
+                continue
+            policy = self.config.item_policy(policy_key)
+            if not policy.enabled or not policy.interact or state.reward_requirements_met is True:
+                continue
+            context: dict[str, object] = {
+                "coord": coord,
+                "blueprint_id": state.blueprint_id,
+                "requirements": [
+                    {"blueprint_id": item.blueprint_id, "amount": item.amount}
+                    for item in state.reward_requirements
+                ],
+            }
+            if state.reward_requirements_met is None:
+                return f"waiting for requirement data for reward container at {coord}", context
+            requirements = ", ".join(
+                f"{item.amount} {item.blueprint_id}" for item in state.reward_requirements
+            )
+            return f"reward container at {coord} requires {requirements}", context
+        return None
+
     def _interaction_actions(
         self,
     ) -> tuple[list[InteractionAction], list[InteractionAction], list[InteractionAction]]:
@@ -668,7 +694,10 @@ class Bot:
             if not policy.interact:
                 continue
             if state.blueprint_id in getattr(self, "_reward_container_ids", frozenset()):
-                if state.claim_output_capacity is not None:
+                if (
+                    state.claim_output_capacity is not None
+                    and state.reward_requirements_met is True
+                ):
                     immediate.append(
                         InteractionAction(
                             InteractionTargetKind.REWARD_CONTAINER,
@@ -952,11 +981,15 @@ class Bot:
         elif result.remaining == 0 and not merge_actions_available:
             self._last_crate_claim_limit = None
             obstacle_wait = self._obstacle_idle_reason()
-            if obstacle_wait is None:
-                self._defer_idle("no supply crates or merge actions are currently available")
-            else:
+            reward_container_wait = self._reward_container_idle_reason()
+            if obstacle_wait is not None:
                 reason, context = obstacle_wait
                 self._defer_idle(reason, **context)
+            elif reward_container_wait is not None:
+                reason, context = reward_container_wait
+                self._defer_idle(reason, **context)
+            else:
+                self._defer_idle("no supply crates or merge actions are currently available")
         elif result.status is ActionStatus.REJECTED:
             self._report_wait(result.detail or "crate spawn was not accepted")
         if result.remaining == 0 and merge_actions_available:

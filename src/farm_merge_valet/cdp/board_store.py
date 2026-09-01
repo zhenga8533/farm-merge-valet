@@ -13,6 +13,7 @@ from __future__ import annotations
 from threading import Event
 
 from farm_merge_valet.automation.runtime import LiveCellState as _LiveCellState
+from farm_merge_valet.automation.runtime import RewardRequirement as _RewardRequirement
 from farm_merge_valet.cdp.evaluation import evaluate
 from farm_merge_valet.cdp.targets import run_game_frame_operation
 from farm_merge_valet.cdp.transport import CdpConnectionError, _command_target
@@ -212,6 +213,16 @@ _READ_EXPRESSION = """
     const obstacleLoot = Array.isArray(lootable?.loot) ? lootable.loot : null;
     const crateRewards = Array.isArray(crateReward?._data?.rewards)
       ? crateReward._data.rewards : null;
+    const rawRewardRequirements = crateRewards
+      ? crateReward?._data?.crateRewardUnlockRequirement : null;
+    const rewardRequirements = rawRewardRequirements == null
+      ? [] : Array.isArray(rawRewardRequirements) && rawRewardRequirements.every((item) =>
+        typeof item?.blueprintID === 'string' && Number.isInteger(item.amount) && item.amount > 0)
+        ? rawRewardRequirements : null;
+    const rewardRequirementsMet = !crateRewards || rewardRequirements === null
+      ? null : rewardRequirements.length === 0
+        ? true : typeof services?.gridFilter?.hasEnoughItems === 'function'
+          ? services.gridFilter.hasEnoughItems(rewardRequirements) : null;
     const claimReward = obstacleLoot || harvestReward || crateRewards;
     const claimOutputCapacity = obstacleLoot
       ? obstacleLoot.length
@@ -243,6 +254,11 @@ _READ_EXPRESSION = """
       behaviorNames: behaviors.filter((name) => typeof name === 'string'),
       claimOutputCapacity,
       claimOutputIDs: Array.from(rewardIDs(claimReward)),
+      rewardRequirements: rewardRequirements?.map((item) => ({
+        blueprintID: item.blueprintID,
+        amount: item.amount,
+      })) ?? null,
+      rewardRequirementsMet,
       obstacle: mapSource && hitpoints && Number.isInteger(hitpoints._data?.current) &&
         Number.isInteger(hitpoints._data?.max) &&
         (Number.isInteger(energyCost) || content.hasBehavior?.('resourceGatePaid'))
@@ -392,6 +408,27 @@ def read_board_state(
         ):
             claim_output_capacity = None
         claim_output_ids = entry.get("claimOutputIDs")
+        reward_requirements_value = entry.get("rewardRequirements")
+        reward_requirements: list[_RewardRequirement] = []
+        if isinstance(reward_requirements_value, list):
+            for requirement in reward_requirements_value:
+                if not isinstance(requirement, dict):
+                    continue
+                requirement_id = requirement.get("blueprintID")
+                amount = requirement.get("amount")
+                if (
+                    isinstance(requirement_id, str)
+                    and isinstance(amount, int)
+                    and not isinstance(amount, bool)
+                    and amount > 0
+                ):
+                    reward_requirements.append(_RewardRequirement(requirement_id, amount))
+        reward_requirements_met_value = entry.get("rewardRequirementsMet")
+        reward_requirements_met = (
+            reward_requirements_met_value
+            if isinstance(reward_requirements_met_value, bool)
+            else None
+        )
         item_variant = entry.get("itemVariant")
         upgrade_applied_tier = entry.get("upgradeAppliedTier")
         if (
@@ -454,5 +491,7 @@ def read_board_state(
             claim_output_ids=frozenset(
                 value for value in claim_output_ids or [] if isinstance(value, str)
             ),
+            reward_requirements=tuple(reward_requirements),
+            reward_requirements_met=reward_requirements_met,
         )
     return states

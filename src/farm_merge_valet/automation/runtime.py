@@ -87,6 +87,12 @@ class RuntimeHealth:
 
 
 @dataclass(frozen=True)
+class RewardRequirement:
+    blueprint_id: str
+    amount: int
+
+
+@dataclass(frozen=True)
 class LiveCellState:
     """Authoritative content state for one game-board coordinate."""
 
@@ -104,6 +110,8 @@ class LiveCellState:
     claim_output_capacity: int | None = None
     claim_output_ids: frozenset[str] = frozenset()
     upgrade_applied_tier: int | None = None
+    reward_requirements: tuple[RewardRequirement, ...] = ()
+    reward_requirements_met: bool | None = None
 
 
 @runtime_checkable

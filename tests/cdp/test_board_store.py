@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from farm_merge_valet.automation.runtime import LiveCellState
+from farm_merge_valet.automation.runtime import LiveCellState, RewardRequirement
 from farm_merge_valet.cdp.board_store import _arm_board_store_target, read_board_state
 from farm_merge_valet.core.items import ProducerKind, ProducerState
 from farm_merge_valet.core.obstacles import ObstacleState
@@ -194,6 +194,10 @@ def test_board_reader_derives_reward_container_capacity_and_ids(monkeypatch) -> 
                 "objectID": 55,
                 "claimOutputCapacity": 6,
                 "claimOutputIDs": ["sticker_pack", "energy_1"],
+                "rewardRequirements": [
+                    {"blueprintID": "reward_crate_key_gold", "amount": 2}
+                ],
+                "rewardRequirementsMet": False,
                 "behaviorNames": ["crateReward", "cooldown"],
             }
         ],
@@ -204,6 +208,10 @@ def test_board_reader_derives_reward_container_capacity_and_ids(monkeypatch) -> 
     assert state is not None
     assert state[(4, 8)].claim_output_capacity == 6
     assert state[(4, 8)].claim_output_ids == frozenset({"sticker_pack", "energy_1"})
+    assert state[(4, 8)].reward_requirements == (
+        RewardRequirement("reward_crate_key_gold", 2),
+    )
+    assert state[(4, 8)].reward_requirements_met is False
 
     from farm_merge_valet.cdp.board_store import _READ_EXPRESSION
 
@@ -211,3 +219,5 @@ def test_board_reader_derives_reward_container_capacity_and_ids(monkeypatch) -> 
     assert "crateRewards.length" in _READ_EXPRESSION
     assert "obstacleLoot.length" in _READ_EXPRESSION
     assert "claimOutputIDs" in _READ_EXPRESSION
+    assert "services.gridFilter.hasEnoughItems(rewardRequirements)" in _READ_EXPRESSION
+    assert "rewardRequirementsMet" in _READ_EXPRESSION

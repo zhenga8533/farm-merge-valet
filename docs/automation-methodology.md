@@ -59,11 +59,14 @@ remain a separate interaction type.
 Reward Chests, Stickerbook crates, event crates, and other `crateReward`
 containers expose an Open policy. Their live reward list defines an exact board-space
 requirement; unlike producer and obstacle output, chest rewards cannot be claimed
-partially. Merge work therefore continues until the full capacity is available.
-Immediately before opening, the runtime revalidates the scene, object, chest and
-cooldown behaviors, complete output space, and every required key object. It then
-uses the game's chest-opening pipeline, which consumes the keys, runs the opening
-animation, spawns rewards, removes the chest, and records game analytics.
+partially. Merge work therefore continues until the full capacity is available. The
+live board snapshot also carries each container's unlock requirements and the game's
+authoritative `hasEnoughItems` result. Planning skips keyed containers until all
+required objects are present; containers with an empty requirement list remain
+eligible. Immediately before opening, the runtime revalidates the scene, object,
+chest and cooldown behaviors, complete output space, and every required key object.
+It then uses the game's chest-opening pipeline, which consumes the keys, runs the
+opening animation, spawns rewards, removes the chest, and records game analytics.
 
 Upgrade cards carry their crop or animal output target in the live board state.
 The same board snapshot reads that target's highest applied tier from the game's

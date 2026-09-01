@@ -9,6 +9,7 @@ from farm_merge_valet.automation.runtime import (
     ActionStatus,
     CrateSpawnResult,
     LiveCellState,
+    RewardRequirement,
     RuntimeHealth,
 )
 from farm_merge_valet.automation.workflows import (
@@ -333,6 +334,7 @@ def test_enabled_reward_container_requires_its_exact_output_space(monkeypatch) -
             behavior_names=frozenset({"crateReward", "cooldown"}),
             claim_output_capacity=7,
             claim_output_ids=frozenset({"gem_1", "energy_1", "toolbox_small"}),
+            reward_requirements_met=True,
         )
     }
     for column in range(7):
@@ -359,6 +361,70 @@ def test_enabled_reward_container_requires_its_exact_output_space(monkeypatch) -
     assert bot.runtime.interactions == [
         ((3, 4), InteractionTargetKind.REWARD_CONTAINER, "reward_crate_bronze", 120)
     ]
+
+
+def test_reward_container_is_not_planned_until_requirements_are_met(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._blueprint_policy_keys = {"reward_crate_gold": "rewards/reward_chest/tier/3"}
+    bot._reward_container_ids = frozenset({"reward_crate_gold"})
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"rewards/reward_chest/tier/3": ItemPolicyOverride(interact=True)},
+    )
+    bot._live_cells = {
+        (71, 64): LiveCellState(
+            True,
+            "reward_crate_gold",
+            121,
+            claim_output_capacity=7,
+            reward_requirements=(RewardRequirement("reward_crate_key_gold", 2),),
+            reward_requirements_met=False,
+        )
+    }
+
+    assert bot._interaction_actions() == ([], [], [])
+    reason = bot._reward_container_idle_reason()
+    assert reason is not None
+    assert reason[0] == (
+        "reward container at (71, 64) requires 2 reward_crate_key_gold"
+    )
+
+    bot._live_cells[(71, 64)] = LiveCellState(
+        True,
+        "reward_crate_gold",
+        121,
+        claim_output_capacity=7,
+        reward_requirements=(RewardRequirement("reward_crate_key_gold", 2),),
+        reward_requirements_met=True,
+    )
+
+    immediate, _, _ = bot._interaction_actions()
+    assert [action.kind for action in immediate] == [InteractionTargetKind.REWARD_CONTAINER]
+
+
+def test_requirement_free_reward_container_is_eligible(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._blueprint_policy_keys = {"event_crate": "rewards/event_crate"}
+    bot._reward_container_ids = frozenset({"event_crate"})
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"rewards/event_crate": ItemPolicyOverride(interact=True)},
+    )
+    bot._live_cells = {
+        (4, 5): LiveCellState(
+            True,
+            "event_crate",
+            122,
+            claim_output_capacity=3,
+            reward_requirements=(),
+            reward_requirements_met=True,
+        )
+    }
+
+    immediate, _, _ = bot._interaction_actions()
+    assert [action.kind for action in immediate] == [InteractionTargetKind.REWARD_CONTAINER]
 
 
 def test_reward_container_waits_when_full_output_space_cannot_be_created(monkeypatch) -> None:
