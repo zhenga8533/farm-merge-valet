@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import logging
+from collections import deque
 
-from PySide6.QtCore import Signal
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QSignalBlocker, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -17,6 +16,13 @@ from farm_merge_valet.gui.components.input_controls import (
     FocusAwareComboBox,
 )
 from farm_merge_valet.gui.components.widgets import secondary_button
+from farm_merge_valet.gui.log_view import (
+    LogEntry,
+    append_log_entry,
+    configure_log_view,
+    minimum_level,
+    render_log_entries,
+)
 from farm_merge_valet.gui.pages.base import (
     AppPage,
 )
@@ -35,9 +41,7 @@ class LogsPage(AppPage):
         )
         self.filter.set_current_value(log_level)
         self.filter.setAccessibleName("Minimum log level")
-        self.filter.currentIndexChanged.connect(
-            lambda _index: self.log_level_changed.emit(str(self.filter.current_value()))
-        )
+        self.filter.currentIndexChanged.connect(self._filter_changed)
         clear = secondary_button("Clear")
         clear.clicked.connect(self.clear)
         self.save_button = QPushButton("Save logs…")
@@ -52,19 +56,39 @@ class LogsPage(AppPage):
         toolbar.addWidget(self.save_button)
         self.page_layout.addLayout(toolbar)
         self.view = QPlainTextEdit()
-        self.view.setReadOnly(True)
-        self.view.setMaximumBlockCount(2000)
-        self.view.setFont(QFont("Cascadia Mono, Consolas, monospace", 10))
+        configure_log_view(self.view, maximum_blocks=2000)
         self.view.setAccessibleName("Application logs")
         self.page_layout.addWidget(self.view, 1)
+        self._entries: deque[LogEntry] = deque(maxlen=2000)
 
     def append(self, timestamp: str, level: str, message: str, levelno: int) -> None:
-        minimum = getattr(logging, str(self.filter.current_value()), logging.INFO)
-        if levelno >= minimum:
-            self.view.appendPlainText(f"[{timestamp}] {level:<8} {message}")
+        entry = LogEntry(timestamp, level, message, levelno)
+        self._entries.append(entry)
+        if levelno >= self._minimum_level():
+            append_log_entry(self.view, entry)
+
+    def apply_log_level(self, level: str) -> None:
+        if self.filter.current_value() != level:
+            with QSignalBlocker(self.filter):
+                self.filter.set_current_value(level)
+        self._render()
 
     def clear(self) -> None:
+        self._entries.clear()
         self.view.clear()
+
+    def refresh_presentation(self) -> None:
+        self._render()
+
+    def _filter_changed(self, _index: int) -> None:
+        self._render()
+        self.log_level_changed.emit(str(self.filter.current_value()))
+
+    def _minimum_level(self) -> int:
+        return minimum_level(str(self.filter.current_value()))
+
+    def _render(self) -> None:
+        render_log_entries(self.view, self._entries, self._minimum_level())
 
     def set_save_result(self, output: str) -> None:
         self.save_status.setText("Saved")

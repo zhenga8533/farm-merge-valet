@@ -484,7 +484,8 @@ class ApplicationController(QObject):
     def _on_record(self, record: logging.LogRecord) -> None:
         formatter = self.log_handler.formatter or logging.Formatter()
         timestamp = formatter.formatTime(record, "%H:%M:%S")
-        message = record.getMessage()
+        message = formatter.format(record)
+        status_message = record.getMessage()
         self.log_received.emit(timestamp, record.levelname, message, record.levelno)
         event = getattr(record, FMV_EVENT_ATTRIBUTE, None)
         context = getattr(record, FMV_CONTEXT_ATTRIBUTE, {})
@@ -494,13 +495,13 @@ class ApplicationController(QObject):
         elif event == "runtime.ready":
             updates["runtime"] = f"Scene {context.get('scene_id', '—')} ready"
         elif event == "bot.idle":
-            updates["last_activity"] = message
+            updates["last_activity"] = status_message
         elif event == "planner.phase_changed":
             updates["phase"] = str(context.get("phase", "—")).replace("_", " ").title()
         elif event in {"action.confirmed", "interaction.confirmed", "crate.claim_completed"}:
-            updates["last_activity"] = message
+            updates["last_activity"] = status_message
         elif record.levelno >= logging.ERROR:
-            updates["last_activity"] = message
+            updates["last_activity"] = status_message
         if updates:
             self._set_status(**updates)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections import deque
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QCloseEvent, QColor, QIcon, QPainter, QPixmap
@@ -22,6 +23,13 @@ from farm_merge_valet.gui.config_sections import SECTION_FIELDS, ConfigSection
 from farm_merge_valet.gui.controller import (
     ApplicationState,
     ApplicationStatus,
+)
+from farm_merge_valet.gui.log_view import (
+    LogEntry,
+    append_log_entry,
+    configure_log_view,
+    minimum_level,
+    render_log_entries,
 )
 
 _APPEARANCE_FIELDS = {
@@ -79,9 +87,9 @@ class CompactOverlay(QMainWindow):
         self.status = QLabel("Stopped")
         self.status.setObjectName("overlayStatus")
         self.logs = QPlainTextEdit()
-        self.logs.setReadOnly(True)
-        self.logs.setMaximumBlockCount(30)
+        configure_log_view(self.logs, maximum_blocks=30)
         self.logs.setAccessibleName("Recent application activity")
+        self._log_entries: deque[LogEntry] = deque(maxlen=30)
         self.run_button = ActionButton("Start")
         self.pause_button = ActionButton("Pause", secondary=True)
         self.run_button.clicked.connect(self.run_requested)
@@ -104,6 +112,7 @@ class CompactOverlay(QMainWindow):
         self.apply_config(config)
 
     def apply_config(self, config: AppConfig) -> None:
+        log_level_changed = self._config.log_level != config.log_level
         self._config = config
         always_on_top = Qt.WindowType.WindowStaysOnTopHint
         if bool(self.windowFlags() & always_on_top) != config.overlay_always_on_top:
@@ -112,6 +121,12 @@ class CompactOverlay(QMainWindow):
             if visible:
                 self.show()
         self._apply_focus_state()
+        if log_level_changed:
+            render_log_entries(
+                self.logs,
+                self._log_entries,
+                minimum_level(config.log_level),
+            )
 
     def set_status(self, status: ApplicationStatus) -> None:
         self._status = status
@@ -158,5 +173,15 @@ class CompactOverlay(QMainWindow):
         self.hide()
         self.close_requested.emit()
 
-    def append_log(self, timestamp: str, level: str, message: str, _levelno: int) -> None:
-        self.logs.appendPlainText(f"[{timestamp}] {level:<8} {message}")
+    def append_log(self, timestamp: str, level: str, message: str, levelno: int) -> None:
+        entry = LogEntry(timestamp, level, message, levelno)
+        self._log_entries.append(entry)
+        if levelno >= minimum_level(self._config.log_level):
+            append_log_entry(self.logs, entry)
+
+    def refresh_log_presentation(self) -> None:
+        render_log_entries(
+            self.logs,
+            self._log_entries,
+            minimum_level(self._config.log_level),
+        )

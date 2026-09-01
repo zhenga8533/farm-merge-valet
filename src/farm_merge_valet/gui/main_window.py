@@ -418,6 +418,8 @@ class MainWindow(QMainWindow):
             )
         if changed_fields & _SETTINGS_FIELDS:
             self.settings_page.apply_config(config)
+        if "log_level" in changed_fields:
+            self.logs_page.apply_log_level(config.log_level)
         if changed_fields & _BROWSER_FIELDS:
             self.browser_page.apply_config(config)
         if changed_fields & _APPEARANCE_FIELDS:
@@ -436,13 +438,18 @@ class MainWindow(QMainWindow):
 
     def _apply_appearance(self) -> None:
         app = QApplication.instance()
+        theme_changed = False
         if isinstance(app, QApplication) and app.property("fmvTheme") != self._draft.theme:
             apply_theme(app, self._draft.theme)
+            theme_changed = True
             current_page = self.pages.currentWidget()
             if isinstance(current_page, QWidget):
                 refresh_widget_theme(current_page, self._draft.theme)
             refresh_widget_theme(self.navigation, self._draft.theme)
             refresh_widget_theme(self.overlay, self._draft.theme)
+        if theme_changed:
+            self.logs_page.refresh_presentation()
+            self.overlay.refresh_log_presentation()
         always_on_top = Qt.WindowType.WindowStaysOnTopHint
         if bool(self.windowFlags() & always_on_top) != self._draft.main_always_on_top:
             visible = self.isVisible()

@@ -255,7 +255,10 @@ console, dashboard, compact overlay, and webhook are independent sinks attached
 to that pipeline, so presentation does not duplicate event emission. Application
 records also carry a stable `fmv_event` name and an `fmv_context` dictionary;
 for example, action records include their planner action, effect, item, source,
-and destination.
+and destination. The desktop log and compact overlay use the configured minimum
+level and the same theme-aware severity colors, retain recent hidden records when
+the filter changes, and include formatted exception tracebacks. Saved logs remain
+plain UTF-8 text without terminal color codes.
 
 Enter an HTTPS Discord webhook in Settings to enable the asynchronous sink.
 Browser, runtime, pause/resume, quit, and stop events are sent immediately, as are
