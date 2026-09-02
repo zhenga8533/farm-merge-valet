@@ -603,8 +603,7 @@ def test_obstacle_clear_uses_resource_gate_payment_handler(monkeypatch) -> None:
 
     assert result.status is ActionStatus.SUBMITTED
     assert "content.hasBehavior?.('mapSource')" in expression
-    assert "content.hasBehavior?.('resourceGatePaid')" in expression
-    assert "!content.hasBehavior?.('resourceGatePaid')" not in expression
+    assert "content.hasBehavior?.('resourceGate')" in expression
     assert "obstacleHandler._getTotalCost(gate)" in expression
     assert "energy.amount < energyCost" in expression
     assert "gameWorkers.hasEnoughWorkers(requiredWorkers)" in expression
@@ -614,7 +613,7 @@ def test_obstacle_clear_uses_resource_gate_payment_handler(monkeypatch) -> None:
     assert "showPopout" not in expression
 
 
-def test_obstacle_loot_uses_verified_tile_interaction(monkeypatch) -> None:
+def test_obstacle_loot_accepts_lootable_target_without_gate_markers(monkeypatch) -> None:
     expression = ""
 
     def capture_expression(_port, value, _title, **_kwargs):
@@ -629,7 +628,7 @@ def test_obstacle_loot_uses_verified_tile_interaction(monkeypatch) -> None:
     )
 
     assert result.status is ActionStatus.SUBMITTED
-    assert "content.hasBehavior?.('resourceGatePaid')" in expression
+    assert "resourceGatePaid" not in expression
     assert "content.hasBehavior?.('lootable')" in expression
     assert "content.getBehavior('lootable').loot.length > 0" in expression
     assert "handler._simulateClick(content)" in expression

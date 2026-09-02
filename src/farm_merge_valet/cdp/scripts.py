@@ -960,7 +960,7 @@ def _interaction_expression(
         content.hasBehavior?.('resourceGate')
     : expectedKind === 'obstacle-loot'
       ? content.hasBehavior?.('mapSource') && content.hasBehavior?.('hitpoints') &&
-        content.hasBehavior?.('resourceGatePaid') && content.hasBehavior?.('lootable') &&
+        content.hasBehavior?.('lootable') &&
         Array.isArray(content.getBehavior?.('lootable')?.loot) &&
         content.getBehavior('lootable').loot.length > 0
     : expectedKind === 'producer'
