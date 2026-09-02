@@ -1355,12 +1355,10 @@ class Bot:
         if not self._verify_pending_shop_action(health, shop_orders):
             return
         if not health.heartbeat_advancing:
-            age = (
-                f", last frame {health.heartbeat_age_ms:.0f}ms ago"
-                if health.heartbeat_age_ms is not None
-                else ""
+            self._report_wait(
+                "game heartbeat is not advancing",
+                heartbeat_age_ms=health.heartbeat_age_ms,
             )
-            self._report_wait(f"game heartbeat is not advancing{age}")
             return
         board_needs_merge = self._board_needs_merge()
         immediate, depleted, ready = self._interaction_actions()

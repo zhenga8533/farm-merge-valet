@@ -17,8 +17,10 @@ delay.
 
 ## Freeze protection
 
-Actions require both a newer animation frame and a heartbeat no more than 500
-ms old. Snapshot timeouts, JavaScript failures, heap scans, and action commands
+Actions require both a newer animation frame and a heartbeat no more than 1.5
+seconds old. This accommodates Chromium's approximately one-frame-per-second
+background cadence while still failing closed when rendering stops. Snapshot
+timeouts, JavaScript failures, heap scans, and action commands
 are not immediately replayed. An action with an ambiguous transport result is
 replanned from a later authoritative snapshot.
 

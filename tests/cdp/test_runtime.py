@@ -82,6 +82,24 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
     assert health.transient_overlay_detail == "sticker-pack-collect"
 
 
+def test_runtime_health_accepts_background_frame_cadence_but_rejects_stale_frame(
+    monkeypatch,
+) -> None:
+    samples = iter(
+        [
+            {"heartbeat": 10, "heartbeatAgeMs": 900},
+            {"heartbeat": 11, "heartbeatAgeMs": 1100},
+            {"heartbeat": 12, "heartbeatAgeMs": 1600},
+        ]
+    )
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", lambda *_, **__: next(samples))
+    adapter = GameRuntimeAdapter(9222, "Farm")
+
+    assert not adapter.read_runtime_health().heartbeat_advancing
+    assert adapter.read_runtime_health().heartbeat_advancing
+    assert not adapter.read_runtime_health().heartbeat_advancing
+
+
 def test_unknown_transient_overlay_kind_fails_closed(monkeypatch) -> None:
     monkeypatch.setattr(
         "farm_merge_valet.cdp.runtime.evaluate",

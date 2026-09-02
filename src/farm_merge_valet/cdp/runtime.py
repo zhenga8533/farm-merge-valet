@@ -64,6 +64,7 @@ new Promise((resolve) => {
 })
 """
 _RECOVERY_COOLDOWNS = (5.0, 15.0, 60.0, 300.0)
+_MAX_HEARTBEAT_AGE_MS = 1500.0
 
 
 class GameRuntimeAdapter:
@@ -369,7 +370,7 @@ class GameRuntimeAdapter:
             and self._last_heartbeat is not None
             and (heartbeat > self._last_heartbeat)
             and heartbeat_age is not None
-            and heartbeat_age <= 500.0
+            and heartbeat_age <= _MAX_HEARTBEAT_AGE_MS
         )
         self._last_heartbeat = heartbeat
         scene_id = raw.get("sceneId") if isinstance(raw.get("sceneId"), int) else None
@@ -462,7 +463,7 @@ class GameRuntimeAdapter:
             and health.heartbeat is not None
             and not health.heartbeat_advancing
             and health.heartbeat_age_ms is not None
-            and health.heartbeat_age_ms > 500.0
+            and health.heartbeat_age_ms > _MAX_HEARTBEAT_AGE_MS
         )
         if stalled != self._heartbeat_stalled:
             log_event(
