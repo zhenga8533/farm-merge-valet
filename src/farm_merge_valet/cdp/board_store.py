@@ -200,6 +200,9 @@ _READ_EXPRESSION = """
       ? blueprints.get(content?._blueprintID)?.components?.harvestable?.harvestReward
       : null;
     const obstacleLoot = Array.isArray(lootable?.loot) ? lootable.loot : null;
+    const obstacleClearing = Boolean(obstacleLoot) || Boolean(
+      content?.hasBehavior?.('resourceGatePaid') && !resourceGate
+    );
     const crateRewards = Array.isArray(crateReward?._data?.rewards)
       ? crateReward._data.rewards : null;
     const rawRewardRequirements = crateRewards
@@ -250,16 +253,14 @@ _READ_EXPRESSION = """
       rewardRequirementsMet,
       obstacle: mapSource && hitpoints && Number.isInteger(hitpoints._data?.current) &&
         Number.isInteger(hitpoints._data?.max) &&
-        (Number.isInteger(energyCost) || content.hasBehavior?.('resourceGatePaid'))
+        (Number.isInteger(energyCost) || obstacleClearing)
         ? {
           stagesRemaining: hitpoints._data.current,
           totalStages: hitpoints._data.max,
           energyCost,
           requiredWorkers,
           movable: Boolean(content.hasBehavior?.('movable')),
-          clearing: Boolean(
-            content.hasBehavior?.('resourceGatePaid') && !resourceGate
-          ),
+          clearing: obstacleClearing,
         }
         : null,
     });

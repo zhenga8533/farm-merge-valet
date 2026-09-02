@@ -173,7 +173,15 @@ def test_read_board_state_preserves_obstacle_progress_and_cost(monkeypatch) -> N
 def test_fresh_obstacle_gate_is_not_hidden_by_previous_paid_marker() -> None:
     from farm_merge_valet.cdp.board_store import _READ_EXPRESSION
 
-    assert "content.hasBehavior?.('resourceGatePaid') && !resourceGate" in _READ_EXPRESSION
+    assert "content?.hasBehavior?.('resourceGatePaid') && !resourceGate" in _READ_EXPRESSION
+
+
+def test_lootable_obstacle_remains_classified_without_gate_markers() -> None:
+    from farm_merge_valet.cdp.board_store import _READ_EXPRESSION
+
+    assert "const obstacleClearing = Boolean(obstacleLoot)" in _READ_EXPRESSION
+    assert "(Number.isInteger(energyCost) || obstacleClearing)" in _READ_EXPRESSION
+    assert "clearing: obstacleClearing" in _READ_EXPRESSION
 
 
 def test_board_reader_derives_claim_capacity_from_live_rewards() -> None:
