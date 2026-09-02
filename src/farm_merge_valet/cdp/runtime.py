@@ -332,11 +332,12 @@ class GameRuntimeAdapter:
         crate_spawn = raw.get("crateSpawn") is True
         board = raw.get("board") is True
         transient_overlay = None
-        try:
-            if isinstance(raw.get("transientOverlay"), str):
-                transient_overlay = TransientOverlayKind(raw["transientOverlay"])
-        except ValueError:
-            transient_overlay = None
+        raw_transient_overlay = raw.get("transientOverlay")
+        if isinstance(raw_transient_overlay, str):
+            try:
+                transient_overlay = TransientOverlayKind(raw_transient_overlay)
+            except ValueError:
+                transient_overlay = TransientOverlayKind.UNSUPPORTED
         return RuntimeHealth(
             available=board
             and (

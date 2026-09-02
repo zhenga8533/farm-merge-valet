@@ -308,8 +308,10 @@ _HEALTH_EXPRESSION = r"""
   while (stage?.parent) stage = stage.parent;
   const layerRoot = stage?.children?.[0];
   const popupLayer = layerRoot?.children?.find((child) => child?.name === 'popup');
-  const levelUpPopup = popupLayer?.children?.find((child) =>
-    child?._name === 'LevelUpPopup' && typeof child.close === 'function');
+  const activePopup = popupLayer?.children?.find((child) =>
+    child?.visible !== false && child?.renderable !== false && child?._destroyed !== true);
+  const levelUpPopup = activePopup?._name === 'LevelUpPopup' &&
+    typeof activePopup.close === 'function' ? activePopup : null;
   const stickerNavigation = stage?.children?.find((child) =>
     Array.isArray(child?._viewStack) && child?._packOpeningView);
   const currentStickerView = stickerNavigation?._viewStack?.at(-1);
@@ -346,8 +348,28 @@ _HEALTH_EXPRESSION = r"""
     currentStickerView._destroyed !== true && Boolean(stickerSetPanel);
   const stickerSetSubmitted = stickerSetActive &&
     window.__fmvStickerSetCompletionSubmission === stickerSetPanel;
-  const activePopup = popupLayer?.children?.find((child) =>
-    child?.visible !== false && child?.renderable !== false && child?._destroyed !== true);
+  const stickerAlbumTransition = stickerNavigation?.visible !== false &&
+    currentStickerView && currentStickerView !== packOpeningView &&
+    currentStickerView.parent === stickerNavigation && currentStickerView.visible !== false &&
+    currentStickerView._destroyed !== true && !stickerSetActive &&
+    typeof currentStickerView.setRewards === 'function' &&
+    typeof currentStickerView.playAnimation === 'function';
+  const dailyChallengePopup = activePopup?._name === 'DailyChallengePopup' &&
+    activePopup === services?.dailyChallenge?._popup &&
+    typeof activePopup.close === 'function';
+  const timedEventPopup = activePopup?._name === 'TimedEventPopup' &&
+    typeof activePopup.close === 'function' &&
+    typeof activePopup.onClosed?.listenOnce === 'function' &&
+    Boolean(activePopup._options?.content);
+  const timedEventSubmitted = timedEventPopup &&
+    window.__fmvTimedEventPopupSubmission === activePopup;
+  const dailyBonusPopup = activePopup?._name === 'DailyBonusPopup' &&
+    typeof activePopup.close === 'function' &&
+    typeof activePopup._claimReward === 'function' &&
+    typeof activePopup._rewardCollected === 'boolean';
+  const albumStartedPopup = activePopup?._name === 'AlbumStartedPopup' &&
+    typeof activePopup.close === 'function' &&
+    typeof activePopup.awaitPopupClosed === 'function';
   const activePopupService = activePopup?.service || activePopup?._service;
   const rewardPopup = activePopup && activePopup !== levelUpPopup &&
     typeof activePopup.close === 'function' && (
@@ -367,17 +389,25 @@ _HEALTH_EXPRESSION = r"""
     child !== stickerNavigation && child?.visible !== false &&
     child?.renderable !== false && child?._destroyed !== true);
   const unsupportedOverlayDetail = activePopup && activePopup !== levelUpPopup &&
-      !rewardPopup && !promotionalPopup
+      !dailyChallengePopup && !timedEventPopup && !dailyBonusPopup &&
+      !albumStartedPopup && !rewardPopup && !promotionalPopup
     ? `popup:${activePopup._name || activePopup.name || activePopup.constructor?.name || 'unknown'}`
     : blockingLayer
       ? `layer:${blockingLayer.name || 'unknown'}`
       : unknownStageView
         ? `stage:${unknownStageView._name || unknownStageView.name ||
           unknownStageView.constructor?.name || 'unknown'}`
-        : stickerNavigation && currentStickerView && !stickerPackActive && !stickerSetActive
+        : stickerNavigation && currentStickerView && !stickerPackActive &&
+            !stickerSetActive && !stickerAlbumTransition
           ? `sticker-view:${currentStickerView.constructor?.name || 'unknown'}`
           : null;
   const transientOverlay = levelUpPopup ? 'level-up'
+    : dailyChallengePopup ? 'daily-challenge'
+    : timedEventSubmitted ? 'timed-event-transition'
+    : timedEventPopup ? 'timed-event'
+    : dailyBonusPopup && activePopup._rewardCollected ? 'daily-bonus-transition'
+    : dailyBonusPopup ? 'daily-bonus-collect'
+    : albumStartedPopup ? 'sticker-album-started'
     : rewardPopup ? 'reward-popup'
     : promotionalPopup ? 'promotional-popup'
     : stickerSkip ? 'sticker-pack-skip'
@@ -386,6 +416,7 @@ _HEALTH_EXPRESSION = r"""
     : stickerSetSubmitted ? 'sticker-set-transition'
     : stickerSetActive && stickerSetButton ? 'sticker-set-collect'
     : stickerSetActive ? 'sticker-set-transition'
+    : stickerAlbumTransition ? 'sticker-album-transition'
     : unsupportedOverlayDetail ? 'unsupported'
     : null;
   const identity = currentBoard && (services.mapGrid || scene || handler || board);
@@ -495,11 +526,19 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
   while (stage?.parent) stage = stage.parent;
   const layerRoot = stage?.children?.[0];
   const popupLayer = layerRoot?.children?.find((child) => child?.name === 'popup');
-  const levelUpPopup = popupLayer?.children?.find((child) =>
-    child?._name === 'LevelUpPopup' && typeof child.close === 'function');
+  const activePopup = popupLayer?.children?.find((child) =>
+    child?.visible !== false && child?.renderable !== false && child?._destroyed !== true);
+  const popupAnimationBusy = (popup) =>
+    popup?._baseAnimationContent?.isAnimationPlaying?.('open') === true ||
+    popup?._baseAnimationBackground?.isAnimationPlaying?.('open') === true ||
+    popup?._baseAnimationContent?.isAnimationPlaying?.('close') === true ||
+    popup?._baseAnimationBackground?.isAnimationPlaying?.('close') === true;
+  const levelUpPopup = activePopup?._name === 'LevelUpPopup' &&
+    typeof activePopup.close === 'function' ? activePopup : null;
   if (levelUpPopup) {{
     if (levelUpPopup._popupLocked === true ||
-        levelUpPopup._popupInteractionsLocked === true)
+        levelUpPopup._popupInteractionsLocked === true ||
+        popupAnimationBusy(levelUpPopup))
       return {{status: 'busy', detail: 'level-up'}};
     const inputBlocker = levelUpPopup.children?.find((child) => child?._events?.pointerup);
     const pointerUp = inputBlocker?._events?.pointerup;
@@ -515,8 +554,41 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     }}
   }}
 
-  const activePopup = popupLayer?.children?.find((child) =>
-    child?.visible !== false && child?.renderable !== false && child?._destroyed !== true);
+  const dailyChallengePopup = activePopup?._name === 'DailyChallengePopup' &&
+    activePopup === services?.dailyChallenge?._popup &&
+    typeof activePopup.close === 'function';
+  const timedEventPopup = activePopup?._name === 'TimedEventPopup' &&
+    typeof activePopup.close === 'function' &&
+    typeof activePopup.onClosed?.listenOnce === 'function' &&
+    Boolean(activePopup._options?.content);
+  const dailyBonusPopup = activePopup?._name === 'DailyBonusPopup' &&
+    typeof activePopup.close === 'function' &&
+    typeof activePopup._claimReward === 'function' &&
+    typeof activePopup._rewardCollected === 'boolean';
+  const albumStartedPopup = activePopup?._name === 'AlbumStartedPopup' &&
+    typeof activePopup.close === 'function' &&
+    typeof activePopup.awaitPopupClosed === 'function';
+  if (dailyChallengePopup || timedEventPopup || dailyBonusPopup || albumStartedPopup) {{
+    const detail = dailyChallengePopup ? 'daily-challenge'
+      : timedEventPopup ? 'timed-event'
+      : dailyBonusPopup ? 'daily-bonus-collect' : 'sticker-album-started';
+    if (timedEventPopup && window.__fmvTimedEventPopupSubmission === activePopup)
+      return {{status: 'busy', detail: 'timed-event-transition'}};
+    if (dailyBonusPopup && activePopup._rewardCollected)
+      return {{status: 'busy', detail: 'daily-bonus-transition'}};
+    if (activePopup._popupLocked === true ||
+        activePopup._popupInteractionsLocked === true || popupAnimationBusy(activePopup))
+      return {{status: 'busy', detail}};
+    try {{
+      if (timedEventPopup) window.__fmvTimedEventPopupSubmission = activePopup;
+      void activePopup.close();
+      return {{status: 'submitted', detail}};
+    }} catch (error) {{
+      if (window.__fmvTimedEventPopupSubmission === activePopup)
+        window.__fmvTimedEventPopupSubmission = null;
+      return {{status: 'rejected', detail: String(error?.message || error)}};
+    }}
+  }}
   const activePopupService = activePopup?.service || activePopup?._service;
   const rewardPopup = activePopup && typeof activePopup.close === 'function' && (
     activePopup?.rewardService === services?.rewardService ||
@@ -528,7 +600,7 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
   if (rewardPopup || promotionalPopup) {{
     const detail = rewardPopup ? 'reward-popup' : 'promotional-popup';
     if (activePopup._popupLocked === true ||
-        activePopup._popupInteractionsLocked === true)
+        activePopup._popupInteractionsLocked === true || popupAnimationBusy(activePopup))
       return {{status: 'busy', detail}};
     try {{
       void activePopup.close();
@@ -547,6 +619,14 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     packOpeningView?.visible !== false && packOpeningView?.parent === stickerNavigation &&
     stickerController?.parent === packOpeningView && stickerController?._isAnimating === true;
   if (!stickerPackActive) {{
+    const stickerAlbumTransition = stickerNavigation?.visible !== false &&
+      currentStickerView && currentStickerView !== packOpeningView &&
+      currentStickerView.parent === stickerNavigation && currentStickerView.visible !== false &&
+      currentStickerView._destroyed !== true &&
+      typeof currentStickerView.setRewards === 'function' &&
+      typeof currentStickerView.playAnimation === 'function';
+    if (stickerAlbumTransition)
+      return {{status: 'busy', detail: 'sticker-album-transition'}};
     const stickerSetPanel = currentStickerView?.children?.find((child) =>
       typeof child?._onButtonPressed === 'function' &&
       typeof child?._animationResolve === 'function' &&

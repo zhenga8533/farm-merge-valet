@@ -81,6 +81,27 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
     assert health.transient_overlay_detail == "sticker-pack-collect"
 
 
+def test_unknown_transient_overlay_kind_fails_closed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.evaluate",
+        lambda *_, **__: {
+            "sceneId": 3,
+            "board": True,
+            "itemDrop": True,
+            "heartbeat": 10,
+            "heartbeatAgeMs": 1,
+            "transientOverlay": "future-overlay",
+            "transientOverlayDetail": "popup:FuturePopup",
+        },
+    )
+    adapter = GameRuntimeAdapter(9222, "Farm")
+
+    health = adapter.read_runtime_health()
+
+    assert health.transient_overlay is TransientOverlayKind.UNSUPPORTED
+    assert health.transient_overlay_detail == "popup:FuturePopup"
+
+
 def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) -> None:
     expressions: list[str] = []
 
@@ -103,6 +124,17 @@ def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) ->
     assert "void stickerSetPanel._onButtonPressed()" in expressions[0]
     assert "window.__fmvStickerSetCompletionSubmission = stickerSetPanel" in expressions[0]
     assert "void activePopup.close()" in expressions[0]
+    assert "activePopup?._name === 'DailyBonusPopup'" in expressions[0]
+    assert "activePopup?._name === 'DailyChallengePopup'" in expressions[0]
+    assert "activePopup === services?.dailyChallenge?._popup" in expressions[0]
+    assert "activePopup?._name === 'TimedEventPopup'" in expressions[0]
+    assert "window.__fmvTimedEventPopupSubmission = activePopup" in expressions[0]
+    assert "timed-event-transition" in expressions[0]
+    assert "popup?._baseAnimationContent?.isAnimationPlaying?.('open')" in expressions[0]
+    assert "popupAnimationBusy(levelUpPopup)" in expressions[0]
+    assert "activePopup?._name === 'AlbumStartedPopup'" in expressions[0]
+    assert "activePopup._rewardCollected" in expressions[0]
+    assert "sticker-album-transition" in expressions[0]
     assert "services?.specialOfferService" in expressions[0]
     assert "services?.recurringConversionService" in expressions[0]
     assert "currentSceneId !== 4" in expressions[0]
@@ -111,7 +143,7 @@ def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) ->
 def test_health_detects_each_supported_reward_overlay_phase() -> None:
     from farm_merge_valet.cdp.scripts import _HEALTH_EXPRESSION
 
-    assert "child?._name === 'LevelUpPopup'" in _HEALTH_EXPRESSION
+    assert "activePopup?._name === 'LevelUpPopup'" in _HEALTH_EXPRESSION
     assert "Array.isArray(child?._viewStack)" in _HEALTH_EXPRESSION
     assert "child?._packOpeningView" in _HEALTH_EXPRESSION
     assert "typeof stickerSpineView._onSkippedPressed === 'function'" in _HEALTH_EXPRESSION
@@ -121,6 +153,18 @@ def test_health_detects_each_supported_reward_overlay_phase() -> None:
     assert "sticker-pack-collect" in _HEALTH_EXPRESSION
     assert "sticker-set-transition" in _HEALTH_EXPRESSION
     assert "sticker-set-collect" in _HEALTH_EXPRESSION
+    assert "daily-bonus-collect" in _HEALTH_EXPRESSION
+    assert "daily-bonus-transition" in _HEALTH_EXPRESSION
+    assert "daily-challenge" in _HEALTH_EXPRESSION
+    assert "activePopup === services?.dailyChallenge?._popup" in _HEALTH_EXPRESSION
+    assert "activePopup?._name === 'TimedEventPopup'" in _HEALTH_EXPRESSION
+    assert "window.__fmvTimedEventPopupSubmission === activePopup" in _HEALTH_EXPRESSION
+    assert "timed-event-transition" in _HEALTH_EXPRESSION
+    assert "child?._name === 'DailyBonusPopup'" not in _HEALTH_EXPRESSION
+    assert "activePopup?._name === 'DailyBonusPopup'" in _HEALTH_EXPRESSION
+    assert "activePopup?._name === 'AlbumStartedPopup'" in _HEALTH_EXPRESSION
+    assert "sticker-album-started" in _HEALTH_EXPRESSION
+    assert "sticker-album-transition" in _HEALTH_EXPRESSION
     assert "reward-popup" in _HEALTH_EXPRESSION
     assert "promotional-popup" in _HEALTH_EXPRESSION
     assert "activePopup?._rewardService === services?.rewardService" in _HEALTH_EXPRESSION

@@ -476,7 +476,7 @@ def test_unsupported_overlay_pauses_without_attempting_dismissal(caplog) -> None
             return health(
                 advancing=True,
                 transient_overlay=TransientOverlayKind.UNSUPPORTED,
-                transient_overlay_detail="popup:DailyBonusPopup",
+                transient_overlay_detail="popup:UnknownPopup",
             )
 
     bot = bare_bot()
@@ -496,6 +496,6 @@ def test_unsupported_overlay_pauses_without_attempting_dismissal(caplog) -> None
     assert bot.runtime.dismissed_overlays == 0
     assert board_reads == 0
     assert any(
-        "unsupported game overlay is open (popup:DailyBonusPopup)" in message
+        "unsupported game overlay is open (popup:UnknownPopup)" in message
         for message in caplog.messages
     )

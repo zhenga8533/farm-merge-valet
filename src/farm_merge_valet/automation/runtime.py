@@ -30,11 +30,18 @@ class ActionStatus(StrEnum):
 
 class TransientOverlayKind(StrEnum):
     LEVEL_UP = "level-up"
+    DAILY_BONUS_COLLECT = "daily-bonus-collect"
+    DAILY_BONUS_TRANSITION = "daily-bonus-transition"
+    DAILY_CHALLENGE = "daily-challenge"
+    TIMED_EVENT = "timed-event"
+    TIMED_EVENT_TRANSITION = "timed-event-transition"
     STICKER_PACK_SKIP = "sticker-pack-skip"
     STICKER_PACK_TRANSITION = "sticker-pack-transition"
     STICKER_PACK_COLLECT = "sticker-pack-collect"
     STICKER_SET_COLLECT = "sticker-set-collect"
     STICKER_SET_TRANSITION = "sticker-set-transition"
+    STICKER_ALBUM_STARTED = "sticker-album-started"
+    STICKER_ALBUM_TRANSITION = "sticker-album-transition"
     REWARD_POPUP = "reward-popup"
     PROMOTIONAL_POPUP = "promotional-popup"
     UNSUPPORTED = "unsupported"
