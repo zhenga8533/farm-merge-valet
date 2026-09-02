@@ -151,6 +151,8 @@ def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) ->
     assert "timed-event-transition" in expressions[0]
     assert "popup?._baseAnimationContent?.isAnimationPlaying?.('open')" in expressions[0]
     assert "popupAnimationBusy(levelUpPopup)" in expressions[0]
+    assert "listener?.fn === levelUpPopup.close" in expressions[0]
+    assert "level-up-handler-not-current" not in expressions[0]
     assert "activePopup?._name === 'AlbumStartedPopup'" in expressions[0]
     assert "activePopup._rewardCollected" in expressions[0]
     assert "sticker-album-transition" in expressions[0]

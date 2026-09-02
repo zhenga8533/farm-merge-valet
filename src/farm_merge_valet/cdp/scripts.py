@@ -545,7 +545,7 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     const listeners = Array.isArray(pointerUp) ? pointerUp : pointerUp ? [pointerUp] : [];
     if (!listeners.some((listener) =>
         listener?.fn === levelUpPopup.close && listener?.context === levelUpPopup))
-      return {{status: 'unavailable', detail: 'level-up-handler-not-current'}};
+      return {{status: 'busy', detail: 'level-up'}};
     try {{
       void levelUpPopup.close();
       return {{status: 'submitted', detail: 'level-up'}};
