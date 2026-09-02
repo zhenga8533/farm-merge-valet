@@ -544,7 +544,7 @@ def test_interaction_uses_internal_click_pipeline_without_screen_coordinates(mon
     assert result.status is ActionStatus.SUBMITTED
     assert "handler._simulateClick(content)" in expression
     assert "collectable" in expression
-    assert "expectedKind === 'immediate'" in expression
+    assert "'immediate': () => content.hasBehavior?.('collectable')" in expression
     assert "hasBehavior?.('ingredient')" not in expression
     assert "hasBehavior?.('cooldown')" in expression
     assert "hasBehavior?.('cooldownPreview')" not in expression
@@ -555,7 +555,10 @@ def test_interaction_uses_internal_click_pipeline_without_screen_coordinates(mon
 def test_interaction_returns_structured_invalid_target(monkeypatch) -> None:
     monkeypatch.setattr(
         "farm_merge_valet.cdp.runtime.evaluate",
-        lambda *_, **__: {"status": "invalid-target"},
+        lambda *_, **__: {
+            "status": "invalid-target",
+            "detail": "producer-state-invalid",
+        },
     )
 
     result = GameRuntimeAdapter(9222, "Farm").submit_board_interaction(
@@ -563,6 +566,28 @@ def test_interaction_returns_structured_invalid_target(monkeypatch) -> None:
     )
 
     assert result.status is ActionStatus.INVALID_TARGET
+    assert result.detail == "producer-state-invalid"
+
+
+def test_interaction_submission_defines_minimum_contract_for_every_kind(monkeypatch) -> None:
+    expression = ""
+
+    def capture_expression(_port, value, _title, **_kwargs):
+        nonlocal expression
+        expression = value
+        return {"status": "submitted"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", capture_expression)
+
+    GameRuntimeAdapter(9222, "Farm").submit_board_interaction(
+        (1, 2), InteractionTargetKind.IMMEDIATE, "milk", 9
+    )
+
+    submission_kinds = set(InteractionTargetKind) - {InteractionTargetKind.REMOVE}
+    for kind in submission_kinds:
+        assert f"'{kind.value}': () =>" in expression
+    assert "detail: `${expectedKind}-state-invalid`" in expression
+    assert "detail: 'unsupported-interaction-kind'" in expression
 
 
 def test_reward_interaction_uses_claim_callback_without_opening_popout(monkeypatch) -> None:

@@ -942,34 +942,36 @@ def _interaction_expression(
     return {{status: 'stale-source'}};
   const producer = content.hasBehavior?.('harvestable') &&
     ['animal', 'crop'].includes(content.getBehavior?.('harvestable')?._data?.harvestableType);
-  const valid = expectedKind === 'immediate'
-    ? content.hasBehavior?.('collectable')
-    : expectedKind === 'reward'
-      ? content.hasBehavior?.('collectable') && content.hasBehavior?.('currency') &&
+  const targetValidators = {{
+    'immediate': () => content.hasBehavior?.('collectable'),
+    'reward': () =>
+      content.hasBehavior?.('collectable') && content.hasBehavior?.('currency') &&
         Array.isArray(content.getBehavior?.('collectable')?.reward) &&
-        content.getBehavior('collectable').reward.length > 0
-    : expectedKind === 'upgrade'
-      ? content.hasBehavior?.('upgradeCard') && Number.isInteger(content.getTier?.()) &&
-        typeof content.getBehavior('upgradeCard')?._data?.targetObjectTreeIngredient === 'string'
-    : expectedKind === 'reward-container'
-      ? content.hasBehavior?.('crateReward') && content.hasBehavior?.('cooldown') &&
+        content.getBehavior('collectable').reward.length > 0,
+    'upgrade': () =>
+      content.hasBehavior?.('upgradeCard') && Number.isInteger(content.getTier?.()) &&
+        typeof content.getBehavior('upgradeCard')?._data?.targetObjectTreeIngredient === 'string',
+    'reward-container': () =>
+      content.hasBehavior?.('crateReward') && content.hasBehavior?.('cooldown') &&
         Array.isArray(content.getBehavior('crateReward')?._data?.rewards) &&
-        content.getBehavior('crateReward')._data.rewards.length > 0
-    : expectedKind === 'clear'
-      ? content.hasBehavior?.('mapSource') && content.hasBehavior?.('hitpoints') &&
-        content.hasBehavior?.('resourceGate')
-    : expectedKind === 'obstacle-loot'
-      ? content.hasBehavior?.('mapSource') && content.hasBehavior?.('hitpoints') &&
+        content.getBehavior('crateReward')._data.rewards.length > 0,
+    'clear': () =>
+      content.hasBehavior?.('mapSource') && content.hasBehavior?.('hitpoints') &&
+        content.hasBehavior?.('resourceGate'),
+    'obstacle-loot': () =>
+      content.hasBehavior?.('mapSource') && content.hasBehavior?.('hitpoints') &&
         content.hasBehavior?.('lootable') &&
         Array.isArray(content.getBehavior?.('lootable')?.loot) &&
-        content.getBehavior('lootable').loot.length > 0
-    : expectedKind === 'producer'
-      ? producer && !content.hasBehavior?.('cooldown') &&
-        !content.hasBehavior?.('depleted')
-      : expectedKind === 'depleted-producer'
-        ? producer && content.hasBehavior?.('depleted')
-        : false;
-  if (!valid) return {{status: 'invalid-target'}};
+        content.getBehavior('lootable').loot.length > 0,
+    'producer': () =>
+      producer && !content.hasBehavior?.('cooldown') && !content.hasBehavior?.('depleted'),
+    'depleted-producer': () => producer && content.hasBehavior?.('depleted'),
+  }};
+  const validateTarget = targetValidators[expectedKind];
+  if (typeof validateTarget !== 'function')
+    return {{status: 'invalid-target', detail: 'unsupported-interaction-kind'}};
+  if (!validateTarget())
+    return {{status: 'invalid-target', detail: `${{expectedKind}}-state-invalid`}};
   if (handler?.busy || handler?.isBusy?.() || handler?.dragging || handler?._dragging ||
       handler?._currentObject || handler?._originCell)
     return {{status: 'busy'}};
