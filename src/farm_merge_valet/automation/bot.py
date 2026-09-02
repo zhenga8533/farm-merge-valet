@@ -21,6 +21,7 @@ from farm_merge_valet.automation.runtime import (
     RuntimeConnectionError,
     RuntimeHealth,
     StorageBubbleState,
+    TransientOverlayKind,
 )
 from farm_merge_valet.automation.workflows import (
     InteractionAction,
@@ -1249,7 +1250,16 @@ class Bot:
             self._report_wait(str(exc))
             return
         self._last_health = health
-        if self.config.auto_dismiss_overlays and health.transient_overlay is not None:
+        if health.transient_overlay is not None:
+            overlay_detail = health.transient_overlay_detail or health.transient_overlay.value
+            if health.transient_overlay is TransientOverlayKind.UNSUPPORTED:
+                self._report_wait(f"unsupported game overlay is open ({overlay_detail})")
+                return
+            if not self.config.auto_dismiss_overlays:
+                self._report_wait(
+                    f"{overlay_detail} overlay is open; automatic dismissal is disabled"
+                )
+                return
             try:
                 result = self.runtime.dismiss_transient_overlay()
             except RuntimeConnectionError as exc:

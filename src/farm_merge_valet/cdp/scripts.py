@@ -312,6 +312,7 @@ _HEALTH_EXPRESSION = r"""
     child?._name === 'LevelUpPopup' && typeof child.close === 'function');
   const stickerNavigation = stage?.children?.find((child) =>
     Array.isArray(child?._viewStack) && child?._packOpeningView);
+  const currentStickerView = stickerNavigation?._viewStack?.at(-1);
   const packOpeningView = stickerNavigation?._packOpeningView;
   const stickerController = packOpeningView?._currentPackAnimation;
   const stickerPackActive = stickerNavigation?.visible !== false &&
@@ -331,10 +332,61 @@ _HEALTH_EXPRESSION = r"""
   const collectPending = stickerRevealView && !liveSkipText &&
     typeof stickerRevealView._animationResolve === 'function' &&
     Boolean(collectButton);
+  const stickerSetPanel = currentStickerView?.children?.find((child) =>
+    typeof child?._onButtonPressed === 'function' &&
+    typeof child?._animationResolve === 'function' &&
+    child?._data?.config?.reward);
+  const stickerSetButton = stickerSetPanel?.children?.find((child) =>
+    child?.name === 'dailyBonusButton' && child?.visible !== false &&
+    child?.renderable !== false && child?._isEnabled !== false &&
+    child?._destroyed !== true);
+  const stickerSetActive = stickerNavigation?.visible !== false &&
+    currentStickerView && currentStickerView !== packOpeningView &&
+    currentStickerView.parent === stickerNavigation && currentStickerView.visible !== false &&
+    currentStickerView._destroyed !== true && Boolean(stickerSetPanel);
+  const stickerSetSubmitted = stickerSetActive &&
+    window.__fmvStickerSetCompletionSubmission === stickerSetPanel;
+  const activePopup = popupLayer?.children?.find((child) =>
+    child?.visible !== false && child?.renderable !== false && child?._destroyed !== true);
+  const activePopupService = activePopup?.service || activePopup?._service;
+  const rewardPopup = activePopup && activePopup !== levelUpPopup &&
+    typeof activePopup.close === 'function' && (
+      activePopup?.rewardService === services?.rewardService ||
+      activePopup?._rewardService === services?.rewardService);
+  const promotionalPopup = activePopup && activePopup !== levelUpPopup &&
+    typeof activePopup.close === 'function' && (
+      [services?.specialOfferService, services?.recurringConversionService]
+        .includes(activePopupService) ||
+      'upsellPopupOptions' in activePopup || '_upsellPopupOptions' in activePopup);
+  const blockingLayer = layerRoot?.children?.find((layer) =>
+    ['disconnection', 'onboarding', 'transition', 'fake_ad'].includes(layer?.name) &&
+    layer?.children?.some((child) => child?.visible !== false &&
+      child?.renderable !== false && child?._destroyed !== true &&
+      (child?.interactive === true || child?.children?.length > 0)));
+  const unknownStageView = stage?.children?.slice(1).find((child) =>
+    child !== stickerNavigation && child?.visible !== false &&
+    child?.renderable !== false && child?._destroyed !== true);
+  const unsupportedOverlayDetail = activePopup && activePopup !== levelUpPopup &&
+      !rewardPopup && !promotionalPopup
+    ? `popup:${activePopup._name || activePopup.name || activePopup.constructor?.name || 'unknown'}`
+    : blockingLayer
+      ? `layer:${blockingLayer.name || 'unknown'}`
+      : unknownStageView
+        ? `stage:${unknownStageView._name || unknownStageView.name ||
+          unknownStageView.constructor?.name || 'unknown'}`
+        : stickerNavigation && currentStickerView && !stickerPackActive && !stickerSetActive
+          ? `sticker-view:${currentStickerView.constructor?.name || 'unknown'}`
+          : null;
   const transientOverlay = levelUpPopup ? 'level-up'
+    : rewardPopup ? 'reward-popup'
+    : promotionalPopup ? 'promotional-popup'
     : stickerSkip ? 'sticker-pack-skip'
     : collectPending ? 'sticker-pack-collect'
     : stickerPackActive ? 'sticker-pack-transition'
+    : stickerSetSubmitted ? 'sticker-set-transition'
+    : stickerSetActive && stickerSetButton ? 'sticker-set-collect'
+    : stickerSetActive ? 'sticker-set-transition'
+    : unsupportedOverlayDetail ? 'unsupported'
     : null;
   const identity = currentBoard && (services.mapGrid || scene || handler || board);
   const sceneId = identity && window.__fmvRuntimeSceneIds
@@ -361,6 +413,7 @@ _HEALTH_EXPRESSION = r"""
     heartbeatAgeMs: beat ? Math.max(0, performance.now() - beat.timestamp) : null,
     heartbeatInstalled: Boolean(window.__fmvHeartbeatInstalled && beat),
     transientOverlay,
+    transientOverlayDetail: unsupportedOverlayDetail || transientOverlay,
   };
 })()
 """
@@ -462,15 +515,64 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     }}
   }}
 
+  const activePopup = popupLayer?.children?.find((child) =>
+    child?.visible !== false && child?.renderable !== false && child?._destroyed !== true);
+  const activePopupService = activePopup?.service || activePopup?._service;
+  const rewardPopup = activePopup && typeof activePopup.close === 'function' && (
+    activePopup?.rewardService === services?.rewardService ||
+    activePopup?._rewardService === services?.rewardService);
+  const promotionalPopup = activePopup && typeof activePopup.close === 'function' && (
+    [services?.specialOfferService, services?.recurringConversionService]
+      .includes(activePopupService) ||
+    'upsellPopupOptions' in activePopup || '_upsellPopupOptions' in activePopup);
+  if (rewardPopup || promotionalPopup) {{
+    const detail = rewardPopup ? 'reward-popup' : 'promotional-popup';
+    if (activePopup._popupLocked === true ||
+        activePopup._popupInteractionsLocked === true)
+      return {{status: 'busy', detail}};
+    try {{
+      void activePopup.close();
+      return {{status: 'submitted', detail}};
+    }} catch (error) {{
+      return {{status: 'rejected', detail: String(error?.message || error)}};
+    }}
+  }}
+
   const stickerNavigation = stage?.children?.find((child) =>
     Array.isArray(child?._viewStack) && child?._packOpeningView);
+  const currentStickerView = stickerNavigation?._viewStack?.at(-1);
   const packOpeningView = stickerNavigation?._packOpeningView;
   const stickerController = packOpeningView?._currentPackAnimation;
   const stickerPackActive = stickerNavigation?.visible !== false &&
     packOpeningView?.visible !== false && packOpeningView?.parent === stickerNavigation &&
     stickerController?.parent === packOpeningView && stickerController?._isAnimating === true;
-  if (!stickerPackActive)
-    return {{status: 'stale-source', detail: 'no-supported-overlay'}};
+  if (!stickerPackActive) {{
+    const stickerSetPanel = currentStickerView?.children?.find((child) =>
+      typeof child?._onButtonPressed === 'function' &&
+      typeof child?._animationResolve === 'function' &&
+      child?._data?.config?.reward);
+    const stickerSetButton = stickerSetPanel?.children?.find((child) =>
+      child?.name === 'dailyBonusButton' && child?.visible !== false &&
+      child?.renderable !== false && child?._isEnabled !== false &&
+      child?._destroyed !== true);
+    const stickerSetActive = stickerNavigation?.visible !== false &&
+      currentStickerView && currentStickerView !== packOpeningView &&
+      currentStickerView.parent === stickerNavigation && currentStickerView.visible !== false &&
+      currentStickerView._destroyed !== true && Boolean(stickerSetPanel);
+    if (!stickerSetActive)
+      return {{status: 'stale-source', detail: 'no-supported-overlay'}};
+    if (window.__fmvStickerSetCompletionSubmission === stickerSetPanel || !stickerSetButton)
+      return {{status: 'busy', detail: 'sticker-set-transition'}};
+    try {{
+      window.__fmvStickerSetCompletionSubmission = stickerSetPanel;
+      void stickerSetPanel._onButtonPressed();
+      return {{status: 'submitted', detail: 'sticker-set-collect'}};
+    }} catch (error) {{
+      if (window.__fmvStickerSetCompletionSubmission === stickerSetPanel)
+        window.__fmvStickerSetCompletionSubmission = null;
+      return {{status: 'rejected', detail: String(error?.message || error)}};
+    }}
+  }}
 
   const stickerSpineView = stickerController._spineAnimation;
   const stickerRevealView = stickerController._revealAnimation;

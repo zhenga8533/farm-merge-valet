@@ -64,6 +64,7 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
                 "heartbeatAgeMs": 1,
                 "itemActionBusy": True,
                 "transientOverlay": "sticker-pack-collect",
+                "transientOverlayDetail": "sticker-pack-collect",
             },
         ]
     )
@@ -77,6 +78,7 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
     assert health.interaction_available
     assert health.reward_interaction_available
     assert health.transient_overlay is TransientOverlayKind.STICKER_PACK_COLLECT
+    assert health.transient_overlay_detail == "sticker-pack-collect"
 
 
 def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) -> None:
@@ -98,6 +100,11 @@ def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) ->
     assert "skip.call(stickerSpineView)" in expressions[0]
     assert "collectButton.destroy()" in expressions[0]
     assert "stickerRevealView._animationResolve()" in expressions[0]
+    assert "void stickerSetPanel._onButtonPressed()" in expressions[0]
+    assert "window.__fmvStickerSetCompletionSubmission = stickerSetPanel" in expressions[0]
+    assert "void activePopup.close()" in expressions[0]
+    assert "services?.specialOfferService" in expressions[0]
+    assert "services?.recurringConversionService" in expressions[0]
     assert "currentSceneId !== 4" in expressions[0]
 
 
@@ -112,6 +119,14 @@ def test_health_detects_each_supported_reward_overlay_phase() -> None:
     assert "stickerController?._isAnimating === true" in _HEALTH_EXPRESSION
     assert "sticker-pack-transition" in _HEALTH_EXPRESSION
     assert "sticker-pack-collect" in _HEALTH_EXPRESSION
+    assert "sticker-set-transition" in _HEALTH_EXPRESSION
+    assert "sticker-set-collect" in _HEALTH_EXPRESSION
+    assert "reward-popup" in _HEALTH_EXPRESSION
+    assert "promotional-popup" in _HEALTH_EXPRESSION
+    assert "activePopup?._rewardService === services?.rewardService" in _HEALTH_EXPRESSION
+    assert "'upsellPopupOptions' in activePopup" in _HEALTH_EXPRESSION
+    assert "unsupportedOverlayDetail" in _HEALTH_EXPRESSION
+    assert "['disconnection', 'onboarding', 'transition', 'fake_ad']" in _HEALTH_EXPRESSION
 
 
 def test_scene_change_invalidates_cached_identity(monkeypatch) -> None:

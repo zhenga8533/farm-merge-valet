@@ -33,6 +33,11 @@ class TransientOverlayKind(StrEnum):
     STICKER_PACK_SKIP = "sticker-pack-skip"
     STICKER_PACK_TRANSITION = "sticker-pack-transition"
     STICKER_PACK_COLLECT = "sticker-pack-collect"
+    STICKER_SET_COLLECT = "sticker-set-collect"
+    STICKER_SET_TRANSITION = "sticker-set-transition"
+    REWARD_POPUP = "reward-popup"
+    PROMOTIONAL_POPUP = "promotional-popup"
+    UNSUPPORTED = "unsupported"
 
 
 class RuntimeCapability(StrEnum):
@@ -99,6 +104,7 @@ class RuntimeHealth:
     reward_container_available: bool = False
     storage_bubble_available: bool = False
     transient_overlay: TransientOverlayKind | None = None
+    transient_overlay_detail: str | None = None
 
     def supports(self, capability: RuntimeCapability) -> bool:
         return {

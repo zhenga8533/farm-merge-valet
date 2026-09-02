@@ -373,6 +373,11 @@ class GameRuntimeAdapter:
             reward_container_available=reward_container,
             storage_bubble_available=storage_bubble,
             transient_overlay=transient_overlay,
+            transient_overlay_detail=(
+                raw["transientOverlayDetail"]
+                if isinstance(raw.get("transientOverlayDetail"), str)
+                else None
+            ),
         )
 
     @staticmethod

@@ -102,6 +102,7 @@ def health(
     advancing: bool,
     item_action_busy: bool = False,
     transient_overlay: TransientOverlayKind | None = None,
+    transient_overlay_detail: str | None = None,
 ) -> RuntimeHealth:
     return RuntimeHealth(
         True,
@@ -119,6 +120,7 @@ def health(
         shop_available=True,
         removal_available=True,
         transient_overlay=transient_overlay,
+        transient_overlay_detail=transient_overlay_detail,
     )
 
 
@@ -440,7 +442,7 @@ def test_known_overlay_is_dismissed_before_frozen_heartbeat_and_board_sync(caplo
     assert "Dismissed level-up overlay." in caplog.messages
 
 
-def test_overlay_dismissal_can_be_disabled() -> None:
+def test_overlay_dismissal_can_be_disabled(caplog) -> None:
     class OverlayRuntime(FakeRuntime):
         def read_runtime_health(self):
             return health(
@@ -451,8 +453,49 @@ def test_overlay_dismissal_can_be_disabled() -> None:
     bot = bare_bot()
     bot.runtime = OverlayRuntime()
     bot.config.auto_dismiss_overlays = False
-    bot._sync_board_from_live_state = lambda: True
+    board_reads = 0
 
-    bot.step()
+    def sync_board() -> bool:
+        nonlocal board_reads
+        board_reads += 1
+        return True
+
+    bot._sync_board_from_live_state = sync_board
+
+    with caplog.at_level(logging.DEBUG):
+        bot.step()
 
     assert bot.runtime.dismissed_overlays == 0
+    assert board_reads == 0
+    assert any("automatic dismissal is disabled" in message for message in caplog.messages)
+
+
+def test_unsupported_overlay_pauses_without_attempting_dismissal(caplog) -> None:
+    class OverlayRuntime(FakeRuntime):
+        def read_runtime_health(self):
+            return health(
+                advancing=True,
+                transient_overlay=TransientOverlayKind.UNSUPPORTED,
+                transient_overlay_detail="popup:DailyBonusPopup",
+            )
+
+    bot = bare_bot()
+    bot.runtime = OverlayRuntime()
+    board_reads = 0
+
+    def sync_board() -> bool:
+        nonlocal board_reads
+        board_reads += 1
+        return True
+
+    bot._sync_board_from_live_state = sync_board
+
+    with caplog.at_level(logging.DEBUG):
+        bot.step()
+
+    assert bot.runtime.dismissed_overlays == 0
+    assert board_reads == 0
+    assert any(
+        "unsupported game overlay is open (popup:DailyBonusPopup)" in message
+        for message in caplog.messages
+    )
