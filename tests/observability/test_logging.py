@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 
 from rich.logging import RichHandler
@@ -7,6 +8,7 @@ from rich.logging import RichHandler
 from farm_merge_valet.observability.logging import (
     FMV_CONTEXT_ATTRIBUTE,
     FMV_EVENT_ATTRIBUTE,
+    _JsonLineFormatter,
     configure_logging,
     log_event,
     logging_sink,
@@ -91,3 +93,26 @@ def test_structured_event_fans_out_to_each_sink_exactly_once() -> None:
     assert first.records[0] is second.records[0]
     assert first.records[0].fmv_event == "runtime.ready"
     assert first.records[0].fmv_context == {"scene_id": 7}
+
+
+def test_persistent_formatter_redacts_secrets_and_url_queries() -> None:
+    record = logging.LogRecord(
+        "farm_merge_valet.test",
+        logging.INFO,
+        __file__,
+        1,
+        "Request failed for https://example.test/path?token=visible",
+        (),
+        None,
+    )
+    record.fmv_event = "runtime.test"
+    record.fmv_context = {
+        "access_token": "secret-value",
+        "endpoint": "https://example.test/api?key=visible#fragment",
+    }
+
+    payload = json.loads(_JsonLineFormatter().format(record))
+
+    assert payload["context"]["access_token"] == "[redacted]"
+    assert payload["context"]["endpoint"] == "https://example.test/api"
+    assert payload["message"] == "Request failed for https://example.test/path"

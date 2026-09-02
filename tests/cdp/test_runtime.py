@@ -6,6 +6,7 @@ from farm_merge_valet.automation.runtime import (
     GameRuntime,
     RuntimeCapability,
     RuntimeHealth,
+    SnapshotOptions,
     TransientOverlayKind,
 )
 from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
@@ -443,7 +444,6 @@ def test_cached_discovery_is_a_debug_diagnostic(monkeypatch, caplog) -> None:
                 "sceneId": 4,
                 "detail": "item-interaction-handler-not-found",
             },
-            True,
             {"frame": 1, "ageMs": 0},
             {
                 "sceneId": 4,
@@ -805,10 +805,7 @@ def test_discovery_rearms_a_stale_cached_board(monkeypatch) -> None:
     responses = iter(
         [
             False,
-            {"status": "unavailable", "detail": "board-map-not-found"},
             False,
-            False,
-            {"status": "found", "sceneId": 5, "detail": None},
             True,
             {"status": "found", "sceneId": 5, "detail": None},
             {"frame": 20, "ageMs": 0},
@@ -850,7 +847,9 @@ def test_concurrent_heap_recovery_is_single_flight_per_target(monkeypatch) -> No
     monkeypatch.setattr(
         GameRuntimeAdapter,
         "_evaluate",
-        lambda *_args, **_kwargs: recovered.is_set(),
+        lambda _self, expression, **_kwargs: (
+            True if "requestAnimationFrame" in expression else recovered.is_set()
+        ),
     )
 
     def arm(*_args, **_kwargs):
@@ -885,7 +884,11 @@ def test_concurrent_heap_recovery_is_single_flight_per_target(monkeypatch) -> No
 def test_failed_heap_recovery_cools_down_but_reload_can_retry(monkeypatch) -> None:
     scans: list[int] = []
     adapter = GameRuntimeAdapter(9444, "Recovery cooldown")
-    monkeypatch.setattr(adapter, "_evaluate", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        adapter,
+        "_evaluate",
+        lambda expression, **_kwargs: "requestAnimationFrame" in expression,
+    )
     monkeypatch.setattr(
         "farm_merge_valet.cdp.runtime.arm_board_store",
         lambda *_args, **_kwargs: scans.append(1) or "cells-map-not-found",
@@ -896,8 +899,54 @@ def test_failed_heap_recovery_cools_down_but_reload_can_retry(monkeypatch) -> No
     assert scans == [1]
 
     assert not adapter._recover_board_from_heap(force=True)
-    assert scans == [1, 1]
+    assert scans == [1]
 
 
 def test_cdp_adapter_satisfies_runtime_protocol() -> None:
     assert isinstance(GameRuntimeAdapter(9222), GameRuntime)
+
+
+def test_atomic_snapshot_reads_requested_state_once_without_retry(monkeypatch) -> None:
+    calls = []
+
+    def evaluate(_port, expression, _title, **kwargs):
+        calls.append((expression, kwargs))
+        return {
+            "health": {
+                "sceneId": 7,
+                "board": True,
+                "itemDrop": True,
+                "crateSpawn": True,
+                "inventory": True,
+                "heartbeat": 10,
+                "heartbeatAgeMs": 1,
+                "heartbeatInstalled": True,
+            },
+            "cells": [
+                {"column": 1, "row": 2, "hasContent": True, "blueprintID": "wheat_1"}
+            ],
+            "energy": None,
+            "workers": None,
+            "storageBubbles": None,
+            "shopOrders": None,
+            "rendererDurationMs": 2.5,
+            "cellCount": 1,
+            "occupiedCellCount": 1,
+        }
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", evaluate)
+    adapter = GameRuntimeAdapter(9222, "Farm")
+    adapter._scene_id = 7
+    adapter._last_heartbeat = 9
+
+    snapshot = adapter.read_snapshot(SnapshotOptions(False, False, False))
+
+    assert snapshot is not None
+    assert snapshot.health.heartbeat_advancing
+    assert snapshot.cells is not None
+    assert snapshot.cells[(1, 2)].blueprint_id == "wheat_1"
+    assert snapshot.metrics is not None
+    assert snapshot.metrics.renderer_duration_ms == 2.5
+    assert len(calls) == 1
+    assert calls[0][1]["retry"] is False
+    assert "const energy = false" in calls[0][0]

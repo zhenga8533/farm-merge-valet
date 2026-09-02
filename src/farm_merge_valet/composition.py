@@ -12,6 +12,7 @@ from farm_merge_valet.catalog.store import CatalogUnavailableError
 from farm_merge_valet.catalog.sync import CatalogSynchronizer
 from farm_merge_valet.cdp.item_catalog import (
     read_runtime_atlas_urls,
+    read_runtime_catalog_fingerprint,
     read_runtime_item_metadata,
 )
 from farm_merge_valet.cdp.resources import (
@@ -47,7 +48,11 @@ def create_catalog_provider(config: AppConfig) -> CatalogProvider:
         except CdpConnectionError:
             return None
 
-    return RefreshingCatalogProvider(config.catalog_dir, read_metadata)
+    return RefreshingCatalogProvider(
+        config.catalog_dir,
+        read_metadata,
+        lambda: read_runtime_catalog_fingerprint(config.cdp_port, config.window_title),
+    )
 
 
 def create_catalog_synchronizer(config: AppConfig) -> CatalogSynchronizer:
@@ -82,6 +87,18 @@ def create_catalog_sync_service(
         CatalogSyncService,
     )
 
+    def read_catalog_upgrade_progress(port: int, title: str):
+        try:
+            catalog = load_item_catalog(config.catalog_dir / "catalog.json")
+        except (OSError, ValueError):
+            return read_upgrade_progress(port, title)
+        targets = {
+            upgrade_target_id: game_id
+            for game_id, item in catalog.items.items()
+            if (upgrade_target_id := getattr(item, "upgrade_target_id", None)) is not None
+        }
+        return read_upgrade_progress(port, title, targets)
+
     return CatalogSyncService(
         config,
         callbacks,
@@ -92,7 +109,7 @@ def create_catalog_sync_service(
             ),
             catalog_provider_factory=create_catalog_provider,
             catalog_synchronizer_factory=create_catalog_synchronizer,
-            upgrade_progress_reader=read_upgrade_progress,
+            upgrade_progress_reader=read_catalog_upgrade_progress,
             catalog_loader=load_item_catalog,
         ),
     )

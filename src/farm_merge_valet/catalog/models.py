@@ -10,8 +10,8 @@ from typing import Any
 
 from farm_merge_valet.core.items import ItemRef, item_tier_policy_key
 
-CATALOG_SCHEMA_VERSION = 6
-SUPPORTED_CATALOG_SCHEMA_VERSIONS = frozenset({CATALOG_SCHEMA_VERSION})
+CATALOG_SCHEMA_VERSION = 7
+SUPPORTED_CATALOG_SCHEMA_VERSIONS = frozenset({6, CATALOG_SCHEMA_VERSION})
 
 
 class TileInteractionMode(StrEnum):
@@ -117,6 +117,7 @@ class CatalogItem:
 class ItemCatalog:
     items: dict[str, CatalogItem]
     variants: dict[str, tuple[CatalogVariant, ...]] = field(default_factory=dict)
+    source_fingerprint: str | None = None
 
     @property
     def automation_items(self) -> dict[str, ItemRef]:
@@ -186,6 +187,7 @@ class ItemCatalog:
     def to_json(self) -> dict[str, object]:
         return {
             "schema_version": CATALOG_SCHEMA_VERSION,
+            "source_fingerprint": self.source_fingerprint,
             "items": {
                 key: {
                     "family_id": item.family_id,
@@ -262,7 +264,12 @@ def load_item_catalog(path: Path) -> ItemCatalog:
         variants[policy_key] = tuple(
             _parse_catalog_variant(policy_key, value, path) for value in values
         )
-    return ItemCatalog(items, variants)
+    fingerprint = raw.get("source_fingerprint")
+    return ItemCatalog(
+        items,
+        variants,
+        fingerprint if isinstance(fingerprint, str) and fingerprint else None,
+    )
 
 
 def _parse_catalog_item(blueprint_id: str, value: dict[str, Any], path: Path) -> CatalogItem:

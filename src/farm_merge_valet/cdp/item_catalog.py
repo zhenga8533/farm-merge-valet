@@ -109,6 +109,26 @@ _READ_ITEM_CATALOG_EXPRESSION = r"""
 })()
 """
 
+_READ_CATALOG_FINGERPRINT_EXPRESSION = (
+    r"""
+(() => {
+  const catalog = (
+"""
+    + _READ_ITEM_CATALOG_EXPRESSION
+    + r"""
+  );
+  if (!catalog || typeof catalog !== 'object') return null;
+  let hash = 2166136261;
+  const text = JSON.stringify(catalog);
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, '0')}:${Object.keys(catalog).length}`;
+})()
+"""
+)
+
 
 def read_runtime_item_metadata(
     port: int, page_title: str | None = None
@@ -121,6 +141,11 @@ def read_runtime_item_metadata(
         for blueprint_id, value in raw.items()
         if isinstance(blueprint_id, str) and isinstance(value, dict)
     }
+
+
+def read_runtime_catalog_fingerprint(port: int, page_title: str | None = None) -> str | None:
+    raw = evaluate(port, _READ_CATALOG_FINGERPRINT_EXPRESSION, page_title)
+    return raw if isinstance(raw, str) and raw else None
 
 
 def read_runtime_atlas_urls(port: int, page_title: str | None = None) -> list[str]:

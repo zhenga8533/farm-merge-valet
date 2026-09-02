@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import random
 import time
+from collections import deque
 from collections.abc import Callable
 from threading import Event, Lock
 
@@ -13,10 +15,13 @@ from farm_merge_valet.automation.runtime import (
     ActionStatus,
     CrateSpawnResult,
     RuntimeHealth,
+    RuntimeReadMetrics,
+    RuntimeSnapshot,
+    SnapshotOptions,
     StorageBubbleState,
     TransientOverlayKind,
 )
-from farm_merge_valet.cdp.board_store import arm_board_store, read_board_state
+from farm_merge_valet.cdp.board_store import arm_board_store, parse_board_state, read_board_state
 from farm_merge_valet.cdp.evaluation import apply_background_overrides, evaluate
 from farm_merge_valet.cdp.inventory_store import read_energy
 from farm_merge_valet.cdp.scripts import (
@@ -37,6 +42,7 @@ from farm_merge_valet.cdp.scripts import (
     _shop_start_expression,
     _storage_bubble_pop_expression,
 )
+from farm_merge_valet.cdp.snapshot import snapshot_expression
 from farm_merge_valet.cdp.targets import read_background_flag_status
 from farm_merge_valet.core.items import GridCoord, InteractionTargetKind
 from farm_merge_valet.core.obstacles import WorkerState
@@ -44,6 +50,20 @@ from farm_merge_valet.core.shops import ShopIngredient, ShopOrder, ShopOrderStat
 from farm_merge_valet.observability.logging import log_event
 
 logger = logging.getLogger(__name__)
+
+_RECOVERY_FRAME_PROBE_EXPRESSION = r"""
+new Promise((resolve) => {
+  let settled = false;
+  const finish = (value) => {
+    if (settled) return;
+    settled = true;
+    resolve(value);
+  };
+  requestAnimationFrame(() => finish(true));
+  setTimeout(() => finish(false), 500);
+})
+"""
+_RECOVERY_COOLDOWNS = (5.0, 15.0, 60.0, 300.0)
 
 
 class GameRuntimeAdapter:
@@ -70,6 +90,9 @@ class GameRuntimeAdapter:
         self._discovery_detail: str | None = "runtime-discovery-not-run"
         self._cancel_event: Event | None = None
         self._reload_recovery_pending = False
+        self._snapshot_metrics: deque[RuntimeReadMetrics] = deque(maxlen=240)
+        self._last_snapshot_summary_at = time.monotonic()
+        self._heartbeat_stalled = False
 
     def set_cancel_event(self, cancel_event: Event) -> None:
         self._cancel_event = cancel_event
@@ -92,6 +115,10 @@ class GameRuntimeAdapter:
 
     def read_workers(self) -> WorkerState | None:
         raw = self._evaluate(_READ_WORKERS_EXPRESSION)
+        return self._parse_workers(raw)
+
+    @staticmethod
+    def _parse_workers(raw: object) -> WorkerState | None:
         if not isinstance(raw, dict):
             return None
         total = raw.get("total")
@@ -109,6 +136,10 @@ class GameRuntimeAdapter:
 
     def read_storage_bubbles(self) -> tuple[StorageBubbleState, ...] | None:
         raw = self._evaluate(_READ_STORAGE_BUBBLES_EXPRESSION)
+        return self._parse_storage_bubbles(raw)
+
+    @staticmethod
+    def _parse_storage_bubbles(raw: object) -> tuple[StorageBubbleState, ...] | None:
         if not isinstance(raw, list):
             return None
         bubbles: list[StorageBubbleState] = []
@@ -134,13 +165,16 @@ class GameRuntimeAdapter:
     def read_background_flag_status(self) -> dict[str, object]:
         return read_background_flag_status(self.port, cancel_event=self._cancel_event)
 
-    def _evaluate(self, expression: str, *, timeout: float = 5.0) -> object:
+    def _evaluate(
+        self, expression: str, *, timeout: float = 5.0, retry: bool = True
+    ) -> object:
         return evaluate(
             self.port,
             expression,
             self.page_title,
             timeout=timeout,
             cancel_event=self._cancel_event,
+            retry=retry,
         )
 
     def discover(self, cancelled: Callable[[], bool] | None = None) -> RuntimeHealth:
@@ -172,20 +206,9 @@ class GameRuntimeAdapter:
         )
         if is_cancelled():
             return self.read_runtime_health()
-        refresh_started = time.monotonic()
-        raw = self._evaluate(_DISCOVER_EXPRESSION)
-        refresh_elapsed = time.monotonic() - refresh_started
-        log_event(
-            logger,
-            logging.DEBUG,
-            "runtime.handler_refresh",
-            "Bounded runtime handler refresh finished in %.3fs.",
-            refresh_elapsed,
-            elapsed_seconds=refresh_elapsed,
-        )
-        board_is_current = self._evaluate(_BOARD_ARMED_EXPRESSION) is True
-        if not board_is_current and not is_cancelled():
-            recovered = self._recover_board_from_heap(force=self._reload_recovery_pending)
+        raw: object = None
+        if not cached_board_is_current and not is_cancelled():
+            recovered = self._recover_board_from_heap(force=False)
             self._reload_recovery_pending = False
             if recovered and not is_cancelled():
                 refresh_started = time.monotonic()
@@ -199,6 +222,18 @@ class GameRuntimeAdapter:
                     elapsed_seconds=time.monotonic() - refresh_started,
                     post_recovery=True,
                 )
+        elif cached_board_is_current:
+            refresh_started = time.monotonic()
+            raw = self._evaluate(_DISCOVER_EXPRESSION)
+            refresh_elapsed = time.monotonic() - refresh_started
+            log_event(
+                logger,
+                logging.DEBUG,
+                "runtime.handler_refresh",
+                "Bounded runtime handler refresh finished in %.3fs.",
+                refresh_elapsed,
+                elapsed_seconds=refresh_elapsed,
+            )
         heartbeat_sample = self._evaluate(_HEARTBEAT_EXPRESSION)
         if isinstance(heartbeat_sample, dict) and isinstance(heartbeat_sample.get("frame"), int):
             self._last_heartbeat = heartbeat_sample["frame"]
@@ -240,7 +275,7 @@ class GameRuntimeAdapter:
             now = time.monotonic()
             with self._recovery_state_lock:
                 failures, retry_at = self._recovery_failures.get(key, (0, 0.0))
-            if not force and now < retry_at:
+            if now < retry_at:
                 log_event(
                     logger,
                     logging.INFO,
@@ -251,12 +286,24 @@ class GameRuntimeAdapter:
                     failures=failures,
                 )
                 return False
+            frame_ready = self._evaluate(
+                _RECOVERY_FRAME_PROBE_EXPRESSION, timeout=1.0, retry=False
+            )
+            if frame_ready is not True:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "runtime.heap_recovery_deferred",
+                    "Board heap recovery deferred because the game loop is not advancing.",
+                    failures=failures,
+                )
+                return False
             log_event(
                 logger,
                 logging.INFO,
                 "runtime.heap_recovery_started",
                 "Cached board is absent or stale; scanning the heap for the active board.",
-                forced=force,
+                forced=False,
             )
             scan_started = time.monotonic()
             raw_status = arm_board_store(
@@ -264,17 +311,15 @@ class GameRuntimeAdapter:
             )
             status = raw_status if isinstance(raw_status, str) else "invalid-board-search-response"
             elapsed = time.monotonic() - scan_started
-            if status.startswith("found"):
-                self._evaluate(_DISCOVER_EXPRESSION)
-            recovered = status.startswith("found") and self._evaluate(
-                _BOARD_ARMED_EXPRESSION
-            ) is True
+            recovered = status.startswith("found")
             with self._recovery_state_lock:
                 if recovered:
                     self._recovery_failures.pop(key, None)
                 else:
                     failures += 1
-                    cooldown = min(60.0, 2.0 ** min(failures - 1, 6))
+                    cooldown = _RECOVERY_COOLDOWNS[
+                        min(failures - 1, len(_RECOVERY_COOLDOWNS) - 1)
+                    ]
                     self._recovery_failures[key] = (failures, time.monotonic() + cooldown)
             log_event(
                 logger,
@@ -297,6 +342,9 @@ class GameRuntimeAdapter:
 
     def read_runtime_health(self) -> RuntimeHealth:
         raw = self._evaluate(_HEALTH_EXPRESSION)
+        return self._parse_runtime_health(raw)
+
+    def _parse_runtime_health(self, raw: object) -> RuntimeHealth:
         if not isinstance(raw, dict):
             return RuntimeHealth(
                 False,
@@ -311,10 +359,17 @@ class GameRuntimeAdapter:
                 detail="invalid-runtime-health-response",
             )
         heartbeat = raw.get("heartbeat") if isinstance(raw.get("heartbeat"), int) else None
+        heartbeat_age = (
+            float(raw["heartbeatAgeMs"])
+            if isinstance(raw.get("heartbeatAgeMs"), int | float)
+            else None
+        )
         advancing = (
             heartbeat is not None
             and self._last_heartbeat is not None
             and (heartbeat > self._last_heartbeat)
+            and heartbeat_age is not None
+            and heartbeat_age <= 500.0
         )
         self._last_heartbeat = heartbeat
         scene_id = raw.get("sceneId") if isinstance(raw.get("sceneId"), int) else None
@@ -356,11 +411,7 @@ class GameRuntimeAdapter:
             crate_spawn_available=crate_spawn,
             inventory_available=raw.get("inventory") is True,
             heartbeat=heartbeat,
-            heartbeat_age_ms=(
-                float(raw["heartbeatAgeMs"])
-                if isinstance(raw.get("heartbeatAgeMs"), int | float)
-                else None
-            ),
+            heartbeat_age_ms=heartbeat_age,
             heartbeat_advancing=advancing,
             heartbeat_installed=raw.get("heartbeatInstalled") is True,
             detail=self._discovery_detail,
@@ -381,6 +432,104 @@ class GameRuntimeAdapter:
             ),
         )
 
+    def read_snapshot(self, options: SnapshotOptions) -> RuntimeSnapshot | None:
+        started = time.monotonic()
+        raw = self._evaluate(snapshot_expression(options), retry=False)
+        wall_duration_ms = (time.monotonic() - started) * 1000.0
+        if not isinstance(raw, dict):
+            return None
+        health = self._parse_runtime_health(raw.get("health"))
+        cells = parse_board_state(raw.get("cells"))
+        energy = raw.get("energy")
+        if not isinstance(energy, int) or isinstance(energy, bool) or energy < 0:
+            energy = None
+        renderer_duration = raw.get("rendererDurationMs")
+        metrics = RuntimeReadMetrics(
+            wall_duration_ms=wall_duration_ms,
+            renderer_duration_ms=(
+                float(renderer_duration)
+                if isinstance(renderer_duration, int | float)
+                and not isinstance(renderer_duration, bool)
+                else None
+            ),
+            response_bytes=len(json.dumps(raw, separators=(",", ":")).encode("utf-8")),
+            cell_count=max(0, int(raw.get("cellCount", 0))),
+            occupied_cell_count=max(0, int(raw.get("occupiedCellCount", 0))),
+        )
+        self._record_snapshot_metrics(metrics)
+        stalled = (
+            health.heartbeat_installed
+            and health.heartbeat is not None
+            and not health.heartbeat_advancing
+            and health.heartbeat_age_ms is not None
+            and health.heartbeat_age_ms > 500.0
+        )
+        if stalled != self._heartbeat_stalled:
+            log_event(
+                logger,
+                logging.WARNING if stalled else logging.INFO,
+                "runtime.heartbeat_stalled" if stalled else "runtime.heartbeat_recovered",
+                "Game heartbeat %s (age %.1fms).",
+                "stalled" if stalled else "recovered",
+                health.heartbeat_age_ms or 0.0,
+                heartbeat_age_ms=health.heartbeat_age_ms,
+            )
+            self._heartbeat_stalled = stalled
+        if wall_duration_ms >= 250.0:
+            log_event(
+                logger,
+                logging.WARNING,
+                "runtime.snapshot_slow",
+                "Slow runtime snapshot: %.1fms wall, %s renderer.",
+                wall_duration_ms,
+                (
+                    f"{metrics.renderer_duration_ms:.1f}ms"
+                    if metrics.renderer_duration_ms is not None
+                    else "unknown"
+                ),
+                wall_duration_ms=wall_duration_ms,
+                renderer_duration_ms=metrics.renderer_duration_ms,
+                response_bytes=metrics.response_bytes,
+                cell_count=metrics.cell_count,
+                occupied_cell_count=metrics.occupied_cell_count,
+            )
+        return RuntimeSnapshot(
+            health=health,
+            cells=cells,
+            energy=energy,
+            workers=self._parse_workers(raw.get("workers")),
+            storage_bubbles=self._parse_storage_bubbles(raw.get("storageBubbles")),
+            shop_orders=self._parse_shop_orders(raw.get("shopOrders")),
+            metrics=metrics,
+        )
+
+    def _record_snapshot_metrics(self, metrics: RuntimeReadMetrics) -> None:
+        self._snapshot_metrics.append(metrics)
+        now = time.monotonic()
+        if now - self._last_snapshot_summary_at < 60.0:
+            return
+        wall = sorted(sample.wall_duration_ms for sample in self._snapshot_metrics)
+        renderer = sorted(
+            sample.renderer_duration_ms
+            for sample in self._snapshot_metrics
+            if sample.renderer_duration_ms is not None
+        )
+        percentile_index = max(0, round((len(wall) - 1) * 0.95))
+        renderer_index = max(0, round((len(renderer) - 1) * 0.95)) if renderer else 0
+        log_event(
+            logger,
+            logging.DEBUG,
+            "runtime.snapshot_summary",
+            "Runtime snapshots: %d samples, %.1fms p95 wall.",
+            len(wall),
+            wall[percentile_index],
+            samples=len(wall),
+            wall_p95_ms=wall[percentile_index],
+            renderer_p95_ms=renderer[renderer_index] if renderer else None,
+            maximum_response_bytes=max(sample.response_bytes for sample in self._snapshot_metrics),
+        )
+        self._last_snapshot_summary_at = now
+
     @staticmethod
     def _action_result(raw: object) -> ActionResult:
         if not isinstance(raw, dict):
@@ -399,14 +548,20 @@ class GameRuntimeAdapter:
         )
 
     def submit_item_drop(self, start: GridCoord, end: GridCoord) -> ActionResult:
-        return self._action_result(self._evaluate(_drop_expression(start, end, self._scene_id)))
+        return self._action_result(
+            self._evaluate(_drop_expression(start, end, self._scene_id), retry=False)
+        )
 
     def dismiss_transient_overlay(self) -> ActionResult:
-        return self._action_result(self._evaluate(_dismiss_overlay_expression(self._scene_id)))
+        return self._action_result(
+            self._evaluate(_dismiss_overlay_expression(self._scene_id), retry=False)
+        )
 
     def submit_storage_bubble_pop(self, expected_object_id: int) -> ActionResult:
         return self._action_result(
-            self._evaluate(_storage_bubble_pop_expression(expected_object_id, self._scene_id))
+            self._evaluate(
+                _storage_bubble_pop_expression(expected_object_id, self._scene_id), retry=False
+            )
         )
 
     def submit_board_interaction(
@@ -424,7 +579,8 @@ class GameRuntimeAdapter:
                     expected_blueprint_id,
                     expected_object_id,
                     self._scene_id,
-                )
+                ),
+                retry=False,
             )
         )
 
@@ -441,7 +597,8 @@ class GameRuntimeAdapter:
                     expected_blueprint_id,
                     expected_object_id,
                     self._scene_id,
-                )
+                ),
+                retry=False,
             )
         )
 
@@ -453,7 +610,7 @@ class GameRuntimeAdapter:
         detail: str | None = None
         claim_limit = max(0, int(limit))
         for claim_index in range(claim_limit):
-            raw = self._evaluate(_crate_expression(1, self._scene_id))
+            raw = self._evaluate(_crate_expression(1, self._scene_id), retry=False)
             if not isinstance(raw, dict):
                 return CrateSpawnResult(
                     ActionStatus.UNAVAILABLE,
@@ -499,6 +656,10 @@ class GameRuntimeAdapter:
 
     def read_shop_orders(self) -> tuple[ShopOrder, ...] | None:
         raw = self._evaluate(_READ_SHOP_ORDERS_EXPRESSION)
+        return self._parse_shop_orders(raw)
+
+    @staticmethod
+    def _parse_shop_orders(raw: object) -> tuple[ShopOrder, ...] | None:
         if not isinstance(raw, list):
             return None
         orders: list[ShopOrder] = []
@@ -549,7 +710,7 @@ class GameRuntimeAdapter:
         return self._shop_action_result(_shop_claim_expression(shop_id, recipe_id, self._scene_id))
 
     def _shop_action_result(self, expression: str) -> ActionResult:
-        raw = self._evaluate(expression)
+        raw = self._evaluate(expression, retry=False)
         if not isinstance(raw, dict):
             return ActionResult(ActionStatus.UNAVAILABLE, "invalid-runtime-response")
         status_value = raw.get("status")

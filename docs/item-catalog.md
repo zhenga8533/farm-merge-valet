@@ -68,6 +68,10 @@ as producer cooldown/depleted frames and broken/repaired building frames live
 in a sibling `variants` directory and retain their exact atlas aliases. The
 top-level `variants` mapping in `catalog.json` records each variant's semantic
 state, alias, and path; consumers never need to infer states from filenames.
+Catalog schema version 7 also records a compact source fingerprint. Startup
+compares it before requesting full blueprint metadata, avoiding a complete
+catalog extraction when game data is unchanged. Version 6 caches remain
+readable and receive a fingerprint on their next live refresh.
 Variant discovery uses exact numbered-family and building-state identities so
 similarly prefixed, unrelated game assets cannot be grouped together.
 Compilation fails if a declared alias is missing and removes stale PNGs.

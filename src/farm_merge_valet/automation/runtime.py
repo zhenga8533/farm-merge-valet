@@ -142,6 +142,35 @@ class StorageBubbleState:
 
 
 @dataclass(frozen=True)
+class SnapshotOptions:
+    """Optional sections requested with an atomic live-game snapshot."""
+
+    include_obstacle_resources: bool = True
+    include_storage_bubbles: bool = True
+    include_shop_orders: bool = True
+
+
+@dataclass(frozen=True)
+class RuntimeReadMetrics:
+    wall_duration_ms: float
+    renderer_duration_ms: float | None
+    response_bytes: int
+    cell_count: int
+    occupied_cell_count: int
+
+
+@dataclass(frozen=True)
+class RuntimeSnapshot:
+    health: RuntimeHealth
+    cells: dict[GridCoord, LiveCellState] | None
+    energy: int | None = None
+    workers: WorkerState | None = None
+    storage_bubbles: tuple[StorageBubbleState, ...] | None = None
+    shop_orders: tuple[ShopOrder, ...] | None = None
+    metrics: RuntimeReadMetrics | None = None
+
+
+@dataclass(frozen=True)
 class LiveCellState:
     """Authoritative content state for one game-board coordinate."""
 
@@ -172,6 +201,8 @@ class GameRuntime(Protocol):
     def discover(self, cancelled: Callable[[], bool] | None = None) -> RuntimeHealth: ...
 
     def read_runtime_health(self) -> RuntimeHealth: ...
+
+    def read_snapshot(self, options: SnapshotOptions) -> RuntimeSnapshot | None: ...
 
     def read_board_state(self) -> dict[GridCoord, LiveCellState] | None: ...
 

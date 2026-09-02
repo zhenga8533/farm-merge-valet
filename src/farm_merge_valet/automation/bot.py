@@ -12,6 +12,7 @@ from queue import Empty, Queue
 from threading import Event, Lock, Thread
 from typing import Literal
 
+from farm_merge_valet.automation.perception import build_board, build_perceived_state
 from farm_merge_valet.automation.runtime import (
     ActionStatus,
     GameRuntime,
@@ -20,9 +21,12 @@ from farm_merge_valet.automation.runtime import (
     RuntimeCapability,
     RuntimeConnectionError,
     RuntimeHealth,
+    RuntimeSnapshot,
+    SnapshotOptions,
     StorageBubbleState,
     TransientOverlayKind,
 )
+from farm_merge_valet.automation.scheduler import MINIMUM_ACTIVE_INTERVAL, AdaptiveScheduler
 from farm_merge_valet.automation.workflows import (
     InteractionAction,
     InteractionWorkflow,
@@ -36,7 +40,6 @@ from farm_merge_valet.config import AppConfig
 from farm_merge_valet.core.board import (
     BoardGrid,
     Cell,
-    CellKind,
 )
 from farm_merge_valet.core.items import (
     GridCoord,
@@ -70,22 +73,6 @@ _ACTION_STABLE_SECONDS = 0.75
 _ACTION_MAX_PENDING_SECONDS = 8.0
 _ACTION_RETRY_SECONDS = 10.0
 _ACTION_FAILURE_LIMIT = 3
-
-_LIVE_STATE_CELL_KIND = {"area_cloud": CellKind.CLOUD, "premium_cloud": CellKind.CLOUD}
-_STRUCTURE_BLUEPRINTS = frozenset(
-    {
-        "bakery",
-        "dairy",
-        "market",
-        "trainstation",
-        "likes_billboard",
-        "traintrack_stop",
-        "delivery_truck",
-        "delivery_cargo",
-        "empty",
-    }
-)
-
 
 @dataclass
 class _PendingStorageBubble:
@@ -138,6 +125,7 @@ class Bot:
         self._energy: int | None = None
         self._workers: WorkerState | None = None
         self._storage_bubbles: tuple[StorageBubbleState, ...] | None = None
+        self._shop_orders: tuple[ShopOrder, ...] | None = None
         self._pending_storage_bubble: _PendingStorageBubble | None = None
         self._storage_bubble_next_action_at = 0.0
         self._obstacle_focus: tuple[GridCoord, int | None] | None = None
@@ -154,6 +142,8 @@ class Bot:
         self._last_crate_claim_log_at = 0.0
         self._last_cooling_producer_count: int | None = None
         self._capability_retries: dict[RuntimeCapability, tuple[float, float]] = {}
+        self._scheduler = AdaptiveScheduler()
+        self._poll_floor_reported = False
 
     def update_config(self, config: AppConfig) -> None:
         """Queue a complete configuration snapshot for the next planning iteration."""
@@ -375,6 +365,24 @@ class Bot:
         return True
 
     def _sync_board_from_live_state(self) -> bool:
+        read_snapshot = getattr(self.runtime, "read_snapshot", None)
+        if callable(read_snapshot):
+            try:
+                snapshot = read_snapshot(self._snapshot_options())
+            except RuntimeConnectionError as exc:
+                log_event(
+                    logger,
+                    logging.DEBUG,
+                    "runtime.snapshot_failed",
+                    "Could not read live runtime snapshot: %s",
+                    exc,
+                    detail=str(exc),
+                )
+                return False
+            if snapshot is None or snapshot.cells is None:
+                return False
+            self._apply_runtime_snapshot(snapshot)
+            return True
         try:
             raw = self.runtime.read_board_state()
         except RuntimeConnectionError as exc:
@@ -389,10 +397,12 @@ class Bot:
             return False
         if raw is None:
             return False
-        board = BoardGrid()
-        for coord, state in raw.items():
-            self._set_live_cell(board, coord, state)
-        self.board = board
+        self.board = build_board(
+            raw,
+            self._blueprint_items,
+            self._direct_interaction_ids,
+            self._reward_interaction_ids,
+        )
         self._live_cells = raw
         read_energy = getattr(self.runtime, "read_energy", None)
         try:
@@ -413,31 +423,41 @@ class Bot:
             self._storage_bubbles = None
         return True
 
+    def _snapshot_options(self) -> SnapshotOptions:
+        obstacle_resources = any(
+            self._interaction_enabled(blueprint_id) for blueprint_id in self._clearable_ids
+        )
+        return SnapshotOptions(
+            include_obstacle_resources=obstacle_resources,
+            include_storage_bubbles=(
+                self.config.auto_pop_storage_bubbles or self._pending_storage_bubble is not None
+            ),
+            include_shop_orders=(
+                self._shop_policy().may_enable_orders or self._shop_workflow.pending is not None
+            ),
+        )
+
+    def _apply_runtime_snapshot(self, snapshot: RuntimeSnapshot) -> None:
+        assert snapshot.cells is not None
+        perceived = build_perceived_state(
+            snapshot,
+            self._blueprint_items,
+            self._direct_interaction_ids,
+            self._reward_interaction_ids,
+        )
+        self.board = perceived.board
+        self._live_cells = perceived.live_cells
+        self._energy = perceived.energy
+        self._workers = perceived.workers
+        self._storage_bubbles = perceived.storage_bubbles
+        self._shop_orders = perceived.shop_orders
+        scheduler = getattr(self, "_scheduler", None)
+        if scheduler is not None and snapshot.metrics is not None:
+            scheduler.record_snapshot(snapshot.metrics.wall_duration_ms / 1000.0)
+
     def sync_board_from_live_state(self) -> bool:
         """Synchronize the local board model from the live game state."""
         return self._sync_board_from_live_state()
-
-    def _set_live_cell(self, board: BoardGrid, coord: GridCoord, state: LiveCellState) -> None:
-        if not state.has_content:
-            board.set_cell(coord, Cell(CellKind.EMPTY))
-            return
-        blueprint_id = state.blueprint_id
-        item = self._blueprint_items.get(blueprint_id) if blueprint_id is not None else None
-        if item is not None:
-            if state.item_variant is not None:
-                item = ItemRef(item.category, item.name, item.tier, state.item_variant)
-            board.set_cell(coord, Cell(CellKind.ITEM, item))
-        elif blueprint_id in _LIVE_STATE_CELL_KIND:
-            board.set_cell(coord, Cell(_LIVE_STATE_CELL_KIND[blueprint_id]))
-        elif blueprint_id in _STRUCTURE_BLUEPRINTS:
-            board.set_cell(coord, Cell(CellKind.STRUCTURE))
-        elif (
-            blueprint_id in self._direct_interaction_ids
-            or blueprint_id in self._reward_interaction_ids
-        ) and state.collectable:
-            board.set_cell(coord, Cell(CellKind.INTERACTABLE))
-        else:
-            board.set_cell(coord, Cell(CellKind.OTHER))
 
     _MERGE_ACTION_PRIORITY = {
         MergeActionKind.TRIGGER: 0,
@@ -1238,10 +1258,20 @@ class Bot:
 
     def step(self) -> None:
         """Run one perceive -> plan -> internal action -> verify iteration."""
+        snapshot_reader = getattr(self.runtime, "read_snapshot", None)
+        atomic_snapshot = False
         try:
-            health_started = time.monotonic()
-            health = self.runtime.read_runtime_health()
-            self._log_slow_stage("runtime health read", health_started)
+            if callable(snapshot_reader):
+                atomic_snapshot = True
+                snapshot = snapshot_reader(self._snapshot_options())
+                if snapshot is None:
+                    self._report_wait("authoritative runtime snapshot unavailable")
+                    return
+                health = snapshot.health
+            else:
+                health_started = time.monotonic()
+                health = self.runtime.read_runtime_health()
+                self._log_slow_stage("runtime health read", health_started)
             if not self._ensure_capability(health, RuntimeCapability.BOARD):
                 return
         except RuntimeConnectionError as exc:
@@ -1289,9 +1319,14 @@ class Bot:
                     detail=result.detail,
                 )
             return
-        board_started = time.monotonic()
-        board_synced = self._sync_board_from_live_state()
-        self._log_slow_stage("board-state read", board_started)
+        if atomic_snapshot:
+            board_synced = snapshot.cells is not None
+            if board_synced:
+                self._apply_runtime_snapshot(snapshot)
+        else:
+            board_started = time.monotonic()
+            board_synced = self._sync_board_from_live_state()
+            self._log_slow_stage("board-state read", board_started)
         if not board_synced:
             if self._interrupt_event.is_set():
                 return
@@ -1304,15 +1339,15 @@ class Bot:
         if not self._verify_pending_storage_bubble(health):
             return
         shop_policy_enabled = self._shop_policy().may_enable_orders
-        shop_orders: tuple[ShopOrder, ...] | None = ()
-        if self._shop_workflow.pending is not None:
+        shop_orders: tuple[ShopOrder, ...] | None = self._shop_orders if atomic_snapshot else ()
+        if not atomic_snapshot and self._shop_workflow.pending is not None:
             if not self._ensure_capability(health, RuntimeCapability.SHOPS):
                 return
             shop_orders = self.runtime.read_shop_orders()
             if shop_orders is None:
                 self._report_wait("authoritative shop-order state unavailable")
                 return
-        elif shop_policy_enabled and health.shop_available:
+        elif not atomic_snapshot and shop_policy_enabled and health.shop_available:
             shop_orders = self.runtime.read_shop_orders()
             if shop_orders is None:
                 self._report_wait("authoritative shop-order state unavailable")
@@ -1478,6 +1513,27 @@ class Bot:
                 elapsed_seconds=elapsed,
             )
 
+    def _effective_loop_delay(self, requested_delay: float) -> float:
+        if (
+            self.config.loop_interval < MINIMUM_ACTIVE_INTERVAL
+            and not getattr(self, "_poll_floor_reported", False)
+        ):
+            log_event(
+                logger,
+                logging.WARNING,
+                "bot.poll_interval_clamped",
+                "Configured loop interval %.3fs was clamped to the safe %.3fs minimum.",
+                self.config.loop_interval,
+                MINIMUM_ACTIVE_INTERVAL,
+                configured_interval=self.config.loop_interval,
+                effective_interval=MINIMUM_ACTIVE_INTERVAL,
+            )
+            self._poll_floor_reported = True
+        scheduler = getattr(self, "_scheduler", None)
+        if scheduler is None:
+            scheduler = self._scheduler = AdaptiveScheduler()
+        return max(requested_delay, scheduler.active_delay(self.config.loop_interval))
+
     def _report_wait(self, reason: str, **context: object) -> None:
         now = time.monotonic()
         if reason != self._last_wait_reason or now - self._last_wait_log_at >= 15:
@@ -1595,7 +1651,7 @@ class Bot:
                     if not self._interrupt_event.is_set():
                         raise
                     continue
-                delay = self._next_loop_delay
+                delay = self._effective_loop_delay(self._next_loop_delay)
                 self._next_loop_delay = self.config.loop_interval
                 self._wait_for_next_iteration(delay)
         except KeyboardInterrupt:

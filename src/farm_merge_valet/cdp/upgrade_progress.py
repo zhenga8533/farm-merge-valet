@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from farm_merge_valet.cdp.evaluation import evaluate
@@ -52,8 +53,28 @@ _READ_UPGRADE_PROGRESS_EXPRESSION = r"""
 """
 
 
-def read_upgrade_progress(port: int, page_title: str | None = None) -> UpgradeProgress | None:
-    raw = evaluate(port, _READ_UPGRADE_PROGRESS_EXPRESSION, page_title)
+def read_upgrade_progress(
+    port: int,
+    page_title: str | None = None,
+    target_blueprints: dict[str, str] | None = None,
+) -> UpgradeProgress | None:
+    expression = _READ_UPGRADE_PROGRESS_EXPRESSION
+    if target_blueprints:
+        expression = f"""
+(() => {{
+  const appliedTiers = window.__fmvGameplayServices?.upgradeCard?._model?._itemData;
+  if (!(appliedTiers instanceof Map)) return null;
+  return Object.entries({json.dumps(target_blueprints)}).map(
+    ([targetID, producerBlueprintID]) => ({{
+      targetID,
+      producerBlueprintID,
+      appliedTier: Number.isInteger(appliedTiers.get(targetID))
+        ? appliedTiers.get(targetID) : 0,
+    }})
+  );
+}})()
+"""
+    raw = evaluate(port, expression, page_title)
     if not isinstance(raw, list):
         return None
     targets: dict[str, UpgradeTargetProgress] = {}

@@ -18,13 +18,27 @@ class CatalogUnavailableError(RuntimeError):
 def load_or_refresh_catalog(
     catalog_dir: Path,
     metadata_reader: Callable[[], dict[str, dict[str, Any]] | None],
+    fingerprint_reader: Callable[[], str | None] | None = None,
 ) -> ItemCatalog:
     """Prefer current runtime metadata and fall back to the user's local cache."""
     catalog_path = catalog_dir / "catalog.json"
+    fingerprint = fingerprint_reader() if fingerprint_reader is not None else None
+    if fingerprint is not None and catalog_path.is_file():
+        try:
+            cached = load_item_catalog(catalog_path)
+        except (OSError, ValueError):
+            pass
+        else:
+            if cached.source_fingerprint == fingerprint:
+                return cached
     metadata = metadata_reader()
     if metadata:
         catalog = build_item_catalog(metadata)
-        catalog = ItemCatalog(catalog.items, _compatible_cached_variants(catalog_path, catalog))
+        catalog = ItemCatalog(
+            catalog.items,
+            _compatible_cached_variants(catalog_path, catalog),
+            fingerprint,
+        )
         write_item_catalog(catalog_path, catalog)
         return catalog
     if catalog_path.is_file():

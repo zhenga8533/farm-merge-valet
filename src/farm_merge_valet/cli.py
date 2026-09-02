@@ -11,6 +11,8 @@ import typer
 from rich import print as rprint
 
 from farm_merge_valet.browser import BrowserKind, BrowserManager, BrowserManagerError
+from farm_merge_valet.cdp.profiling import profile_runtime, write_profile
+from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
 from farm_merge_valet.composition import create_catalog_synchronizer
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.observability.logging import configure_logging
@@ -18,8 +20,10 @@ from farm_merge_valet.observability.logging import configure_logging
 app = typer.Typer(help="Automation tool for Farm Merge Valley.", invoke_without_command=True)
 browser_app = typer.Typer(help="Manage the dedicated Chromium-family browser.")
 assets_app = typer.Typer(help="Synchronize and rebuild cached game assets.")
+diagnostics_app = typer.Typer(help="Run read-only runtime diagnostics.")
 app.add_typer(browser_app, name="browser")
 app.add_typer(assets_app, name="assets")
+app.add_typer(diagnostics_app, name="diagnostics")
 
 logger = logging.getLogger(__name__)
 _config_store = ConfigStore()
@@ -160,6 +164,23 @@ def version() -> None:
     from farm_merge_valet import __version__
 
     rprint(__version__)
+
+
+@diagnostics_app.command("profile-runtime")
+def profile_runtime_cmd(
+    duration: float = typer.Option(120.0, min=1.0),  # noqa: B008
+    output: Path = typer.Option(Path(".tmp/runtime-profile.json")),  # noqa: B008
+) -> None:
+    """Profile cached live-state reads without discovery or game actions."""
+    runtime = GameRuntimeAdapter(_config().cdp_port, _config().window_title)
+    try:
+        report = profile_runtime(runtime, duration_seconds=duration)
+    except RuntimeError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    serialized = json.dumps(report, indent=2)
+    write_profile(output, serialized)
+    typer.echo(serialized)
 
 
 if __name__ == "__main__":

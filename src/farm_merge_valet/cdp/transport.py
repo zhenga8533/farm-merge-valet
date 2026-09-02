@@ -7,7 +7,6 @@ import logging
 import time
 from threading import Event, Lock
 from typing import Any, TypeVar
-from urllib.parse import urlsplit
 
 from websockets.exceptions import ConnectionClosed, WebSocketException
 from websockets.sync.client import connect
@@ -16,32 +15,8 @@ from farm_merge_valet.automation.runtime import RuntimeCancelledError, RuntimeCo
 
 logger = logging.getLogger(__name__)
 
-# The game is a Reddit "devvit" app, embedded as a cross-origin iframe
-# inside the Reddit post page -- this is what distinguishes its CDP target
-# from the top-level Reddit page and any other iframe (e.g. a reCAPTCHA
-# challenge frame) that might also be open. Not underscore-prefixed since
-GAME_FRAME_URL_MARKER = "playfmv-"
-GAME_FRAME_ENTRYPOINT = "/index.html"
-
-# Distinguishes the actual Reddit post page hosting the game from any
-# other unrelated tab that might happen to be open in the same
-# remote-debugging browser instance -- see `find_top_page_target`.
-_REDDIT_PAGE_URL_MARKER = "reddit.com"
-
-_TargetPair = tuple[str, str]
-_TargetKey = tuple[int, str | None]
-_target_pairs: dict[_TargetKey, _TargetPair] = {}
-_target_pairs_lock = Lock()
 _sessions: dict[str, _CdpSession] = {}
 _sessions_lock = Lock()
-
-
-def is_game_frame_url(value: object) -> bool:
-    url = str(value)
-    parts = urlsplit(url)
-    return GAME_FRAME_URL_MARKER in parts.netloc.casefold() and parts.path.casefold().endswith(
-        GAME_FRAME_ENTRYPOINT
-    )
 
 
 _T = TypeVar("_T")
@@ -49,13 +24,6 @@ _T = TypeVar("_T")
 _CDP_CONNECT_TIMEOUT = 3.0
 _CDP_COMMAND_TIMEOUT = 5.0
 _CDP_POLL_INTERVAL = 0.1
-
-REQUIRED_BACKGROUND_FLAGS = (
-    "--disable-background-timer-throttling",
-    "--disable-renderer-backgrounding",
-    "--disable-backgrounding-occluded-windows",
-)
-
 
 class CdpConnectionError(RuntimeConnectionError):
     """Raised when the browser DevTools Protocol endpoint isn't reachable,
@@ -69,6 +37,10 @@ class CdpConnectionError(RuntimeConnectionError):
 
 class CdpTimeoutError(CdpConnectionError):
     """Raised when the browser doesn't answer a CDP command within its deadline."""
+
+
+class CdpEvaluationError(RuntimeConnectionError):
+    """Raised when JavaScript ran but failed inside the target renderer."""
 
 
 class CdpCancelledError(CdpConnectionError, RuntimeCancelledError):

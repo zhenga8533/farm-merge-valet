@@ -327,16 +327,19 @@ def run_game_frame_operation(
     port: int,
     page_title: str | None,
     operation: Callable[[str], _T],
+    *,
+    retry: bool = True,
 ) -> _T:
     """Run against the cached game target, refreshing it once on failure."""
-    for attempt in range(2):
+    attempts = 2 if retry else 1
+    for attempt in range(attempts):
         try:
             return operation(find_game_frame_target(port, page_title))
         except CdpCancelledError:
             raise
         except CdpConnectionError:
             _invalidate_target_pair(port, page_title)
-            if attempt == 1:
+            if attempt + 1 == attempts:
                 raise
             log_event(
                 logger,

@@ -19,9 +19,15 @@ class RefreshingCatalogProvider:
         self,
         catalog_dir: Path,
         metadata_reader: Callable[[], dict[str, dict[str, Any]] | None],
+        fingerprint_reader: Callable[[], str | None] | None = None,
     ) -> None:
         self._catalog_dir = catalog_dir
         self._metadata_reader = metadata_reader
+        self._fingerprint_reader = fingerprint_reader
 
     def load(self) -> ItemCatalog:
-        return load_or_refresh_catalog(self._catalog_dir, self._metadata_reader)
+        return load_or_refresh_catalog(
+            self._catalog_dir,
+            self._metadata_reader,
+            self._fingerprint_reader,
+        )

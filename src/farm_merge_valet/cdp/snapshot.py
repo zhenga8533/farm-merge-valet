@@ -1,0 +1,46 @@
+"""Atomic live-state expression used by the automation hot path."""
+
+from __future__ import annotations
+
+import json
+
+from farm_merge_valet.automation.runtime import SnapshotOptions
+from farm_merge_valet.cdp.board_store import _READ_EXPRESSION
+from farm_merge_valet.cdp.inventory_store import _READ_ENERGY_EXPRESSION
+from farm_merge_valet.cdp.scripts import (
+    _HEALTH_EXPRESSION,
+    _READ_SHOP_ORDERS_EXPRESSION,
+    _READ_STORAGE_BUBBLES_EXPRESSION,
+    _READ_WORKERS_EXPRESSION,
+)
+
+
+def snapshot_expression(options: SnapshotOptions) -> str:
+    obstacle = json.dumps(options.include_obstacle_resources)
+    bubbles = json.dumps(options.include_storage_bubbles)
+    shops = json.dumps(options.include_shop_orders)
+    return f"""
+(() => {{
+  const startedAt = performance.now();
+  const health = ({_HEALTH_EXPRESSION});
+  const cells = health?.board ? ({_READ_EXPRESSION}) : null;
+  const energy = {obstacle} ? ({_READ_ENERGY_EXPRESSION}) : null;
+  const workers = {obstacle} ? ({_READ_WORKERS_EXPRESSION}) : null;
+  const storageBubbles = {bubbles} ? ({_READ_STORAGE_BUBBLES_EXPRESSION}) : null;
+  const shopOrders = {shops} ? ({_READ_SHOP_ORDERS_EXPRESSION}) : null;
+  const rendererDurationMs = performance.now() - startedAt;
+  return {{
+    health,
+    cells,
+    energy,
+    workers,
+    storageBubbles,
+    shopOrders,
+    rendererDurationMs,
+    cellCount: Array.isArray(cells) ? cells.length : 0,
+    occupiedCellCount: Array.isArray(cells)
+      ? cells.reduce((count, cell) => count + (cell?.hasContent ? 1 : 0), 0)
+      : 0,
+  }};
+}})()
+"""

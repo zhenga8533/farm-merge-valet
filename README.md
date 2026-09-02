@@ -290,3 +290,5 @@ See [Automation Methodology](docs/automation-methodology.md) and
 [Game Mechanics](docs/game-mechanics.md) for additional context. The generated
 taxonomy and asset workflow are documented in
 [Item Catalog and Compiled Assets](docs/item-catalog.md).
+Runtime cadence, recovery safeguards, persistent diagnostics, and read-only
+profiling are documented in [Runtime Performance](docs/runtime-performance.md).

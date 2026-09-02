@@ -16,6 +16,7 @@ from farm_merge_valet.cdp.transport import (
     _CDP_COMMAND_TIMEOUT,
     CdpCancelledError,
     CdpConnectionError,
+    CdpEvaluationError,
     CdpTimeoutError,
     _command_target,
 )
@@ -45,12 +46,12 @@ def _evaluate_target(
         )
         if exception := command_result.get("exceptionDetails"):
             description = exception.get("exception", {}).get("description")
-            raise CdpConnectionError(
+            raise CdpEvaluationError(
                 f"CDP JavaScript evaluation failed: {description or exception.get('text')}"
             )
         result = command_result.get("result", {})
         return result.get("value") if isinstance(result, dict) else None
-    except (CdpConnectionError, CdpCancelledError, CdpTimeoutError):
+    except (CdpConnectionError, CdpCancelledError, CdpTimeoutError, CdpEvaluationError):
         raise
     except (OSError, ValueError, WebSocketException, TimeoutError) as exc:
         raise CdpConnectionError("Lost the browser DevTools WebSocket connection.") from exc
@@ -63,6 +64,7 @@ def evaluate(
     *,
     timeout: float = _CDP_COMMAND_TIMEOUT,
     cancel_event: Event | None = None,
+    retry: bool = True,
 ) -> object:
     """Evaluate `expression` in the game iframe's JS context and return its
     value (must be JSON-serializable -- CDP's `returnByValue` requirement).
@@ -73,6 +75,7 @@ def evaluate(
         lambda ws_url: _evaluate_target(
             ws_url, expression, timeout=timeout, cancel_event=cancel_event
         ),
+        retry=retry,
     )
 
 

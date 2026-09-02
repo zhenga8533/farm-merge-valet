@@ -10,6 +10,7 @@ from farm_merge_valet.automation.runtime import (
     CrateSpawnResult,
     LiveCellState,
     RuntimeHealth,
+    RuntimeSnapshot,
 )
 from farm_merge_valet.automation.workflows import (
     InteractionWorkflow,
@@ -148,6 +149,40 @@ def bare_bot() -> Bot:
     bot._capability_retry_at = 0.0
     bot._capability_retry_delay = 1.0
     return bot
+
+
+def test_live_sync_uses_one_atomic_snapshot_and_suppresses_disabled_sections() -> None:
+    class SnapshotRuntime(FakeRuntime):
+        def __init__(self) -> None:
+            super().__init__()
+            self.options = []
+
+        def read_snapshot(self, options):
+            self.options.append(options)
+            return RuntimeSnapshot(
+                health(advancing=True),
+                {(1, 2): LiveCellState(False, None)},
+            )
+
+        def read_board_state(self):
+            raise AssertionError("fragmented board read must not be used")
+
+    runtime = SnapshotRuntime()
+    bot = Bot(
+        AppConfig(
+            auto_pop_storage_bubbles=False,
+            shop_default_enabled=False,
+            recipe_default_enabled=False,
+        ),
+        runtime,
+        FakeCatalogProvider(),
+    )
+
+    assert bot.sync_board_from_live_state()
+    assert len(runtime.options) == 1
+    assert not runtime.options[0].include_obstacle_resources
+    assert not runtime.options[0].include_storage_bubbles
+    assert not runtime.options[0].include_shop_orders
 
 
 def action(item: ItemRef) -> MergeAction:

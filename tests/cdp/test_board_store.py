@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from farm_merge_valet.automation.runtime import LiveCellState, RewardRequirement
-from farm_merge_valet.cdp.board_store import _arm_board_store_target, read_board_state
+from farm_merge_valet.cdp.board_store import (
+    _READ_EXPRESSION,
+    _arm_board_store_target,
+    read_board_state,
+)
 from farm_merge_valet.core.items import ProducerKind, ProducerState
 from farm_merge_valet.core.obstacles import ObstacleState
 
@@ -50,7 +54,12 @@ def test_arm_board_store_releases_query_object(monkeypatch) -> None:
     result = _arm_board_store_target("ws://game", None)
 
     assert result.startswith("found")
-    assert methods[-1] == "Runtime.releaseObject"
+    assert methods[-2:] == ["Runtime.releaseObject", "Runtime.releaseObject"]
+
+
+def test_board_reader_omits_inert_clouds_and_unused_behavior_names() -> None:
+    assert "content?._blueprintID === 'area_cloud'" in _READ_EXPRESSION
+    assert "name === 'cooldown' || name === 'lootable'" in _READ_EXPRESSION
 
 
 def test_read_board_state_preserves_collectable_semantics(monkeypatch) -> None:

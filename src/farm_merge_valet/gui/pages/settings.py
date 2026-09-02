@@ -89,7 +89,7 @@ class SettingsPage(ConfigFormPage):
 
         automation_advanced, form = disclosure_section("Advanced timing")
         self._add_float(form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)
-        self._add_float(form, "Loop interval (seconds)", "loop_interval", 0.01, 60, 0.1)
+        self._add_float(form, "Loop interval (seconds)", "loop_interval", 0.25, 60, 0.1)
         self._add_float(form, "Item delay minimum", "item_action_delay_min", 0, 60, 0.1)
         self._add_float(form, "Item delay maximum", "item_action_delay_max", 0, 60, 0.1)
         self._add_float(form, "Crate delay minimum", "crate_delay_min", 0, 5, 0.05)

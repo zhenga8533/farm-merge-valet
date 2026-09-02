@@ -26,7 +26,7 @@ def test_help_groups_user_workflows() -> None:
     assert result.exit_code == 0
     assert "browser" in result.stdout
     assert "assets" in result.stdout
-    assert "diagnostics" not in result.stdout
+    assert "diagnostics" in result.stdout
     assert "sync-assets" not in result.stdout
     assert "diagnose-live-state" not in result.stdout
 

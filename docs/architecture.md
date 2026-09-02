@@ -23,12 +23,14 @@ GUI / CLI -> automation and catalog services -> core
   tile-interaction, and shop pending,
   pending action, verification, retry, submission, and phase-execution behavior
   belongs to dedicated workflow objects under `automation.workflows`.
+  `automation.perception` converts atomic snapshots into planning state, and
+  `automation.scheduler` owns renderer-load-aware polling cadence.
 - `catalog` owns catalog models, taxonomy, labels, construction, persistence,
   blueprint mapping, asset compilation, and synchronization orchestration.
   Its synchronization service accepts resource and metadata readers; concrete
   CDP readers are supplied only by the application composition root.
-- `cdp` owns browser protocol transport, target/resource access, raw game-state
-  readers, embedded scripts, and `GameRuntimeAdapter`.
+- `cdp` owns browser protocol transport, target/resource access, atomic
+  game-state snapshots, embedded scripts, profiling, and `GameRuntimeAdapter`.
 - `browser` owns managed browser process discovery, launch, and shutdown.
 - `config` owns stable platform paths, validated schema-version-1 models,
   canonical hotkey values, and atomic persistence. Its package root defines
@@ -48,6 +50,10 @@ runtime and live/cache catalog provider and injects them into `Bot`. GUI and CLI
 entry points may import adapters and feature services; feature services must not
 construct adapters internally. CDP translates raw game data to models from
 `automation.runtime`.
+
+The automation hot path crosses the adapter boundary once per iteration through
+`RuntimeSnapshot`. Optional sections are selected from enabled policy and
+pending work, so feature-specific reads are not separate renderer requests.
 
 The package root contains only package metadata, Python/CLI entry points, and
 the shared composition root. Feature implementation belongs to its owning

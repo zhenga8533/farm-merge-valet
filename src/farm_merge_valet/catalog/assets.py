@@ -158,7 +158,7 @@ def attach_catalog_variants(atlases: Atlases, catalog: ItemCatalog) -> ItemCatal
             variants[policy_key] = tuple(
                 sorted(discovered.values(), key=lambda variant: variant.asset_alias)
             )
-    return ItemCatalog(catalog.items, variants)
+    return ItemCatalog(catalog.items, variants, catalog.source_fingerprint)
 
 
 def _attach_numbered_variants(

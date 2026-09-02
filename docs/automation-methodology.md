@@ -16,14 +16,22 @@ accepted only when the active map-grid service still owns the same board map
 and the interaction handlers remain subscribed to that service; otherwise the
 adapter performs fresh discovery.
 
-Each browser target has one serialized, persistent CDP session. Ordinary
-commands have a short deadline; the explicitly requested heap query receives a
-longer bounded deadline. Local DevTools WebSockets bypass proxy discovery.
-Browser `localhost` endpoints are normalized to the numeric IPv4 loopback to
-avoid slow Windows hostname and proxy resolution.
+Each browser target has one serialized, persistent CDP session. An active
+iteration reads one atomic snapshot containing health, heartbeat, board state,
+and only the optional feature data currently needed. Ordinary commands have a
+short deadline; the explicitly requested heap query receives a longer bounded
+deadline. Local DevTools WebSockets bypass proxy discovery. Browser `localhost`
+endpoints are normalized to the numeric IPv4 loopback to avoid slow Windows
+hostname and proxy resolution.
 Pause and quit are checked while waiting for a response, and a timed-out or
-stale connection is closed before target discovery retries once. Temporary
-objects returned by `Runtime.queryObjects` are released after use.
+stale connection is closed. Snapshot timeouts, JavaScript failures, heap scans,
+and actions are not immediately replayed. Temporary objects created for
+`Runtime.queryObjects`, including the prototype handle, are released after use.
+
+Heap recovery first verifies that the renderer can produce a frame. It locates
+the exact active board through its map-grid service owner instead of measuring
+render bounds across candidate maps. Failed scans use a 5, 15, 60, then
+300-second cooldown.
 
 The runtime adapter locates and validates the active gameplay screen, board
 map, tile-interaction handler, shop-order service, live HUD crate event, and supply inventory. References
@@ -32,9 +40,10 @@ runtime update that breaks discovery fails closed with structured health and
 action diagnostics; physical input is never used as a fallback.
 
 A lightweight `requestAnimationFrame` counter measures whether the local game
-loop is advancing. The bot may continue observing while it is frozen, but sends
-no actions and queues no retries. This prevents a background-tab suspension
-from being mistaken for an action failure.
+loop is advancing. Actions require a newer frame whose age is at most 500 ms.
+The bot may continue observing while it is frozen, but sends no actions and
+queues no retries. This prevents a background-tab suspension from being
+mistaken for an action failure.
 
 A strict, default-enabled reward-overlay
 step runs before this gate: Level Up invokes its native close callback, while
@@ -241,8 +250,10 @@ individual plans, submissions, confirmations, slow-stage timings, cached
 discovery, and planner transitions are `DEBUG` diagnostics. Runtime readiness,
 user controls, crate-batch results, and transitions into a genuinely idle state
 use `INFO`; recoverable failures use `WARNING`; unsafe terminal conditions use
-`ERROR`. When no interaction, crate, or item action can be planned, the loop uses the
-configured idle delay before checking authoritative state again.
+`ERROR`. The one-second default polling interval has an effective 250-ms floor
+and adapts upward when renderer reads become expensive. When no interaction,
+crate, or item action can be planned, the loop uses the configured idle delay
+before checking authoritative state again.
 When the highest-priority focused obstacle cannot start, the idle diagnostic
 reports its missing energy or available-worker requirement rather than implying
 that the absence of crates and merge actions is the only reason for waiting.

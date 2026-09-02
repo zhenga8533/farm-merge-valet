@@ -21,56 +21,49 @@ from farm_merge_valet.core.items import GridCoord, ProducerKind, ProducerState
 from farm_merge_valet.core.obstacles import ObstacleState
 
 # `_content` holds the cell's Pixi display object and `_neighbors` its
-# adjacency links. The size bounds and keys distinguish the cell map from
-# other Maps in the game runtime.
+# adjacency links. The bounded size and keys reject unrelated Maps before an
+# owning active map-grid service is required.
 _CELL_SHAPE_KEYS = ("column", "row", "_content", "_neighbors")
 _CELL_MAP_MIN_SIZE = 50
 _CELL_MAP_MAX_SIZE = 5000
 
 _FIND_CELLS_MAP_EXPRESSION = f"""
 function() {{
-  let best = null;
-  let bestContentCount = -1;
-  let bestRenderableCount = -1;
+  const subscribers = (signal) => Array.isArray(signal?._subscribers)
+    ? signal._subscribers : [];
   for (const m of this) {{
     try {{
       if (m.size < {_CELL_MAP_MIN_SIZE} || m.size > {_CELL_MAP_MAX_SIZE}) continue;
       const first = m.values().next().value;
       if (!first || typeof first !== 'object') continue;
       const keys = {list(_CELL_SHAPE_KEYS)!r};
-      if (keys.every((k) => k in first)) {{
-        let contentCount = 0;
-        let renderableCount = 0;
-        for (const cell of m.values()) {{
-          if (!cell || !cell._content) continue;
-          contentCount++;
-          try {{
-            const bounds = cell._content.getBounds();
-            if (
-              bounds.width > 0 && bounds.height > 0 &&
-              Number.isFinite(bounds.x) && Number.isFinite(bounds.y)
-            ) renderableCount++;
-          }} catch (e) {{}}
+      if (!keys.every((k) => k in first)) continue;
+      let services = null;
+      for (const cell of m.values()) {{
+        for (const key of ['onContentAdded', 'onContentRemoved', 'onChanged']) {{
+          const subscriber = subscribers(cell?.[key]).find((entry) =>
+            entry?.context?._services?.mapGrid?._cells === m &&
+            entry.context._services.mapGrid._isActive !== false);
+          if (subscriber) {{
+            services = subscriber.context._services;
+            break;
+          }}
         }}
-        if (
-          renderableCount > bestRenderableCount ||
-          (renderableCount === bestRenderableCount && contentCount > bestContentCount)
-        ) {{
-          best = m;
-          bestContentCount = contentCount;
-          bestRenderableCount = renderableCount;
-        }}
+        if (services) break;
       }}
+      if (!services) continue;
+      let contentCount = 0;
+      for (const cell of m.values()) if (cell?._content) contentCount++;
+      window.__fmvBoardCells = m;
+      return {{
+        status: 'found',
+        contentCount,
+        renderableCount: 0,
+        size: m.size,
+      }};
     }} catch (e) {{}}
   }}
-  if (!best) return {{ status: 'not-found' }};
-  window.__fmvBoardCells = best;
-  return {{
-    status: 'found',
-    contentCount: bestContentCount,
-    renderableCount: bestRenderableCount,
-    size: best.size,
-  }};
+  return {{ status: 'not-found' }};
 }}
 """
 
@@ -152,28 +145,36 @@ _READ_EXPRESSION = """
   const services = window.__fmvGameplayServices;
   const rootServices = services?.ordersService?._recipes?._services;
   const blueprints = rootServices?.blueprintCollection?._blueprints;
-  const rewardCapacity = (value) => {
-    if (!Array.isArray(value) || value.length === 0) return 0;
+  const rewardCapacity = (value, seen = new WeakSet(), depth = 0) => {
+    if (!Array.isArray(value) || value.length === 0 || depth > 8 || seen.has(value)) return 0;
+    seen.add(value);
     if (value.every((entry) => entry && typeof entry === 'object' &&
         (Number.isFinite(entry.chance) || Array.isArray(entry.items)))) {
       return value.length;
     }
-    return Math.max(0, ...value.map(rewardCapacity));
+    return Math.max(0, ...value.map((entry) => rewardCapacity(entry, seen, depth + 1)));
   };
-  const rewardIDs = (value, output = new Set()) => {
+  const rewardIDs = (value, output = new Set(), seen = new WeakSet(), depth = 0) => {
+    if (depth > 8) return output;
     if (Array.isArray(value)) {
-      for (const entry of value) rewardIDs(entry, output);
+      if (seen.has(value)) return output;
+      seen.add(value);
+      for (const entry of value) rewardIDs(entry, output, seen, depth + 1);
     } else if (typeof value === 'string') {
       output.add(value);
     } else if (value && typeof value === 'object') {
+      if (seen.has(value)) return output;
+      seen.add(value);
       if (typeof value.key === 'string') output.add(value.key);
-      for (const entry of Object.values(value)) rewardIDs(entry, output);
+      for (const entry of Object.values(value)) rewardIDs(entry, output, seen, depth + 1);
     }
     return output;
   };
   const out = [];
   for (const cell of cells.values()) {
     const content = cell._content;
+    if (content?._blueprintID === 'area_cloud' ||
+        content?._blueprintID === 'premium_cloud') continue;
     const behaviors = content?._behaviors instanceof Map
       ? Array.from(content._behaviors.keys()) : [];
     const harvestable = content?.getBehavior?.('harvestable');
@@ -227,13 +228,14 @@ _READ_EXPRESSION = """
       else if (content.hasBehavior?.('cooldown')) producerState = 'cooling';
       else producerState = 'ready';
     }
+    const tier = content?.getTier?.();
     out.push({
       column: cell.column,
       row: cell.row,
       hasContent: Boolean(content),
       blueprintID: content ? content._blueprintID : null,
       objectID: Number.isInteger(content?.id) ? content.id : null,
-      tier: Number.isInteger(content?.getTier?.()) ? content.getTier() : null,
+      tier: Number.isInteger(tier) ? tier : null,
       collectable: Boolean(content?.hasBehavior?.('collectable')),
       collectableIngredient: Boolean(
         content?.hasBehavior?.('collectable') && content.hasBehavior?.('ingredient')
@@ -243,7 +245,7 @@ _READ_EXPRESSION = """
       itemVariant: upgradeTarget,
       upgradeAppliedTier: Number.isInteger(appliedUpgradeTier) && appliedUpgradeTier >= 0
         ? appliedUpgradeTier : null,
-      behaviorNames: behaviors.filter((name) => typeof name === 'string'),
+      behaviorNames: behaviors.filter((name) => name === 'cooldown' || name === 'lootable'),
       claimOutputCapacity,
       claimOutputIDs: Array.from(rewardIDs(claimReward)),
       rewardRequirements: rewardRequirements?.map((item) => ({
@@ -283,19 +285,19 @@ def _arm_board_store_target(ws_url: str, cancel_event: Event | None) -> str:
     if not proto_object_id:
         return "no-map-prototype"
 
-    instances = _command_target(
-        ws_url,
-        "Runtime.queryObjects",
-        {"prototypeObjectId": proto_object_id},
-        timeout=30,
-        cancel_event=cancel_event,
-    )
-    instances_result = instances.get("objects", {})
-    instances_object_id = instances_result.get("objectId")
-    if not instances_object_id:
-        return "query-objects-failed"
-
+    instances_object_id = None
     try:
+        instances = _command_target(
+            ws_url,
+            "Runtime.queryObjects",
+            {"prototypeObjectId": proto_object_id},
+            timeout=30,
+            cancel_event=cancel_event,
+        )
+        instances_result = instances.get("objects", {})
+        instances_object_id = instances_result.get("objectId")
+        if not instances_object_id:
+            return "query-objects-failed"
         found = _command_target(
             ws_url,
             "Runtime.callFunctionOn",
@@ -310,25 +312,24 @@ def _arm_board_store_target(ws_url: str, cancel_event: Event | None) -> str:
         value = found.get("result", {}).get("value")
         if isinstance(value, dict) and value.get("status") == "found":
             content_count = value.get("contentCount", 0)
-            renderable_count = value.get("renderableCount", 0)
             size = value.get("size", 0)
-            return (
-                f"found ({content_count}/{size} cells with content, "
-                f"{renderable_count} with live bounds)"
-            )
+            return f"found ({content_count}/{size} cells with content, active map-grid owner)"
         if isinstance(value, dict) and value.get("status"):
             return str(value["status"])
         return str(value) if value else "cells-map-not-found"
     finally:
-        try:
-            _command_target(
-                ws_url,
-                "Runtime.releaseObject",
-                {"objectId": instances_object_id},
-                timeout=1,
-            )
-        except CdpConnectionError:
-            pass
+        for object_id in (instances_object_id, proto_object_id):
+            if not object_id:
+                continue
+            try:
+                _command_target(
+                    ws_url,
+                    "Runtime.releaseObject",
+                    {"objectId": object_id},
+                    timeout=1,
+                )
+            except CdpConnectionError:
+                pass
 
 
 def arm_board_store(
@@ -336,17 +337,20 @@ def arm_board_store(
 ) -> str:
     """Best-effort, idempotent: locate the board's live cell `Map` on the
     heap and stash a reference at `window.__fmvBoardCells` for
-    `read_board_state` to use. When multiple cell-shaped maps exist, the
-    candidate with the most valid live Pixi bounds is selected, distinguishing
-    the active rendered board from retained snapshots. Bots call this only
-    until their session is armed.
+    `read_board_state` to use. A cell signal must identify the Map as the one
+    owned by an active map-grid service, distinguishing it from retained
+    snapshots without forcing display-object bounds calculations. Bots call
+    this only until their session is armed.
 
     Returns a short status string for logging (`"found (...)"`,
     `"cells-map-not-found"`, etc.) so discovery failures remain diagnosable.
     """
 
     return run_game_frame_operation(
-        port, page_title, lambda ws_url: _arm_board_store_target(ws_url, cancel_event)
+        port,
+        page_title,
+        lambda ws_url: _arm_board_store_target(ws_url, cancel_event),
+        retry=False,
     )
 
 
@@ -355,8 +359,9 @@ def read_board_state(
 ) -> dict[GridCoord, _LiveCellState] | None:
     """Every cell's current content, straight from the game's live map.
 
-    A cell with no `_content` is an available board slot. A present content
-    object may expose an item, cloud, building, product, or the game's
+    A cell with no `_content` is an available board slot. Inert locked-land
+    clouds are omitted because an absent coordinate is already non-actionable.
+    Other content may expose an item, building, product, or the game's
     misleadingly named `"empty"` blueprint used for unavailable structure
     footprint cells.
 
@@ -364,11 +369,19 @@ def read_board_state(
     reference yet.
     """
     raw = evaluate(port, _READ_EXPRESSION, page_title, cancel_event=cancel_event)
+    return parse_board_state(raw)
+
+
+def parse_board_state(raw: object) -> dict[GridCoord, _LiveCellState] | None:
     if not isinstance(raw, list):
         return None
     states: dict[GridCoord, _LiveCellState] = {}
     for entry in raw:
         if not isinstance(entry, dict):
+            continue
+        column = entry.get("column")
+        row = entry.get("row")
+        if not isinstance(column, int) or not isinstance(row, int):
             continue
         blueprint_id = entry.get("blueprintID")
         object_id = entry.get("objectID")
@@ -462,7 +475,7 @@ def read_board_state(
                     clearing=obstacle_value.get("clearing") is True,
                     required_workers=required_workers,
                 )
-        states[(entry["column"], entry["row"])] = _LiveCellState(
+        states[(column, row)] = _LiveCellState(
             has_content=entry.get("hasContent") is True,
             blueprint_id=blueprint_id if isinstance(blueprint_id, str) else None,
             object_id=object_id if isinstance(object_id, int) else None,
