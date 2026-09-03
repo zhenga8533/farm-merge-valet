@@ -167,6 +167,9 @@ QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 5px; font-
 QLabel#saveStatus {{ color: {colors.muted}; font-weight: 600; }}
 QLabel#saveStatus[status="success"] {{ color: {colors.primary}; }}
 QLabel#saveStatus[status="error"] {{ color: {colors.danger}; }}
+QLabel#statusLabel {{ color: {colors.muted}; font-weight: 600; }}
+QLabel#statusLabel[status="success"] {{ color: {colors.primary}; }}
+QLabel#statusLabel[status="error"] {{ color: {colors.danger}; }}
 QPushButton {{
     background: {colors.primary}; color: white; border: 1px solid {colors.primary};
     border-radius: 6px; padding: 7px 14px; font-weight: 600;

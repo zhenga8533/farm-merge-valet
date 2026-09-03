@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections import defaultdict
 from functools import partial
 
@@ -12,27 +11,28 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QStyledItemDelegate,
     QStyleOptionViewItem,
-    QTreeWidget,
     QTreeWidgetItem,
 )
 
 from farm_merge_valet.catalog.models import (
     CatalogItem,
-    ItemCatalog,
-    load_item_catalog,
 )
 from farm_merge_valet.config import AppConfig
-from farm_merge_valet.gui.components.bulk_header import BulkToggleHeader
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
+from farm_merge_valet.gui.components.metrics import (
+    POLICY_COMPACT_ROW_HEIGHT,
+    POLICY_ICON_SIZE,
+    POLICY_MEDIA_BADGE_COLUMN_WIDTH,
+    POLICY_MEDIA_ROW_HEIGHT,
+)
+from farm_merge_valet.gui.components.policy_tree import create_policy_tree
 from farm_merge_valet.gui.components.policy_view import (
     LazyPolicyBranches,
     PolicyCheckBox,
     PolicyTreeItem,
-    PolicyTreeToolbar,
     aggregate_check_state,
     configure_policy_toggle,
-    configure_policy_view,
     expanded_policy_keys,
     fit_policy_widget_column,
     policy_badge,
@@ -42,10 +42,8 @@ from farm_merge_valet.gui.components.policy_view import (
 )
 from farm_merge_valet.gui.pages.base import AppPage, ConfigEdit
 from farm_merge_valet.gui.services.assets import CatalogIconLoader
+from farm_merge_valet.gui.services.catalog import load_gui_catalog
 
-logger = logging.getLogger(__name__)
-
-_ITEM_ICON_SIZE = QSize(40, 40)
 _SHOP_ICON_SIZE = QSize(100, 54)
 _SHOP_SORT_COLUMNS = {"item": 0, "type": 1, "enabled": 2}
 
@@ -61,17 +59,8 @@ class _ShopIconDelegate(QStyledItemDelegate):
         option.decorationSize = (
             _SHOP_ICON_SIZE
             if isinstance(identity, tuple) and identity and identity[0] == "shop"
-            else _ITEM_ICON_SIZE
+            else POLICY_ICON_SIZE
         )
-
-
-def _load_catalog(config: AppConfig) -> ItemCatalog | None:
-    path = config.catalog_dir / "catalog.json"
-    try:
-        return load_item_catalog(path) if path.is_file() else None
-    except (OSError, ValueError) as exc:
-        logger.warning("Could not load the GUI item catalog: %s", exc)
-        return None
 
 
 class ShopsPage(AppPage):
@@ -100,31 +89,27 @@ class ShopsPage(AppPage):
             1,
             Qt.AlignmentFlag.AlignCenter,
         )
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(("Shop / recipe", "Type", ""))
-        self.bulk_header = BulkToggleHeader({2: "Enabled"}, self.tree)
+        scaffold = create_policy_tree(
+            header_labels=("Shop / recipe", "Type", ""),
+            bulk_labels={2: "Enabled"},
+            accessible_name="Shop and recipe policies",
+            search_placeholder="Search shops and recipes\u2026",
+            search_accessible_name="Search shops and recipes",
+            scope="shop and recipe groups",
+            icon_size=_SHOP_ICON_SIZE,
+            minimum_section_size=96,
+        )
+        self.tree = scaffold.tree
+        self.bulk_header = scaffold.header
         self.bulk_header.toggled.connect(self._set_all)
-        self.tree.setHeader(self.bulk_header)
-        self.tree.setIconSize(_SHOP_ICON_SIZE)
         self.tree.setItemDelegate(_ShopIconDelegate(self.tree))
-        self.bulk_header.setMinimumSectionSize(96)
         self.bulk_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.bulk_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self.bulk_header.resizeSection(1, 124)
         self.bulk_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        configure_policy_view(self.tree)
-        self.tree.setUniformRowHeights(True)
-        self.tree.setIndentation(22)
-        self.tree.setRootIsDecorated(True)
         self._apply_sort_preference()
-        self.tree.setAccessibleName("Shop and recipe policies")
 
-        self.toolbar = PolicyTreeToolbar(
-            self.tree,
-            placeholder="Search shops and recipes…",
-            accessible_name="Search shops and recipes",
-            scope="shop and recipe groups",
-        )
+        self.toolbar = scaffold.toolbar
         self.search = self.toolbar.search
         self.expansion_controls = self.toolbar.expansion_controls
         self.page_layout.addWidget(self.toolbar)
@@ -221,7 +206,7 @@ class ShopsPage(AppPage):
         self._toggles = {}
         self._tree_items = {}
         self._lazy_branches.reset()
-        catalog = _load_catalog(self._config)
+        catalog = load_gui_catalog(self._config)
         if catalog is None:
             self._catalog_loaded = False
             self._show_catalog_onboarding()
@@ -243,7 +228,7 @@ class ShopsPage(AppPage):
             parent = PolicyTreeItem((shop_name, "", ""))
             parent.setIcon(0, self._icons.icon_for(shop))
             parent.setData(0, Qt.ItemDataRole.UserRole, ("shop", shop_id))
-            parent.setSizeHint(0, QSize(0, 64))
+            parent.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
             parent_font = parent.font(0)
             parent_font.setWeight(QFont.Weight.DemiBold)
             parent.setFont(0, parent_font)
@@ -292,7 +277,11 @@ class ShopsPage(AppPage):
                 ),
             )
         self._lazy_branches.restore_expanded(expanded)
-        fit_policy_widget_column(self.tree, 1, minimum=124)
+        fit_policy_widget_column(
+            self.tree,
+            1,
+            minimum=POLICY_MEDIA_BADGE_COLUMN_WIDTH,
+        )
         self.tree.blockSignals(False)
         self.tree.setSortingEnabled(True)
         self.bulk_header.setSortIndicatorShown(False)
@@ -312,7 +301,7 @@ class ShopsPage(AppPage):
             child = PolicyTreeItem((recipe.display_name, "", ""))
             child.setIcon(0, self._icons.icon_for(recipe))
             child.setData(0, Qt.ItemDataRole.UserRole, ("recipe", recipe.game_id))
-            child.setSizeHint(0, QSize(0, 64))
+            child.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
             child.setToolTip(0, recipe.display_name)
             parent.addChild(child)
             set_policy_widget(
@@ -365,7 +354,7 @@ class ShopsPage(AppPage):
     def _show_empty(self, message: str) -> None:
         item = QTreeWidgetItem((message, "", ""))
         item.setFlags(Qt.ItemFlag.NoItemFlags)
-        item.setSizeHint(0, QSize(0, 52))
+        item.setSizeHint(0, QSize(0, POLICY_COMPACT_ROW_HEIGHT))
         self.tree.addTopLevelItem(item)
         item.setFirstColumnSpanned(True)
         self.bulk_header.set_state(2, Qt.CheckState.Unchecked, enabled=False)

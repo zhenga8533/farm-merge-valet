@@ -9,9 +9,9 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from farm_merge_valet.config import ConfigStore
+from farm_merge_valet.gui.branding import app_icon
 from farm_merge_valet.gui.controller import ApplicationController
 from farm_merge_valet.gui.main_window import MainWindow as _MainWindow
-from farm_merge_valet.gui.main_window import _app_icon
 from farm_merge_valet.gui.theme import apply_theme
 from farm_merge_valet.observability.logging import configure_logging, logging_sink
 
@@ -20,7 +20,7 @@ def run_application(store: ConfigStore | None = None) -> int:
     existing = QApplication.instance()
     app = existing if isinstance(existing, QApplication) else QApplication(sys.argv)
     app.setApplicationName("Farm Merge Valet")
-    app.setWindowIcon(_app_icon())
+    app.setWindowIcon(app_icon())
     app.setQuitOnLastWindowClosed(False)
     config_store = store or ConfigStore()
     try:

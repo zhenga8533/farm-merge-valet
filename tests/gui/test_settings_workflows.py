@@ -89,6 +89,36 @@ def test_gui_changes_autosave_to_the_config_store(tmp_path) -> None:
     app.processEvents()
 
 
+def test_registered_form_controls_refresh_from_config(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    config = AppConfig(
+        close_to_tray=False,
+        browser="edge",
+        cdp_port=9333,
+        loop_interval=2.5,
+        theme="dark",
+        pause_hotkey=None,
+        main_unfocused_opacity=0.75,
+    )
+
+    window.browser_page.apply_config(config)
+    window.settings_page.apply_config(config)
+
+    assert window.browser_page.browser_choice.current_value() == "edge"
+    assert window.browser_page.controls["cdp_port"].value() == 9333
+    assert window.settings_page.controls["loop_interval"].value() == 2.5
+    assert window.settings_page.controls["theme"].current_value() == "dark"
+    assert window.settings_page.controls["pause_hotkey"].value is None
+    assert window.settings_page.controls["main_unfocused_opacity"].value() == 75
+    assert window.settings_page.opacity_labels["main_unfocused_opacity"].text() == "75%"
+
+    window.quit_application()
+    app.processEvents()
+
+
 def test_config_changes_refresh_only_affected_gui_sections(tmp_path, monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     store = ConfigStore(tmp_path / "config.json")

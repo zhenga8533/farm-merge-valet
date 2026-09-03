@@ -6,7 +6,7 @@ import sys
 from collections import deque
 
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QColor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -17,9 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from farm_merge_valet.config import AppConfig
-from farm_merge_valet.config.hotkeys import display_hotkey
 from farm_merge_valet.gui.components.action_button import ActionButton
-from farm_merge_valet.gui.config_sections import SECTION_FIELDS, ConfigSection
 from farm_merge_valet.gui.controller import (
     ApplicationState,
     ApplicationStatus,
@@ -31,48 +29,6 @@ from farm_merge_valet.gui.log_view import (
     minimum_level,
     render_log_entries,
 )
-
-_APPEARANCE_FIELDS = {
-    "theme",
-    "main_always_on_top",
-    "main_focused_opacity",
-    "main_unfocused_opacity",
-    "overlay_always_on_top",
-    "overlay_click_through",
-    "overlay_focused_opacity",
-    "overlay_unfocused_opacity",
-}
-_HOTKEY_FIELDS = {"start_stop_hotkey", "pause_hotkey", "quit_hotkey"}
-_VIEW_FIELDS = set(SECTION_FIELDS[ConfigSection.VIEW])
-_ITEM_VIEW_FIELDS = {field for field in _VIEW_FIELDS if field.startswith("items_")}
-_SHOP_VIEW_FIELDS = {field for field in _VIEW_FIELDS if field.startswith("shops_")}
-_ITEM_FIELDS = set(SECTION_FIELDS[ConfigSection.ITEMS]) | _ITEM_VIEW_FIELDS | {"catalog_dir"}
-_ITEM_POLICY_FIELDS = _ITEM_FIELDS - {"items_sort_column", "items_sort_descending"}
-_SHOP_FIELDS = set(SECTION_FIELDS[ConfigSection.SHOPS]) | _SHOP_VIEW_FIELDS | {"catalog_dir"}
-_SHOP_POLICY_FIELDS = _SHOP_FIELDS - {"shops_sort_column", "shops_sort_descending"}
-_BROWSER_FIELDS = set(SECTION_FIELDS[ConfigSection.BROWSER])
-_SETTINGS_FIELDS = set(SECTION_FIELDS[ConfigSection.SETTINGS])
-
-
-def _app_icon() -> QIcon:
-    pixmap = QPixmap(64, 64)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor("#238636"))
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawRoundedRect(4, 4, 56, 56, 14, 14)
-    painter.setBrush(QColor("#ffffff"))
-    painter.drawEllipse(18, 16, 18, 32)
-    painter.drawEllipse(30, 16, 18, 32)
-    painter.end()
-    return QIcon(pixmap)
-
-
-def _menu_action_text(label: str, hotkey: str | None) -> str:
-    if hotkey is None:
-        return label
-    return f"{label}\t{display_hotkey(hotkey)}"
 
 
 class CompactOverlay(QMainWindow):

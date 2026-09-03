@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from functools import partial
@@ -11,15 +10,12 @@ from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QHeaderView,
-    QTreeWidget,
     QTreeWidgetItem,
 )
 
 from farm_merge_valet.catalog.models import (
     CatalogItem,
-    ItemCatalog,
     TileInteractionMode,
-    load_item_catalog,
 )
 from farm_merge_valet.config import AppConfig, ItemPolicyOverride
 from farm_merge_valet.core.items import item_tier_policy_key
@@ -28,18 +24,21 @@ from farm_merge_valet.core.upgrade_progress import (
     UpgradeTargetProgress,
     UpgradeTierState,
 )
-from farm_merge_valet.gui.components.bulk_header import BulkToggleHeader
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.loading_state import LoadingState
+from farm_merge_valet.gui.components.metrics import (
+    POLICY_COMPACT_BADGE_COLUMN_WIDTH,
+    POLICY_COMPACT_ROW_HEIGHT,
+    POLICY_ICON_SIZE,
+)
+from farm_merge_valet.gui.components.policy_tree import create_policy_tree
 from farm_merge_valet.gui.components.policy_view import (
     LazyPolicyBranches,
     PolicyCheckBox,
     PolicyTreeItem,
-    PolicyTreeToolbar,
     aggregate_check_state,
     configure_policy_toggle,
-    configure_policy_view,
     expanded_policy_keys,
     fit_policy_widget_column,
     policy_badges,
@@ -51,10 +50,8 @@ from farm_merge_valet.gui.components.policy_view import (
 )
 from farm_merge_valet.gui.pages.base import AppPage, ConfigEdit
 from farm_merge_valet.gui.services.assets import CatalogIconLoader
+from farm_merge_valet.gui.services.catalog import load_gui_catalog
 
-logger = logging.getLogger(__name__)
-
-_ITEM_ICON_SIZE = QSize(40, 40)
 _ITEM_SORT_COLUMNS = {
     "item": 0,
     "category": 1,
@@ -85,15 +82,6 @@ class _ItemPolicyRow:
             or field == "always_remove"
             and self.supports_remove
         )
-
-
-def _load_catalog(config: AppConfig) -> ItemCatalog | None:
-    path = config.catalog_dir / "catalog.json"
-    try:
-        return load_item_catalog(path) if path.is_file() else None
-    except (OSError, ValueError) as exc:
-        logger.warning("Could not load the GUI item catalog: %s", exc)
-        return None
 
 
 class ItemsPage(AppPage):
@@ -136,41 +124,33 @@ class ItemsPage(AppPage):
             Qt.AlignmentFlag.AlignCenter,
         )
 
-        self.table = QTreeWidget()
-        self.table.setColumnCount(7)
-        self.table.setHeaderLabels(("Item / tier", "Category", "", "", "", "", ""))
-        self.bulk_header = BulkToggleHeader(
-            {
+        scaffold = create_policy_tree(
+            header_labels=("Item / tier", "Category", "", "", "", "", ""),
+            bulk_labels={
                 2: "Enabled",
                 3: "Merge",
                 4: "Merge 5",
                 5: "Interact",
                 6: "Remove",
             },
-            self.table,
+            accessible_name="Item automation policies",
+            search_placeholder="Search item families and tiers\u2026",
+            search_accessible_name="Search item families and tiers",
+            scope="item groups",
+            icon_size=POLICY_ICON_SIZE,
+            minimum_section_size=64,
         )
+        self.table = scaffold.tree
+        self.bulk_header = scaffold.header
         self.bulk_header.toggled.connect(self._set_all)
-        self.table.setHeader(self.bulk_header)
-        self.table.setIconSize(_ITEM_ICON_SIZE)
-        self.bulk_header.setMinimumSectionSize(64)
         self.bulk_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.bulk_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self.bulk_header.resizeSection(1, 108)
         for column in range(2, 7):
             self.bulk_header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-        configure_policy_view(self.table)
-        self.table.setIndentation(22)
-        self.table.setRootIsDecorated(True)
-        self.table.setUniformRowHeights(True)
         self._apply_sort_preference()
-        self.table.setAccessibleName("Item automation policies")
 
-        self.toolbar = PolicyTreeToolbar(
-            self.table,
-            placeholder="Search item families and tiers…",
-            accessible_name="Search item families and tiers",
-            scope="item groups",
-        )
+        self.toolbar = scaffold.toolbar
         self.search = self.toolbar.search
         self.expansion_controls = self.toolbar.expansion_controls
         self.page_layout.addWidget(self.toolbar)
@@ -290,7 +270,7 @@ class ItemsPage(AppPage):
         self._policy_controls = []
         self._lazy_branches.reset()
         self._upgrade_targets = {}
-        catalog = _load_catalog(self._config)
+        catalog = load_gui_catalog(self._config)
         if catalog is None:
             self._catalog_loaded = False
             self._show_catalog_onboarding()
@@ -426,7 +406,11 @@ class ItemsPage(AppPage):
                 ),
             )
         self._lazy_branches.restore_expanded(expanded_keys)
-        fit_policy_widget_column(self.table, 1, minimum=116)
+        fit_policy_widget_column(
+            self.table,
+            1,
+            minimum=POLICY_COMPACT_BADGE_COLUMN_WIDTH,
+        )
         self.table.setSortingEnabled(True)
         self.bulk_header.setSortIndicatorShown(False)
         self.table.sortByColumn(sort_column, sort_order)
@@ -541,7 +525,7 @@ class ItemsPage(AppPage):
             tier=tier,
         )
         item.setIcon(0, icons.icon_for(catalog_item))
-        item.setSizeHint(0, QSize(0, 52))
+        item.setSizeHint(0, QSize(0, POLICY_COMPACT_ROW_HEIGHT))
         item.setToolTip(0, f"{name}\nGame ID: {catalog_item.game_id}")
         font = item.font(0)
         font.setWeight(QFont.Weight.DemiBold if category is not None else QFont.Weight.Normal)
@@ -783,7 +767,7 @@ class ItemsPage(AppPage):
     def _show_empty(self, message: str) -> None:
         item = QTreeWidgetItem((message, "", "", "", "", "", ""))
         item.setFlags(Qt.ItemFlag.NoItemFlags)
-        item.setSizeHint(0, QSize(0, 52))
+        item.setSizeHint(0, QSize(0, POLICY_COMPACT_ROW_HEIGHT))
         self.table.addTopLevelItem(item)
         for column in range(2, 7):
             self.bulk_header.set_state(column, Qt.CheckState.Unchecked, enabled=False)

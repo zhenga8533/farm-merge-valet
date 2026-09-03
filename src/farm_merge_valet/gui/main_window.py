@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QColor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.config.hotkeys import display_hotkey
+from farm_merge_valet.gui.branding import app_icon
 from farm_merge_valet.gui.config_sections import SECTION_FIELDS, ConfigSection, reset_config_section
 from farm_merge_valet.gui.controller import (
     ApplicationController,
@@ -72,21 +73,6 @@ _BROWSER_FIELDS = set(SECTION_FIELDS[ConfigSection.BROWSER])
 _SETTINGS_FIELDS = set(SECTION_FIELDS[ConfigSection.SETTINGS])
 
 
-def _app_icon() -> QIcon:
-    pixmap = QPixmap(64, 64)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor("#238636"))
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawRoundedRect(4, 4, 56, 56, 14, 14)
-    painter.setBrush(QColor("#ffffff"))
-    painter.drawEllipse(18, 16, 18, 32)
-    painter.drawEllipse(30, 16, 18, 32)
-    painter.end()
-    return QIcon(pixmap)
-
-
 def _menu_action_text(label: str, hotkey: str | None) -> str:
     if hotkey is None:
         return label
@@ -124,7 +110,7 @@ class MainWindow(QMainWindow):
         self._save_timer.setInterval(350)
         self._save_timer.timeout.connect(self._save_config_async)
         self.setWindowTitle("Farm Merge Valet")
-        self.setWindowIcon(_app_icon())
+        self.setWindowIcon(app_icon())
         self.setMinimumSize(1000, 560)
         self.resize(1100, 740)
 
@@ -530,7 +516,7 @@ class MainWindow(QMainWindow):
         self._set_overlay_visible(not self.overlay.isVisible())
 
     def _setup_tray(self) -> None:
-        self.tray = QSystemTrayIcon(_app_icon(), self)
+        self.tray = QSystemTrayIcon(app_icon(), self)
         from PySide6.QtWidgets import QMenu
 
         menu = QMenu(self)

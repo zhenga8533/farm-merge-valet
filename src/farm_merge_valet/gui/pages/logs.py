@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 from farm_merge_valet.gui.components.input_controls import (
     FocusAwareComboBox,
 )
+from farm_merge_valet.gui.components.status import StatusLabel
 from farm_merge_valet.gui.components.widgets import secondary_button
 from farm_merge_valet.gui.log_view import (
     LogEntry,
@@ -46,11 +47,13 @@ class LogsPage(AppPage):
         clear.clicked.connect(self.clear)
         self.save_button = QPushButton("Save logs…")
         self.save_button.clicked.connect(self.save_requested)
-        toolbar.addWidget(QLabel("Minimum level"))
+        minimum_level_label = QLabel("Minimum level")
+        minimum_level_label.setBuddy(self.filter)
+        toolbar.addWidget(minimum_level_label)
         toolbar.addWidget(self.filter)
         toolbar.addStretch()
-        self.save_status = QLabel()
-        self.save_status.setObjectName("saveStatus")
+        self.save_status = StatusLabel(object_name="saveStatus")
+        self.save_status.setAccessibleName("Log export status")
         toolbar.addWidget(self.save_status)
         toolbar.addWidget(clear)
         toolbar.addWidget(self.save_button)
@@ -91,9 +94,7 @@ class LogsPage(AppPage):
         render_log_entries(self.view, self._entries, self._minimum_level())
 
     def set_save_result(self, output: str) -> None:
-        self.save_status.setText("Saved")
-        self.save_status.setToolTip(output)
+        self.save_status.set_success("Saved", output)
 
     def set_save_error(self, message: str) -> None:
-        self.save_status.setText("Save failed")
-        self.save_status.setToolTip(message)
+        self.save_status.set_error("Save failed", message)

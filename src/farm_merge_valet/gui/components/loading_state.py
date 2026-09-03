@@ -1,30 +1,23 @@
 """Reusable indeterminate state for deferred local GUI work."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QLabel, QProgressBar, QVBoxLayout
+from PySide6.QtWidgets import QProgressBar
+
+from farm_merge_valet.gui.components.state_panel import StatePanel
 
 
-class LoadingState(QFrame):
+class LoadingState(StatePanel):
     def __init__(self, title: str, description: str) -> None:
-        super().__init__()
-        self.setObjectName("loadingState")
-        self.setMaximumWidth(520)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 24)
-        layout.setSpacing(10)
-
-        title_label = QLabel(title)
-        title_label.setObjectName("onboardingTitle")
-        description_label = QLabel(description)
-        description_label.setObjectName("pageSubtitle")
-        description_label.setWordWrap(True)
-        progress = QProgressBar()
-        progress.setAccessibleName(title)
-        progress.setRange(0, 0)
-        progress.setTextVisible(False)
-
-        layout.addWidget(title_label)
-        layout.addWidget(description_label)
-        layout.addSpacing(4)
-        layout.addWidget(progress)
-        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        super().__init__(
+            title,
+            description,
+            object_name="loadingState",
+            maximum_width=520,
+        )
+        self.progress = QProgressBar()
+        self.progress.setAccessibleName(title)
+        self.progress.setRange(0, 0)
+        self.progress.setTextVisible(False)
+        self.content_layout.addSpacing(4)
+        self.content_layout.addWidget(self.progress)
+        self.content_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)

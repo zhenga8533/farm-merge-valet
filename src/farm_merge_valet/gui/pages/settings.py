@@ -5,17 +5,11 @@ from __future__ import annotations
 from pydantic import SecretStr
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QDoubleSpinBox,
     QFormLayout,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QScrollArea,
-    QSlider,
-    QSpinBox,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -33,6 +27,7 @@ from farm_merge_valet.gui.pages.base import (
     ConfigEdit,
     ConfigFormPage,
     disclosure_section,
+    scrollable_sections,
     settings_section,
 )
 
@@ -58,14 +53,7 @@ class SettingsPage(ConfigFormPage):
         self.reset_all_button = reset_all
         self.page_layout.addWidget(self.configuration_header)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        content = QWidget()
-        sections = QVBoxLayout(content)
-        sections.setContentsMargins(4, 4, 4, 4)
-        sections.setSpacing(14)
+        sections = scrollable_sections(self.page_layout)
 
         automation, automation_form = settings_section("Automation")
         self._add_int(automation_form, "Reserved empty cells", "merge_empty_cell_reserve", 0, 50)
@@ -121,7 +109,15 @@ class SettingsPage(ConfigFormPage):
         webhook.editingFinished.connect(
             lambda: self._request("discord_webhook_url", webhook.text().strip() or None)
         )
-        self.controls["discord_webhook_url"] = webhook
+        self._register_control(
+            "discord_webhook_url",
+            webhook,
+            lambda value: webhook.setText(
+                value.get_secret_value()
+                if isinstance(value, SecretStr)
+                else str(value) if value is not None else ""
+            ),
+        )
         self._add_form_row(notifications_form, "Discord webhook", webhook)
 
         notifications_advanced, form = disclosure_section("Advanced timing")
@@ -139,7 +135,7 @@ class SettingsPage(ConfigFormPage):
         theme.currentIndexChanged.connect(
             lambda _index: self._request("theme", str(theme.current_value()))
         )
-        self.controls["theme"] = theme
+        self._register_control("theme", theme, theme.set_current_value)
         self._add_form_row(appearance_form, "Theme", theme)
 
         appearance_advanced, form = disclosure_section("Advanced window behavior")
@@ -164,8 +160,6 @@ class SettingsPage(ConfigFormPage):
         self._add_form_row(form, "Version", version)
         sections.addWidget(application)
         sections.addStretch()
-        scroll.setWidget(content)
-        self.page_layout.addWidget(scroll, 1)
 
     def _request(self, field: str, value: object) -> None:
         changes = {field: value}
@@ -199,7 +193,11 @@ class SettingsPage(ConfigFormPage):
         control.editingFinished.connect(
             lambda widget=control, name=field: self._request(name, widget.value())
         )
-        self.controls[field] = control
+
+        def set_value(value: object) -> None:
+            control.setValue(float(str(value)))
+
+        self._register_control(field, control, set_value)
         self._add_form_row(form, label, control)
 
     def _add_hotkey(self, form: QFormLayout, label: str, field: str) -> None:
@@ -207,7 +205,11 @@ class SettingsPage(ConfigFormPage):
         control = HotkeyEdit(value if isinstance(value, str) else None, f"{label} global hotkey")
         control.value_changed.connect(lambda hotkey, name=field: self._request(name, hotkey))
         control.recording_changed.connect(self.hotkey_recording_changed)
-        self.controls[field] = control
+
+        def set_value(value: object) -> None:
+            control.set_value(value if isinstance(value, str) else None)
+
+        self._register_control(field, control, set_value)
         self._add_form_row(form, label, control)
 
     def _add_opacity(self, form: QFormLayout, label: str, field: str) -> None:
@@ -229,7 +231,12 @@ class SettingsPage(ConfigFormPage):
             self._request(field, value / 100)
 
         control.valueChanged.connect(update)
-        self.controls[field] = control
+        def set_opacity(value: object) -> None:
+            percent = round(float(str(value)) * 100)
+            control.setValue(percent)
+            value_label.setText(f"{percent}%")
+
+        self._register_control(field, control, set_opacity)
         self.opacity_labels[field] = value_label
         self._add_form_row(form, label, row)
 
@@ -239,7 +246,7 @@ class SettingsPage(ConfigFormPage):
             return
         control = self.controls[field]
         if isinstance(control, HotkeyEdit):
-            self._set_control_value(field, control, getattr(config, field))
+            self._apply_registered_control(field, getattr(config, field))
             control.show_error(message)
             control.setFocus()
             return
@@ -264,33 +271,10 @@ class SettingsPage(ConfigFormPage):
         )
 
     def apply_config(self, config: AppConfig) -> None:
-        self._config = config
-        for field, control in self.controls.items():
-            self._set_control_value(field, control, getattr(config, field))
+        self._apply_registered_controls(config)
+        for control in self.controls.values():
             if isinstance(control, HotkeyEdit):
                 control.show_error("")
             else:
                 set_validation_state(control)
         self.configuration_header.mark_saved()
-
-    def _set_control_value(self, field: str, control: QWidget, value: object) -> None:
-        control.blockSignals(True)
-        if isinstance(control, HotkeyEdit):
-            control.set_value(value if isinstance(value, str) else None)
-        elif isinstance(control, QCheckBox):
-            control.setChecked(bool(value))
-        elif isinstance(control, QSpinBox):
-            control.setValue(int(str(value)))
-        elif isinstance(control, QDoubleSpinBox):
-            control.setValue(float(str(value)))
-        elif isinstance(control, QSlider):
-            percent = round(float(str(value)) * 100)
-            control.setValue(percent)
-            self.opacity_labels[field].setText(f"{percent}%")
-        elif isinstance(control, FocusAwareComboBox):
-            control.set_current_value(value)
-        elif isinstance(control, QLineEdit):
-            if field == "discord_webhook_url" and isinstance(value, SecretStr):
-                value = value.get_secret_value()
-            control.setText(str(value) if value is not None else "")
-        control.blockSignals(False)

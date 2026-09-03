@@ -2,26 +2,28 @@
 
 from __future__ import annotations
 
-import logging
 from collections import defaultdict
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QHeaderView, QTreeWidget, QTreeWidgetItem
+from PySide6.QtWidgets import QHeaderView, QTreeWidgetItem
 
 from farm_merge_valet.catalog.marketplace import MARKETPLACE_ICON_ASSETS, marketplace_catalog
-from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog, load_item_catalog
+from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.core.marketplace import MarketplaceOffer
-from farm_merge_valet.gui.components.bulk_header import BulkToggleHeader
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
+from farm_merge_valet.gui.components.metrics import (
+    POLICY_ICON_SIZE,
+    POLICY_MEDIA_BADGE_COLUMN_WIDTH,
+    POLICY_MEDIA_ROW_HEIGHT,
+)
+from farm_merge_valet.gui.components.policy_tree import create_policy_tree
 from farm_merge_valet.gui.components.policy_view import (
     PolicyCheckBox,
     PolicyTreeItem,
-    PolicyTreeToolbar,
     aggregate_check_state,
     configure_policy_toggle,
-    configure_policy_view,
     expanded_policy_keys,
     filter_policy_tree,
     fit_policy_widget_column,
@@ -32,25 +34,14 @@ from farm_merge_valet.gui.components.policy_view import (
 )
 from farm_merge_valet.gui.pages.base import AppPage, ConfigEdit
 from farm_merge_valet.gui.services.assets import CatalogIconLoader
+from farm_merge_valet.gui.services.catalog import load_gui_catalog
 
-logger = logging.getLogger(__name__)
-
-_ICON_SIZE = QSize(40, 40)
 _SORT_COLUMNS = {"offer": 0, "cost": 1, "enabled": 2}
 _REWARD_FAMILY_ALIASES = {
     "crates": frozenset({"crate"}),
     "gems": frozenset({"gem"}),
     "event_energy": frozenset({"event_energy", "time_limited_event_energy"}),
 }
-
-
-def _load_catalog(config: AppConfig) -> ItemCatalog | None:
-    path = config.catalog_dir / "catalog.json"
-    try:
-        return load_item_catalog(path) if path.is_file() else None
-    except (OSError, ValueError) as exc:
-        logger.warning("Could not load marketplace icons from the item catalog: %s", exc)
-        return None
 
 
 class MarketplacePage(AppPage):
@@ -79,26 +70,22 @@ class MarketplacePage(AppPage):
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(("Offer", "Cost", ""))
-        self.bulk_header = BulkToggleHeader({2: "Auto-purchase"}, self.tree)
+        scaffold = create_policy_tree(
+            header_labels=("Offer", "Cost", ""),
+            bulk_labels={2: "Auto-purchase"},
+            accessible_name="Marketplace purchase policies",
+            search_placeholder="Search marketplace offers\u2026",
+            search_accessible_name="Search marketplace offers",
+            scope="marketplace groups",
+            icon_size=POLICY_ICON_SIZE,
+        )
+        self.tree = scaffold.tree
+        self.bulk_header = scaffold.header
         self.bulk_header.toggled.connect(self._set_all)
-        self.tree.setHeader(self.bulk_header)
-        configure_policy_view(self.tree)
-        self.tree.setRootIsDecorated(True)
-        self.tree.setIndentation(22)
-        self.tree.setIconSize(_ICON_SIZE)
-        self.tree.setUniformRowHeights(True)
-        self.tree.setAccessibleName("Marketplace purchase policies")
         self.bulk_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in range(1, 3):
             self.bulk_header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-        self.toolbar = PolicyTreeToolbar(
-            self.tree,
-            placeholder="Search marketplace offers…",
-            accessible_name="Search marketplace offers",
-            scope="marketplace groups",
-        )
+        self.toolbar = scaffold.toolbar
         self.toolbar.filter_requested.connect(lambda text: filter_policy_tree(self.tree, text))
         self.page_layout.addWidget(self.toolbar)
         self.page_layout.addWidget(self.tree, 1)
@@ -142,13 +129,13 @@ class MarketplacePage(AppPage):
         self._group_toggles = {}
         self._group_policy_keys = {}
         self._group_items = {}
-        self._catalog = _load_catalog(self._config)
+        self._catalog = load_gui_catalog(self._config)
         grouped: dict[str, list[MarketplaceOffer]] = defaultdict(list)
         for offer in marketplace_catalog():
             grouped[offer.group].append(offer)
         for group, offers in grouped.items():
             parent = PolicyTreeItem((group, "", ""))
-            parent.setSizeHint(0, QSize(0, 64))
+            parent.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
             parent_font = parent.font(0)
             parent_font.setWeight(QFont.Weight.DemiBold)
             parent.setFont(0, parent_font)
@@ -189,7 +176,11 @@ class MarketplacePage(AppPage):
             self._group_items[group] = parent
             parent.setExpanded(("group", group) in expanded)
         self.tree.setSortingEnabled(True)
-        fit_policy_widget_column(self.tree, 1, minimum=124)
+        fit_policy_widget_column(
+            self.tree,
+            1,
+            minimum=POLICY_MEDIA_BADGE_COLUMN_WIDTH,
+        )
         self.tree.sortByColumn(
             _SORT_COLUMNS[self._config.marketplace_sort_column],
             Qt.SortOrder.DescendingOrder
@@ -208,7 +199,7 @@ class MarketplacePage(AppPage):
         cost_tone = "free" if offer.payment_type == "free" else offer.payment_key
         quantity = f" \u00d7{offer.reward_amount}" if offer.reward_amount > 1 else ""
         item = PolicyTreeItem((f"{offer.display_name}{quantity}", "", ""))
-        item.setSizeHint(0, QSize(0, 64))
+        item.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
         marketplace_icon = MARKETPLACE_ICON_ASSETS.get(offer.offer_id)
         if marketplace_icon is not None:
             item.setIcon(0, self._icons.icon_for_path(marketplace_icon[1]))

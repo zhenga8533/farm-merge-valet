@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
+from farm_merge_valet.gui.components.status import StatusLabel
 from farm_merge_valet.gui.components.widgets import secondary_button
 
 
@@ -15,10 +16,8 @@ class ConfigurationHeader(QWidget):
         super().__init__()
         self.actions_layout = QHBoxLayout(self)
         self.actions_layout.setContentsMargins(0, 0, 0, 0)
-        self.status_label = QLabel("Saved")
-        self.status_label.setObjectName("saveStatus")
+        self.status_label = StatusLabel("Saved", tone="saved", object_name="saveStatus")
         self.status_label.setAccessibleName("Configuration status")
-        self.status_label.setProperty("status", "saved")
         self.actions_layout.addWidget(self.status_label)
         self.actions_layout.addStretch()
         self.reset_button = self.add_action(reset_text)
@@ -42,9 +41,4 @@ class ConfigurationHeader(QWidget):
         self._set_status(message, "error")
 
     def _set_status(self, text: str, status: str) -> None:
-        self.status_label.setText(text)
-        if self.status_label.property("status") == status:
-            return
-        self.status_label.setProperty("status", status)
-        self.status_label.style().unpolish(self.status_label)
-        self.status_label.style().polish(self.status_label)
+        self.status_label.set_status(text, status)

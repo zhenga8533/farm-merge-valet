@@ -4,19 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QFileDialog,
     QFormLayout,
-    QFrame,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
-    QSpinBox,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -26,11 +20,17 @@ from farm_merge_valet.gui.components.configuration_header import ConfigurationHe
 from farm_merge_valet.gui.components.input_controls import (
     FocusAwareComboBox,
 )
-from farm_merge_valet.gui.components.widgets import secondary_button, set_validation_state
+from farm_merge_valet.gui.components.status import StatusLabel
+from farm_merge_valet.gui.components.widgets import (
+    secondary_button,
+    set_styled_property,
+    set_validation_state,
+)
 from farm_merge_valet.gui.pages.base import (
     ConfigEdit,
     ConfigFormPage,
     disclosure_section,
+    scrollable_sections,
     settings_section,
 )
 
@@ -55,17 +55,10 @@ class BrowserPage(ConfigFormPage):
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        content = QWidget()
-        sections = QVBoxLayout(content)
-        sections.setContentsMargins(4, 4, 4, 4)
-        sections.setSpacing(14)
+        sections = scrollable_sections(self.page_layout)
 
         managed, managed_form = settings_section("Managed browser")
-        self.status_label = QLabel("Not checked")
+        self.status_label = StatusLabel("Not checked")
         self.status_label.setWordWrap(True)
         self.status_label.setAccessibleName("Managed browser status")
         self.browser_choice = FocusAwareComboBox()
@@ -83,15 +76,18 @@ class BrowserPage(ConfigFormPage):
         self.browser_choice.currentIndexChanged.connect(
             lambda _index: self._request("browser", str(self.browser_choice.current_value()))
         )
-        self.controls["browser"] = self.browser_choice
+        self._register_control(
+            "browser",
+            self.browser_choice,
+            self.browser_choice.set_current_value,
+        )
         self._add_form_row(managed_form, "Status", self.status_label)
         self._add_form_row(managed_form, "Preferred browser", self.browser_choice)
         self._add_toggle(managed_form, "Launch automatically when needed", "browser_auto_launch")
         buttons = QHBoxLayout()
         self.refresh_button = secondary_button("Refresh status")
         self.browser_action_button = QPushButton("Launch managed browser")
-        self.restart_button = QPushButton("Restart managed browser")
-        self.restart_button.setProperty("secondary", True)
+        self.restart_button = secondary_button("Restart managed browser")
         self.refresh_button.clicked.connect(self.refresh_requested)
         self.browser_action_button.clicked.connect(self._request_browser_action)
         self.restart_button.clicked.connect(self.restart_requested)
@@ -111,7 +107,7 @@ class BrowserPage(ConfigFormPage):
         sections.addWidget(managed)
 
         assets, assets_form = settings_section("Game data and assets")
-        self.game_sync_status_label = QLabel(self._game_sync_status(config))
+        self.game_sync_status_label = StatusLabel(self._game_sync_status(config))
         self.game_sync_status_label.setWordWrap(True)
         self.game_sync_status_label.setAccessibleName("Game data and asset status")
         self._add_form_row(assets_form, "Status", self.game_sync_status_label)
@@ -128,8 +124,6 @@ class BrowserPage(ConfigFormPage):
         assets_form.addRow(assets_advanced)
         sections.addWidget(assets)
         sections.addStretch()
-        scroll.setWidget(content)
-        self.page_layout.addWidget(scroll, 1)
         self._browser_busy = False
         self._game_sync_busy = False
         self._runtime_active = False
@@ -158,7 +152,7 @@ class BrowserPage(ConfigFormPage):
         return self._browser_status is not None
 
     def set_game_sync_status(self, status: str) -> None:
-        self.game_sync_status_label.setText(status)
+        self.game_sync_status_label.set_status(status)
 
     def set_game_sync_busy(self, busy: bool) -> None:
         self._game_sync_busy = busy
@@ -174,10 +168,7 @@ class BrowserPage(ConfigFormPage):
             "Stop managed browser" if running and managed else "Launch managed browser"
         )
         danger = running and managed
-        if self.browser_action_button.property("danger") != danger:
-            self.browser_action_button.setProperty("danger", danger)
-            self.browser_action_button.style().unpolish(self.browser_action_button)
-            self.browser_action_button.style().polish(self.browser_action_button)
+        set_styled_property(self.browser_action_button, "danger", danger)
         self.refresh_button.setEnabled(not operation_busy)
         self.browser_action_button.setEnabled(
             not operation_busy and not self._runtime_active and (not running or managed)
@@ -196,7 +187,11 @@ class BrowserPage(ConfigFormPage):
         control.editingFinished.connect(
             lambda widget=control, name=field: self._request(name, widget.text().strip())
         )
-        self.controls[field] = control
+
+        def set_value(value: object) -> None:
+            control.setText(str(value) if value is not None else "")
+
+        self._register_control(field, control, set_value)
         self._add_form_row(form, label, control)
 
     def _add_path(
@@ -229,25 +224,18 @@ class BrowserPage(ConfigFormPage):
 
         control.editingFinished.connect(update)
         browse.clicked.connect(choose)
-        self.controls[field] = control
+
+        def set_value(current: object) -> None:
+            control.setText(str(current) if current is not None else "")
+
+        self._register_control(field, control, set_value)
         self._add_form_row(form, label, row)
 
     def apply_config(self, config: AppConfig) -> None:
-        self._config = config
-        for field, control in self.controls.items():
-            control.blockSignals(True)
-            value = getattr(config, field)
-            if isinstance(control, FocusAwareComboBox):
-                control.set_current_value(value)
-            elif isinstance(control, QCheckBox):
-                control.setChecked(bool(value))
-            elif isinstance(control, QSpinBox):
-                control.setValue(int(value))
-            elif isinstance(control, QLineEdit):
-                control.setText(str(value) if value is not None else "")
-            control.blockSignals(False)
+        self._apply_registered_controls(config)
+        for control in self.controls.values():
             set_validation_state(control)
-        self.game_sync_status_label.setText(self._game_sync_status(config))
+        self.game_sync_status_label.set_status(self._game_sync_status(config))
         self.configuration_header.mark_saved()
 
     def mark_saving(self, field: str | None = None) -> None:

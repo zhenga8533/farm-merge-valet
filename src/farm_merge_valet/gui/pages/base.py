@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QFormLayout,
+    QFrame,
     QGroupBox,
     QLabel,
     QLayout,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -49,6 +52,20 @@ def disclosure_section(
     return section, form
 
 
+def scrollable_sections(page_layout: QVBoxLayout) -> QVBoxLayout:
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    content = QWidget()
+    sections = QVBoxLayout(content)
+    sections.setContentsMargins(4, 4, 4, 4)
+    sections.setSpacing(14)
+    scroll.setWidget(content)
+    page_layout.addWidget(scroll, 1)
+    return sections
+
+
 class AppPage(QWidget):
     def __init__(self, title: str, subtitle: str = "") -> None:
         super().__init__()
@@ -81,6 +98,7 @@ class ConfigFormPage(AppPage):
         self._config = config
         self._form_label_width = form_label_width
         self.controls: dict[str, QWidget] = {}
+        self._control_setters: dict[str, Callable[[object], None]] = {}
 
     def _request(self, field: str, value: object) -> None:
         raise NotImplementedError
@@ -104,7 +122,11 @@ class ConfigFormPage(AppPage):
         control.setChecked(bool(getattr(self._config, field)))
         control.setAccessibleName(label)
         control.toggled.connect(lambda value, name=field: self._request(name, value))
-        self.controls[field] = control
+
+        def set_value(value: object) -> None:
+            control.setChecked(bool(value))
+
+        self._register_control(field, control, set_value)
         self._add_form_row(form, label, control)
 
     def _add_int(
@@ -122,5 +144,29 @@ class ConfigFormPage(AppPage):
         control.editingFinished.connect(
             lambda widget=control, name=field: self._request(name, widget.value())
         )
-        self.controls[field] = control
+
+        def set_value(value: object) -> None:
+            control.setValue(int(str(value)))
+
+        self._register_control(field, control, set_value)
         self._add_form_row(form, label, control)
+
+    def _register_control(
+        self,
+        field: str,
+        control: QWidget,
+        setter: Callable[[object], None],
+    ) -> None:
+        self.controls[field] = control
+        self._control_setters[field] = setter
+
+    def _apply_registered_controls(self, config: AppConfig) -> None:
+        self._config = config
+        for field in self.controls:
+            self._apply_registered_control(field, getattr(config, field))
+
+    def _apply_registered_control(self, field: str, value: object) -> None:
+        control = self.controls[field]
+        control.blockSignals(True)
+        self._control_setters[field](value)
+        control.blockSignals(False)

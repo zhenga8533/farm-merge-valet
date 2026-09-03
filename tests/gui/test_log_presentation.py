@@ -47,6 +47,21 @@ def test_log_multiline_content_uses_aligned_plain_text() -> None:
     )
 
 
+def test_log_export_status_uses_semantic_success_and_error_tones() -> None:
+    _app = QApplication.instance() or QApplication([])
+    page = LogsPage("INFO")
+
+    page.set_save_result("C:/logs/output.log")
+    assert page.save_status.text() == "Saved"
+    assert page.save_status.property("status") == "success"
+    assert page.save_status.toolTip() == "C:/logs/output.log"
+
+    page.set_save_error("disk full")
+    assert page.save_status.text() == "Save failed"
+    assert page.save_status.property("status") == "error"
+    assert page.save_status.toolTip() == "disk full"
+
+
 def test_compact_overlay_uses_configured_level_and_replays_recent_entries() -> None:
     _app = QApplication.instance() or QApplication([])
     overlay = CompactOverlay(AppConfig(log_level="INFO"))

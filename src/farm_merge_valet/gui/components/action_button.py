@@ -6,6 +6,7 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton
 
 from farm_merge_valet.config.hotkeys import display_hotkey
+from farm_merge_valet.gui.components.widgets import set_styled_property
 
 
 class ActionButton(QPushButton):
@@ -47,10 +48,7 @@ class ActionButton(QPushButton):
         )
         self.setAccessibleName(description)
         self.setToolTip(description)
-        if self.property("danger") != danger:
-            self.setProperty("danger", danger)
-            self.style().unpolish(self)
-            self.style().polish(self)
+        set_styled_property(self, "danger", danger)
         self.updateGeometry()
 
     def sizeHint(self) -> QSize:

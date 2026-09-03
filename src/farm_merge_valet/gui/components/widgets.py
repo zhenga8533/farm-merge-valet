@@ -6,6 +6,15 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QPushButton, QToolButton, QVBoxLayout, QWidget
 
 
+def set_styled_property(widget: QWidget, name: str, value: object) -> None:
+    if widget.property(name) == value:
+        return
+    widget.setProperty(name, value)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+    widget.update()
+
+
 class DisclosureSection(QFrame):
     """A keyboard-accessible section that keeps advanced controls out of the main scan path."""
 
@@ -37,9 +46,7 @@ class DisclosureSection(QFrame):
     def _set_expanded(self, expanded: bool) -> None:
         self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
         self.content.setVisible(expanded)
-        self.setProperty("expanded", expanded)
-        self.style().unpolish(self)
-        self.style().polish(self)
+        set_styled_property(self, "expanded", expanded)
 
 
 def secondary_button(text: str) -> QPushButton:
@@ -49,8 +56,6 @@ def secondary_button(text: str) -> QPushButton:
 
 
 def set_validation_state(widget: QWidget, message: str = "") -> None:
-    widget.setProperty("invalid", bool(message))
+    set_styled_property(widget, "invalid", bool(message))
     widget.setToolTip(message)
     widget.setAccessibleDescription(message)
-    widget.style().unpolish(widget)
-    widget.style().polish(widget)
