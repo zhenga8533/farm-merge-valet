@@ -29,11 +29,8 @@ class MarketplaceOffer:
     payment_key: str | None
     payment_amount: int
     stock: int
-    renewal_seconds: int | None = None
     slot_id: str | None = None
     candidate_key: str | None = None
-    unlock_level: int = 1
-    weight: int | None = None
 
     def __post_init__(self) -> None:
         required = (self.offer_id, self.group, self.display_name, self.reward_key)
@@ -74,11 +71,9 @@ class MarketplaceLiveOffer:
     payment_key: str | None
     payment_amount: int
     remaining_stock: int
-    available: bool
     slot_id: str | None = None
     candidate_key: str | None = None
     balance: int | None = None
-    refresh_remaining_seconds: float | None = None
 
     @property
     def affordable(self) -> bool:
@@ -101,9 +96,7 @@ class MarketplaceAction:
     candidate_key: str | None = None
 
 
-def live_offer_matches_catalog(
-    offer: MarketplaceOffer, live: MarketplaceLiveOffer
-) -> bool:
+def live_offer_matches_catalog(offer: MarketplaceOffer, live: MarketplaceLiveOffer) -> bool:
     return (
         live.policy_key == offer.policy_key
         and live.offer_id == offer.offer_id
@@ -115,7 +108,6 @@ def live_offer_matches_catalog(
         and live.payment_key == offer.payment_key
         and live.payment_amount == offer.payment_amount
         and live.remaining_stock > 0
-        and live.available
     )
 
 

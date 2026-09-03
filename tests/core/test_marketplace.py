@@ -21,7 +21,6 @@ def _live_for(index: int = 0) -> MarketplaceLiveOffer:
         payment_key=offer.payment_key,
         payment_amount=offer.payment_amount,
         remaining_stock=offer.stock,
-        available=True,
         balance=10_000,
     )
 
@@ -46,9 +45,9 @@ def test_planner_defaults_to_disabled_and_requires_exact_live_match() -> None:
     live = _live_for()
     assert plan_marketplace_purchase(catalog, (live,), {}) is None
     assert (
-        plan_marketplace_purchase(catalog, (replace(live, payment_amount=10),), {
-            live.policy_key: True
-        })
+        plan_marketplace_purchase(
+            catalog, (replace(live, payment_amount=10),), {live.policy_key: True}
+        )
         is None
     )
 
@@ -65,8 +64,5 @@ def test_planner_produces_one_exact_action_for_enabled_affordable_offer() -> Non
 def test_planner_rejects_same_slot_different_candidate() -> None:
     live = replace(_live_for(), candidate_key="egg")
     assert (
-        plan_marketplace_purchase(
-            marketplace_catalog(), (live,), {live.policy_key: True}
-        )
-        is None
+        plan_marketplace_purchase(marketplace_catalog(), (live,), {live.policy_key: True}) is None
     )

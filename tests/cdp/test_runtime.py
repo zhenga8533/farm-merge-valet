@@ -331,6 +331,16 @@ def test_discovery_uses_active_gameplay_crate_signal() -> None:
     assert "inventory?.onAnimateChanges" not in _DISCOVER_EXPRESSION
 
 
+def test_discovery_does_not_require_marketplace_ui_purchase_notifier() -> None:
+    from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+
+    for expression in (_DISCOVER_EXPRESSION, _HEALTH_EXPRESSION):
+        assert "getMarketplacePopupData" in expression
+        assert "getItemConfigsByShop" in expression
+        assert "getStockItem" in expression
+        assert "purchaseItem" not in expression
+
+
 def test_crate_claim_rebinds_inventory_from_active_scene(monkeypatch) -> None:
     expression = ""
 
@@ -943,9 +953,7 @@ def test_atomic_snapshot_reads_requested_state_once_without_retry(monkeypatch) -
                 "heartbeatAgeMs": 1,
                 "heartbeatInstalled": True,
             },
-            "cells": [
-                {"column": 1, "row": 2, "hasContent": True, "blueprintID": "wheat_1"}
-            ],
+            "cells": [{"column": 1, "row": 2, "hasContent": True, "blueprintID": "wheat_1"}],
             "energy": None,
             "workers": None,
             "storageBubbles": None,

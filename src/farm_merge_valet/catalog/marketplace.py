@@ -10,8 +10,6 @@ from farm_merge_valet.core.marketplace import (
     MarketplacePaymentType,
 )
 
-MARKETPLACE_CATALOG_BUILD = "1.78.2-4.reddit"
-MARKETPLACE_CATALOG_FINGERPRINT = "fmv-marketplace-1.78.2-54"
 MARKETPLACE_ICON_ASSETS = {
     "gems_5_no_ads": ("icon_content_gems01", "marketplace/gems_5_no_ads.png"),
     "energy_5_no_ads": ("icon_content_energy01", "marketplace/energy_5_no_ads.png"),
@@ -30,12 +28,22 @@ _FLASH_GROUPS = (
         9,
         5,
         (
-            ("wheat", 1, 9), ("egg", 3, 18), ("milk", 4, 36),
-            ("sugarcane", 7, 36), ("carrot", 9, 27), ("goatmilk", 11, 27),
-            ("soybeans", 14, 27), ("bacon", 17, 45), ("sunflower", 21, 27),
-            ("corn", 26, 54), ("wool", 30, 45), ("coffeebeans", 37, 45),
-            ("fur", 43, 45), ("tomato", 50, 45), ("avocado", 55, 54),
-            ("truffle", 65, 63),
+            ("wheat", 9),
+            ("egg", 18),
+            ("milk", 36),
+            ("sugarcane", 36),
+            ("carrot", 27),
+            ("goatmilk", 27),
+            ("soybeans", 27),
+            ("bacon", 45),
+            ("sunflower", 27),
+            ("corn", 54),
+            ("wool", 45),
+            ("coffeebeans", 45),
+            ("fur", 45),
+            ("tomato", 45),
+            ("avocado", 54),
+            ("truffle", 63),
         ),
     ),
     (
@@ -45,9 +53,12 @@ _FLASH_GROUPS = (
         1,
         5,
         (
-            ("tree_small_moveable", 1, 50), ("tree_medium_moveable", 1, 125),
-            ("tree_large_moveable", 1, 450), ("rock_small_moveable", 1, 50),
-            ("rock_medium_moveable", 1, 125), ("rock_large_moveable", 1, 450),
+            ("tree_small_moveable", 50),
+            ("tree_medium_moveable", 125),
+            ("tree_large_moveable", 450),
+            ("rock_small_moveable", 50),
+            ("rock_medium_moveable", 125),
+            ("rock_large_moveable", 450),
         ),
     ),
     (
@@ -57,9 +68,15 @@ _FLASH_GROUPS = (
         1,
         2,
         (
-            ("wood_3", 1, 9), ("wood_4", 1, 27), ("wood_5", 1, 81),
-            ("stone_3", 1, 9), ("stone_4", 1, 27), ("stone_5", 1, 81),
-            ("tool_3", 11, 27), ("tool_4", 11, 81), ("tool_5", 11, 243),
+            ("wood_3", 9),
+            ("wood_4", 27),
+            ("wood_5", 81),
+            ("stone_3", 9),
+            ("stone_4", 27),
+            ("stone_5", 81),
+            ("tool_3", 27),
+            ("tool_4", 81),
+            ("tool_5", 243),
         ),
     ),
     (
@@ -69,10 +86,12 @@ _FLASH_GROUPS = (
         1,
         2,
         (
-            ("reward_crate_bronze", 1, 99), ("reward_crate_silver", 1, 199),
-            ("reward_crate_gold", 1, 299), ("reward_crate_bronze_gazebo", 20, 99),
-            ("reward_crate_silver_gazebo", 20, 199),
-            ("reward_crate_gold_gazebo", 20, 299),
+            ("reward_crate_bronze", 99),
+            ("reward_crate_silver", 199),
+            ("reward_crate_gold", 299),
+            ("reward_crate_bronze_gazebo", 99),
+            ("reward_crate_silver_gazebo", 199),
+            ("reward_crate_gold_gazebo", 299),
         ),
     ),
     (
@@ -82,9 +101,9 @@ _FLASH_GROUPS = (
         1,
         2,
         (
-            ("reward_crate_key_bronze", 1, 15),
-            ("reward_crate_key_silver", 1, 45),
-            ("reward_crate_key_gold", 1, 135),
+            ("reward_crate_key_bronze", 15),
+            ("reward_crate_key_silver", 45),
+            ("reward_crate_key_gold", 135),
         ),
     ),
     (
@@ -94,11 +113,16 @@ _FLASH_GROUPS = (
         1,
         2,
         (
-            ("greenhouse_3", 1, 50), ("greenhouse_4", 1, 150),
-            ("greenhouse_5", 1, 300), ("greenhouse_6", 1, 450),
-            ("greenhouse_7", 1, 600), ("gazebo_3", 20, 50),
-            ("gazebo_4", 20, 150), ("gazebo_5", 20, 300),
-            ("gazebo_6", 20, 450), ("gazebo_7", 20, 600),
+            ("greenhouse_3", 50),
+            ("greenhouse_4", 150),
+            ("greenhouse_5", 300),
+            ("greenhouse_6", 450),
+            ("greenhouse_7", 600),
+            ("gazebo_3", 50),
+            ("gazebo_4", 150),
+            ("gazebo_5", 300),
+            ("gazebo_6", 450),
+            ("gazebo_7", 600),
         ),
     ),
 )
@@ -119,10 +143,7 @@ def _display_name(key: str) -> str:
 def marketplace_catalog() -> tuple[MarketplaceOffer, ...]:
     offers: list[MarketplaceOffer] = []
     for slot_id, group, currency, reward_amount, stock, candidates in _FLASH_GROUPS:
-        for candidate, unlock_level, price in candidates:
-            weight = 10_000 if candidate.endswith("_gazebo") and "crate" in candidate else (
-                1 if "reward_crate" in candidate and "key" not in candidate else None
-            )
+        for candidate, price in candidates:
             offers.append(
                 MarketplaceOffer(
                     kind=MarketplaceOfferKind.FLASH,
@@ -137,9 +158,6 @@ def marketplace_catalog() -> tuple[MarketplaceOffer, ...]:
                     payment_key=currency,
                     payment_amount=price,
                     stock=stock,
-                    renewal_seconds=14_400,
-                    unlock_level=unlock_level,
-                    weight=weight,
                 )
             )
     offers.extend(
@@ -154,7 +172,6 @@ def marketplace_catalog() -> tuple[MarketplaceOffer, ...]:
             payment_key=None,
             payment_amount=0,
             stock=1,
-            renewal_seconds=14_400,
         )
         for offer_id, display_name, reward_key, reward_amount in _FREE_OFFERS
     )

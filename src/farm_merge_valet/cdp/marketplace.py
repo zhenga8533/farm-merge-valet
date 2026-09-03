@@ -22,7 +22,7 @@ _READ_MARKETPLACE_EXPRESSION = r"""
     : value && typeof value === 'object' ? Object.values(value) : [];
   const scalar = (value) => Number.isFinite(value) ? value
     : Number.isFinite(value?.amount) ? value.amount : null;
-  const normalize = (item, shopId, slotId = null) => {
+  const normalize = (item, slotId = null) => {
     const payment = item?.payment || item?.price || item?._payment;
     const reward = item?.reward || item?.rewards?.[0] || item?._reward;
     const rewardData = reward?.data;
@@ -51,14 +51,11 @@ _READ_MARKETPLACE_EXPRESSION = r"""
     const inventory = service._inventory || service._services?.inventory ||
       window.__fmvGameplayServices?.ordersService?._inventory;
     const balanceItem = paymentKey && inventory?.getInventoryItem?.(paymentKey);
-    const remainingMs = flash?._flashDealsTimer?._remaining;
     return {
       policyKey, offerId, slotId, candidateKey: slotId ? candidate : null,
       rewardKey, rewardAmount, paymentType, paymentKey, paymentAmount,
-      remainingStock: stock, available: true, shopId,
+      remainingStock: stock,
       balance: Number.isInteger(balanceItem?.amount) ? balanceItem.amount : null,
-      refreshRemainingSeconds: Number.isFinite(remainingMs) ? remainingMs / 1000
-        : scalar(flash?.remainingSeconds ?? flash?.timeRemaining),
     };
   };
   const offers = [];
@@ -71,10 +68,10 @@ _READ_MARKETPLACE_EXPRESSION = r"""
       const id = item?.id || item?.key || item?._key;
       if (typeof id === 'string' && id.startsWith('flash_deal_')) {
         const selected = flash?.getFlashDealItem?.(id);
-        const normalized = normalize(selected, shopId, id);
+        const normalized = normalize(selected, id);
         if (normalized) offers.push(normalized);
       } else if ((item?.payment || item?.price || item?._payment)?.type === 'free') {
-        const normalized = normalize(item, shopId);
+        const normalized = normalize(item);
         if (normalized) offers.push(normalized);
       }
     }
@@ -109,11 +106,7 @@ def parse_marketplace_offers(raw: object) -> tuple[MarketplaceLiveOffer, ...] | 
                     payment_key=_optional_string(value.get("paymentKey")),
                     payment_amount=payment_amount,
                     remaining_stock=stock,
-                    available=value.get("available") is True,
                     balance=_optional_integer(value.get("balance")),
-                    refresh_remaining_seconds=_optional_number(
-                        value.get("refreshRemainingSeconds")
-                    ),
                 )
             )
         except (TypeError, ValueError):
@@ -319,11 +312,3 @@ def _integer(value: object) -> int:
 
 def _optional_integer(value: object) -> int | None:
     return None if value is None else _integer(value)
-
-
-def _optional_number(value: object) -> float | None:
-    if value is None:
-        return None
-    if not isinstance(value, int | float) or isinstance(value, bool) or value < 0:
-        raise TypeError
-    return float(value)

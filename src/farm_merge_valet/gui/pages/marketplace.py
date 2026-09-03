@@ -37,11 +37,6 @@ from farm_merge_valet.gui.services.assets import CatalogIconLoader
 from farm_merge_valet.gui.services.catalog import load_gui_catalog
 
 _SORT_COLUMNS = {"offer": 0, "cost": 1, "enabled": 2}
-_REWARD_FAMILY_ALIASES = {
-    "crates": frozenset({"crate"}),
-    "gems": frozenset({"gem"}),
-    "event_energy": frozenset({"event_energy", "time_limited_event_energy"}),
-}
 
 
 class MarketplacePage(AppPage):
@@ -220,12 +215,8 @@ class MarketplacePage(AppPage):
         configure_policy_toggle(toggle)
         toggle.setChecked(self._config.marketplace_policy_enabled(offer.policy_key))
         toggle.setAccessibleName(f"{offer.display_name}: auto-purchase")
-        toggle.toggled.connect(
-            lambda value, key=offer.policy_key: self._set_enabled(key, value)
-        )
-        set_policy_widget(
-            self.tree, item, 2, policy_cell(toggle), sort_value=toggle.isChecked()
-        )
+        toggle.toggled.connect(lambda value, key=offer.policy_key: self._set_enabled(key, value))
+        set_policy_widget(self.tree, item, 2, policy_cell(toggle), sort_value=toggle.isChecked())
         self._toggles[offer.policy_key] = toggle
         self._tree_items[offer.policy_key] = item
 
@@ -235,16 +226,7 @@ class MarketplacePage(AppPage):
         exact = self._catalog.items.get(reward_key)
         if exact is not None:
             return exact
-        family_ids = {reward_key, *_REWARD_FAMILY_ALIASES.get(reward_key, ())}
-        candidates = [
-            item for item in self._catalog.items.values() if item.family_id in family_ids
-        ]
-        if reward_key == "event_energy":
-            candidates.extend(
-                item
-                for item in self._catalog.items.values()
-                if "event" in item.game_id and "energy" in item.game_id
-            )
+        candidates = [item for item in self._catalog.items.values() if item.family_id == reward_key]
         return min(
             {item.game_id: item for item in candidates}.values(),
             key=lambda item: (item.tier is None, item.tier or 0, item.game_id),
@@ -258,9 +240,7 @@ class MarketplacePage(AppPage):
         else:
             values[key] = enabled
         self._config = AppConfig.model_validate(
-            self._config.model_copy(
-                update={"marketplace_policy_overrides": values}
-            ).model_dump()
+            self._config.model_copy(update={"marketplace_policy_overrides": values}).model_dump()
         )
         self.config_edited.emit(
             ConfigEdit({"marketplace_policy_overrides": values}, source="marketplace")
@@ -275,9 +255,7 @@ class MarketplacePage(AppPage):
             else:
                 values[key] = enabled
         self._config = AppConfig.model_validate(
-            self._config.model_copy(
-                update={"marketplace_policy_overrides": values}
-            ).model_dump()
+            self._config.model_copy(update={"marketplace_policy_overrides": values}).model_dump()
         )
         self.config_edited.emit(
             ConfigEdit({"marketplace_policy_overrides": values}, source="marketplace")
@@ -291,9 +269,7 @@ class MarketplacePage(AppPage):
             if enabled != self._config.marketplace_policy_default_enabled(offer.policy_key)
         }
         self._config = AppConfig.model_validate(
-            self._config.model_copy(
-                update={"marketplace_policy_overrides": values}
-            ).model_dump()
+            self._config.model_copy(update={"marketplace_policy_overrides": values}).model_dump()
         )
         self.config_edited.emit(
             ConfigEdit({"marketplace_policy_overrides": values}, source="marketplace")

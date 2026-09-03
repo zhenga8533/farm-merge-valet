@@ -19,7 +19,6 @@ def _live(index: int = 0) -> MarketplaceLiveOffer:
         offer.payment_key,
         offer.payment_amount,
         offer.stock,
-        True,
         offer.slot_id,
         offer.candidate_key,
         1_000,

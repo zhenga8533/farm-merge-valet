@@ -111,8 +111,7 @@ _DISCOVER_EXPRESSION = r"""
   const validMarketplace = marketplace?._isActive !== false &&
     typeof marketplace?.getMarketplacePopupData === 'function' &&
     typeof marketplace?.getItemConfigsByShop === 'function' &&
-    typeof marketplace?.getStockItem === 'function' &&
-    typeof marketplace?.purchaseItem === 'function';
+    typeof marketplace?.getStockItem === 'function';
 
   window.__fmvGameplayServices = services;
   window.__fmvGameplayMapScreen = screen;
@@ -213,7 +212,7 @@ _DISCOVERY_DIAGNOSTICS_EXPRESSION = r"""
   rewardContainer: false,
   storageBubble: false,
   upgradeInteraction: false,
-  shopOrders: false,
+  shopOrders: false, marketplace: false,
   inventory: Boolean(window.__fmvCrateInventoryItem), missing: ['discovery-not-run'],
 })()
 """
@@ -316,8 +315,7 @@ _HEALTH_EXPRESSION = r"""
   const currentMarketplace = currentBoard && marketplace?._isActive !== false &&
     typeof marketplace?.getMarketplacePopupData === 'function' &&
     typeof marketplace?.getItemConfigsByShop === 'function' &&
-    typeof marketplace?.getStockItem === 'function' &&
-    typeof marketplace?.purchaseItem === 'function';
+    typeof marketplace?.getStockItem === 'function';
   let stage = scene;
   while (stage?.parent) stage = stage.parent;
   const layerRoot = stage?.children?.[0];

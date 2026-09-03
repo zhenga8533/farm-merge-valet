@@ -21,9 +21,7 @@ def test_marketplace_parser_accepts_strict_normalized_offer() -> None:
                     "paymentKey": None,
                     "paymentAmount": 0,
                     "remainingStock": 1,
-                    "available": True,
                     "balance": None,
-                    "refreshRemainingSeconds": 10,
                 }
             ]
         }
