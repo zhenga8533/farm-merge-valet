@@ -429,13 +429,20 @@ def test_policy_table_headers_fit_controls_and_sort_indicators(tmp_path) -> None
             section_right = header.sectionViewportPosition(column) + header.sectionSize(column)
             assert control.geometry().right() < section_right - 14
 
-        last_control = header._controls[max(header._controls)]
-        last_control.move(0, last_control.y())
+        last_column = max(header._controls)
+        last_control = header._controls[last_column]
+
+        def late_geometry_change(control=last_control) -> None:
+            control.move(0, control.y())
+
+        header.geometriesChanged.connect(late_geometry_change)
         header.geometriesChanged.emit()
+        assert last_control.x() == 0
         app.processEvents()
+        header.geometriesChanged.disconnect(late_geometry_change)
         expected_left = (
-            header.sectionViewportPosition(max(header._controls))
-            + (header.sectionSize(max(header._controls)) - last_control.width()) // 2
+            header.sectionViewportPosition(last_column)
+            + (header.sectionSize(last_column) - last_control.width()) // 2
         )
         assert last_control.x() == expected_left
 
