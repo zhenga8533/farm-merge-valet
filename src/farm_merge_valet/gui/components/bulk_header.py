@@ -5,14 +5,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QPainter, QPalette, QPen
-from PySide6.QtWidgets import QApplication, QHeaderView, QWidget
+from PySide6.QtGui import QIcon, QPainter, QPalette, QPen
+from PySide6.QtWidgets import QApplication, QHeaderView, QStyle, QStyleOptionHeader, QWidget
 
 from farm_merge_valet.gui.components.policy_view import PolicyCheckBox
 
 _CONTROL_LEFT_MARGIN = 8
-_SORT_INDICATOR_RESERVE = 22
 _HEADER_VERTICAL_PADDING = 6
+_LABEL_HORIZONTAL_PADDING = 8
+_SORT_INDICATOR_GAP = 6
+_SORT_INDICATOR_WIDTH = 9
 
 
 class _BulkCheckBox(PolicyCheckBox):
@@ -67,7 +69,10 @@ class BulkToggleHeader(QHeaderView):
         label_width = self.fontMetrics().horizontalAdvance(self._labels[logical_index])
         required_width = max(
             hint.width() + (_CONTROL_LEFT_MARGIN * 2),
-            label_width + (_CONTROL_LEFT_MARGIN * 2) + _SORT_INDICATOR_RESERVE,
+            label_width
+            + (_LABEL_HORIZONTAL_PADDING * 2)
+            + _SORT_INDICATOR_GAP
+            + _SORT_INDICATOR_WIDTH,
         )
         required_height = (
             self.fontMetrics().height() + hint.height() + (_HEADER_VERTICAL_PADDING * 3)
@@ -96,19 +101,45 @@ class BulkToggleHeader(QHeaderView):
         self._position_controls()
 
     def paintSection(self, painter: QPainter, rect: QRect, logical_index: int) -> None:
-        super().paintSection(painter, rect, logical_index)
-        label = self._labels.get(logical_index)
-        if label is not None:
-            label_rect = rect.adjusted(
-                _CONTROL_LEFT_MARGIN,
-                _HEADER_VERTICAL_PADDING,
-                -_SORT_INDICATOR_RESERVE,
-                -(self._controls[logical_index].sizeHint().height() + _HEADER_VERTICAL_PADDING),
-            )
-            painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
-        if logical_index != self.sortIndicatorSection():
+        option = QStyleOptionHeader()
+        self.initStyleOptionForIndex(option, logical_index)
+        option.rect = rect
+        option.text = ""
+        option.icon = QIcon()
+        option.sortIndicator = QStyleOptionHeader.SortIndicator.None_
+        self.style().drawControl(QStyle.ControlElement.CE_Header, option, painter, self)
+
+        label = self._section_label(logical_index)
+        label_rect = self._label_rect(rect, logical_index)
+        show_indicator = logical_index == self.sortIndicatorSection()
+        indicator_space = (
+            _SORT_INDICATOR_GAP + _SORT_INDICATOR_WIDTH if show_indicator else 0
+        )
+        available_text_width = max(0, label_rect.width() - indicator_space)
+        metrics = painter.fontMetrics()
+        visible_label = metrics.elidedText(
+            label,
+            Qt.TextElideMode.ElideRight,
+            available_text_width,
+        )
+        text_width = metrics.horizontalAdvance(visible_label)
+        content_width = text_width + indicator_space
+        content_left = label_rect.center().x() - (content_width // 2)
+        text_rect = QRect(
+            content_left,
+            label_rect.top(),
+            text_width,
+            label_rect.height(),
+        )
+        painter.setPen(self.palette().color(QPalette.ColorRole.Text))
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, visible_label)
+        if not show_indicator:
             return
-        center = QPoint(rect.right() - 13, rect.top() + 13)
+
+        center = QPoint(
+            content_left + text_width + _SORT_INDICATOR_GAP + (_SORT_INDICATOR_WIDTH // 2),
+            label_rect.center().y(),
+        )
         ascending = self.sortIndicatorOrder() is Qt.SortOrder.AscendingOrder
         vertical = -2 if ascending else 2
         app = QApplication.instance()
@@ -124,6 +155,32 @@ class BulkToggleHeader(QHeaderView):
         painter.drawLine(center + QPoint(-4, -vertical), center + QPoint(0, vertical))
         painter.drawLine(center + QPoint(0, vertical), center + QPoint(4, -vertical))
         painter.restore()
+
+    def _section_label(self, logical_index: int) -> str:
+        if logical_index in self._labels:
+            return self._labels[logical_index]
+        value = self.model().headerData(
+            logical_index,
+            self.orientation(),
+            Qt.ItemDataRole.DisplayRole,
+        )
+        return "" if value is None else str(value)
+
+    def _label_rect(self, rect: QRect, logical_index: int) -> QRect:
+        control = self._controls.get(logical_index)
+        if control is None:
+            return rect.adjusted(
+                _LABEL_HORIZONTAL_PADDING,
+                0,
+                -_LABEL_HORIZONTAL_PADDING,
+                0,
+            )
+        return rect.adjusted(
+            _LABEL_HORIZONTAL_PADDING,
+            _HEADER_VERTICAL_PADDING,
+            -_LABEL_HORIZONTAL_PADDING,
+            -(control.sizeHint().height() + _HEADER_VERTICAL_PADDING),
+        )
 
     def _position_controls(self) -> None:
         for column, control in self._controls.items():
