@@ -421,8 +421,23 @@ def test_policy_table_headers_fit_controls_and_sort_indicators(tmp_path) -> None
         app.processEvents()
         for column, control in header._controls.items():
             assert control.width() >= control.sizeHint().width()
+            expected_left = (
+                header.sectionViewportPosition(column)
+                + (header.sectionSize(column) - control.width()) // 2
+            )
+            assert control.x() == expected_left
             section_right = header.sectionViewportPosition(column) + header.sectionSize(column)
             assert control.geometry().right() < section_right - 14
+
+        last_control = header._controls[max(header._controls)]
+        last_control.move(0, last_control.y())
+        header.geometriesChanged.emit()
+        app.processEvents()
+        expected_left = (
+            header.sectionViewportPosition(max(header._controls))
+            + (header.sectionSize(max(header._controls)) - last_control.width()) // 2
+        )
+        assert last_control.x() == expected_left
 
     window.quit_application()
     app.processEvents()

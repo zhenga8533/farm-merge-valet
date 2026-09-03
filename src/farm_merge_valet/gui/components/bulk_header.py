@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QPainter, QPalette, QPen
 from PySide6.QtWidgets import QApplication, QHeaderView, QStyle, QStyleOptionHeader, QWidget
 
@@ -38,6 +38,9 @@ class BulkToggleHeader(QHeaderView):
         self.setMinimumHeight(58)
         self._labels = dict(labels)
         self._controls: dict[int, _BulkCheckBox] = {}
+        self._position_timer = QTimer(self)
+        self._position_timer.setSingleShot(True)
+        self._position_timer.timeout.connect(self._position_controls)
         for column, label in labels.items():
             control = _BulkCheckBox("", self.viewport())
             control.setProperty("policyToggle", True)
@@ -50,8 +53,9 @@ class BulkToggleHeader(QHeaderView):
                 lambda checked, section=column: self.toggled.emit(section, checked)
             )
             self._controls[column] = control
-        self.sectionResized.connect(lambda *_args: self._position_controls())
-        self.sectionMoved.connect(lambda *_args: self._position_controls())
+        self.sectionResized.connect(self._refresh_control_positions)
+        self.sectionMoved.connect(self._refresh_control_positions)
+        self.geometriesChanged.connect(self._refresh_control_positions)
 
     def set_state(self, column: int, state: Qt.CheckState, *, enabled: bool = True) -> None:
         control = self._controls[column]
@@ -94,11 +98,11 @@ class BulkToggleHeader(QHeaderView):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._position_controls()
+        self._refresh_control_positions()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        self._position_controls()
+        self._refresh_control_positions()
 
     def paintSection(self, painter: QPainter, rect: QRect, logical_index: int) -> None:
         option = QStyleOptionHeader()
@@ -112,9 +116,7 @@ class BulkToggleHeader(QHeaderView):
         label = self._section_label(logical_index)
         label_rect = self._label_rect(rect, logical_index)
         show_indicator = logical_index == self.sortIndicatorSection()
-        indicator_space = (
-            _SORT_INDICATOR_GAP + _SORT_INDICATOR_WIDTH if show_indicator else 0
-        )
+        indicator_space = _SORT_INDICATOR_GAP + _SORT_INDICATOR_WIDTH if show_indicator else 0
         available_text_width = max(0, label_rect.width() - indicator_space)
         metrics = painter.fontMetrics()
         visible_label = metrics.elidedText(
@@ -192,3 +194,7 @@ class BulkToggleHeader(QHeaderView):
                 hint.width(),
                 hint.height(),
             )
+
+    def _refresh_control_positions(self, *_args: object) -> None:
+        self._position_controls()
+        self._position_timer.start(0)
