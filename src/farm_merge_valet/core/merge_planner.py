@@ -73,6 +73,17 @@ def _cluster_sizes(coords: set[GridCoord]) -> tuple[int, ...]:
     return tuple(sorted((len(cluster) for cluster in _find_coord_clusters(coords)), reverse=True))
 
 
+def _swap_preserves_displaced_clusters(
+    board: BoardGrid,
+    displaced_item: ItemRef,
+    start: GridCoord,
+    end: GridCoord,
+) -> bool:
+    before = _item_positions(board, displaced_item)
+    after = (before - {end}) | {start}
+    return _cluster_sizes(after) >= _cluster_sizes(before)
+
+
 @dataclass(frozen=True)
 class _Relocation:
     start: GridCoord
@@ -118,6 +129,10 @@ def _relocations(
         remaining = positions - {start}
         for end, effect, displaced_item in destinations:
             if not require_join or any(neighbor in remaining for neighbor in _neighbors(end)):
+                if displaced_item is not None and not _swap_preserves_displaced_clusters(
+                    board, displaced_item, start, end
+                ):
+                    continue
                 candidates.append(
                     _Relocation(
                         start=start,

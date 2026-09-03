@@ -220,6 +220,17 @@ def test_merge_five_builds_its_base_by_swapping_on_a_full_board() -> None:
     assert action.displaced_item == WHEAT_2
 
 
+def test_gather_swap_does_not_break_the_displaced_items_cluster() -> None:
+    grid = BoardGrid()
+    carrot = ItemRef(category="crops", name="carrot", tier=1)
+    for coord in [(0, 0), (1, 0), (10, 10), (11, 11), (12, 12)]:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    for coord in [(2, 0), (3, 0)]:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=carrot))
+
+    assert not plan_merge_actions(grid, WHEAT_1, target_size=5)
+
+
 def test_swap_candidates_exclude_non_items_and_matching_items() -> None:
     grid = BoardGrid()
     positions = {(0, 0), (10, 10), (20, 20), (30, 30), (40, 40)}
