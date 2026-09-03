@@ -12,6 +12,15 @@ from farm_merge_valet.core.marketplace import (
 
 MARKETPLACE_CATALOG_BUILD = "1.78.2-4.reddit"
 MARKETPLACE_CATALOG_FINGERPRINT = "fmv-marketplace-1.78.2-54"
+MARKETPLACE_ICON_ASSETS = {
+    "gems_5_no_ads": ("icon_content_gems01", "marketplace/gems_5_no_ads.png"),
+    "energy_5_no_ads": ("icon_content_energy01", "marketplace/energy_5_no_ads.png"),
+    "crates_10_no_ads": ("icon_content_crates01", "marketplace/crates_10_no_ads.png"),
+    "event_energy_5_no_ads": (
+        "icon_content_eventenergy01",
+        "marketplace/event_energy_5_no_ads.png",
+    ),
+}
 
 _FLASH_GROUPS = (
     (
@@ -98,7 +107,7 @@ _FREE_OFFERS = (
     ("gems_5_no_ads", "Gems", "gems", 5),
     ("energy_5_no_ads", "Energy", "energy", 5),
     ("crates_10_no_ads", "Crates", "crates", 10),
-    ("event_energy_5_no_ads", "Event Energy", "event_energy", 25),
+    ("event_energy_5_no_ads", "Event Energy", "time_limited_event_energy", 25),
 )
 
 

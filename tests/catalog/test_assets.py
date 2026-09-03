@@ -13,6 +13,7 @@ from farm_merge_valet.catalog.assets import (
     compile_catalog_assets,
     load_cached_atlases,
 )
+from farm_merge_valet.catalog.marketplace import MARKETPLACE_ICON_ASSETS
 from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog
 from farm_merge_valet.catalog.sync import (
     CatalogSynchronizer,
@@ -58,6 +59,21 @@ def test_asset_compiler_preserves_atlas_aliases_and_related_states(tmp_path: Pat
     assert (building_dir / "variants" / "obj_prod_bakery.png").exists()
     assert catalog.variants["shops/bakery"][0].state == "active"
     assert not (tmp_path / "unrelated.png").exists()
+
+
+def test_asset_compiler_exports_marketplace_icons_when_available(tmp_path: Path) -> None:
+    alias, relative_path = MARKETPLACE_ICON_ASSETS["event_energy_5_no_ads"]
+    manifest = {"frames": {alias: {"frame": {"x": 0, "y": 0, "w": 1, "h": 1}}}}
+    image = np.full((1, 1, 4), 200, dtype=np.uint8)
+
+    written = compile_catalog_assets(
+        {"marketplace": (manifest, image)},
+        ItemCatalog({}),
+        tmp_path,
+    )
+
+    assert written == 1
+    assert tmp_path.joinpath(*Path(relative_path).parts).exists()
 
 
 def test_cached_atlases_prefer_high_quality_frames() -> None:

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
 )
 
+from farm_merge_valet.catalog.marketplace import MARKETPLACE_ICON_ASSETS
 from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog, RecipeMetadata
 from farm_merge_valet.catalog.store import write_item_catalog
 from farm_merge_valet.config import AppConfig, ConfigStore
@@ -317,6 +318,7 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
         event_energy.asset_path,
         shop.asset_path,
         recipe.asset_path,
+        *(path for _alias, path in MARKETPLACE_ICON_ASSETS.values()),
     ):
         assert relative_path is not None
         path = catalog_dir / relative_path

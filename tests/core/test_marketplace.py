@@ -32,6 +32,8 @@ def test_versioned_catalog_contains_50_flash_and_four_free_offers() -> None:
     assert sum(offer.kind is MarketplaceOfferKind.FLASH for offer in catalog) == 50
     assert sum(offer.kind is MarketplaceOfferKind.FREE for offer in catalog) == 4
     assert len({offer.policy_key for offer in catalog}) == 54
+    event_energy = next(offer for offer in catalog if offer.offer_id == "event_energy_5_no_ads")
+    assert event_energy.reward_key == "time_limited_event_energy"
 
 
 def test_flash_policy_identity_includes_slot_and_candidate() -> None:

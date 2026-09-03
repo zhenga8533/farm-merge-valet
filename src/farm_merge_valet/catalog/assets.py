@@ -11,6 +11,7 @@ import cv2
 import httpx
 import numpy as np
 
+from farm_merge_valet.catalog.marketplace import MARKETPLACE_ICON_ASSETS
 from farm_merge_valet.catalog.models import (
     CatalogItem,
     CatalogVariant,
@@ -263,6 +264,9 @@ def compile_catalog_assets(atlases: Atlases, catalog: ItemCatalog, output_dir: P
         for variant in variants:
             variant_path = output_dir.joinpath(*PurePosixPath(variant.asset_path).parts)
             desired[variant_path] = variant.asset_alias
+    for alias, relative_path in MARKETPLACE_ICON_ASSETS.values():
+        if alias in all_frames:
+            desired[output_dir.joinpath(*PurePosixPath(relative_path).parts)] = alias
 
     output_dir.mkdir(parents=True, exist_ok=True)
     written = 0

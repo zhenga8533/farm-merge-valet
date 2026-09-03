@@ -9,7 +9,7 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QHeaderView, QTreeWidget, QTreeWidgetItem
 
-from farm_merge_valet.catalog.marketplace import marketplace_catalog
+from farm_merge_valet.catalog.marketplace import MARKETPLACE_ICON_ASSETS, marketplace_catalog
 from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog, load_item_catalog
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.core.marketplace import MarketplaceOffer
@@ -174,8 +174,11 @@ class MarketplacePage(AppPage):
         quantity = f" \u00d7{offer.reward_amount}" if offer.reward_amount > 1 else ""
         item = PolicyTreeItem((f"{offer.display_name}{quantity}", "", ""))
         item.setSizeHint(0, QSize(0, 64))
-        catalog_item = self._catalog_item(offer.reward_key)
-        item.setIcon(0, self._icons.icon_for(catalog_item))
+        marketplace_icon = MARKETPLACE_ICON_ASSETS.get(offer.offer_id)
+        if marketplace_icon is not None:
+            item.setIcon(0, self._icons.icon_for_path(marketplace_icon[1]))
+        else:
+            item.setIcon(0, self._icons.icon_for(self._catalog_item(offer.reward_key)))
         item.setData(0, Qt.ItemDataRole.UserRole, offer.policy_key)
         item.setToolTip(0, offer.policy_key)
         parent.addChild(item)
