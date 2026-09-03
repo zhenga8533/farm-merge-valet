@@ -122,7 +122,7 @@ def parse_marketplace_offers(raw: object) -> tuple[MarketplaceLiveOffer, ...] | 
 
 
 def marketplace_purchase_expression(action: MarketplaceAction, scene_id: int | None) -> str:
-    """Build a fail-closed preflight; submission uses the exact live config object."""
+    """Build a fail-closed purchase using the exact live offer and game services."""
     expected = json.dumps(
         {
             "sceneId": scene_id,
@@ -139,12 +139,13 @@ def marketplace_purchase_expression(action: MarketplaceAction, scene_id: int | N
         }
     )
     return f"""
-(() => {{
+(async () => {{
   const expected = {expected};
   if (window.__fmvRuntimeSceneIdentity !== expected.sceneId)
     return {{status: 'stale-source', detail: 'runtime-scene-changed'}};
   const service = window.__fmvGameplayServices?.marketplaceService;
-  if (!service || typeof service.purchaseItem !== 'function')
+  if (!service || typeof service.getMarketplacePopupData !== 'function' ||
+      typeof service.getStockItem !== 'function')
     return {{status: 'unavailable', detail: 'marketplace-service-unavailable'}};
   if (window.__fmvMarketplacePurchasePending)
     return {{status: 'busy', detail: 'marketplace-purchase-pending'}};
@@ -221,12 +222,64 @@ def marketplace_purchase_expression(action: MarketplaceAction, scene_id: int | N
   const balance = actual.paymentKey && inventory?.getInventoryItem?.(actual.paymentKey)?.amount;
   if (expected.slotId && (!Number.isInteger(balance) || balance < actual.paymentAmount))
     return {{status: 'rejected', detail: 'insufficient-funds'}};
+  const services = service._services || window.__fmvGameplayServices;
+  const rewardService = services?.rewardService;
+  const storageBubble = services?.storageBubble;
+  const autoSaveService = service._autoSaveService;
+  if (!autoSaveService || typeof autoSaveService.forceSave !== 'function')
+    return {{status: 'unavailable', detail: 'autosave-service-unavailable'}};
+  let objectContent = null;
+  if (reward?.type === 'inventory') {{
+    if (rewardData?.key !== expected.rewardKey ||
+        rewardData?.amount !== expected.rewardAmount ||
+        typeof rewardService?.giveInventoryReward !== 'function' ||
+        !services?.cameraService?.cameraView)
+      return {{status: 'stale-source', detail: 'inventory-reward-unavailable'}};
+  }} else if (reward?.type === 'object') {{
+    if (!Array.isArray(rewardData) || rewardData.length !== expected.rewardAmount ||
+        rewardData.some((key) => key !== expected.rewardKey))
+      return {{status: 'stale-source', detail: 'object-reward-mismatch'}};
+    const blueprintCollection = services?.ordersService?._recipes?._services
+      ?.blueprintCollection;
+    if (typeof blueprintCollection?.getBlueprint !== 'function' ||
+        typeof storageBubble?.createBubbleAndShowContent !== 'function')
+      return {{status: 'unavailable', detail: 'object-reward-service-unavailable'}};
+    objectContent = rewardData.map((key) => {{
+      const blueprint = blueprintCollection.getBlueprint(key);
+      return blueprint?.components == null
+        ? null : {{blueprint: key, data: blueprint.components}};
+    }});
+    if (objectContent.some((item) => item === null))
+      return {{status: 'unavailable', detail: 'object-reward-blueprint-unavailable'}};
+  }} else {{
+    return {{status: 'rejected', detail: 'unsupported-reward-type'}};
+  }}
+  if (expected.slotId && typeof inventory?.spendAmount !== 'function')
+    return {{status: 'unavailable', detail: 'inventory-spend-unavailable'}};
   window.__fmvMarketplacePurchasePending = true;
+  let mutationStarted = false;
   try {{
-    service.purchaseItem(configured);
+    if (expected.slotId) {{
+      mutationStarted = true;
+      await inventory.spendAmount(actual.paymentKey, actual.paymentAmount);
+    }}
+    mutationStarted = true;
+    stockItem.amount = actual.stock - 1;
+    if (reward.type === 'inventory') {{
+      await rewardService.giveInventoryReward({{
+        reward: rewardData,
+        parent: services.cameraService.cameraView,
+      }});
+    }} else {{
+      storageBubble.createBubbleAndShowContent(objectContent);
+    }}
+    await autoSaveService.forceSave();
     return {{status: 'submitted'}};
   }} catch (error) {{
-    return {{status: 'rejected', detail: String(error?.message || error)}};
+    return {{
+      status: mutationStarted ? 'submitted' : 'rejected',
+      detail: String(error?.message || error),
+    }};
   }} finally {{
     window.__fmvMarketplacePurchasePending = false;
   }}
@@ -240,9 +293,7 @@ def parse_action_result(raw: object) -> ActionResult:
     status_value = raw.get("status")
     try:
         status = (
-            ActionStatus(status_value)
-            if isinstance(status_value, str)
-            else ActionStatus.REJECTED
+            ActionStatus(status_value) if isinstance(status_value, str) else ActionStatus.REJECTED
         )
     except ValueError:
         status = ActionStatus.REJECTED

@@ -33,10 +33,11 @@ def _health() -> RuntimeHealth:
 def _bot(now: list[float], live: MarketplaceLiveOffer):
     class Runtime:
         submissions = 0
+        submitted_keys: list[str] = []
 
         def submit_marketplace_purchase(self, action):
             self.submissions += 1
-            assert action.policy_key == live.policy_key
+            self.submitted_keys.append(action.policy_key)
             return ActionResult(ActionStatus.SUBMITTED)
 
     return SimpleNamespace(
@@ -74,18 +75,22 @@ def test_workflow_submits_one_unit_then_requires_stock_and_balance_verification(
     assert workflow.pending is None
 
 
-def test_ambiguous_timeout_blocks_all_resubmission() -> None:
+def test_ambiguous_timeout_blocks_only_the_affected_offer() -> None:
     now = [10.0]
-    live = _live()
-    bot = _bot(now, live)
+    first = _live(-4)
+    second = _live(-3)
+    bot = _bot(now, first)
+    bot.config = AppConfig()
     workflow = MarketplaceWorkflow()
-    workflow.step(bot, _health(), (live,))
+    workflow.step(bot, _health(), (first, second))
 
     now[0] = 21.0
-    assert not workflow.verify_pending(bot, _health(), (live,))
+    assert not workflow.verify_pending(bot, _health(), (first, second))
     assert workflow.pending is None
-    assert not workflow.step(bot, _health(), (live,))
-    assert bot.runtime.submissions == 1
+    assert workflow.step(bot, _health(), (first, second))
+    assert workflow.pending is not None
+    assert workflow.pending.action.policy_key == second.policy_key
+    assert bot.runtime.submitted_keys == [first.policy_key, second.policy_key]
 
 
 def test_free_claims_are_enabled_by_default_and_can_be_disabled() -> None:

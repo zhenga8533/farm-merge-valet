@@ -52,7 +52,11 @@ def test_purchase_expression_guards_exact_offer_and_never_refreshes() -> None:
         offer.candidate_key,
     )
     expression = marketplace_purchase_expression(action, 7)
-    assert "service.purchaseItem(configured)" in expression
+    assert "service.purchaseItem(configured)" not in expression
+    assert "stockItem.amount = actual.stock - 1" in expression
+    assert "giveInventoryReward" in expression
+    assert "createBubbleAndShowContent" in expression
+    assert "await autoSaveService.forceSave()" in expression
     assert "live-offer-mismatch" in expression
     assert "game-popup-open" in expression
     assert "attemptFlashDealsRefresh" not in expression

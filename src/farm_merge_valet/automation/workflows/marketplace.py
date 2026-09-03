@@ -40,7 +40,6 @@ class PendingMarketplacePurchase:
 class MarketplaceWorkflow:
     pending: PendingMarketplacePurchase | None = None
     blocked_until: dict[str, float] = field(default_factory=dict)
-    all_blocked_until: float = 0.0
 
     def verify_pending(
         self,
@@ -66,12 +65,9 @@ class MarketplaceWorkflow:
             pending.before.balance is not None
             and current is not None
             and current.balance is not None
-            and current.balance
-            == pending.before.balance - pending.action.payment_amount
+            and current.balance == pending.before.balance - pending.action.payment_amount
         )
-        if stock_decreased and (
-            pending.action.payment_type == "free" or balance_decreased
-        ):
+        if stock_decreased and (pending.action.payment_type == "free" or balance_decreased):
             assert current is not None
             self.pending = None
             bot._last_wait_reason = None
@@ -92,7 +88,6 @@ class MarketplaceWorkflow:
             return False
         self.pending = None
         self.blocked_until[pending.action.policy_key] = now + _AMBIGUOUS_BACKOFF_SECONDS
-        self.all_blocked_until = now + _AMBIGUOUS_BACKOFF_SECONDS
         log_event(
             logger,
             logging.WARNING,
@@ -111,8 +106,6 @@ class MarketplaceWorkflow:
         offers: tuple[MarketplaceLiveOffer, ...],
     ) -> bool:
         now = bot._now()
-        if now < self.all_blocked_until:
-            return False
         catalog = marketplace_catalog()
         enabled = {
             offer.policy_key: True
