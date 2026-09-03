@@ -163,8 +163,6 @@ class AppConfig(BaseModel):
     @field_validator("marketplace_policy_overrides")
     @classmethod
     def validate_marketplace_policy_keys(cls, value: dict[str, bool]) -> dict[str, bool]:
-        if not all(value.values()):
-            raise ValueError("marketplace policy overrides may contain only enabled policies")
         for key in value:
             parts = key.split(":")
             valid = (
@@ -185,7 +183,13 @@ class AppConfig(BaseModel):
         return "offer" if value in {"stock", "availability", "reward"} else value
 
     def marketplace_policy_enabled(self, policy_key: str) -> bool:
-        return self.marketplace_policy_overrides.get(policy_key, False)
+        return self.marketplace_policy_overrides.get(
+            policy_key, self.marketplace_policy_default_enabled(policy_key)
+        )
+
+    @staticmethod
+    def marketplace_policy_default_enabled(policy_key: str) -> bool:
+        return policy_key.startswith("free:")
 
     @field_validator("item_default_overrides", "item_policy_overrides")
     @classmethod

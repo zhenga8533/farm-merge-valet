@@ -310,6 +310,15 @@ QLabel#policyBadge {{
     border: 1px solid {colors.border}; border-radius: 8px;
     padding: 3px 8px; font-size: 8pt; font-weight: 600;
 }}
+QLabel#policyBadge[tone="free"] {{
+    color: {colors.primary}; border-color: {colors.primary};
+}}
+QLabel#policyBadge[tone="coins"] {{
+    background: rgba(210, 153, 34, 40); color: {colors.text}; border-color: #d29922;
+}}
+QLabel#policyBadge[tone="gems"] {{
+    background: rgba(163, 113, 247, 40); color: {colors.text}; border-color: #a371f7;
+}}
 QLabel#policyUnavailable {{
     font-size: 12pt; font-weight: 600;
 }}

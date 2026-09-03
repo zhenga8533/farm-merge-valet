@@ -8,8 +8,8 @@ from farm_merge_valet.config import AppConfig
 from farm_merge_valet.core.marketplace import MarketplaceLiveOffer
 
 
-def _live() -> MarketplaceLiveOffer:
-    offer = marketplace_catalog()[0]
+def _live(index: int = 0) -> MarketplaceLiveOffer:
+    offer = marketplace_catalog()[index]
     return MarketplaceLiveOffer(
         offer.policy_key,
         offer.offer_id,
@@ -86,3 +86,17 @@ def test_ambiguous_timeout_blocks_all_resubmission() -> None:
     assert workflow.pending is None
     assert not workflow.step(bot, _health(), (live,))
     assert bot.runtime.submissions == 1
+
+
+def test_free_claims_are_enabled_by_default_and_can_be_disabled() -> None:
+    now = [10.0]
+    live = _live(-4)
+    bot = _bot(now, live)
+    workflow = MarketplaceWorkflow()
+    bot.config = AppConfig()
+
+    assert workflow.step(bot, _health(), (live,))
+
+    workflow.pending = None
+    bot.config = AppConfig(marketplace_policy_overrides={live.policy_key: False})
+    assert not workflow.step(bot, _health(), (live,))

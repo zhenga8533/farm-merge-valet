@@ -22,10 +22,12 @@ from farm_merge_valet.gui.components.policy_view import (
     aggregate_check_state,
     configure_policy_toggle,
     configure_policy_view,
+    expanded_policy_keys,
     filter_policy_tree,
     fit_policy_widget_column,
     policy_badge,
     policy_cell,
+    set_policy_value,
     set_policy_widget,
 )
 from farm_merge_valet.gui.pages.base import AppPage, ConfigEdit
@@ -69,6 +71,10 @@ class MarketplacePage(AppPage):
         self._icons = icons or CatalogIconLoader(config.catalog_dir)
         self._catalog: ItemCatalog | None = None
         self._toggles: dict[str, PolicyCheckBox] = {}
+        self._tree_items: dict[str, QTreeWidgetItem] = {}
+        self._group_toggles: dict[str, PolicyCheckBox] = {}
+        self._group_policy_keys: dict[str, tuple[str, ...]] = {}
+        self._group_items: dict[str, QTreeWidgetItem] = {}
         self.configuration_header = ConfigurationHeader("Reset marketplace policies")
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
@@ -128,9 +134,14 @@ class MarketplacePage(AppPage):
             self.populate()
 
     def populate(self) -> None:
+        expanded = expanded_policy_keys(self.tree)
         self.tree.setSortingEnabled(False)
         self.tree.clear()
         self._toggles = {}
+        self._tree_items = {}
+        self._group_toggles = {}
+        self._group_policy_keys = {}
+        self._group_items = {}
         self._catalog = _load_catalog(self._config)
         grouped: dict[str, list[MarketplaceOffer]] = defaultdict(list)
         for offer in marketplace_catalog():
@@ -153,7 +164,30 @@ class MarketplacePage(AppPage):
             )
             for offer in offers:
                 self._add_offer(parent, offer)
-            parent.setExpanded(group in {"Ingredients", "Free Claims"})
+            policy_keys = tuple(offer.policy_key for offer in offers)
+            state = aggregate_check_state(
+                [self._config.marketplace_policy_enabled(key) for key in policy_keys]
+            )
+            group_toggle = PolicyCheckBox()
+            configure_policy_toggle(group_toggle)
+            group_toggle.setTristate(True)
+            group_toggle.setCheckState(state)
+            group_toggle.setAccessibleName(f"{group}: auto-purchase for all offers")
+            group_toggle.setToolTip(group_toggle.accessibleName())
+            group_toggle.clicked.connect(
+                lambda checked, keys=policy_keys: self._set_group(keys, checked)
+            )
+            set_policy_widget(
+                self.tree,
+                parent,
+                2,
+                policy_cell(group_toggle),
+                sort_value=state.value,
+            )
+            self._group_toggles[group] = group_toggle
+            self._group_policy_keys[group] = policy_keys
+            self._group_items[group] = parent
+            parent.setExpanded(("group", group) in expanded)
         self.tree.setSortingEnabled(True)
         fit_policy_widget_column(self.tree, 1, minimum=124)
         self.tree.sortByColumn(
@@ -171,6 +205,7 @@ class MarketplacePage(AppPage):
             if offer.payment_type == "free"
             else f"{offer.payment_amount} {(offer.payment_key or '').title()}"
         )
+        cost_tone = "free" if offer.payment_type == "free" else offer.payment_key
         quantity = f" \u00d7{offer.reward_amount}" if offer.reward_amount > 1 else ""
         item = PolicyTreeItem((f"{offer.display_name}{quantity}", "", ""))
         item.setSizeHint(0, QSize(0, 64))
@@ -186,7 +221,7 @@ class MarketplacePage(AppPage):
             self.tree,
             item,
             1,
-            policy_badge(cost),
+            policy_badge(cost, tone=cost_tone),
             sort_value=cost,
             search_text=cost,
         )
@@ -201,6 +236,7 @@ class MarketplacePage(AppPage):
             self.tree, item, 2, policy_cell(toggle), sort_value=toggle.isChecked()
         )
         self._toggles[offer.policy_key] = toggle
+        self._tree_items[offer.policy_key] = item
 
     def _catalog_item(self, reward_key: str) -> CatalogItem | None:
         if self._catalog is None:
@@ -226,10 +262,10 @@ class MarketplacePage(AppPage):
 
     def _set_enabled(self, key: str, enabled: bool) -> None:
         values = dict(self._config.marketplace_policy_overrides)
-        if enabled:
-            values[key] = True
-        else:
+        if enabled == self._config.marketplace_policy_default_enabled(key):
             values.pop(key, None)
+        else:
+            values[key] = enabled
         self._config = AppConfig.model_validate(
             self._config.model_copy(
                 update={"marketplace_policy_overrides": values}
@@ -238,10 +274,31 @@ class MarketplacePage(AppPage):
         self.config_edited.emit(
             ConfigEdit({"marketplace_policy_overrides": values}, source="marketplace")
         )
-        self._sync_bulk_header()
+        self._sync_controls()
+
+    def _set_group(self, policy_keys: tuple[str, ...], enabled: bool) -> None:
+        values = dict(self._config.marketplace_policy_overrides)
+        for key in policy_keys:
+            if enabled == self._config.marketplace_policy_default_enabled(key):
+                values.pop(key, None)
+            else:
+                values[key] = enabled
+        self._config = AppConfig.model_validate(
+            self._config.model_copy(
+                update={"marketplace_policy_overrides": values}
+            ).model_dump()
+        )
+        self.config_edited.emit(
+            ConfigEdit({"marketplace_policy_overrides": values}, source="marketplace")
+        )
+        self._sync_controls()
 
     def _set_all(self, _column: int, enabled: bool) -> None:
-        values = {offer.policy_key: True for offer in marketplace_catalog()} if enabled else {}
+        values = {
+            offer.policy_key: enabled
+            for offer in marketplace_catalog()
+            if enabled != self._config.marketplace_policy_default_enabled(offer.policy_key)
+        }
         self._config = AppConfig.model_validate(
             self._config.model_copy(
                 update={"marketplace_policy_overrides": values}
@@ -250,7 +307,27 @@ class MarketplacePage(AppPage):
         self.config_edited.emit(
             ConfigEdit({"marketplace_policy_overrides": values}, source="marketplace")
         )
-        self.populate()
+        self._sync_controls()
+
+    def _sync_controls(self) -> None:
+        for key, toggle in self._toggles.items():
+            enabled = self._config.marketplace_policy_enabled(key)
+            toggle.blockSignals(True)
+            toggle.setChecked(enabled)
+            toggle.blockSignals(False)
+            set_policy_value(self._tree_items[key], 2, enabled)
+        for group, toggle in self._group_toggles.items():
+            state = aggregate_check_state(
+                [
+                    self._config.marketplace_policy_enabled(key)
+                    for key in self._group_policy_keys[group]
+                ]
+            )
+            toggle.blockSignals(True)
+            toggle.setCheckState(state)
+            toggle.blockSignals(False)
+            set_policy_value(self._group_items[group], 2, state.value)
+        self._sync_bulk_header()
 
     def _sync_bulk_header(self) -> None:
         values = [self._config.marketplace_policy_enabled(key) for key in self._toggles]

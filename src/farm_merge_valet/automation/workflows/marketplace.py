@@ -113,12 +113,14 @@ class MarketplaceWorkflow:
         now = bot._now()
         if now < self.all_blocked_until:
             return False
+        catalog = marketplace_catalog()
         enabled = {
-            key: value
-            for key, value in bot.config.marketplace_policy_overrides.items()
-            if value and now >= self.blocked_until.get(key, 0.0)
+            offer.policy_key: True
+            for offer in catalog
+            if bot.config.marketplace_policy_enabled(offer.policy_key)
+            and now >= self.blocked_until.get(offer.policy_key, 0.0)
         }
-        action = plan_marketplace_purchase(marketplace_catalog(), offers, enabled)
+        action = plan_marketplace_purchase(catalog, offers, enabled)
         if action is None:
             return False
         before = next(offer for offer in offers if offer.policy_key == action.policy_key)

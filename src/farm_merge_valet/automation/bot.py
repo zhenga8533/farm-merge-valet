@@ -35,6 +35,7 @@ from farm_merge_valet.automation.workflows import (
     PendingInteraction,
     ShopWorkflow,
 )
+from farm_merge_valet.catalog.marketplace import marketplace_catalog
 from farm_merge_valet.catalog.provider import CatalogProvider
 from farm_merge_valet.catalog.store import CatalogUnavailableError
 from farm_merge_valet.config import AppConfig
@@ -75,6 +76,13 @@ _ACTION_STABLE_SECONDS = 0.75
 _ACTION_MAX_PENDING_SECONDS = 8.0
 _ACTION_RETRY_SECONDS = 10.0
 _ACTION_FAILURE_LIMIT = 3
+
+
+def _marketplace_policy_enabled(config: AppConfig) -> bool:
+    return any(
+        config.marketplace_policy_enabled(offer.policy_key)
+        for offer in marketplace_catalog()
+    )
 
 @dataclass
 class _PendingStorageBubble:
@@ -442,7 +450,7 @@ class Bot:
                 self._shop_policy().may_enable_orders or self._shop_workflow.pending is not None
             ),
             include_marketplace=(
-                any(self.config.marketplace_policy_overrides.values())
+                _marketplace_policy_enabled(self.config)
                 or (marketplace_workflow is not None and marketplace_workflow.pending is not None)
             ),
         )
@@ -1365,7 +1373,13 @@ class Bot:
                 shop_orders = ()
         if not self._verify_pending_shop_action(health, shop_orders):
             return
-        marketplace_enabled = any(self.config.marketplace_policy_overrides.values())
+        if not health.heartbeat_advancing:
+            self._report_wait(
+                "game heartbeat is not advancing",
+                heartbeat_age_ms=health.heartbeat_age_ms,
+            )
+            return
+        marketplace_enabled = _marketplace_policy_enabled(self.config)
         marketplace_workflow = getattr(self, "_marketplace_workflow", None)
         if marketplace_workflow is None:
             marketplace_workflow = self._marketplace_workflow = MarketplaceWorkflow()
@@ -1379,12 +1393,6 @@ class Bot:
         if not marketplace_workflow.verify_pending(
             bot=self, health=health, offers=marketplace_offers
         ):
-            return
-        if not health.heartbeat_advancing:
-            self._report_wait(
-                "game heartbeat is not advancing",
-                heartbeat_age_ms=health.heartbeat_age_ms,
-            )
             return
         board_needs_merge = self._board_needs_merge()
         immediate, depleted, ready = self._interaction_actions()

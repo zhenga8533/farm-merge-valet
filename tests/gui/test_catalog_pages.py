@@ -6,7 +6,7 @@ from dataclasses import replace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
 )
 
-from farm_merge_valet.catalog.marketplace import MARKETPLACE_ICON_ASSETS
+from farm_merge_valet.catalog.marketplace import MARKETPLACE_ICON_ASSETS, marketplace_catalog
 from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog, RecipeMetadata
 from farm_merge_valet.catalog.store import write_item_catalog
 from farm_merge_valet.config import AppConfig, ConfigStore
@@ -99,7 +99,7 @@ def test_missing_catalog_shows_shared_onboarding_and_refreshes_when_discovered(t
     app.processEvents()
 
 
-def test_marketplace_page_contains_full_disabled_catalog(tmp_path) -> None:
+def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     store = ConfigStore(tmp_path / "config.json")
     store.replace(AppConfig(close_to_tray=False))
@@ -111,7 +111,18 @@ def test_marketplace_page_contains_full_disabled_catalog(tmp_path) -> None:
     assert not hasattr(page, "refresh_requested")
     assert not hasattr(page, "_live")
     assert len(page._toggles) == 54
-    assert all(not toggle.isChecked() for toggle in page._toggles.values())
+    assert sum(toggle.isChecked() for toggle in page._toggles.values()) == 4
+    assert len(page._group_toggles) == 7
+    assert all(
+        page._toggles[offer.policy_key].isChecked() == (offer.payment_type == "free")
+        for offer in marketplace_catalog()
+    )
+    assert all(
+        not page.tree.topLevelItem(row).isExpanded()
+        for row in range(page.tree.topLevelItemCount())
+    )
+    assert page._group_toggles["Free Claims"].checkState() == Qt.CheckState.Checked
+    assert page._group_toggles["Ingredients"].checkState() == Qt.CheckState.Unchecked
     ingredients = next(
         page.tree.topLevelItem(row)
         for row in range(page.tree.topLevelItemCount())
@@ -125,7 +136,44 @@ def test_marketplace_page_contains_full_disabled_catalog(tmp_path) -> None:
     )
     assert wheat is not None and wheat.text(0) == "Wheat \u00d79"
     cost_badge = page.tree.itemWidget(wheat, 1)
-    assert cost_badge is not None and cost_badge.findChild(QLabel).text() == "9 Gems"
+    assert cost_badge is not None
+    gem_label = cost_badge.findChild(QLabel)
+    assert gem_label.text() == "9 Gems"
+    assert gem_label.property("tone") == "gems"
+    generators = next(
+        page.tree.topLevelItem(row)
+        for row in range(page.tree.topLevelItemCount())
+        if page.tree.topLevelItem(row).text(0) == "Generators"
+    )
+    coin_label = page.tree.itemWidget(generators.child(0), 1).findChild(QLabel)
+    assert coin_label.property("tone") == "coins"
+    free_claims = next(
+        page.tree.topLevelItem(row)
+        for row in range(page.tree.topLevelItemCount())
+        if page.tree.topLevelItem(row).text(0) == "Free Claims"
+    )
+    free_label = page.tree.itemWidget(free_claims.child(0), 1).findChild(QLabel)
+    assert free_label.text() == "Free"
+    assert free_label.property("tone") == "free"
+
+    page._group_toggles["Ingredients"].click()
+    assert all(
+        page._toggles[key].isChecked()
+        for key in page._group_policy_keys["Ingredients"]
+    )
+    assert page._group_toggles["Ingredients"].checkState() == Qt.CheckState.Checked
+    ingredient_key = page._group_policy_keys["Ingredients"][0]
+    page._toggles[ingredient_key].click()
+    assert page._group_toggles["Ingredients"].checkState() == Qt.CheckState.PartiallyChecked
+    page._group_toggles["Free Claims"].click()
+    assert all(
+        not page._toggles[key].isChecked()
+        for key in page._group_policy_keys["Free Claims"]
+    )
+    assert all(
+        page._config.marketplace_policy_overrides[key] is False
+        for key in page._group_policy_keys["Free Claims"]
+    )
 
     window.quit_application()
     app.processEvents()

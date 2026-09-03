@@ -412,15 +412,17 @@ def policy_cell(widget: QWidget, *, centered: bool = True) -> QWidget:
     return container
 
 
-def policy_badge(text: str) -> QWidget:
-    return policy_badges((text,))
+def policy_badge(text: str, *, tone: str | None = None) -> QWidget:
+    return policy_badges((text,), tone=tone)
 
 
-def policy_badges(texts: tuple[str, ...]) -> QWidget:
+def policy_badges(texts: tuple[str, ...], *, tone: str | None = None) -> QWidget:
     labels = []
     for text in texts:
         label = QLabel(text)
         label.setObjectName("policyBadge")
+        if tone is not None:
+            label.setProperty("tone", tone)
         labels.append(label)
     container = QWidget()
     container.setProperty("policyCell", True)
