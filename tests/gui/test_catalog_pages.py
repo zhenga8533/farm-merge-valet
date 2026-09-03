@@ -98,6 +98,37 @@ def test_missing_catalog_shows_shared_onboarding_and_refreshes_when_discovered(t
     app.processEvents()
 
 
+def test_marketplace_page_contains_full_disabled_catalog(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+
+    page = window.marketplace_page
+    assert page.tree.topLevelItemCount() == 7
+    assert page.tree.columnCount() == 3
+    assert not hasattr(page, "refresh_requested")
+    assert not hasattr(page, "_live")
+    assert len(page._toggles) == 54
+    assert all(not toggle.isChecked() for toggle in page._toggles.values())
+    ingredients = next(
+        page.tree.topLevelItem(row)
+        for row in range(page.tree.topLevelItemCount())
+        if page.tree.topLevelItem(row).text(0) == "Ingredients"
+    )
+    assert ingredients is not None
+    wheat = next(
+        ingredients.child(row)
+        for row in range(ingredients.childCount())
+        if ingredients.child(row).text(0).startswith("Wheat")
+    )
+    assert wheat is not None and wheat.text(0) == "Wheat \u00d79"
+    cost_badge = page.tree.itemWidget(wheat, 1)
+    assert cost_badge is not None and cost_badge.findChild(QLabel).text() == "9 Gems"
+
+    window.quit_application()
+    app.processEvents()
+
 def test_catalog_pages_populate_lazily_and_ignore_hidden_refreshes(tmp_path, monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     catalog_dir = tmp_path / "catalog"
@@ -179,6 +210,46 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
         asset_alias="wheat",
         asset_path="crops/wheat/wheat_1.png",
     )
+    gem = replace(
+        wheat,
+        game_id="gem_1",
+        family_id="gem",
+        policy_key="currencies/gem/tier/1",
+        category="currencies",
+        display_name="Crystal",
+        asset_alias="gem",
+        asset_path="currencies/gem/gem_1.png",
+    )
+    crate = replace(
+        wheat,
+        game_id="crate_1",
+        family_id="crate",
+        policy_key="resources/crate/tier/1",
+        category="resources",
+        display_name="Crate",
+        asset_alias="crate",
+        asset_path="resources/crate/crate_1.png",
+    )
+    energy = replace(
+        wheat,
+        game_id="energy_1",
+        family_id="energy",
+        policy_key="currencies/energy/tier/1",
+        category="currencies",
+        display_name="Energy",
+        asset_alias="energy",
+        asset_path="currencies/energy/energy_1.png",
+    )
+    event_energy = replace(
+        wheat,
+        game_id="time_limited_event_energy_1",
+        family_id="time_limited_event_energy",
+        policy_key="currencies/time_limited_event_energy/tier/1",
+        category="currencies",
+        display_name="Event Energy",
+        asset_alias="event_energy",
+        asset_path="currencies/event_energy/event_energy_1.png",
+    )
     shop = CatalogItem(
         game_id="bakery",
         family_id="bakery",
@@ -207,7 +278,18 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
         capabilities=frozenset({"recipe"}),
         recipe=RecipeMetadata("bakery", 60, (), ()),
     )
-    catalog = ItemCatalog({**base.items, "wheat_1": wheat, "bakery": shop, "bread": recipe})
+    catalog = ItemCatalog(
+        {
+            **base.items,
+            "wheat_1": wheat,
+            "gem_1": gem,
+            "crate_1": crate,
+            "energy_1": energy,
+            "time_limited_event_energy_1": event_energy,
+            "bakery": shop,
+            "bread": recipe,
+        }
+    )
     write_item_catalog(catalog_dir / "catalog.json", catalog)
 
     store = ConfigStore(tmp_path / "config.json")
@@ -227,7 +309,15 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
     bakery.setExpanded(True)
     assert bakery.childCount() == 1 and bakery.child(0).icon(0).isNull()
 
-    for relative_path in (wheat.asset_path, shop.asset_path, recipe.asset_path):
+    for relative_path in (
+        wheat.asset_path,
+        gem.asset_path,
+        crate.asset_path,
+        energy.asset_path,
+        event_energy.asset_path,
+        shop.asset_path,
+        recipe.asset_path,
+    ):
         assert relative_path is not None
         path = catalog_dir / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -257,6 +347,28 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
     delegate.initStyleOption(recipe_option, window.shops_page.tree.indexFromItem(bakery.child(0)))
     assert shop_option.decorationSize == QSize(100, 54)
     assert recipe_option.decorationSize == QSize(40, 40)
+    marketplace_ingredients = next(
+        window.marketplace_page.tree.topLevelItem(row)
+        for row in range(window.marketplace_page.tree.topLevelItemCount())
+        if window.marketplace_page.tree.topLevelItem(row).text(0) == "Ingredients"
+    )
+    marketplace_wheat = next(
+        marketplace_ingredients.child(row)
+        for row in range(marketplace_ingredients.childCount())
+        if marketplace_ingredients.child(row).text(0).startswith("Wheat")
+    )
+    assert not marketplace_wheat.icon(0).isNull()
+    assert window.marketplace_page.tree.iconSize() == QSize(40, 40)
+    assert marketplace_wheat.sizeHint(0).height() == 64
+    free_claims = next(
+        window.marketplace_page.tree.topLevelItem(row)
+        for row in range(window.marketplace_page.tree.topLevelItemCount())
+        if window.marketplace_page.tree.topLevelItem(row).text(0) == "Free Claims"
+    )
+    assert all(
+        not free_claims.child(row).icon(0).isNull()
+        for row in range(free_claims.childCount())
+    )
     assert (
         window.items_page.table.objectName() == window.shops_page.tree.objectName() == "policyView"
     )

@@ -33,6 +33,7 @@ from farm_merge_valet.gui.pages import (
     DashboardPage,
     ItemsPage,
     LogsPage,
+    MarketplacePage,
     SettingsPage,
     ShopsPage,
 )
@@ -61,6 +62,12 @@ _ITEM_FIELDS = set(SECTION_FIELDS[ConfigSection.ITEMS]) | _ITEM_VIEW_FIELDS | {"
 _ITEM_POLICY_FIELDS = _ITEM_FIELDS - {"items_sort_column", "items_sort_descending"}
 _SHOP_FIELDS = set(SECTION_FIELDS[ConfigSection.SHOPS]) | _SHOP_VIEW_FIELDS | {"catalog_dir"}
 _SHOP_POLICY_FIELDS = _SHOP_FIELDS - {"shops_sort_column", "shops_sort_descending"}
+_MARKETPLACE_VIEW_FIELDS = {
+    field for field in _VIEW_FIELDS if field.startswith("marketplace_")
+}
+_MARKETPLACE_FIELDS = (
+    set(SECTION_FIELDS[ConfigSection.MARKETPLACE]) | _MARKETPLACE_VIEW_FIELDS
+)
 _BROWSER_FIELDS = set(SECTION_FIELDS[ConfigSection.BROWSER])
 _SETTINGS_FIELDS = set(SECTION_FIELDS[ConfigSection.SETTINGS])
 
@@ -87,7 +94,9 @@ def _menu_action_text(label: str, hotkey: str | None) -> str:
 
 
 class MainWindow(QMainWindow):
-    _NAVIGATION = ("Dashboard", "Items", "Shops", "Browser", "Settings", "Logs")
+    _NAVIGATION = (
+        "Dashboard", "Items", "Shops", "Marketplace", "Browser", "Settings", "Logs"
+    )
 
     def __init__(
         self,
@@ -145,6 +154,7 @@ class MainWindow(QMainWindow):
             icons=self._catalog_icons,
             populate_immediately=eager_catalog_pages,
         )
+        self.marketplace_page = MarketplacePage(self._draft, icons=self._catalog_icons)
         self.browser_page = BrowserPage(self._draft)
         self.settings_page = SettingsPage(self._draft)
         self.logs_page = LogsPage(self._draft.log_level)
@@ -152,6 +162,7 @@ class MainWindow(QMainWindow):
             self.dashboard_page,
             self.items_page,
             self.shops_page,
+            self.marketplace_page,
             self.browser_page,
             self.settings_page,
             self.logs_page,
@@ -212,6 +223,8 @@ class MainWindow(QMainWindow):
         self.shops_page.config_edited.connect(self._queue_edit)
         self.shops_page.catalog_setup_requested.connect(self.controller.setup_catalog)
         self.shops_page.reset_requested.connect(self._reset_shop_policies)
+        self.marketplace_page.config_edited.connect(self._queue_edit)
+        self.marketplace_page.reset_requested.connect(self._reset_marketplace_policies)
         self.browser_page.config_edited.connect(self._queue_edit)
         self.browser_page.refresh_requested.connect(self.controller.refresh_browser)
         self.browser_page.launch_requested.connect(self.controller.launch_browser)
@@ -278,6 +291,13 @@ class MainWindow(QMainWindow):
             "Restore recommended shop and recipe behavior and remove all custom choices?",
         )
 
+    def _reset_marketplace_policies(self) -> None:
+        self._reset_section(
+            ConfigSection.MARKETPLACE,
+            "Reset marketplace policies?",
+            "Disable every marketplace auto-purchase policy?",
+        )
+
     def _reset_browser_configuration(self) -> None:
         self._reset_section(
             ConfigSection.BROWSER,
@@ -300,6 +320,7 @@ class MainWindow(QMainWindow):
             headers = {
                 ConfigSection.ITEMS: self.items_page.configuration_header,
                 ConfigSection.SHOPS: self.shops_page.configuration_header,
+                ConfigSection.MARKETPLACE: self.marketplace_page.configuration_header,
                 ConfigSection.BROWSER: self.browser_page.configuration_header,
                 ConfigSection.SETTINGS: self.settings_page.configuration_header,
             }
@@ -324,11 +345,13 @@ class MainWindow(QMainWindow):
         return True
 
     def _queue_edit(self, edit: ConfigEdit) -> None:
-        editor: ItemsPage | ShopsPage | BrowserPage | SettingsPage
+        editor: ItemsPage | ShopsPage | MarketplacePage | BrowserPage | SettingsPage
         if edit.source == "items":
             editor = self.items_page
         elif edit.source == "shops":
             editor = self.shops_page
+        elif edit.source == "marketplace":
+            editor = self.marketplace_page
         elif edit.source == "browser":
             editor = self.browser_page
         else:
@@ -373,6 +396,7 @@ class MainWindow(QMainWindow):
         headers = {
             "items": self.items_page.configuration_header,
             "shops": self.shops_page.configuration_header,
+            "marketplace": self.marketplace_page.configuration_header,
             "browser": self.browser_page.configuration_header,
             "settings": self.settings_page.configuration_header,
         }
@@ -387,6 +411,7 @@ class MainWindow(QMainWindow):
         headers = {
             "items": self.items_page.configuration_header,
             "shops": self.shops_page.configuration_header,
+            "marketplace": self.marketplace_page.configuration_header,
             "browser": self.browser_page.configuration_header,
             "settings": self.settings_page.configuration_header,
         }
@@ -416,6 +441,8 @@ class MainWindow(QMainWindow):
                 config,
                 refresh=bool(changed_fields & _SHOP_POLICY_FIELDS),
             )
+        if changed_fields & _MARKETPLACE_FIELDS:
+            self.marketplace_page.apply_config(config)
         if changed_fields & _SETTINGS_FIELDS:
             self.settings_page.apply_config(config)
         if "log_level" in changed_fields:
@@ -558,11 +585,13 @@ class MainWindow(QMainWindow):
         self._catalog_icons.clear()
         for page in self._catalog_pages():
             page.reload_catalog_if_missing()
+        self.marketplace_page.reload_catalog_if_missing()
 
     def _catalog_assets_refreshed(self, *_args: object) -> None:
         self._catalog_icons.clear()
         for page in self._catalog_pages():
             page.reload_catalog()
+        self.marketplace_page.reload_catalog()
 
     def _save_logs(self) -> None:
         output, _filter = QFileDialog.getSaveFileName(

@@ -13,7 +13,7 @@ GUI / CLI -> automation and catalog services -> core
 
 ## Package ownership
 
-- `core` owns item identities, board state, merge planning, shop planning, and
+- `core` owns item identities, board state, merge planning, shop and marketplace planning, and
   upgrade-progress value objects. It performs no I/O and imports no GUI,
   browser, CDP, configuration-persistence, or observability code.
 - `automation` owns the bot lifecycle, action-workflow execution, and its
@@ -24,7 +24,8 @@ GUI / CLI -> automation and catalog services -> core
   pending action, verification, retry, submission, and phase-execution behavior
   belongs to dedicated workflow objects under `automation.workflows`.
   `automation.perception` converts atomic snapshots into planning state, and
-  `automation.scheduler` owns renderer-load-aware polling cadence.
+  `automation.scheduler` owns renderer-load-aware polling cadence. Marketplace purchases use a
+  dedicated pending workflow and stable `flash:<slot>:<candidate>` or `free:<offer>` identities.
 - `catalog` owns catalog models, taxonomy, labels, construction, persistence,
   blueprint mapping, asset compilation, and synchronization orchestration.
   Its synchronization service accepts resource and metadata readers; concrete
@@ -54,6 +55,9 @@ construct adapters internally. CDP translates raw game data to models from
 The automation hot path crosses the adapter boundary once per iteration through
 `RuntimeSnapshot`. Optional sections are selected from enabled policy and
 pending work, so feature-specific reads are not separate renderer requests.
+Marketplace state is included only while a marketplace policy is enabled or a
+purchase is pending. The GUI owns only the persistent catalog and policy editor;
+all live marketplace reads belong to the automation runtime.
 
 The package root contains only package metadata, Python/CLI entry points, and
 the shared composition root. Feature implementation belongs to its owning

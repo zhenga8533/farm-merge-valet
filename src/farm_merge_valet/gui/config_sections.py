@@ -10,6 +10,7 @@ from farm_merge_valet.config import AppConfig
 class ConfigSection(StrEnum):
     ITEMS = "items"
     SHOPS = "shops"
+    MARKETPLACE = "marketplace"
     BROWSER = "browser"
     SETTINGS = "settings"
     VIEW = "view"
@@ -29,6 +30,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "shop_overrides",
         "recipe_overrides",
     ),
+    ConfigSection.MARKETPLACE: ("marketplace_policy_overrides",),
     ConfigSection.BROWSER: (
         "window_title",
         "browser",
@@ -77,6 +79,8 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "items_sort_descending",
         "shops_sort_column",
         "shops_sort_descending",
+        "marketplace_sort_column",
+        "marketplace_sort_descending",
     ),
 }
 

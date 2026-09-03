@@ -96,12 +96,15 @@ class AppConfig(BaseModel):
     recipe_default_enabled: bool = True
     shop_overrides: dict[str, bool] = Field(default_factory=dict)
     recipe_overrides: dict[str, bool] = Field(default_factory=dict)
+    marketplace_policy_overrides: dict[str, bool] = Field(default_factory=dict)
     items_sort_column: Literal[
         "item", "category", "enabled", "merge", "merge_five", "interact", "remove"
     ] = "item"
     items_sort_descending: bool = False
     shops_sort_column: Literal["item", "type", "enabled"] = "item"
     shops_sort_descending: bool = False
+    marketplace_sort_column: Literal["offer", "cost", "enabled"] = "offer"
+    marketplace_sort_descending: bool = False
 
     loop_interval: float = Field(default=1.0, ge=0.01, le=60.0)
     idle_wait_seconds: float = Field(default=30.0, ge=0.0, le=3600.0)
@@ -156,6 +159,33 @@ class AppConfig(BaseModel):
         if any(not game_id.strip() or game_id != game_id.strip() for game_id in value):
             raise ValueError("game IDs must be non-empty and have no surrounding whitespace")
         return value
+
+    @field_validator("marketplace_policy_overrides")
+    @classmethod
+    def validate_marketplace_policy_keys(cls, value: dict[str, bool]) -> dict[str, bool]:
+        if not all(value.values()):
+            raise ValueError("marketplace policy overrides may contain only enabled policies")
+        for key in value:
+            parts = key.split(":")
+            valid = (
+                len(parts) == 2 and parts[0] == "free" and bool(parts[1])
+            ) or (
+                len(parts) == 3
+                and parts[0] == "flash"
+                and bool(parts[1])
+                and bool(parts[2])
+            )
+            if not valid or key != key.strip():
+                raise ValueError("invalid marketplace policy key")
+        return value
+
+    @field_validator("marketplace_sort_column", mode="before")
+    @classmethod
+    def normalize_legacy_marketplace_live_sort(cls, value: object) -> object:
+        return "offer" if value in {"stock", "availability", "reward"} else value
+
+    def marketplace_policy_enabled(self, policy_key: str) -> bool:
+        return self.marketplace_policy_overrides.get(policy_key, False)
 
     @field_validator("item_default_overrides", "item_policy_overrides")
     @classmethod

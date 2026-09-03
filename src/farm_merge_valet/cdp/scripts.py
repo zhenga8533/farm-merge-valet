@@ -107,6 +107,12 @@ _DISCOVER_EXPRESSION = r"""
     typeof orders?.getOrderByBuilding === 'function' &&
     typeof orders?.startOrder === 'function' &&
     typeof orders?.onOrderRewarded?.fire === 'function';
+  const marketplace = services?.marketplaceService;
+  const validMarketplace = marketplace?._isActive !== false &&
+    typeof marketplace?.getMarketplacePopupData === 'function' &&
+    typeof marketplace?.getItemConfigsByShop === 'function' &&
+    typeof marketplace?.getStockItem === 'function' &&
+    typeof marketplace?.purchaseItem === 'function';
 
   window.__fmvGameplayServices = services;
   window.__fmvGameplayMapScreen = screen;
@@ -161,6 +167,7 @@ _DISCOVER_EXPRESSION = r"""
     crateSubscribers: crateSubscribers.length,
     inventory: Boolean(validInventory),
     shopOrders: Boolean(validShopOrders),
+    marketplace: Boolean(validMarketplace),
     missing,
   };
   return {
@@ -178,6 +185,7 @@ _DISCOVER_EXPRESSION = r"""
     crateSpawn: Boolean(validCrateSignal),
     inventory: Boolean(validInventory),
     shopOrders: Boolean(validShopOrders),
+    marketplace: Boolean(validMarketplace),
     detail: missing.length ? `${missing.join(',')}-not-found` : null,
     discovery: window.__fmvRuntimeDiscovery,
   };
@@ -304,6 +312,12 @@ _HEALTH_EXPRESSION = r"""
     orders?._isActive !== false && typeof orders?.getCurrentOrders === 'function' &&
     typeof orders?.startOrder === 'function' &&
     typeof orders?.onOrderRewarded?.fire === 'function';
+  const marketplace = services?.marketplaceService;
+  const currentMarketplace = currentBoard && marketplace?._isActive !== false &&
+    typeof marketplace?.getMarketplacePopupData === 'function' &&
+    typeof marketplace?.getItemConfigsByShop === 'function' &&
+    typeof marketplace?.getStockItem === 'function' &&
+    typeof marketplace?.purchaseItem === 'function';
   let stage = scene;
   while (stage?.parent) stage = stage.parent;
   const layerRoot = stage?.children?.[0];
@@ -440,6 +454,7 @@ _HEALTH_EXPRESSION = r"""
     crateSpawn: Boolean(currentCrateSignal),
     inventory: Boolean(currentInventory),
     shopOrders: Boolean(currentShopOrders),
+    marketplace: Boolean(currentMarketplace),
     heartbeat: beat ? beat.frame : null,
     heartbeatAgeMs: beat ? Math.max(0, performance.now() - beat.timestamp) : null,
     heartbeatInstalled: Boolean(window.__fmvHeartbeatInstalled && beat),

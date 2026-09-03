@@ -24,6 +24,14 @@ from farm_merge_valet.automation.runtime import (
 from farm_merge_valet.cdp.board_store import arm_board_store, parse_board_state, read_board_state
 from farm_merge_valet.cdp.evaluation import apply_background_overrides, evaluate
 from farm_merge_valet.cdp.inventory_store import read_energy
+from farm_merge_valet.cdp.marketplace import (
+    _READ_MARKETPLACE_EXPRESSION,
+    marketplace_purchase_expression,
+    parse_marketplace_offers,
+)
+from farm_merge_valet.cdp.marketplace import (
+    parse_action_result as parse_marketplace_action_result,
+)
 from farm_merge_valet.cdp.scripts import (
     _BOARD_ARMED_EXPRESSION,
     _DISCOVER_EXPRESSION,
@@ -45,6 +53,7 @@ from farm_merge_valet.cdp.scripts import (
 from farm_merge_valet.cdp.snapshot import snapshot_expression
 from farm_merge_valet.cdp.targets import read_background_flag_status
 from farm_merge_valet.core.items import GridCoord, InteractionTargetKind
+from farm_merge_valet.core.marketplace import MarketplaceAction, MarketplaceLiveOffer
 from farm_merge_valet.core.obstacles import WorkerState
 from farm_merge_valet.core.shops import ShopIngredient, ShopOrder, ShopOrderState
 from farm_merge_valet.observability.logging import log_event
@@ -419,6 +428,7 @@ class GameRuntimeAdapter:
             item_action_busy=raw.get("itemActionBusy") is True,
             interaction_available=interaction,
             shop_available=raw.get("shopOrders") is True,
+            marketplace_available=raw.get("marketplace") is True,
             removal_available=removal,
             reward_interaction_available=reward_interaction,
             obstacle_clear_available=raw.get("obstacleClear") is True,
@@ -501,6 +511,7 @@ class GameRuntimeAdapter:
             workers=self._parse_workers(raw.get("workers")),
             storage_bubbles=self._parse_storage_bubbles(raw.get("storageBubbles")),
             shop_orders=self._parse_shop_orders(raw.get("shopOrders")),
+            marketplace_offers=parse_marketplace_offers(raw.get("marketplace")),
             metrics=metrics,
         )
 
@@ -709,6 +720,15 @@ class GameRuntimeAdapter:
 
     def claim_shop_order(self, shop_id: str, recipe_id: str) -> ActionResult:
         return self._shop_action_result(_shop_claim_expression(shop_id, recipe_id, self._scene_id))
+
+    def read_marketplace_offers(self) -> tuple[MarketplaceLiveOffer, ...] | None:
+        return parse_marketplace_offers(self._evaluate(_READ_MARKETPLACE_EXPRESSION, retry=False))
+
+    def submit_marketplace_purchase(self, action: MarketplaceAction) -> ActionResult:
+        raw = self._evaluate(
+            marketplace_purchase_expression(action, self._scene_id), retry=False
+        )
+        return parse_marketplace_action_result(raw)
 
     def _shop_action_result(self, expression: str) -> ActionResult:
         raw = self._evaluate(expression, retry=False)

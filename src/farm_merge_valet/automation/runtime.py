@@ -14,6 +14,7 @@ from farm_merge_valet.core.items import (
     ProducerKind,
     ProducerState,
 )
+from farm_merge_valet.core.marketplace import MarketplaceAction, MarketplaceLiveOffer
 from farm_merge_valet.core.obstacles import ObstacleState, WorkerState
 from farm_merge_valet.core.shops import ShopOrder
 
@@ -59,6 +60,7 @@ class RuntimeCapability(StrEnum):
     STORAGE_BUBBLES = "storage-bubbles"
     CRATES = "crates"
     SHOPS = "shops"
+    MARKETPLACE = "marketplace"
 
 
 class RuntimeConnectionError(RuntimeError):
@@ -110,6 +112,7 @@ class RuntimeHealth:
     upgrade_interaction_available: bool = False
     reward_container_available: bool = False
     storage_bubble_available: bool = False
+    marketplace_available: bool = False
     transient_overlay: TransientOverlayKind | None = None
     transient_overlay_detail: str | None = None
 
@@ -126,6 +129,7 @@ class RuntimeHealth:
             RuntimeCapability.STORAGE_BUBBLES: self.storage_bubble_available,
             RuntimeCapability.CRATES: self.crate_spawn_available and self.inventory_available,
             RuntimeCapability.SHOPS: self.shop_available,
+            RuntimeCapability.MARKETPLACE: self.marketplace_available,
         }[capability]
 
 
@@ -148,6 +152,7 @@ class SnapshotOptions:
     include_obstacle_resources: bool = True
     include_storage_bubbles: bool = True
     include_shop_orders: bool = True
+    include_marketplace: bool = False
 
 
 @dataclass(frozen=True)
@@ -167,6 +172,7 @@ class RuntimeSnapshot:
     workers: WorkerState | None = None
     storage_bubbles: tuple[StorageBubbleState, ...] | None = None
     shop_orders: tuple[ShopOrder, ...] | None = None
+    marketplace_offers: tuple[MarketplaceLiveOffer, ...] | None = None
     metrics: RuntimeReadMetrics | None = None
 
 
@@ -242,3 +248,7 @@ class GameRuntime(Protocol):
     def start_shop_order(self, shop_id: str, recipe_id: str) -> ActionResult: ...
 
     def claim_shop_order(self, shop_id: str, recipe_id: str) -> ActionResult: ...
+
+    def read_marketplace_offers(self) -> tuple[MarketplaceLiveOffer, ...] | None: ...
+
+    def submit_marketplace_purchase(self, action: MarketplaceAction) -> ActionResult: ...

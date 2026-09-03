@@ -4,10 +4,15 @@ The active automation loop reads one atomic snapshot from the game renderer. A
 snapshot contains runtime health, heartbeat state, the board, and only the
 optional resources needed by enabled or pending features. Energy and workers
 are omitted when obstacle automation cannot use them, storage bubbles are
-omitted when their automation is disabled, and shop orders are omitted when
-shop policy is disabled. Locked-land cloud cells are also omitted from the
+omitted when their automation is disabled, shop orders are omitted when shop
+policy is disabled, and marketplace offers are omitted unless a marketplace
+policy is enabled or a purchase is pending. Locked-land cloud cells are also omitted from the
 wire payload because unknown coordinates and cloud coordinates are both
 non-actionable to the planner.
+
+The Marketplace page performs no live reads. Stock, availability, balances, and
+post-purchase verification are read only by the automation bot through the
+conditional marketplace section of its atomic snapshot.
 
 The default interval remains one second. The effective minimum is 250 ms, and
 the loop increases its delay when snapshot latency rises. Existing

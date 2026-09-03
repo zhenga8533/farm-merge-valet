@@ -101,6 +101,21 @@ Facebook/TikTok community posts, and direct in-app observation (marked
 
 ## Tier-4 Producers
 
+## Marketplace
+
+The marketplace rotates six flash-deal slots on a four-hour cycle. The observed
+1.78.2-4.reddit configuration has 50 possible flash candidates across
+ingredients, generators, materials, reward crates, keys, and greenhouse/gazebo
+parts. A slot's current candidate determines its real reward and price; the
+static 99,999-gem slot placeholder is not a purchasable offer.
+
+Four configured claims use the literal payment type `free`: five gems, five
+energy, ten crates, and 25 event energy. Parallel ad and premium variants are
+different offer types. Stock is finite and renews on the marketplace cycle;
+event energy is exposed only while its event shop is active.
+
+## Tier-4 Producers
+
 - Tier-4 crops and animals become harvestable immediately after their merge
   and can be harvested twice. The second harvest becomes available after a
   cooldown. This lifecycle is directly observed in the live game state.

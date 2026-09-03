@@ -6,6 +6,28 @@ from pydantic import ValidationError
 from farm_merge_valet.config import AppConfig, ConfigStore
 
 
+def test_marketplace_policies_default_disabled_and_validate_semantic_keys() -> None:
+    config = AppConfig()
+    assert not config.marketplace_policy_enabled("free:gems_5_no_ads")
+    enabled = AppConfig(
+        marketplace_policy_overrides={"flash:flash_deal_ingredient:wheat": True}
+    )
+    assert enabled.marketplace_policy_enabled("flash:flash_deal_ingredient:wheat")
+    with pytest.raises(ValidationError):
+        AppConfig(marketplace_policy_overrides={"flash:slot": True})
+    with pytest.raises(ValidationError):
+        AppConfig(marketplace_policy_overrides={"free:gems_5_no_ads": False})
+
+
+def test_legacy_marketplace_live_sort_normalizes_to_offer() -> None:
+    config = AppConfig.model_validate({"marketplace_sort_column": "stock"})
+    assert config.marketplace_sort_column == "offer"
+    config = AppConfig.model_validate({"marketplace_sort_column": "availability"})
+    assert config.marketplace_sort_column == "offer"
+    config = AppConfig.model_validate({"marketplace_sort_column": "reward"})
+    assert config.marketplace_sort_column == "offer"
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

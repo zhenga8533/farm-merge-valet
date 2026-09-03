@@ -30,6 +30,7 @@ from farm_merge_valet.automation.scheduler import MINIMUM_ACTIVE_INTERVAL, Adapt
 from farm_merge_valet.automation.workflows import (
     InteractionAction,
     InteractionWorkflow,
+    MarketplaceWorkflow,
     MergeWorkflow,
     PendingInteraction,
     ShopWorkflow,
@@ -48,6 +49,7 @@ from farm_merge_valet.core.items import (
     ProducerKind,
     ProducerState,
 )
+from farm_merge_valet.core.marketplace import MarketplaceLiveOffer
 from farm_merge_valet.core.merge_planner import (
     MergeAction,
     MergeActionKind,
@@ -86,6 +88,7 @@ class _PendingStorageBubble:
 class Phase(Enum):
     INTERACT_TILES = auto()
     SHOPS = auto()
+    MARKETPLACE = auto()
     CLAIM_CRATES = auto()
     MERGE = auto()
 
@@ -126,12 +129,14 @@ class Bot:
         self._workers: WorkerState | None = None
         self._storage_bubbles: tuple[StorageBubbleState, ...] | None = None
         self._shop_orders: tuple[ShopOrder, ...] | None = None
+        self._marketplace_offers: tuple[MarketplaceLiveOffer, ...] | None = None
         self._pending_storage_bubble: _PendingStorageBubble | None = None
         self._storage_bubble_next_action_at = 0.0
         self._obstacle_focus: tuple[GridCoord, int | None] | None = None
         self._merge_workflow = MergeWorkflow()
         self._interaction_workflow = InteractionWorkflow()
         self._shop_workflow = ShopWorkflow()
+        self._marketplace_workflow = MarketplaceWorkflow()
         self._last_health: RuntimeHealth | None = None
         self._last_wait_reason: str | None = None
         self._last_wait_log_at = 0.0
@@ -424,6 +429,7 @@ class Bot:
         return True
 
     def _snapshot_options(self) -> SnapshotOptions:
+        marketplace_workflow = getattr(self, "_marketplace_workflow", None)
         obstacle_resources = any(
             self._interaction_enabled(blueprint_id) for blueprint_id in self._clearable_ids
         )
@@ -434,6 +440,10 @@ class Bot:
             ),
             include_shop_orders=(
                 self._shop_policy().may_enable_orders or self._shop_workflow.pending is not None
+            ),
+            include_marketplace=(
+                any(self.config.marketplace_policy_overrides.values())
+                or (marketplace_workflow is not None and marketplace_workflow.pending is not None)
             ),
         )
 
@@ -451,6 +461,7 @@ class Bot:
         self._workers = perceived.workers
         self._storage_bubbles = perceived.storage_bubbles
         self._shop_orders = perceived.shop_orders
+        self._marketplace_offers = snapshot.marketplace_offers
         scheduler = getattr(self, "_scheduler", None)
         if scheduler is not None and snapshot.metrics is not None:
             scheduler.record_snapshot(snapshot.metrics.wall_duration_ms / 1000.0)
@@ -1354,6 +1365,21 @@ class Bot:
                 shop_orders = ()
         if not self._verify_pending_shop_action(health, shop_orders):
             return
+        marketplace_enabled = any(self.config.marketplace_policy_overrides.values())
+        marketplace_workflow = getattr(self, "_marketplace_workflow", None)
+        if marketplace_workflow is None:
+            marketplace_workflow = self._marketplace_workflow = MarketplaceWorkflow()
+        marketplace_offers = self._marketplace_offers if atomic_snapshot else ()
+        if not atomic_snapshot and (
+            marketplace_enabled or marketplace_workflow.pending is not None
+        ):
+            if not self._ensure_capability(health, RuntimeCapability.MARKETPLACE):
+                return
+            marketplace_offers = self.runtime.read_marketplace_offers()
+        if not marketplace_workflow.verify_pending(
+            bot=self, health=health, offers=marketplace_offers
+        ):
+            return
         if not health.heartbeat_advancing:
             self._report_wait(
                 "game heartbeat is not advancing",
@@ -1409,6 +1435,13 @@ class Bot:
                 if not self._ensure_capability(health, RuntimeCapability.SHOPS):
                     return
             if self._step_shops(health, shop_orders, board_needs_merge):
+                return
+        if marketplace_enabled and marketplace_offers is not None:
+            if not health.supports(RuntimeCapability.MARKETPLACE):
+                if not self._ensure_capability(health, RuntimeCapability.MARKETPLACE):
+                    return
+            if marketplace_workflow.step(self, health, marketplace_offers):
+                self._set_phase(Phase.MARKETPLACE)
                 return
         if self.phase is Phase.INTERACT_TILES:
             self._set_phase(Phase.CLAIM_CRATES)

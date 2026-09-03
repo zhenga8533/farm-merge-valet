@@ -202,6 +202,17 @@ without hardcoding the discovered catalog. Completed
 rewards reserve one empty cell per reward object and ask the merge planner to
 create space before claiming when necessary.
 
+The Marketplace page is a persistent catalog of all 50 known flash candidates
+and four genuine free claims. Auto-purchase is disabled by default for every
+offer. Selections use stable slot-plus-candidate identities, so a rotating flash
+slot cannot cause a different item to be bought. Enabled finite stock is drained
+one verified unit per bot iteration; the bot never buys ordinary marketplace
+offers or refreshes flash deals.
+
+Before each marketplace submission, the runtime rechecks the exact live reward,
+payment type, currency, price, stock, and current flash candidate. A timeout or
+connection loss is treated as ambiguous and is not blindly retried.
+
 Internet or server interruptions are not detected separately yet. The bot keeps
 using passive reconnect behavior whenever the local game loop and live state
 remain available.
@@ -218,7 +229,7 @@ startup pauses without taking actions.
 All end-user configuration lives in the desktop application. Changes validate
 and autosave atomically to `%LOCALAPPDATA%\FarmMergeValet\config.json` on
 Windows (or the platform user-data directory elsewhere). The dashboard exposes
-browser, automation, item/shop policy, timing, hotkey, Discord, logging, theme,
+browser, automation, item/shop/marketplace policy, timing, hotkey, Discord, logging, theme,
 tray, opacity, and compact-overlay controls. Saved automation, policy, and timing
 changes are adopted by a running bot before its next planning iteration; an idle
 poll is woken immediately. Browser connection, catalog/cache location, Discord

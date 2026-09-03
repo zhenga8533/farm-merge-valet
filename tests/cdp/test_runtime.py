@@ -34,6 +34,7 @@ def test_runtime_health_exposes_adapter_neutral_capabilities() -> None:
         upgrade_interaction_available=True,
         reward_container_available=True,
         storage_bubble_available=True,
+        marketplace_available=True,
     )
 
     assert all(health.supports(capability) for capability in RuntimeCapability)
