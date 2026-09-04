@@ -85,6 +85,15 @@ class ShopsPage(AppPage):
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
+        self.master_toggle = PolicyCheckBox("Enable shop automation")
+        configure_policy_toggle(self.master_toggle)
+        self.master_toggle.setChecked(config.shop_automation_enabled)
+        self.master_toggle.setAccessibleName("Enable shop automation")
+        self.master_toggle.setToolTip(
+            "Pause all shop starts and claims without changing shop or recipe selections."
+        )
+        self.master_toggle.toggled.connect(self._set_master_enabled)
+        self.page_layout.addWidget(self.master_toggle)
         self.catalog_onboarding = CatalogOnboarding()
         self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
         self.page_layout.addWidget(
@@ -147,6 +156,9 @@ class ShopsPage(AppPage):
             or config.shops_sort_descending != self._config.shops_sort_descending
         )
         self._config = config
+        self.master_toggle.blockSignals(True)
+        self.master_toggle.setChecked(config.shop_automation_enabled)
+        self.master_toggle.blockSignals(False)
         self._icons.set_catalog_dir(config.catalog_dir)
         if sort_changed:
             self._apply_sort_preference()
@@ -429,6 +441,14 @@ class ShopsPage(AppPage):
             values[key] = enabled
         self._emit(**{field: values})
         self._sync_bulk_header()
+
+    def _set_master_enabled(self, enabled: bool) -> None:
+        self._config = AppConfig.model_validate(
+            self._config.model_copy(update={"shop_automation_enabled": enabled}).model_dump()
+        )
+        self.config_edited.emit(
+            ConfigEdit({"shop_automation_enabled": enabled}, source="shops")
+        )
 
     def _set_all(self, _column: int, value: bool) -> None:
         shop_overrides = dict(self._config.shop_overrides)

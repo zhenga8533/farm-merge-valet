@@ -6,13 +6,12 @@ import logging
 import random
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from enum import Enum, auto
 from queue import Empty, Queue
 from threading import Event, Lock, Thread
 from typing import Literal
 
-from farm_merge_valet.automation.action_control import ActionCoordinator, OperationKind
+from farm_merge_valet.automation.action_control import ActionCoordinator
 from farm_merge_valet.automation.board_space import BoardSpaceAssessment
 from farm_merge_valet.automation.perception import build_board, build_perceived_state
 from farm_merge_valet.automation.runtime import (
@@ -30,12 +29,14 @@ from farm_merge_valet.automation.runtime import (
 )
 from farm_merge_valet.automation.scheduler import MINIMUM_ACTIVE_INTERVAL, AdaptiveScheduler
 from farm_merge_valet.automation.workflows import (
+    CrateWorkflow,
     InteractionAction,
     InteractionWorkflow,
     MarketplaceWorkflow,
     MergeWorkflow,
     PendingInteraction,
     ShopWorkflow,
+    StorageBubbleWorkflow,
 )
 from farm_merge_valet.catalog.marketplace import marketplace_catalog
 from farm_merge_valet.catalog.provider import CatalogProvider
@@ -74,27 +75,14 @@ from farm_merge_valet.observability.logging import log_event
 
 logger = logging.getLogger(__name__)
 
-_ACTION_SETTLE_SECONDS = 3.0
-_ACTION_STABLE_SECONDS = 0.75
-_ACTION_MAX_PENDING_SECONDS = 8.0
-_ACTION_RETRY_SECONDS = 10.0
 _ACTION_FAILURE_LIMIT = 3
 
 
 def _marketplace_policy_enabled(config: AppConfig) -> bool:
-    return any(
+    return config.marketplace_automation_enabled and any(
         config.marketplace_policy_enabled(offer.policy_key)
         for offer in marketplace_catalog()
     )
-
-@dataclass
-class _PendingStorageBubble:
-    initial_state: StorageBubbleState
-    scene_id: int | None
-    submitted_at: float
-    last_state: StorageBubbleState | None
-    last_change_at: float
-
 
 class Phase(Enum):
     INTERACT_TILES = auto()
@@ -141,13 +129,13 @@ class Bot:
         self._storage_bubbles: tuple[StorageBubbleState, ...] | None = None
         self._shop_orders: tuple[ShopOrder, ...] | None = None
         self._marketplace_offers: tuple[MarketplaceLiveOffer, ...] | None = None
-        self._pending_storage_bubble: _PendingStorageBubble | None = None
-        self._storage_bubble_next_action_at = 0.0
         self._obstacle_focus: tuple[GridCoord, int | None] | None = None
         self._merge_workflow = MergeWorkflow()
         self._interaction_workflow = InteractionWorkflow()
         self._shop_workflow = ShopWorkflow()
         self._marketplace_workflow = MarketplaceWorkflow()
+        self._crate_workflow = CrateWorkflow()
+        self._storage_bubble_workflow = StorageBubbleWorkflow()
         self._action_control = ActionCoordinator()
         self._last_health: RuntimeHealth | None = None
         self._last_wait_reason: str | None = None
@@ -155,8 +143,6 @@ class Bot:
         self._last_idle_reason: str | None = None
         self._last_idle_log_at = 0.0
         self._next_loop_delay = self.config.loop_interval
-        self._last_crate_claim_limit: int | None = None
-        self._last_crate_claim_log_at = 0.0
         self._last_cooling_producer_count: int | None = None
         self._capability_retries: dict[RuntimeCapability, tuple[float, float]] = {}
         self._scheduler = AdaptiveScheduler()
@@ -445,13 +431,18 @@ class Bot:
 
     def _snapshot_options(self) -> SnapshotOptions:
         marketplace_workflow = getattr(self, "_marketplace_workflow", None)
-        obstacle_resources = any(
+        storage_bubble_workflow = getattr(self, "_storage_bubble_workflow", None)
+        obstacle_resources = self.config.allow_obstacle_stage_starts and any(
             self._interaction_enabled(blueprint_id) for blueprint_id in self._clearable_ids
         )
         return SnapshotOptions(
             include_obstacle_resources=obstacle_resources,
             include_storage_bubbles=(
-                self.config.auto_pop_storage_bubbles or self._pending_storage_bubble is not None
+                self.config.auto_pop_storage_bubbles
+                or (
+                    storage_bubble_workflow is not None
+                    and storage_bubble_workflow.pending is not None
+                )
             ),
             include_shop_orders=(
                 self._shop_policy().may_enable_orders or self._shop_workflow.pending is not None
@@ -712,6 +703,8 @@ class Bot:
         return selected
 
     def _obstacle_to_clear(self, candidates: list[ObstacleCandidate]) -> ObstacleCandidate | None:
+        if not self.config.allow_obstacle_stage_starts:
+            return None
         focused = self._focused_obstacle(candidates)
         if focused is None:
             return None
@@ -987,161 +980,16 @@ class Bot:
         return self._interaction_workflow._submit_interaction(self, action, health)
 
     def _verify_pending_storage_bubble(self, health: RuntimeHealth) -> bool:
-        pending = getattr(self, "_pending_storage_bubble", None)
-        if pending is None:
-            return True
-        operation_key = (pending.initial_state.object_id,)
-        now = self._now()
-        age = now - pending.submitted_at
-        if self._storage_bubbles is None:
-            self._report_wait("authoritative storage-bubble state unavailable")
-            return False
-        current = next(
-            (
-                bubble
-                for bubble in self._storage_bubbles
-                if bubble.object_id == pending.initial_state.object_id
-            ),
-            None,
-        )
-        if current is None or current.content_ids != pending.initial_state.content_ids:
-            popped_count = len(pending.initial_state.content_ids) - len(
-                current.content_ids if current is not None else ()
-            )
-            self._pending_storage_bubble = None
-            self._actions().complete(OperationKind.STORAGE_BUBBLE, operation_key)
-            self._storage_bubble_next_action_at = now + random.uniform(
-                self.config.item_action_delay_min,
-                self.config.item_action_delay_max,
-            )
-            self._last_wait_reason = None
-            self._last_idle_reason = None
-            log_event(
-                logger,
-                logging.DEBUG,
-                "storage_bubble.confirmed",
-                "Storage bubble %d pop confirmed; released %d item(s).",
-                pending.initial_state.object_id,
-                max(0, popped_count),
-                object_id=pending.initial_state.object_id,
-                popped_items=max(0, popped_count),
-                remaining_items=len(current.content_ids) if current is not None else 0,
-                elapsed_seconds=age,
-            )
-            return True
-        if not health.heartbeat_advancing:
-            if age >= _ACTION_SETTLE_SECONDS:
-                self._report_wait(
-                    "submitted storage-bubble pop is pending while the game heartbeat is frozen"
-                )
-            return False
-        if current != pending.last_state:
-            pending.last_state = current
-            pending.last_change_at = now
-        stable_for = now - pending.last_change_at
-        if age < _ACTION_MAX_PENDING_SECONDS and (
-            age < _ACTION_SETTLE_SECONDS or stable_for < _ACTION_STABLE_SECONDS
-        ):
-            return False
-        self._pending_storage_bubble = None
-        self._actions().fail(
-            OperationKind.STORAGE_BUBBLE,
-            operation_key,
-            now,
-            base_delay=_ACTION_RETRY_SECONDS,
-        )
-        log_event(
-            logger,
-            logging.WARNING,
-            "storage_bubble.not_accepted",
-            "Storage bubble %d pop was not accepted after %.1fs; replanning.",
-            pending.initial_state.object_id,
-            age,
-            object_id=pending.initial_state.object_id,
-            elapsed_seconds=age,
-        )
-        return True
+        workflow = getattr(self, "_storage_bubble_workflow", None)
+        if workflow is None:
+            workflow = self._storage_bubble_workflow = StorageBubbleWorkflow()
+        return workflow.verify_pending(self, health)
 
     def _step_storage_bubbles(self, health: RuntimeHealth) -> bool:
-        if not self.config.auto_pop_storage_bubbles:
-            return False
-        now = self._now()
-        if now < getattr(self, "_storage_bubble_next_action_at", 0.0):
-            return True
-        bubbles = tuple(
-            bubble
-            for bubble in (getattr(self, "_storage_bubbles", None) or ())
-            if bubble.content_ids
-            and self._actions().available(OperationKind.STORAGE_BUBBLE, (bubble.object_id,), now)
-        )
-        if not bubbles or not self.board.find_empty():
-            return False
-        if not self._ensure_capability(
-            health,
-            RuntimeCapability.STORAGE_BUBBLES,
-            label="storage-bubble interaction",
-        ):
-            return True
-        bubble = min(bubbles, key=lambda value: value.object_id)
-        operation_key = (bubble.object_id,)
-        if not self._actions().begin(OperationKind.STORAGE_BUBBLE, operation_key, now):
-            return True
-        log_event(
-            logger,
-            logging.DEBUG,
-            "storage_bubble.planned",
-            "Planned pop for storage bubble %d containing %d item(s).",
-            bubble.object_id,
-            len(bubble.content_ids),
-            object_id=bubble.object_id,
-            contained_items=len(bubble.content_ids),
-            empty_cells=len(self.board.find_empty()),
-        )
-        submitted_at = self._now()
-        self._pending_storage_bubble = _PendingStorageBubble(
-            bubble,
-            health.scene_id,
-            submitted_at,
-            bubble,
-            submitted_at,
-        )
-        result = self.runtime.submit_storage_bubble_pop(bubble.object_id)
-        if result.submitted:
-            self._last_wait_reason = None
-            log_event(
-                logger,
-                logging.DEBUG,
-                "storage_bubble.submitted",
-                "Submitted storage bubble %d pop; awaiting verification.",
-                bubble.object_id,
-                object_id=bubble.object_id,
-                scene_id=health.scene_id,
-            )
-            return True
-        self._pending_storage_bubble = None
-        if result.status in {ActionStatus.BUSY, ActionStatus.UNAVAILABLE}:
-            self._actions().release(OperationKind.STORAGE_BUBBLE, operation_key)
-            self._report_wait(result.detail or "storage-bubble interaction unavailable")
-        else:
-            self._actions().fail(
-                OperationKind.STORAGE_BUBBLE,
-                operation_key,
-                self._now(),
-                base_delay=_ACTION_RETRY_SECONDS,
-            )
-            log_event(
-                logger,
-                logging.WARNING,
-                "storage_bubble.rejected",
-                "Storage bubble %d pop could not be submitted: %s (%s).",
-                bubble.object_id,
-                result.status.value,
-                result.detail or "no detail",
-                object_id=bubble.object_id,
-                status=result.status.value,
-                detail=result.detail,
-            )
-        return True
+        workflow = getattr(self, "_storage_bubble_workflow", None)
+        if workflow is None:
+            workflow = self._storage_bubble_workflow = StorageBubbleWorkflow()
+        return workflow.step(self, health)
 
     @staticmethod
     def _shop_order_for_action(
@@ -1218,75 +1066,10 @@ class Bot:
         return True
 
     def _step_claim_crates(self, board_space: BoardSpaceAssessment) -> None:
-        if board_space.needs_merge:
-            self._set_phase(Phase.MERGE)
-            return
-        merge_actions_available = bool(board_space.merge_actions)
-        reserve = board_space.reserve if merge_actions_available else 0
-        limit = max(0, board_space.empty_cells - reserve)
-        if limit == 0:
-            self._set_phase(Phase.MERGE)
-            return
-        result = self.runtime.spawn_supply_crates(limit)
-        now = time.monotonic()
-        if (
-            result.available_before is not None
-            and result.available_before > 0
-            and (limit != self._last_crate_claim_limit or now - self._last_crate_claim_log_at >= 15)
-        ):
-            claim_count = min(limit, result.available_before)
-            log_event(
-                logger,
-                logging.DEBUG,
-                "crate.claim_started",
-                "Claiming up to %d of %d available supply crate(s); board capacity is %d.",
-                claim_count,
-                result.available_before,
-                limit,
-                claim_limit=limit,
-                available_crates=result.available_before,
-                empty_cells=board_space.empty_cells,
-                reserved_empty_cells=reserve,
-            )
-            self._last_crate_claim_limit = limit
-            self._last_crate_claim_log_at = now
-        if result.spawned:
-            self._last_wait_reason = None
-            self._last_idle_reason = None
-            self._last_crate_claim_limit = None
-            log_event(
-                logger,
-                logging.INFO,
-                "crate.claim_completed",
-                "Spawned %d supply crate(s); %s remain.",
-                result.spawned,
-                result.remaining,
-                claim_limit=limit,
-                spawned=result.spawned,
-                remaining=result.remaining,
-                status=result.status.value,
-            )
-        elif result.status is ActionStatus.BUSY:
-            self._report_wait("the game is finishing another crate claim")
-        elif result.status is ActionStatus.UNAVAILABLE:
-            self._report_wait(result.detail or "crate claim capability unavailable")
-        elif result.remaining == 0 and not merge_actions_available:
-            self._last_crate_claim_limit = None
-            obstacle_wait = self._obstacle_idle_reason()
-            if obstacle_wait is not None:
-                reason, context = obstacle_wait
-                self._defer_idle(reason, **context)
-            else:
-                reward_container_wait = self._reward_container_idle_reason()
-                if reward_container_wait is not None:
-                    reason, context = reward_container_wait
-                    self._defer_idle(reason, **context)
-                else:
-                    self._defer_idle("no supply crates or merge actions are currently available")
-        elif result.status is ActionStatus.REJECTED:
-            self._report_wait(result.detail or "crate spawn was not accepted")
-        if result.remaining == 0 and merge_actions_available:
-            self._set_phase(Phase.MERGE)
+        workflow = getattr(self, "_crate_workflow", None)
+        if workflow is None:
+            workflow = self._crate_workflow = CrateWorkflow()
+        workflow.step(self, board_space)
 
     def _step_merge(
         self,
@@ -1313,6 +1096,8 @@ class Bot:
             self.config.recipe_default_enabled,
             self.config.shop_overrides,
             self.config.recipe_overrides,
+            self.config.allow_shop_order_starts,
+            self.config.shop_automation_enabled,
         )
 
     def step(self) -> None:
@@ -1499,8 +1284,12 @@ class Bot:
         if self.phase is Phase.INTERACT_TILES:
             self._set_phase(Phase.CLAIM_CRATES)
         if self.phase is Phase.CLAIM_CRATES:
-            if not board_space.needs_merge and not self._ensure_capability(
-                health, RuntimeCapability.CRATES
+            if (
+                self.config.auto_claim_supply_crates
+                and not board_space.needs_merge
+                and not self._ensure_capability(
+                    health, RuntimeCapability.CRATES
+                )
             ):
                 return
             self._step_claim_crates(board_space)

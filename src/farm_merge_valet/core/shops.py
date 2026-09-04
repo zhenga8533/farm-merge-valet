@@ -55,14 +55,20 @@ class ShopPolicy:
     recipe_default_enabled: bool = True
     shop_overrides: Mapping[str, bool] = MappingProxyType({})
     recipe_overrides: Mapping[str, bool] = MappingProxyType({})
+    allow_starts: bool = True
+    automation_enabled: bool = True
 
     def enables(self, order: ShopOrder) -> bool:
-        return self.shop_overrides.get(order.shop_id, self.shop_default_enabled) and (
+        return self.automation_enabled and self.shop_overrides.get(
+            order.shop_id, self.shop_default_enabled
+        ) and (
             self.recipe_overrides.get(order.recipe_id, self.recipe_default_enabled)
         )
 
     @property
     def may_enable_orders(self) -> bool:
+        if not self.automation_enabled:
+            return False
         shops_may_be_enabled = self.shop_default_enabled or any(self.shop_overrides.values())
         recipes_may_be_enabled = self.recipe_default_enabled or any(self.recipe_overrides.values())
         return shops_may_be_enabled and recipes_may_be_enabled
@@ -79,9 +85,10 @@ def plan_shop_action(
             required = len(order.reward_ids)
             if empty_cells >= required:
                 return ShopAction(ShopActionKind.CLAIM, order.shop_id, order.recipe_id, required)
-    for order in eligible:
-        if order.state is ShopOrderState.AVAILABLE and order.affordable:
-            return ShopAction(ShopActionKind.START, order.shop_id, order.recipe_id)
+    if policy.allow_starts:
+        for order in eligible:
+            if order.state is ShopOrderState.AVAILABLE and order.affordable:
+                return ShopAction(ShopActionKind.START, order.shop_id, order.recipe_id)
     return None
 
 

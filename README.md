@@ -120,7 +120,9 @@ the item's primary action: direct interaction, reward-container opening,
 producer harvesting, upgrade application, or obstacle clearing. Ingredients, train tickets, ordinary supply
 crates, reward containers, crops, animals, obstacles, and upgrade-card tiers 1 and 3 default on.
 Other direct-interaction items remain opt-in. HUD supply crates and shop rewards
-are governed separately.
+are governed separately. Global controls can pause automatic supply-crate claims
+and prevent new obstacle stages from spending energy without disabling collection
+of loot from stages that were already paid.
 Fields that do not match an item's catalog capabilities are ignored, allowing
 the GUI to expose only relevant controls without separate schemas.
 The default-disabled `always_remove` field authorizes the bot to shovel matching
@@ -195,7 +197,8 @@ larger ones, and then fewer remaining stages. Finished obstacle stages are
 claimed before another stage is started. An obstacle stays focused while its
 worker is active and through subsequent stages, but a paid stage cannot block a
 worker that the game reports as available. Its exact remaining loot count
-drives the same merge-first, partial-claim workflow.
+drives the same merge-first, partial-claim workflow. New stage payments can be
+disabled independently from loot collection.
 
 Shop automation reads each active shop's fixed current recipe, live ingredient
 inventory, production timer, and rewards. It can start affordable orders and
@@ -204,7 +207,9 @@ spending policy uses global shop and recipe defaults, both enabled by default.
 Per-ID GUI overrides take precedence, so one shop or recipe can be disabled
 without hardcoding the discovered catalog. Completed
 rewards reserve one empty cell per reward object and ask the merge planner to
-create space before claiming when necessary.
+create space before claiming when necessary. Starting new orders can be disabled
+globally while completed enabled orders continue to be claimed. A shop master
+switch pauses both behaviors without discarding per-shop or per-recipe selections.
 
 The Marketplace page is a persistent catalog of all 50 known flash candidates
 and four genuine free claims. Flash purchases are disabled by default; the four
@@ -212,7 +217,8 @@ free claims are enabled by default, and every offer can be overridden individual
 Selections use stable slot-plus-candidate identities, so a rotating flash
 slot cannot cause a different item to be bought. Enabled finite stock is drained
 one verified unit per bot iteration; the bot never buys ordinary marketplace
-offers or refreshes flash deals.
+offers or refreshes flash deals. A master switch pauses all marketplace purchases
+without discarding those individual selections.
 
 Before each marketplace submission, the runtime rechecks the exact live reward,
 payment type, currency, price, stock, and current flash candidate. A timeout or
@@ -239,6 +245,8 @@ tray, opacity, and compact-overlay controls. Saved automation, policy, and timin
 changes are adopted by a running bot before its next planning iteration; an idle
 poll is woken immediately. Browser connection, catalog/cache location, Discord
 delivery, and startup-only changes still require the corresponding restart.
+Application shutdown can optionally close the verified managed browser; it never
+closes an unowned browser process.
 `.env` and `FMV_*` variables are not read. Invalid configuration is never silently
 overwritten; startup offers an explicit reset to safe defaults. The Browser page
 combines status and restart actions with browser, game-connection, and asset-cache

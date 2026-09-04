@@ -54,6 +54,23 @@ def test_affordable_available_order_is_started() -> None:
     assert action.kind is ShopActionKind.START
 
 
+def test_order_starts_can_be_disabled_without_blocking_ready_claims() -> None:
+    policy = ShopPolicy(allow_starts=False)
+
+    assert plan_shop_action((order(ShopOrderState.AVAILABLE),), policy, 10) is None
+    action = plan_shop_action((order(ShopOrderState.READY),), policy, 10)
+
+    assert action is not None
+    assert action.kind is ShopActionKind.CLAIM
+
+
+def test_shop_master_switch_preserves_policies_without_planning_actions() -> None:
+    policy = ShopPolicy(automation_enabled=False)
+
+    assert plan_shop_action((order(ShopOrderState.READY),), policy, 10) is None
+    assert not policy.may_enable_orders
+
+
 def test_defaults_enable_current_and_future_shop_recipes() -> None:
     action = plan_shop_action(
         (

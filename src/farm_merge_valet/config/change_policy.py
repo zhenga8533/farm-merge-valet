@@ -9,7 +9,6 @@ BROWSER_RESTART_FIELDS = frozenset(
         "browser",
         "browser_executable",
         "browser_profile_dir",
-        "browser_auto_launch",
         "cdp_port",
         "game_url",
         "window_title",

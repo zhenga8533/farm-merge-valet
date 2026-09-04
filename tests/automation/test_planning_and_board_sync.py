@@ -143,8 +143,6 @@ def bare_bot() -> Bot:
     bot._last_idle_reason = None
     bot._last_idle_log_at = 0.0
     bot._next_loop_delay = 1.0
-    bot._last_crate_claim_limit = None
-    bot._last_crate_claim_log_at = 0.0
     bot._last_cooling_producer_count = None
     bot._capability_retry_at = 0.0
     bot._capability_retry_delay = 1.0
@@ -213,6 +211,18 @@ def test_crate_limit_preserves_policy_reserve(monkeypatch, caplog) -> None:
     )
     assert records["crate.claim_started"].fmv_context["available_crates"] == 3
     assert records["crate.claim_completed"].levelno == logging.INFO
+
+
+def test_supply_crate_claiming_can_be_disabled() -> None:
+    bot = bare_bot()
+    bot.config.auto_claim_supply_crates = False
+    bot.board.set_cell((0, 0), Cell(CellKind.EMPTY))
+    bot._merge_actions_for_policy = lambda: []
+
+    bot._step_claim_crates(bot._assess_board_space())
+
+    assert bot.runtime.spawn_limits == []
+    assert bot._next_loop_delay == bot.config.idle_wait_seconds
 
 
 def test_exhausted_crates_use_configured_idle_delay(monkeypatch, caplog) -> None:

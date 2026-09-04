@@ -134,8 +134,6 @@ def bare_bot() -> Bot:
     bot._last_idle_reason = None
     bot._last_idle_log_at = 0.0
     bot._next_loop_delay = 1.0
-    bot._last_crate_claim_limit = None
-    bot._last_crate_claim_log_at = 0.0
     bot._last_cooling_producer_count = None
     bot._capability_retry_at = 0.0
     bot._capability_retry_delay = 1.0

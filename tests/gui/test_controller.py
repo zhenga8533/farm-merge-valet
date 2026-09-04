@@ -255,7 +255,7 @@ def test_catalog_setup_launches_game_and_publishes_catalog_before_icons(
             pass
 
     catalog = type("Catalog", (), {"items": {"one": object(), "two": object()}})()
-    monkeypatch.setattr("farm_merge_valet.gui.controller.BrowserManager", BrowserManagerStub)
+    monkeypatch.setattr("farm_merge_valet.composition.BrowserManager", BrowserManagerStub)
     monkeypatch.setattr("farm_merge_valet.composition.GameRuntimeAdapter", RuntimeStub)
     monkeypatch.setattr(
         "farm_merge_valet.composition.read_upgrade_progress",
@@ -481,3 +481,34 @@ def test_shutdown_interrupts_cooperative_utility_waits(tmp_path) -> None:
 
     assert shutdown_events == [True]
     assert time.monotonic() - started_at < 1
+
+
+def test_shutdown_can_close_owned_managed_browser(tmp_path, monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_managed_browser_on_exit=True))
+    stopped: list[bool] = []
+
+    class BrowserManagerStub:
+        def __init__(self, _config: AppConfig) -> None:
+            pass
+
+        def status(self) -> BrowserStatus:
+            return BrowserStatus(running=True, compatible=True, managed=True)
+
+        def stop(self) -> None:
+            stopped.append(True)
+
+    monkeypatch.setattr("farm_merge_valet.gui.controller.BrowserManager", BrowserManagerStub)
+    controller = ApplicationController(store)
+    shutdown_events: list[bool] = []
+    controller.shutdown_complete.connect(lambda: shutdown_events.append(True))
+
+    controller.shutdown()
+    deadline = time.monotonic() + 2
+    while not shutdown_events and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+
+    assert stopped == [True]
+    assert shutdown_events == [True]

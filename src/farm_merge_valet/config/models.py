@@ -87,6 +87,8 @@ class AppConfig(BaseModel):
     producer_interact_min_empty_cells: int = Field(default=4, ge=1, le=50)
     auto_dismiss_overlays: bool = True
     auto_pop_storage_bubbles: bool = True
+    auto_claim_supply_crates: bool = True
+    allow_obstacle_stage_starts: bool = True
     prefer_merge_five: bool = True
     item_policy_defaults: ItemPolicy = Field(default_factory=ItemPolicy)
     item_category_defaults: dict[str, ItemPolicyOverride] = Field(default_factory=dict)
@@ -94,9 +96,12 @@ class AppConfig(BaseModel):
     item_policy_overrides: dict[str, ItemPolicyOverride] = Field(default_factory=dict)
     shop_default_enabled: bool = True
     recipe_default_enabled: bool = True
+    shop_automation_enabled: bool = True
+    allow_shop_order_starts: bool = True
     shop_overrides: dict[str, bool] = Field(default_factory=dict)
     recipe_overrides: dict[str, bool] = Field(default_factory=dict)
     marketplace_policy_overrides: dict[str, bool] = Field(default_factory=dict)
+    marketplace_automation_enabled: bool = True
     items_sort_column: Literal[
         "item", "category", "enabled", "merge", "merge_five", "interact", "remove"
     ] = "item"
@@ -126,6 +131,7 @@ class AppConfig(BaseModel):
     start_minimized: bool = False
     bot_autostart: bool = False
     close_to_tray: bool = True
+    close_managed_browser_on_exit: bool = False
     main_always_on_top: bool = False
     main_focused_opacity: float = Field(default=1.0, ge=0.25, le=1.0)
     main_unfocused_opacity: float = Field(default=0.92, ge=0.25, le=1.0)

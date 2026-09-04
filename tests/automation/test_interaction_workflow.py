@@ -155,16 +155,12 @@ def bare_bot() -> Bot:
     bot._clearable_ids = frozenset()
     bot._obstacle_focus = None
     bot._storage_bubbles = ()
-    bot._pending_storage_bubble = None
-    bot._storage_bubble_next_action_at = 0.0
     bot._last_health = None
     bot._last_wait_reason = None
     bot._last_wait_log_at = 0.0
     bot._last_idle_reason = None
     bot._last_idle_log_at = 0.0
     bot._next_loop_delay = 1.0
-    bot._last_crate_claim_limit = None
-    bot._last_crate_claim_log_at = 0.0
     bot._last_cooling_producer_count = None
     bot._capability_retry_at = 0.0
     bot._capability_retry_delay = 1.0
@@ -189,7 +185,7 @@ def test_storage_bubble_pop_requires_open_board_space() -> None:
 
     assert bot._step_storage_bubbles(health(advancing=True))
     assert bot.runtime.popped_storage_bubbles == [41]
-    assert bot._pending_storage_bubble is not None
+    assert bot._storage_bubble_workflow.pending is not None
 
 
 def test_storage_bubble_pop_respects_global_toggle() -> None:
@@ -210,7 +206,7 @@ def test_storage_bubble_partial_pop_is_confirmed() -> None:
     bot._storage_bubbles = (StorageBubbleState(41, ("energy_1",)),)
 
     assert bot._verify_pending_storage_bubble(health(advancing=True))
-    assert bot._pending_storage_bubble is None
+    assert bot._storage_bubble_workflow.pending is None
 
 
 def test_ground_product_is_interacted_with_before_ready_producer(monkeypatch) -> None:
@@ -578,6 +574,38 @@ def test_affordable_obstacle_clear_is_planned_and_submitted(monkeypatch) -> None
     bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
 
     assert bot.runtime.interactions == [((3, 4), InteractionTargetKind.CLEAR, "rock_medium", 91)]
+
+
+def test_obstacle_stage_starts_can_be_disabled_without_disabling_loot(monkeypatch) -> None:
+    bot = bare_bot()
+    bot.config.allow_obstacle_stage_starts = False
+    bot._clearable_ids = frozenset({"rock_medium"})
+    bot._blueprint_policy_keys = {"rock_medium": "obstacles/rock_medium"}
+    bot._energy = 10
+    bot._workers = WorkerState(1, 1)
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"obstacles/rock_medium": ItemPolicyOverride(interact=True)},
+    )
+    obstacle = ObstacleState(4, 5, 10, False, required_workers=1)
+    bot._live_cells = {(3, 4): LiveCellState(True, "rock_medium", 91, obstacle=obstacle)}
+
+    assert bot._interaction_actions() == ([], [], [])
+
+    lootable = ObstacleState(4, 5, None, False, clearing=True)
+    bot._live_cells = {
+        (3, 4): LiveCellState(
+            True,
+            "rock_medium",
+            91,
+            behavior_names=frozenset({"lootable"}),
+            obstacle=lootable,
+        )
+    }
+
+    immediate, _, _ = bot._interaction_actions()
+    assert immediate[0].kind is InteractionTargetKind.OBSTACLE_LOOT
 
 
 def test_ready_obstacle_loot_is_planned_without_energy_or_workers(monkeypatch) -> None:

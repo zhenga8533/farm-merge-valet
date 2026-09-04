@@ -106,6 +106,7 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
     window = MainWindow(ApplicationController(store))
 
     page = window.marketplace_page
+    assert page.master_toggle.isChecked()
     assert page.tree.topLevelItemCount() == 7
     assert page.tree.columnCount() == 3
     assert not hasattr(page, "refresh_requested")
@@ -174,6 +175,10 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
         page._config.marketplace_policy_overrides[key] is False
         for key in page._group_policy_keys["Free Claims"]
     )
+    selected_offers = dict(page._config.marketplace_policy_overrides)
+    page.master_toggle.click()
+    assert not page._config.marketplace_automation_enabled
+    assert page._config.marketplace_policy_overrides == selected_offers
 
     window.quit_application()
     app.processEvents()

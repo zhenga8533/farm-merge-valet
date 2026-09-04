@@ -19,13 +19,13 @@ GUI / CLI -> automation and catalog services -> core
 - `automation` owns the bot lifecycle, action-workflow execution, and its
   adapter-neutral runtime contract. `Bot` receives an `AppConfig` snapshot, a
   runtime, and a catalog provider. Saved updates are handed to a running bot as
-  complete snapshots and adopted between planning iterations. Merge,
-  tile-interaction, and shop pending,
-  pending action, verification, retry, submission, and phase-execution behavior
-  belongs to dedicated workflow objects under `automation.workflows`.
+  complete snapshots and adopted between planning iterations. Workflow-specific
+  planning, submission, pending-action verification, retry state, and execution
+  belong to dedicated merge, tile-interaction, storage-bubble, supply-crate,
+  shop, and marketplace objects under `automation.workflows`.
   `automation.perception` converts atomic snapshots into planning state, and
-  `automation.scheduler` owns renderer-load-aware polling cadence. Marketplace purchases use a
-  dedicated pending workflow and stable `flash:<slot>:<candidate>` or `free:<offer>` identities.
+  `automation.scheduler` owns renderer-load-aware polling cadence. Marketplace purchases use
+  stable `flash:<slot>:<candidate>` or `free:<offer>` identities.
 - `catalog` owns catalog models, taxonomy, labels, construction, persistence,
   blueprint mapping, asset compilation, and synchronization orchestration.
   Its synchronization service accepts resource and metadata readers; concrete

@@ -116,6 +116,8 @@ class MarketplaceWorkflow:
         health: RuntimeHealth,
         offers: tuple[MarketplaceLiveOffer, ...],
     ) -> bool:
+        if not bot.config.marketplace_automation_enabled:
+            return False
         now = bot._now()
         catalog = marketplace_catalog()
         enabled = {

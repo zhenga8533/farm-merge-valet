@@ -107,3 +107,13 @@ def test_free_claims_are_enabled_by_default_and_can_be_disabled() -> None:
     workflow.pending = None
     bot.config = AppConfig(marketplace_policy_overrides={live.policy_key: False})
     assert not workflow.step(bot, _health(), (live,))
+
+
+def test_marketplace_master_switch_preserves_offer_policy_without_purchasing() -> None:
+    now = [10.0]
+    live = _live(-4)
+    bot = _bot(now, live)
+    bot.config = AppConfig(marketplace_automation_enabled=False)
+
+    assert not MarketplaceWorkflow().step(bot, _health(), (live,))
+    assert bot.runtime.submissions == 0

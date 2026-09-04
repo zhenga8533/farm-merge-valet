@@ -173,7 +173,9 @@ Only the highest-priority obstacle is selected: fixed before movable, then
 already-started before untouched, then fewer total stages, fewer remaining
 stages, and board coordinate. All paid stages exposing `lootable` output are
 claimed through the normal tile-interaction pipeline before another stage is
-started. While no worker is available, the focused obstacle remains unchanged.
+started. The global obstacle-spending control prevents new stages from being paid
+without blocking loot collection from an already-paid stage. While no worker is
+available, the focused obstacle remains unchanged.
 If a paid obstacle has no fresh resource gate, that stage is not charged again
 and does not block an available worker from starting the next eligible
 obstacle. The paid marker can persist after loot is collected; when a fresh
@@ -195,7 +197,8 @@ or object-identity change.
 
 ## Claim crates
 
-The bot derives a claim-capacity limit from empty board cells and the configured
+Supply-crate claiming has a global, default-enabled control. When enabled, the
+bot derives a claim-capacity limit from empty board cells and the configured
 merge-space reserve. It fires the HUD's live internal crate event sequentially
 up to the lesser of that capacity and the available inventory. Each attempt
 resolves the crate item from the active scene's inventory service instead of
@@ -218,8 +221,10 @@ Shop and recipe policy have separate GUI defaults and per-ID boolean overrides
 derived from catalog IDs. Both global defaults are enabled, so current
 and newly discovered content is automated without a hardcoded list. An explicit
 shop or recipe override takes precedence, allowing individual entries to be
-disabled. Complete enabled orders take priority over starting enabled affordable
-orders. Claims require one open board cell per reward object; when space is
+disabled. A master switch can pause all shop automation while preserving those
+selections. Complete enabled orders take priority over starting enabled affordable
+orders. A separate control can prevent new orders from spending ingredients
+while leaving completed enabled orders claimable. Claims require one open board cell per reward object; when space is
 insufficient, merge planning preempts the claim and supply crates.
 
 Starting uses the game's public order handler, which revalidates the current
@@ -236,11 +241,11 @@ duplicated during a frozen heartbeat or reload.
 
 ## Marketplace purchases
 
-Marketplace state is included in the atomic snapshot whenever at least one offer
-policy is enabled or a purchase is pending. The catalog gives every flash candidate
+Marketplace state is included in the atomic snapshot whenever the master switch
+and at least one offer policy are enabled, or whenever a purchase is pending. The catalog gives every flash candidate
 a stable slot-plus-candidate key and every genuine free claim a stable offer key.
 Flash purchases default off, while the four free claims default on; per-offer GUI
-overrides take precedence.
+overrides take precedence. Disabling the master switch preserves those selections.
 
 Planning considers only enabled catalog entries whose exact live identity, reward,
 payment, price, and stock still match. It selects deterministically, checks live

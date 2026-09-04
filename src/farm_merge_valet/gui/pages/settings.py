@@ -56,10 +56,16 @@ class SettingsPage(ConfigFormPage):
         sections = scrollable_sections(self.page_layout)
 
         automation, automation_form = settings_section("Automation")
-        self._add_int(automation_form, "Reserved empty cells", "merge_empty_cell_reserve", 0, 50)
         self._add_int(
             automation_form,
-            "Producer interaction open cells",
+            "Merge-space reserve",
+            "merge_empty_cell_reserve",
+            0,
+            50,
+        )
+        self._add_int(
+            automation_form,
+            "Fallback producer open cells",
             "producer_interact_min_empty_cells",
             1,
             50,
@@ -73,6 +79,21 @@ class SettingsPage(ConfigFormPage):
             automation_form,
             "Automatically pop stored items",
             "auto_pop_storage_bubbles",
+        )
+        self._add_toggle(
+            automation_form,
+            "Automatically claim supply crates",
+            "auto_claim_supply_crates",
+        )
+        self._add_toggle(
+            automation_form,
+            "Allow obstacle energy spending",
+            "allow_obstacle_stage_starts",
+        )
+        self._add_toggle(
+            automation_form,
+            "Allow starting new shop orders",
+            "allow_shop_order_starts",
         )
 
         automation_advanced, form = disclosure_section("Advanced timing")
@@ -91,10 +112,11 @@ class SettingsPage(ConfigFormPage):
         self._add_hotkey(form, "Pause / resume", "pause_hotkey")
         self._add_hotkey(form, "Quit application", "quit_hotkey")
         for field, label in (
-            ("start_paused", "Start automation paused"),
+            ("start_paused", "Start each bot run paused"),
             ("start_minimized", "Start minimized to tray"),
             ("bot_autostart", "Start bot with application"),
             ("close_to_tray", "Close window to tray"),
+            ("close_managed_browser_on_exit", "Close managed browser when quitting"),
         ):
             self._add_toggle(form, label, field)
         sections.addWidget(controls)

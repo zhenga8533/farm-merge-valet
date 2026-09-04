@@ -65,6 +65,15 @@ class MarketplacePage(AppPage):
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
+        self.master_toggle = PolicyCheckBox("Enable marketplace automation")
+        configure_policy_toggle(self.master_toggle)
+        self.master_toggle.setChecked(config.marketplace_automation_enabled)
+        self.master_toggle.setAccessibleName("Enable marketplace automation")
+        self.master_toggle.setToolTip(
+            "Pause all marketplace purchases without changing individual offer selections."
+        )
+        self.master_toggle.toggled.connect(self._set_master_enabled)
+        self.page_layout.addWidget(self.master_toggle)
         scaffold = create_policy_tree(
             header_labels=("Offer", "Cost", ""),
             bulk_labels={2: "Auto-purchase"},
@@ -95,6 +104,9 @@ class MarketplacePage(AppPage):
             or config.marketplace_sort_descending != self._config.marketplace_sort_descending
         )
         self._config = config
+        self.master_toggle.blockSignals(True)
+        self.master_toggle.setChecked(config.marketplace_automation_enabled)
+        self.master_toggle.blockSignals(False)
         self._icons.set_catalog_dir(config.catalog_dir)
         if sort_changed:
             self._apply_sort_preference()
@@ -246,6 +258,16 @@ class MarketplacePage(AppPage):
             ConfigEdit({"marketplace_policy_overrides": values}, source="marketplace")
         )
         self._sync_controls()
+
+    def _set_master_enabled(self, enabled: bool) -> None:
+        self._config = AppConfig.model_validate(
+            self._config.model_copy(
+                update={"marketplace_automation_enabled": enabled}
+            ).model_dump()
+        )
+        self.config_edited.emit(
+            ConfigEdit({"marketplace_automation_enabled": enabled}, source="marketplace")
+        )
 
     def _set_group(self, policy_keys: tuple[str, ...], enabled: bool) -> None:
         values = dict(self._config.marketplace_policy_overrides)

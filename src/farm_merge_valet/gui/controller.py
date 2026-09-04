@@ -91,7 +91,7 @@ class ApplicationController(QObject):
     upgrade_progress_changed = Signal(object)
     shutdown_complete = Signal()
     _utility_operation_finished = Signal(str, object)
-    _bot_finished = Signal(object, bool)
+    _bot_finished = Signal(object)
 
     def __init__(self, store: ConfigStore) -> None:
         super().__init__()
@@ -104,6 +104,9 @@ class ApplicationController(QObject):
         self._stopping = False
         self._shutting_down = False
         self._unsubscribed = False
+        self._shutdown_browser_worker: threading.Thread | None = None
+        self._shutdown_browser_error: str | None = None
+        self._shutdown_browser_complete = False
         self.hotkeys = HotkeyManager()
         self.hotkeys.setParent(self)
         self.hotkeys.start_stop_requested.connect(self.toggle_running)
@@ -268,11 +271,8 @@ class ApplicationController(QObject):
                 _exc_info=True,
             )
         finally:
-            quit_from_inbound_control = bool(
-                self._bot is not None and self._bot.quit_requested and not self._stopping
-            )
             self._bot = None
-            self._bot_finished.emit(failure, quit_from_inbound_control)
+            self._bot_finished.emit(failure)
 
     def toggle_pause(self) -> None:
         if self._bot is None:
@@ -322,12 +322,10 @@ class ApplicationController(QObject):
             self.stop_bot()
         self._poll_workers()
 
-    def _finish_bot(self, failure: object, quit_from_inbound_control: bool) -> None:
+    def _finish_bot(self, failure: object) -> None:
         self._stopping = False
         state = ApplicationState.ERROR if failure is not None else ApplicationState.STOPPED
         self._set_status(state=state, phase="—")
-        if quit_from_inbound_control:
-            self.application_quit_requested.emit()
 
     @staticmethod
     def _browser_status_text(status: BrowserStatus) -> str:
@@ -511,12 +509,43 @@ class ApplicationController(QObject):
         bot_running = self._worker is not None and self._worker.is_alive()
         if bot_running or self._operations.running or self._operations.completion_pending:
             return
+        if self.config.close_managed_browser_on_exit and not self._shutdown_browser_complete:
+            worker = self._shutdown_browser_worker
+            if worker is None:
+                self._shutdown_browser_worker = threading.Thread(
+                    target=self._close_managed_browser_for_shutdown,
+                    daemon=True,
+                    name="fmv-browser-shutdown",
+                )
+                self._shutdown_browser_worker.start()
+                return
+            if worker.is_alive():
+                return
+            self._shutdown_browser_complete = True
+            if self._shutdown_browser_error is not None:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "browser.shutdown_failed",
+                    "Could not close the managed browser during shutdown: %s",
+                    self._shutdown_browser_error,
+                    detail=self._shutdown_browser_error,
+                )
         self._state_timer.stop()
         if not self._unsubscribed:
             self._unsubscribe()
             self._unsubscribed = True
         self.shutdown_complete.emit()
         self.deleteLater()
+
+    def _close_managed_browser_for_shutdown(self) -> None:
+        try:
+            manager = BrowserManager(self.store.current)
+            status = manager.status()
+            if status.running and status.managed:
+                manager.stop()
+        except (OSError, RuntimeError) as exc:
+            self._shutdown_browser_error = str(exc)
 
     def _set_status(self, **changes: object) -> None:
         values = vars(self.status) | changes
