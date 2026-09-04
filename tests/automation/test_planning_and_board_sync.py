@@ -199,7 +199,7 @@ def test_crate_limit_preserves_policy_reserve(monkeypatch, caplog) -> None:
     monkeypatch.setattr(bot.config, "merge_empty_cell_reserve", 1)
 
     with caplog.at_level(logging.DEBUG):
-        bot._step_claim_crates(False)
+        bot._step_claim_crates(bot._assess_board_space())
 
     assert bot.runtime.spawn_limits == [3]
     events = [record.fmv_event for record in caplog.records if hasattr(record, "fmv_event")]
@@ -224,7 +224,7 @@ def test_exhausted_crates_use_configured_idle_delay(monkeypatch, caplog) -> None
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 10.0)
 
     with caplog.at_level(logging.DEBUG):
-        bot._step_claim_crates(False)
+        bot._step_claim_crates(bot._assess_board_space())
 
     assert bot._next_loop_delay == 30.0
     record = next(record for record in caplog.records if record.fmv_event == "bot.idle")
@@ -260,7 +260,7 @@ def test_idle_log_explains_when_focused_obstacle_needs_more_energy(monkeypatch, 
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 10.0)
 
     with caplog.at_level(logging.INFO):
-        bot._step_claim_crates(False)
+        bot._step_claim_crates(bot._assess_board_space())
 
     record = next(record for record in caplog.records if record.fmv_event == "bot.idle")
     assert "needs 25 energy; 13 available" in record.message

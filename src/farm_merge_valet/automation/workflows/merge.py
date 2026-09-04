@@ -6,6 +6,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from farm_merge_valet.automation.board_space import (
+    BoardSpaceAssessment,
+    BoardSpaceStatus,
+)
 from farm_merge_valet.automation.runtime import ActionStatus, RuntimeHealth
 from farm_merge_valet.core.board import Cell
 from farm_merge_valet.core.items import GridCoord, ItemRef
@@ -41,6 +45,34 @@ class MergeWorkflow:
     failures: dict[tuple[object, ...], int] = field(default_factory=dict)
     retry_at: dict[tuple[object, ...], float] = field(default_factory=dict)
     next_action_at: float = 0.0
+    blocked_requirement: tuple[int, int] | None = None
+
+    def _report_blocked_space(
+        self,
+        bot: Bot,
+        board_space: BoardSpaceAssessment,
+        required_empty_cells: int,
+    ) -> None:
+        signature = (board_space.empty_cells, required_empty_cells)
+        if signature != self.blocked_requirement:
+            log_event(
+                logger,
+                logging.WARNING,
+                "planner.board_blocked",
+                "Board has %d open cell(s), needs %d, and no policy-compliant merge can "
+                "create space; waiting for a board or policy change.",
+                board_space.empty_cells,
+                required_empty_cells,
+                empty_cells=board_space.empty_cells,
+                required_empty_cells=required_empty_cells,
+            )
+            self.blocked_requirement = signature
+        bot._defer_idle(
+            f"board has {board_space.empty_cells} open cells but needs "
+            f"{required_empty_cells}; no policy-compliant merge can create space",
+            empty_cells=board_space.empty_cells,
+            required_empty_cells=required_empty_cells,
+        )
 
     def _merge_action_succeeded(self, bot: Bot, action: MergeAction) -> bool:
         def has_item(coord: GridCoord, item: ItemRef) -> bool:
@@ -246,19 +278,20 @@ class MergeWorkflow:
         self,
         bot: Bot,
         health: RuntimeHealth,
-        board_needs_merge: bool,
+        board_space: BoardSpaceAssessment,
         *,
         required_empty_cells: int | None = None,
     ) -> None:
         if bot._now() < self.next_action_at:
             return
-        actions = bot._merge_actions_for_policy()
+        actions = board_space.merge_actions
         eligible_actions = [
             action
             for action in actions
             if self.retry_at.get(bot._action_key(action), 0.0) <= bot._now()
         ]
         if eligible_actions:
+            self.blocked_requirement = None
             selected = eligible_actions[0]
             log_event(
                 logger,
@@ -276,26 +309,18 @@ class MergeWorkflow:
             )
             bot._submit_merge(selected, health)
         elif actions:
+            self.blocked_requirement = None
             bot._report_wait("failed item actions are cooling down before retry")
         elif (
-            required_empty_cells is not None and len(bot.board.find_empty()) < required_empty_cells
+            required_empty_cells is not None
+            and board_space.status_for(required_empty_cells) is BoardSpaceStatus.BLOCKED
         ):
-            bot._report_wait(
-                f"an output claim needs {required_empty_cells} open cells and no merge can "
-                "currently create more space",
-                empty_cells=len(bot.board.find_empty()),
-                required_empty_cells=required_empty_cells,
-            )
-        elif not board_needs_merge:
+            self._report_blocked_space(bot, board_space, required_empty_cells)
+        elif not board_space.needs_merge:
+            self.blocked_requirement = None
             bot._set_phase(bot.phase.__class__.CLAIM_CRATES)
-        elif not bot.board.find_empty():
-            log_event(
-                logger,
-                logging.ERROR,
-                "planner.board_full",
-                "Board is full and no merge action is available; pausing.",
-            )
-            bot.paused = True
-            bot._interrupt_event.set()
+        elif board_space.status_for(1) is BoardSpaceStatus.BLOCKED:
+            self._report_blocked_space(bot, board_space, 1)
         else:
+            self.blocked_requirement = None
             bot._defer_idle("no item, producer, or crate action is currently available")

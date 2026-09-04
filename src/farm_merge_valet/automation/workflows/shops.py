@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from farm_merge_valet.automation.board_space import BoardSpaceAssessment
 from farm_merge_valet.automation.runtime import ActionStatus, RuntimeHealth
 from farm_merge_valet.core.shops import (
     ShopAction,
@@ -194,20 +195,20 @@ class ShopWorkflow:
         bot: Bot,
         health: RuntimeHealth,
         orders: tuple[ShopOrder, ...],
-        board_needs_merge: bool,
+        board_space: BoardSpaceAssessment,
     ) -> bool:
         policy = bot._shop_policy()
-        action = plan_shop_action(orders, policy, len(bot.board.find_empty()))
+        action = plan_shop_action(orders, policy, board_space.empty_cells)
         if action is not None:
             bot._set_phase(bot.phase.__class__.SHOPS)
             bot._submit_shop_action(action, health)
             return True
         required_empty_cells = required_shop_claim_empty_cells(orders, policy)
-        if required_empty_cells is not None and len(bot.board.find_empty()) < required_empty_cells:
+        if required_empty_cells is not None and board_space.empty_cells < required_empty_cells:
             bot._set_phase(bot.phase.__class__.MERGE)
             bot._step_merge(
                 health,
-                board_needs_merge,
+                board_space,
                 required_empty_cells=required_empty_cells,
             )
             return True

@@ -173,7 +173,7 @@ def test_selected_action_logs_plan_then_submission(monkeypatch, caplog) -> None:
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 10.0)
 
     with caplog.at_level(logging.DEBUG):
-        bot._step_merge(health(advancing=True), True)
+        bot._step_merge(health(advancing=True), bot._assess_board_space())
 
     events = [record.fmv_event for record in caplog.records if hasattr(record, "fmv_event")]
     assert events[-2:] == ["action.planned", "action.submitted"]
@@ -317,7 +317,7 @@ def test_item_action_pacing_wait_is_silent(monkeypatch, caplog) -> None:
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 10.0)
 
     with caplog.at_level(logging.INFO):
-        bot._step_merge(health(advancing=True), True)
+        bot._step_merge(health(advancing=True), bot._assess_board_space())
 
     assert caplog.messages == []
 
@@ -366,7 +366,7 @@ def test_genuine_noop_delays_before_trying_an_alternative(monkeypatch) -> None:
 
     assert bot._verify_pending_action(health(advancing=True))
     bot._merge_actions_for_policy = lambda: [failed, alternative]
-    bot._step_merge(health(advancing=True), True)
+    bot._step_merge(health(advancing=True), bot._assess_board_space())
 
     assert bot.runtime.drops == []
 
@@ -385,3 +385,55 @@ def test_three_genuine_noops_pause_instead_of_repeating(monkeypatch) -> None:
     assert not bot._verify_pending_action(health(advancing=True))
     assert bot.paused
     assert bot._interrupt_event.is_set()
+
+
+def test_full_board_without_safe_recovery_keeps_polling(caplog) -> None:
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    bot.board.set_cell((0, 0), Cell(CellKind.ITEM, wheat))
+
+    with caplog.at_level(logging.INFO):
+        bot._step_merge(health(advancing=True), bot._assess_board_space())
+
+    assert not bot.paused
+    assert not bot._interrupt_event.is_set()
+    assert bot._next_loop_delay == bot.config.idle_wait_seconds
+    assert any(
+        getattr(record, "fmv_event", None) == "planner.board_blocked"
+        for record in caplog.records
+    )
+
+
+def test_blocked_board_recovers_after_space_is_freed() -> None:
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    bot.board.set_cell((0, 0), Cell(CellKind.ITEM, wheat))
+    bot._step_merge(health(advancing=True), bot._assess_board_space())
+
+    bot.board.set_cell((1, 0), Cell(CellKind.EMPTY))
+    bot._step_merge(health(advancing=True), bot._assess_board_space())
+
+    assert bot.phase is Phase.CLAIM_CRATES
+    assert not bot.paused
+
+
+def test_output_space_deadlock_uses_same_non_terminal_blocked_state(caplog) -> None:
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    bot.board.set_cell((0, 0), Cell(CellKind.ITEM, wheat))
+
+    with caplog.at_level(logging.INFO):
+        bot._step_merge(
+            health(advancing=True),
+            bot._assess_board_space(),
+            required_empty_cells=3,
+        )
+
+    assert not bot.paused
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "fmv_event", None) == "planner.board_blocked"
+    )
+    assert record.fmv_context["empty_cells"] == 0
+    assert record.fmv_context["required_empty_cells"] == 3

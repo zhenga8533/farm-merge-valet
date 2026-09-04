@@ -12,6 +12,7 @@ from queue import Empty, Queue
 from threading import Event, Lock, Thread
 from typing import Literal
 
+from farm_merge_valet.automation.board_space import BoardSpaceAssessment
 from farm_merge_valet.automation.perception import build_board, build_perceived_state
 from farm_merge_valet.automation.runtime import (
     ActionStatus,
@@ -583,11 +584,12 @@ class Bot:
             prefer_merge_five=True,
         )
 
-    def _board_needs_merge(self) -> bool:
-        empty_count = len(self.board.find_empty())
-        return empty_count == 0 or (
-            empty_count <= self.config.merge_empty_cell_reserve
-            and bool(self._merge_actions_for_policy())
+    def _assess_board_space(self) -> BoardSpaceAssessment:
+        empty_cells = len(self.board.find_empty())
+        return BoardSpaceAssessment(
+            empty_cells=empty_cells,
+            reserve=self.config.merge_empty_cell_reserve,
+            merge_actions=tuple(self._merge_actions_for_policy()),
         )
 
     def _action_signature(self, action: MergeAction) -> tuple[tuple[GridCoord, Cell | None], ...]:
@@ -1151,8 +1153,16 @@ class Bot:
         immediate: list[InteractionAction],
         depleted: list[InteractionAction],
         ready: list[InteractionAction],
+        board_space: BoardSpaceAssessment | None = None,
     ) -> None:
-        self._interaction_workflow._step_interact_tiles(self, health, immediate, depleted, ready)
+        self._interaction_workflow._step_interact_tiles(
+            self,
+            health,
+            immediate,
+            depleted,
+            ready,
+            board_space or self._assess_board_space(),
+        )
 
     def _continue_output_space_request(
         self,
@@ -1160,11 +1170,15 @@ class Bot:
         immediate: list[InteractionAction],
         depleted: list[InteractionAction],
         ready: list[InteractionAction],
+        board_space: BoardSpaceAssessment | None = None,
     ) -> bool:
+        board_space = board_space or self._assess_board_space()
         requested = self._interaction_workflow.requested_output_claim(immediate, depleted, ready)
         if requested is None:
             return False
-        required_empty_cells = self._interaction_workflow.required_output_space(self, requested)
+        required_empty_cells = self._interaction_workflow.required_output_space(
+            self, requested, board_space
+        )
         if required_empty_cells is None:
             self._interaction_workflow.output_space_request = None
             return False
@@ -1172,18 +1186,18 @@ class Bot:
         if self._ensure_capability(health, RuntimeCapability.MERGE_DROP):
             self._step_merge(
                 health,
-                True,
+                board_space,
                 required_empty_cells=required_empty_cells,
             )
         return True
 
-    def _step_claim_crates(self, board_needs_merge: bool) -> None:
-        if board_needs_merge:
+    def _step_claim_crates(self, board_space: BoardSpaceAssessment) -> None:
+        if board_space.needs_merge:
             self._set_phase(Phase.MERGE)
             return
-        merge_actions_available = bool(self._merge_actions_for_policy())
-        reserve = self.config.merge_empty_cell_reserve if merge_actions_available else 0
-        limit = max(0, len(self.board.find_empty()) - reserve)
+        merge_actions_available = bool(board_space.merge_actions)
+        reserve = board_space.reserve if merge_actions_available else 0
+        limit = max(0, board_space.empty_cells - reserve)
         if limit == 0:
             self._set_phase(Phase.MERGE)
             return
@@ -1205,7 +1219,7 @@ class Bot:
                 limit,
                 claim_limit=limit,
                 available_crates=result.available_before,
-                empty_cells=len(self.board.find_empty()),
+                empty_cells=board_space.empty_cells,
                 reserved_empty_cells=reserve,
             )
             self._last_crate_claim_limit = limit
@@ -1251,21 +1265,21 @@ class Bot:
     def _step_merge(
         self,
         health: RuntimeHealth,
-        board_needs_merge: bool,
+        board_space: BoardSpaceAssessment,
         *,
         required_empty_cells: int | None = None,
     ) -> None:
         self._merge_workflow._step_merge(
-            self, health, board_needs_merge, required_empty_cells=required_empty_cells
+            self, health, board_space, required_empty_cells=required_empty_cells
         )
 
     def _step_shops(
         self,
         health: RuntimeHealth,
         orders: tuple[ShopOrder, ...],
-        board_needs_merge: bool,
+        board_space: BoardSpaceAssessment,
     ) -> bool:
-        return self._shop_workflow._step_shops(self, health, orders, board_needs_merge)
+        return self._shop_workflow._step_shops(self, health, orders, board_space)
 
     def _shop_policy(self) -> ShopPolicy:
         return ShopPolicy(
@@ -1394,9 +1408,11 @@ class Bot:
             bot=self, health=health, offers=marketplace_offers
         ):
             return
-        board_needs_merge = self._board_needs_merge()
+        board_space = self._assess_board_space()
         immediate, depleted, ready = self._interaction_actions()
-        if self._continue_output_space_request(health, immediate, depleted, ready):
+        if self._continue_output_space_request(
+            health, immediate, depleted, ready, board_space
+        ):
             return
         claim_is_ready = immediate and immediate[0].kind is not InteractionTargetKind.CLEAR
         if not claim_is_ready and self._step_storage_bubbles(health):
@@ -1425,7 +1441,7 @@ class Bot:
                 capability = "board interaction"
             if not self._ensure_capability(health, runtime_capability, label=capability):
                 return
-            self._step_interact_tiles(health, immediate, depleted, ready)
+            self._step_interact_tiles(health, immediate, depleted, ready, board_space)
             return
         cooling_producers = self._cooling_producer_count()
         if cooling_producers and cooling_producers != self._last_cooling_producer_count:
@@ -1442,7 +1458,7 @@ class Bot:
             if not health.supports(RuntimeCapability.SHOPS):
                 if not self._ensure_capability(health, RuntimeCapability.SHOPS):
                     return
-            if self._step_shops(health, shop_orders, board_needs_merge):
+            if self._step_shops(health, shop_orders, board_space):
                 return
         if marketplace_enabled and marketplace_offers is not None:
             if not health.supports(RuntimeCapability.MARKETPLACE):
@@ -1454,15 +1470,15 @@ class Bot:
         if self.phase is Phase.INTERACT_TILES:
             self._set_phase(Phase.CLAIM_CRATES)
         if self.phase is Phase.CLAIM_CRATES:
-            if not board_needs_merge and not self._ensure_capability(
+            if not board_space.needs_merge and not self._ensure_capability(
                 health, RuntimeCapability.CRATES
             ):
                 return
-            self._step_claim_crates(board_needs_merge)
+            self._step_claim_crates(board_space)
         else:
             if not self._ensure_capability(health, RuntimeCapability.MERGE_DROP):
                 return
-            self._step_merge(health, board_needs_merge)
+            self._step_merge(health, board_space)
 
     def _ensure_capability(
         self,

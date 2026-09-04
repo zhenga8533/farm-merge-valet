@@ -218,6 +218,10 @@ exists. Occupied-item swaps can recover a full board. The game may relocate the
 displaced item to any available empty cell rather than exchanging the two cells
 literally, so success is based on the dragged item reaching its destination;
 the next authoritative board read discovers the displaced item's location.
+When no policy-compliant merge can create required space, the bot enters a
+non-terminal blocked state and keeps polling for a manual board change or policy
+update. It never removes an item as an emergency measure unless that item's
+removal policy explicitly authorizes it.
 
 The selected source and destination coordinates are resolved directly against
 the complete live board map, including cells that are not rendered on screen.

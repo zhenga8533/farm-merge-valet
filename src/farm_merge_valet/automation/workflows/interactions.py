@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from farm_merge_valet.automation.board_space import BoardSpaceAssessment
 from farm_merge_valet.automation.runtime import (
     ActionStatus,
     LiveCellState,
@@ -113,14 +114,18 @@ class InteractionWorkflow:
         return current
 
     @staticmethod
-    def required_output_space(bot: Bot, action: InteractionAction) -> int | None:
+    def required_output_space(
+        bot: Bot,
+        action: InteractionAction,
+        board_space: BoardSpaceAssessment,
+    ) -> int | None:
         desired_empty_cells = action.output_capacity or bot.config.producer_interact_min_empty_cells
-        empty_count = len(bot.board.find_empty())
+        empty_count = board_space.empty_cells
         if empty_count >= desired_empty_cells:
             return None
         if action.requires_full_output_space:
             return desired_empty_cells
-        if bot._merge_actions_for_policy() or empty_count == 0:
+        if board_space.merge_actions or empty_count == 0:
             return desired_empty_cells
         return None
 
@@ -373,18 +378,21 @@ class InteractionWorkflow:
         bot: Bot,
         health: RuntimeHealth,
         action: InteractionAction,
+        board_space: BoardSpaceAssessment,
     ) -> None:
-        empty_count = len(bot.board.find_empty())
+        empty_count = board_space.empty_cells
         desired_empty_cells = action.output_capacity or bot.config.producer_interact_min_empty_cells
         if empty_count >= desired_empty_cells:
             self.output_space_request = None
             bot._submit_interaction(action, health)
             return
-        if bot._merge_actions_for_policy():
+        if board_space.merge_actions:
             self.output_space_request = action
             bot._set_phase(bot.phase.__class__.MERGE)
             if bot._ensure_capability(health, RuntimeCapability.MERGE_DROP):
-                bot._step_merge(health, True, required_empty_cells=desired_empty_cells)
+                bot._step_merge(
+                    health, board_space, required_empty_cells=desired_empty_cells
+                )
             return
         if action.requires_full_output_space:
             self.output_space_request = action
@@ -416,7 +424,7 @@ class InteractionWorkflow:
             return
         self.output_space_request = action
         bot._set_phase(bot.phase.__class__.MERGE)
-        bot._step_merge(health, True, required_empty_cells=1)
+        bot._step_merge(health, board_space, required_empty_cells=1)
 
     def _step_interact_tiles(
         self,
@@ -425,6 +433,7 @@ class InteractionWorkflow:
         immediate: list[InteractionAction],
         depleted: list[InteractionAction],
         ready: list[InteractionAction],
+        board_space: BoardSpaceAssessment,
     ) -> None:
         if bot._now() < self.next_action_at:
             return
@@ -434,11 +443,11 @@ class InteractionWorkflow:
                 InteractionTargetKind.OBSTACLE_LOOT,
                 InteractionTargetKind.REWARD_CONTAINER,
             }:
-                self._step_output_claim(bot, health, action)
+                self._step_output_claim(bot, health, action, board_space)
             else:
                 bot._submit_interaction(action, health)
             return
-        empty_count = len(bot.board.find_empty())
+        empty_count = board_space.empty_cells
         for action in depleted:
             required = 1 if action.producer_kind is ProducerKind.CROP else 0
             if empty_count >= required:
@@ -447,9 +456,9 @@ class InteractionWorkflow:
         if depleted:
             bot._set_phase(bot.phase.__class__.MERGE)
             if bot._ensure_capability(health, RuntimeCapability.MERGE_DROP):
-                bot._step_merge(health, True, required_empty_cells=1)
+                bot._step_merge(health, board_space, required_empty_cells=1)
             return
         if ready:
-            self._step_output_claim(bot, health, ready[0])
+            self._step_output_claim(bot, health, ready[0], board_space)
             return
         bot._set_phase(bot.phase.__class__.CLAIM_CRATES)
