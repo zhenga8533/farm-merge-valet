@@ -87,10 +87,6 @@ class ActionCoordinator:
         state = self.retries.get((kind, key))
         return state.retry_at if state is not None else 0.0
 
-    def failure_count(self, kind: OperationKind, key: OperationKey) -> int:
-        state = self.retries.get((kind, key))
-        return state.failures if state is not None else 0
-
     def _release(self, kind: OperationKind, key: OperationKey) -> None:
         if self.active == ActiveOperation(kind, key):
             self.active = None

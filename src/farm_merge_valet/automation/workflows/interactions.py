@@ -80,6 +80,19 @@ class InteractionWorkflow:
             OperationKind.INTERACTION, self._action_key(action), bot._now()
         )
 
+    def available_actions(
+        self,
+        bot: Bot,
+        immediate: list[InteractionAction],
+        depleted: list[InteractionAction],
+        ready: list[InteractionAction],
+    ) -> tuple[list[InteractionAction], list[InteractionAction], list[InteractionAction]]:
+        return (
+            [action for action in immediate if self._available(bot, action)],
+            [action for action in depleted if self._available(bot, action)],
+            [action for action in ready if self._available(bot, action)],
+        )
+
     def output_capacity_for(
         self,
         coord: GridCoord,
@@ -358,14 +371,15 @@ class InteractionWorkflow:
             )
             return True
         self.pending = None
-        bot._actions().release(OperationKind.INTERACTION, action_key)
         if result.status is ActionStatus.BUSY:
+            bot._actions().release(OperationKind.INTERACTION, action_key)
             bot._report_wait(
                 "the game is finishing another board interaction",
                 status=result.status.value,
                 **bot._interaction_event_context(action),
             )
         elif result.status is ActionStatus.UNAVAILABLE:
+            bot._actions().release(OperationKind.INTERACTION, action_key)
             bot._report_wait(
                 result.detail or "board interaction handler unavailable",
                 status=result.status.value,
@@ -460,23 +474,23 @@ class InteractionWorkflow:
             action = next(
                 (candidate for candidate in immediate if self._available(bot, candidate)), None
             )
-            if action is None:
+            if action is not None:
+                if action.kind in {
+                    InteractionTargetKind.OBSTACLE_LOOT,
+                    InteractionTargetKind.REWARD_CONTAINER,
+                }:
+                    self._step_output_claim(bot, health, action, board_space)
+                else:
+                    bot._submit_interaction(action, health)
                 return
-            if action.kind in {
-                InteractionTargetKind.OBSTACLE_LOOT,
-                InteractionTargetKind.REWARD_CONTAINER,
-            }:
-                self._step_output_claim(bot, health, action, board_space)
-            else:
-                bot._submit_interaction(action, health)
-            return
         empty_count = board_space.empty_cells
-        for action in depleted:
+        available_depleted = [action for action in depleted if self._available(bot, action)]
+        for action in available_depleted:
             required = 1 if action.producer_kind is ProducerKind.CROP else 0
-            if empty_count >= required and self._available(bot, action):
+            if empty_count >= required:
                 bot._submit_interaction(action, health)
                 return
-        if depleted:
+        if available_depleted:
             bot._set_phase(bot.phase.__class__.MERGE)
             if bot._ensure_capability(health, RuntimeCapability.MERGE_DROP):
                 bot._step_merge(health, board_space, required_empty_cells=1)

@@ -251,7 +251,6 @@ class MergeWorkflow:
             )
             return True
         self.pending = None
-        bot._actions().release(OperationKind.MERGE, action_key)
         if result.status not in (ActionStatus.BUSY, ActionStatus.UNAVAILABLE):
             log_event(
                 logger,
@@ -274,12 +273,14 @@ class MergeWorkflow:
                 delay=_ACTION_RETRY_SECONDS,
             )
         elif result.status is ActionStatus.BUSY:
+            bot._actions().release(OperationKind.MERGE, action_key)
             bot._report_wait(
                 "the game is finishing another item action",
                 status=result.status.value,
                 **bot._action_event_context(action),
             )
         else:
+            bot._actions().release(OperationKind.MERGE, action_key)
             bot._report_wait(
                 result.detail or "item interaction handler unavailable",
                 status=result.status.value,

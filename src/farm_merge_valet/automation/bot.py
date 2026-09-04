@@ -1117,12 +1117,12 @@ class Bot:
                 object_id=bubble.object_id,
                 scene_id=health.scene_id,
             )
-        else:
-            self._pending_storage_bubble = None
-            self._actions().release(OperationKind.STORAGE_BUBBLE, operation_key)
+            return True
+        self._pending_storage_bubble = None
         if result.status in {ActionStatus.BUSY, ActionStatus.UNAVAILABLE}:
+            self._actions().release(OperationKind.STORAGE_BUBBLE, operation_key)
             self._report_wait(result.detail or "storage-bubble interaction unavailable")
-        elif not result.submitted:
+        else:
             self._actions().fail(
                 OperationKind.STORAGE_BUBBLE,
                 operation_key,
@@ -1440,6 +1440,9 @@ class Bot:
             health, immediate, depleted, ready, board_space
         ):
             return
+        immediate, depleted, ready = self._interaction_workflow.available_actions(
+            self, immediate, depleted, ready
+        )
         claim_is_ready = immediate and immediate[0].kind is not InteractionTargetKind.CLEAR
         if not claim_is_ready and self._step_storage_bubbles(health):
             return

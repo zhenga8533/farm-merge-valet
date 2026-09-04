@@ -152,8 +152,8 @@ class MarketplaceWorkflow:
             )
             return True
         self.pending = None
-        bot._actions().release(OperationKind.MARKETPLACE, action_key)
         if result.status in {ActionStatus.BUSY, ActionStatus.UNAVAILABLE}:
+            bot._actions().release(OperationKind.MARKETPLACE, action_key)
             bot._report_wait(result.detail or "marketplace purchase unavailable")
         else:
             bot._actions().fail(

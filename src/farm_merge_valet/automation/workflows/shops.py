@@ -179,8 +179,8 @@ class ShopWorkflow:
             )
             return True
         self.pending = None
-        bot._actions().release(OperationKind.SHOP, action_key)
         if result.status in (ActionStatus.BUSY, ActionStatus.UNAVAILABLE):
+            bot._actions().release(OperationKind.SHOP, action_key)
             bot._report_wait(result.detail or "shop action capability unavailable")
         else:
             bot._actions().fail(
