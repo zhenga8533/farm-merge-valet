@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from farm_merge_valet.automation.action_control import OperationKey, OperationKind
 from farm_merge_valet.automation.board_space import BoardSpaceAssessment
 from farm_merge_valet.automation.runtime import (
     ActionStatus,
@@ -63,13 +64,21 @@ class PendingInteraction:
 @dataclass
 class InteractionWorkflow:
     pending: PendingInteraction | None = None
-    next_action_at: float = 0.0
     output_space_request: InteractionAction | None = None
     remaining_output_capacity: dict[tuple[GridCoord, int | None], int] = field(default_factory=dict)
 
     @staticmethod
     def _output_key(action: InteractionAction) -> tuple[GridCoord, int | None]:
         return action.coord, action.object_id
+
+    @staticmethod
+    def _action_key(action: InteractionAction) -> OperationKey:
+        return action.kind.value, action.coord, action.blueprint_id, action.object_id
+
+    def _available(self, bot: Bot, action: InteractionAction) -> bool:
+        return bot._actions().available(
+            OperationKind.INTERACTION, self._action_key(action), bot._now()
+        )
 
     def output_capacity_for(
         self,
@@ -223,6 +232,7 @@ class InteractionWorkflow:
         output_progress_count = self._output_progress_count(bot, pending)
         partially_completed = not completed and output_progress_count > 0
         if completed or partially_completed:
+            action_key = self._action_key(pending.action)
             output_key = self._output_key(pending.action)
             if completed:
                 self.remaining_output_capacity.pop(output_key, None)
@@ -234,6 +244,7 @@ class InteractionWorkflow:
                     1, attempted_capacity - output_progress_count
                 )
             self.pending = None
+            bot._actions().complete(OperationKind.INTERACTION, action_key)
             bot._last_wait_reason = None
             bot._last_idle_reason = None
             log_event(
@@ -266,7 +277,12 @@ class InteractionWorkflow:
                 )
             return False
         self.pending = None
-        self.next_action_at = now + _ACTION_RETRY_SECONDS
+        bot._actions().fail(
+            OperationKind.INTERACTION,
+            self._action_key(pending.action),
+            now,
+            base_delay=_ACTION_RETRY_SECONDS,
+        )
         log_event(
             logger,
             logging.WARNING,
@@ -283,7 +299,10 @@ class InteractionWorkflow:
     def _submit_interaction(
         self, bot: Bot, action: InteractionAction, health: RuntimeHealth
     ) -> bool:
-        if bot._merge_workflow.pending is not None or self.pending is not None:
+        action_key = self._action_key(action)
+        if self.pending is not None or not bot._actions().begin(
+            OperationKind.INTERACTION, action_key, bot._now()
+        ):
             return False
         log_event(
             logger,
@@ -296,40 +315,35 @@ class InteractionWorkflow:
             empty_cells=len(bot.board.find_empty()),
             **bot._interaction_event_context(action),
         )
+        submitted_at = bot._now()
+        initial_state = bot._live_cells[action.coord]
+        initial_output_object_ids = frozenset(
+            state.object_id
+            for state in bot._live_cells.values()
+            if state.object_id is not None and state.blueprint_id in action.output_ids
+        )
+        self.pending = PendingInteraction(
+            action,
+            initial_state,
+            health.scene_id,
+            submitted_at,
+            initial_state,
+            submitted_at,
+            initial_output_object_ids,
+        )
         if action.kind is InteractionTargetKind.REMOVE:
             result = bot.runtime.submit_item_removal(
-                action.coord,
-                action.blueprint_id,
-                action.object_id,
+                action.coord, action.blueprint_id, action.object_id
             )
         else:
             result = bot.runtime.submit_board_interaction(
-                action.coord,
-                action.kind,
-                action.blueprint_id,
-                action.object_id,
+                action.coord, action.kind, action.blueprint_id, action.object_id
             )
         if result.status is ActionStatus.SUBMITTED:
             if self.output_space_request is not None and self._same_target(
                 action, self.output_space_request
             ):
                 self.output_space_request = None
-            submitted_at = bot._now()
-            initial_state = bot._live_cells[action.coord]
-            initial_output_object_ids = frozenset(
-                state.object_id
-                for state in bot._live_cells.values()
-                if state.object_id is not None and state.blueprint_id in action.output_ids
-            )
-            self.pending = PendingInteraction(
-                action,
-                initial_state,
-                health.scene_id,
-                submitted_at,
-                initial_state,
-                submitted_at,
-                initial_output_object_ids,
-            )
             bot._last_wait_reason = None
             log_event(
                 logger,
@@ -343,6 +357,8 @@ class InteractionWorkflow:
                 **bot._interaction_event_context(action),
             )
             return True
+        self.pending = None
+        bot._actions().release(OperationKind.INTERACTION, action_key)
         if result.status is ActionStatus.BUSY:
             bot._report_wait(
                 "the game is finishing another board interaction",
@@ -356,7 +372,12 @@ class InteractionWorkflow:
                 **bot._interaction_event_context(action),
             )
         else:
-            self.next_action_at = bot._now() + _ACTION_RETRY_SECONDS
+            bot._actions().fail(
+                OperationKind.INTERACTION,
+                action_key,
+                bot._now(),
+                base_delay=_ACTION_RETRY_SECONDS,
+            )
             log_event(
                 logger,
                 logging.WARNING,
@@ -435,10 +456,12 @@ class InteractionWorkflow:
         ready: list[InteractionAction],
         board_space: BoardSpaceAssessment,
     ) -> None:
-        if bot._now() < self.next_action_at:
-            return
         if immediate:
-            action = immediate[0]
+            action = next(
+                (candidate for candidate in immediate if self._available(bot, candidate)), None
+            )
+            if action is None:
+                return
             if action.kind in {
                 InteractionTargetKind.OBSTACLE_LOOT,
                 InteractionTargetKind.REWARD_CONTAINER,
@@ -450,7 +473,7 @@ class InteractionWorkflow:
         empty_count = board_space.empty_cells
         for action in depleted:
             required = 1 if action.producer_kind is ProducerKind.CROP else 0
-            if empty_count >= required:
+            if empty_count >= required and self._available(bot, action):
                 bot._submit_interaction(action, health)
                 return
         if depleted:
@@ -459,6 +482,10 @@ class InteractionWorkflow:
                 bot._step_merge(health, board_space, required_empty_cells=1)
             return
         if ready:
-            self._step_output_claim(bot, health, ready[0], board_space)
+            action = next(
+                (candidate for candidate in ready if self._available(bot, candidate)), None
+            )
+            if action is not None:
+                self._step_output_claim(bot, health, action, board_space)
             return
         bot._set_phase(bot.phase.__class__.CLAIM_CRATES)

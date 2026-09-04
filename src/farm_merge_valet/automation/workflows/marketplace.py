@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from farm_merge_valet.automation.action_control import OperationKey, OperationKind
 from farm_merge_valet.automation.runtime import (
     ActionStatus,
     RuntimeConnectionError,
@@ -39,7 +40,10 @@ class PendingMarketplacePurchase:
 @dataclass
 class MarketplaceWorkflow:
     pending: PendingMarketplacePurchase | None = None
-    blocked_until: dict[str, float] = field(default_factory=dict)
+
+    @staticmethod
+    def _action_key(action: MarketplaceAction) -> OperationKey:
+        return (action.policy_key,)
 
     def verify_pending(
         self,
@@ -70,6 +74,7 @@ class MarketplaceWorkflow:
         if stock_decreased and (pending.action.payment_type == "free" or balance_decreased):
             assert current is not None
             self.pending = None
+            bot._actions().complete(OperationKind.MARKETPLACE, self._action_key(pending.action))
             bot._last_wait_reason = None
             log_event(
                 logger,
@@ -87,7 +92,13 @@ class MarketplaceWorkflow:
                 bot._report_wait("submitted marketplace purchase is still resolving")
             return False
         self.pending = None
-        self.blocked_until[pending.action.policy_key] = now + _AMBIGUOUS_BACKOFF_SECONDS
+        bot._actions().fail(
+            OperationKind.MARKETPLACE,
+            self._action_key(pending.action),
+            now,
+            base_delay=_AMBIGUOUS_BACKOFF_SECONDS,
+            max_delay=_AMBIGUOUS_BACKOFF_SECONDS,
+        )
         log_event(
             logger,
             logging.WARNING,
@@ -111,19 +122,15 @@ class MarketplaceWorkflow:
             offer.policy_key: True
             for offer in catalog
             if bot.config.marketplace_policy_enabled(offer.policy_key)
-            and now >= self.blocked_until.get(offer.policy_key, 0.0)
+            and bot._actions().available(OperationKind.MARKETPLACE, (offer.policy_key,), now)
         }
         action = plan_marketplace_purchase(catalog, offers, enabled)
         if action is None:
             return False
         before = next(offer for offer in offers if offer.policy_key == action.policy_key)
-        if any(
-            (
-                bot._merge_workflow.pending,
-                bot._interaction_workflow.pending,
-                bot._shop_workflow.pending,
-                self.pending,
-            )
+        action_key = self._action_key(action)
+        if self.pending is not None or not bot._actions().begin(
+            OperationKind.MARKETPLACE, action_key, now
         ):
             return False
         pending = PendingMarketplacePurchase(action, before, health.scene_id, now)
@@ -145,9 +152,17 @@ class MarketplaceWorkflow:
             )
             return True
         self.pending = None
+        bot._actions().release(OperationKind.MARKETPLACE, action_key)
         if result.status in {ActionStatus.BUSY, ActionStatus.UNAVAILABLE}:
             bot._report_wait(result.detail or "marketplace purchase unavailable")
         else:
+            bot._actions().fail(
+                OperationKind.MARKETPLACE,
+                action_key,
+                now,
+                base_delay=_AMBIGUOUS_BACKOFF_SECONDS,
+                max_delay=_AMBIGUOUS_BACKOFF_SECONDS,
+            )
             log_event(
                 logger,
                 logging.WARNING,

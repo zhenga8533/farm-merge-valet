@@ -138,7 +138,8 @@ Each iteration follows a short, fail-closed cycle:
 
 1. Perceive authoritative board, inventory, runtime, and heartbeat state.
 2. Plan with the existing merge, shop, and reserve policies.
-3. Submit through the game's click, pick/drag/drop, order, or live HUD crate event.
+3. Acquire the shared action lease and submit through the game's click,
+   pick/drag/drop, order, or live HUD crate event.
 4. Verify against authoritative board or order state before another action is submitted.
 
 A `requestAnimationFrame` heartbeat must advance before actions are sent. If it
@@ -147,6 +148,9 @@ remains pending until active, settled board state confirms success, a different
 change, or a genuine no-op. Genuine no-ops cool down before retry, and three
 failures of the same action pause the bot. Runtime incompatibility reports an
 unavailable capability; there is no mouse-input fallback.
+Connection loss during submission triggers runtime rediscovery while preserving
+the pending intent for authoritative verification. Interaction and shop retries
+are target-specific, so one rejected target does not block unrelated work.
 
 Known reward overlays are handled before the heartbeat gate because Level Up
 and sticker-pack presentation can pause the game loop. The default-enabled

@@ -1,6 +1,7 @@
 from dataclasses import replace
 from types import SimpleNamespace
 
+from farm_merge_valet.automation.action_control import ActionCoordinator
 from farm_merge_valet.automation.runtime import ActionResult, ActionStatus, RuntimeHealth
 from farm_merge_valet.automation.workflows.marketplace import MarketplaceWorkflow
 from farm_merge_valet.catalog.marketplace import marketplace_catalog
@@ -39,6 +40,7 @@ def _bot(now: list[float], live: MarketplaceLiveOffer):
             self.submitted_keys.append(action.policy_key)
             return ActionResult(ActionStatus.SUBMITTED)
 
+    action_control = ActionCoordinator()
     return SimpleNamespace(
         config=AppConfig(marketplace_policy_overrides={live.policy_key: True}),
         runtime=Runtime(),
@@ -48,6 +50,7 @@ def _bot(now: list[float], live: MarketplaceLiveOffer):
         _interaction_workflow=SimpleNamespace(pending=None),
         _shop_workflow=SimpleNamespace(pending=None),
         _last_wait_reason=None,
+        _actions=lambda: action_control,
     )
 
 

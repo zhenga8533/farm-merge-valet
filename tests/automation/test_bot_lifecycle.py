@@ -11,6 +11,7 @@ from farm_merge_valet.automation.runtime import (
     ActionStatus,
     CrateSpawnResult,
     LiveCellState,
+    RuntimeConnectionError,
     RuntimeHealth,
     TransientOverlayKind,
 )
@@ -197,6 +198,26 @@ def test_config_update_is_applied_as_a_deep_snapshot_at_loop_boundary(caplog) ->
     assert "Applied updated configuration (4 field(s))." in caplog.messages
 
 
+def test_restart_required_config_is_not_applied_to_running_bot(tmp_path) -> None:
+    initial = AppConfig(cdp_port=9222, catalog_dir=tmp_path / "initial")
+    bot = Bot(initial, FakeRuntime(), FakeCatalogProvider())
+
+    bot.update_config(
+        initial.model_copy(
+            update={
+                "cdp_port": 9333,
+                "catalog_dir": tmp_path / "replacement",
+                "loop_interval": 0.25,
+            }
+        )
+    )
+    bot._apply_pending_config()
+
+    assert bot.config.cdp_port == 9222
+    assert bot.config.catalog_dir == tmp_path / "initial"
+    assert bot.config.loop_interval == 0.25
+
+
 def test_latest_config_update_wakes_an_idle_loop_wait() -> None:
     bot = Bot(AppConfig(), FakeRuntime(), FakeCatalogProvider())
     waiting = Event()
@@ -291,6 +312,38 @@ def test_unexpected_bot_failure_is_logged_before_propagating(monkeypatch, caplog
     events = [record.fmv_event for record in caplog.records if hasattr(record, "fmv_event")]
     assert "bot.unhandled_error" in events
     assert events[-1] == "bot.stopped"
+
+
+def test_runtime_connection_loss_reinitializes_without_stopping(monkeypatch, caplog) -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(loop_interval=0.01)
+    bot._resume_cached_runtime = lambda: False
+    initializations: list[bool] = []
+    steps = 0
+
+    def initialize() -> bool:
+        initializations.append(True)
+        return True
+
+    def step() -> None:
+        nonlocal steps
+        steps += 1
+        if steps == 1:
+            raise RuntimeConnectionError("temporary disconnect")
+        bot.request_quit()
+
+    bot.initialize = initialize
+    bot.step = step
+    monkeypatch.setattr(bot.config, "start_paused", False)
+
+    with caplog.at_level(logging.INFO):
+        bot.run_forever()
+
+    events = [record.fmv_event for record in caplog.records if hasattr(record, "fmv_event")]
+    assert len(initializations) == 2
+    assert steps == 2
+    assert "runtime.connection_lost" in events
+    assert "bot.unhandled_error" not in events
 
 
 def test_run_forever_reports_first_successful_initialization(monkeypatch) -> None:

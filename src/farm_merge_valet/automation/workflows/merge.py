@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from farm_merge_valet.automation.action_control import OperationKind
 from farm_merge_valet.automation.board_space import (
     BoardSpaceAssessment,
     BoardSpaceStatus,
@@ -42,8 +43,6 @@ class PendingMergeAction:
 @dataclass
 class MergeWorkflow:
     pending: PendingMergeAction | None = None
-    failures: dict[tuple[object, ...], int] = field(default_factory=dict)
-    retry_at: dict[tuple[object, ...], float] = field(default_factory=dict)
     next_action_at: float = 0.0
     blocked_requirement: tuple[int, int] | None = None
 
@@ -120,8 +119,7 @@ class MergeWorkflow:
         if bot._merge_action_succeeded(pending.action):
             self.pending = None
             action_key = bot._action_key(pending.action)
-            self.failures.pop(action_key, None)
-            self.retry_at.pop(action_key, None)
+            bot._actions().complete(OperationKind.MERGE, action_key)
             bot._schedule_next_item_action(now)
             bot._last_wait_reason = None
             bot._last_idle_reason = None
@@ -157,7 +155,9 @@ class MergeWorkflow:
         self.pending = None
         bot._schedule_next_item_action(now)
         action = pending.action
+        action_key = bot._action_key(action)
         if current_signature != pending.signature:
+            bot._actions().complete(OperationKind.MERGE, action_key)
             log_event(
                 logger,
                 logging.DEBUG,
@@ -176,10 +176,13 @@ class MergeWorkflow:
                 **bot._action_event_context(action),
             )
         else:
-            action_key = bot._action_key(action)
-            failure_count = self.failures.get(action_key, 0) + 1
-            self.failures[action_key] = failure_count
-            self.retry_at[action_key] = now + _ACTION_RETRY_SECONDS
+            failure_count = bot._actions().fail(
+                OperationKind.MERGE,
+                action_key,
+                now,
+                base_delay=_ACTION_RETRY_SECONDS,
+                max_delay=_ACTION_RETRY_SECONDS,
+            )
             log_event(
                 logger,
                 logging.DEBUG,
@@ -215,20 +218,23 @@ class MergeWorkflow:
         return True
 
     def _submit_merge(self, bot: Bot, action: MergeAction, health: RuntimeHealth) -> bool:
-        if self.pending is not None or bot._interaction_workflow.pending is not None:
+        action_key = bot._action_key(action)
+        if self.pending is not None or not bot._actions().begin(
+            OperationKind.MERGE, action_key, bot._now()
+        ):
             return False
+        submitted_at = bot._now()
+        signature = bot._action_signature(action)
+        self.pending = PendingMergeAction(
+            action,
+            signature,
+            health.scene_id,
+            submitted_at,
+            signature,
+            submitted_at,
+        )
         result = bot.runtime.submit_item_drop(action.start, action.end)
         if result.status is ActionStatus.SUBMITTED:
-            submitted_at = bot._now()
-            signature = bot._action_signature(action)
-            self.pending = PendingMergeAction(
-                action,
-                signature,
-                health.scene_id,
-                submitted_at,
-                signature,
-                submitted_at,
-            )
             bot._last_wait_reason = None
             log_event(
                 logger,
@@ -244,6 +250,8 @@ class MergeWorkflow:
                 **bot._action_event_context(action),
             )
             return True
+        self.pending = None
+        bot._actions().release(OperationKind.MERGE, action_key)
         if result.status not in (ActionStatus.BUSY, ActionStatus.UNAVAILABLE):
             log_event(
                 logger,
@@ -259,7 +267,12 @@ class MergeWorkflow:
                 detail=result.detail,
                 **bot._action_event_context(action),
             )
-            self.retry_at[bot._action_key(action)] = bot._now() + _ACTION_RETRY_SECONDS
+            bot._actions().defer(
+                OperationKind.MERGE,
+                action_key,
+                bot._now(),
+                delay=_ACTION_RETRY_SECONDS,
+            )
         elif result.status is ActionStatus.BUSY:
             bot._report_wait(
                 "the game is finishing another item action",
@@ -288,7 +301,9 @@ class MergeWorkflow:
         eligible_actions = [
             action
             for action in actions
-            if self.retry_at.get(bot._action_key(action), 0.0) <= bot._now()
+            if bot._actions().available(
+                OperationKind.MERGE, bot._action_key(action), bot._now()
+            )
         ]
         if eligible_actions:
             self.blocked_requirement = None

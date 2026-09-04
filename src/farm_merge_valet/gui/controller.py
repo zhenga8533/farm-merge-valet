@@ -14,6 +14,7 @@ from farm_merge_valet.automation.bot import Bot
 from farm_merge_valet.browser import BrowserManager, BrowserManagerError, BrowserStatus
 from farm_merge_valet.composition import create_bot, create_catalog_sync_service
 from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.config.change_policy import BOT_RESTART_FIELDS, BROWSER_RESTART_FIELDS
 from farm_merge_valet.config.hotkeys import HotkeyBindings
 from farm_merge_valet.gui.services.background_operation import (
     BackgroundOperationCancelled,
@@ -124,15 +125,7 @@ class ApplicationController(QObject):
         previous = self.config
         self.config = config
         browser_changed = any(
-            (
-                previous.browser != config.browser,
-                previous.browser_executable != config.browser_executable,
-                previous.browser_profile_dir != config.browser_profile_dir,
-                previous.browser_auto_launch != config.browser_auto_launch,
-                previous.cdp_port != config.cdp_port,
-                previous.game_url != config.game_url,
-                previous.window_title != config.window_title,
-            )
+            getattr(previous, name) != getattr(config, name) for name in BROWSER_RESTART_FIELDS
         )
         if browser_changed:
             self._set_status(
@@ -142,14 +135,7 @@ class ApplicationController(QObject):
         bot = self._bot
         if bot is not None:
             bot.update_config(config)
-            restart_fields = (
-                previous.discord_webhook_url != config.discord_webhook_url,
-                previous.webhook_summary_interval != config.webhook_summary_interval,
-                previous.webhook_status_interval != config.webhook_status_interval,
-                previous.catalog_dir != config.catalog_dir,
-                previous.atlas_cache_dir != config.atlas_cache_dir,
-            )
-            if any(restart_fields):
+            if any(getattr(previous, name) != getattr(config, name) for name in BOT_RESTART_FIELDS):
                 self._set_status(last_activity="Settings saved · restart bot to apply")
         hotkeys_changed = any(
             (

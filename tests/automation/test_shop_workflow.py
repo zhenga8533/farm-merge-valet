@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from threading import Event, Lock
 
+from farm_merge_valet.automation.board_space import BoardSpaceAssessment
 from farm_merge_valet.automation.bot import Bot, Phase
 from farm_merge_valet.automation.runtime import (
     ActionResult,
@@ -175,3 +176,37 @@ def test_shop_claim_is_submitted_and_verified() -> None:
     assert bot.runtime.claimed_orders == [("bakery", "recipe_bread")]
     assert bot._verify_pending_shop_action(health(advancing=True), ())
     assert bot._shop_workflow.pending is None
+
+
+def test_global_action_lease_prevents_shop_submission_during_merge() -> None:
+    bot = bare_bot()
+    merge = action(ItemRef("ingredient", "milk", 1, "milk_1"))
+    shop = ShopAction(ShopActionKind.START, "market", "recipe_flour")
+
+    assert bot._submit_merge(merge, health(advancing=True))
+    assert not bot._submit_shop_action(shop, health(advancing=True))
+    assert bot.runtime.started_orders == []
+
+
+def test_rejected_shop_action_cools_down_without_blocking_another_order() -> None:
+    bot = bare_bot()
+    attempts: list[tuple[str, str]] = []
+
+    def start_order(shop_id: str, recipe_id: str) -> ActionResult:
+        attempts.append((shop_id, recipe_id))
+        status = ActionStatus.REJECTED if recipe_id == "first" else ActionStatus.SUBMITTED
+        return ActionResult(status)
+
+    bot.runtime.start_shop_order = start_order
+    orders = (
+        ShopOrder("market", "first", ShopOrderState.AVAILABLE, (), (), 60),
+        ShopOrder("market", "second", ShopOrderState.AVAILABLE, (), (), 60),
+    )
+    board_space = BoardSpaceAssessment(1, 0, ())
+
+    assert bot._step_shops(health(advancing=True), orders, board_space)
+    assert bot._step_shops(health(advancing=True), orders, board_space)
+
+    assert attempts == [("market", "first"), ("market", "second")]
+    assert bot._shop_workflow.pending is not None
+    assert bot._shop_workflow.pending.action.recipe_id == "second"

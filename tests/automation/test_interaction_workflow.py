@@ -3,6 +3,10 @@ from __future__ import annotations
 import logging
 from threading import Event, Lock
 
+import pytest
+
+from farm_merge_valet.automation.action_control import OperationKind
+from farm_merge_valet.automation.board_space import BoardSpaceAssessment
 from farm_merge_valet.automation.bot import Bot, Phase
 from farm_merge_valet.automation.runtime import (
     ActionResult,
@@ -10,6 +14,7 @@ from farm_merge_valet.automation.runtime import (
     CrateSpawnResult,
     LiveCellState,
     RewardRequirement,
+    RuntimeConnectionError,
     RuntimeHealth,
     StorageBubbleState,
 )
@@ -436,9 +441,7 @@ def test_reward_container_is_not_planned_until_requirements_are_met(monkeypatch)
     assert bot._interaction_actions() == ([], [], [])
     reason = bot._reward_container_idle_reason()
     assert reason is not None
-    assert reason[0] == (
-        "reward container at (71, 64) requires 2 reward_crate_key_gold"
-    )
+    assert reason[0] == ("reward container at (71, 64) requires 2 reward_crate_key_gold")
 
     bot._live_cells[(71, 64)] = LiveCellState(
         True,
@@ -1355,7 +1358,13 @@ def test_pending_producer_claim_accepts_new_output_as_partial_progress(monkeypat
         assert bot._verify_pending_interaction(health(advancing=True))
 
     assert bot._interaction_workflow.pending is None
-    assert bot._interaction_workflow.next_action_at == 0.0
+    assert (
+        bot._actions().retry_at(
+            OperationKind.INTERACTION,
+            bot._interaction_workflow._action_key(interaction),
+        )
+        == 0.0
+    )
     assert bot._interaction_workflow.output_capacity_for((3, 4), 91, 7) == 6
     assert any(record.fmv_event == "interaction.partially_confirmed" for record in caplog.records)
 
@@ -1422,7 +1431,13 @@ def test_pending_producer_without_output_or_transition_remains_a_noop(monkeypatc
     assert bot._verify_pending_interaction(health(advancing=True))
 
     assert bot._interaction_workflow.pending is None
-    assert bot._interaction_workflow.next_action_at == 15.0
+    assert (
+        bot._actions().retry_at(
+            OperationKind.INTERACTION,
+            bot._interaction_workflow._action_key(interaction),
+        )
+        == 15.0
+    )
 
 
 def test_interaction_noop_cools_down_before_retry(monkeypatch) -> None:
@@ -1436,4 +1451,60 @@ def test_interaction_noop_cools_down_before_retry(monkeypatch) -> None:
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 5.0)
 
     assert bot._verify_pending_interaction(health(advancing=True))
-    assert bot._interaction_workflow.next_action_at == 15.0
+    assert (
+        bot._actions().retry_at(
+            OperationKind.INTERACTION,
+            bot._interaction_workflow._action_key(interaction),
+        )
+        == 15.0
+    )
+
+
+def test_cooling_interaction_does_not_block_another_target(monkeypatch) -> None:
+    bot = bare_bot()
+    first = InteractionAction(InteractionTargetKind.IMMEDIATE, (1, 1), "milk", 10)
+    second = InteractionAction(InteractionTargetKind.IMMEDIATE, (2, 1), "milk", 11)
+    bot._live_cells = {
+        first.coord: LiveCellState(True, "milk", first.object_id),
+        second.coord: LiveCellState(True, "milk", second.object_id),
+    }
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 5.0)
+    bot._actions().fail(
+        OperationKind.INTERACTION,
+        bot._interaction_workflow._action_key(first),
+        5.0,
+        base_delay=10.0,
+    )
+
+    bot._interaction_workflow._step_interact_tiles(
+        bot,
+        health(advancing=True),
+        [first, second],
+        [],
+        [],
+        BoardSpaceAssessment(1, 0, ()),
+    )
+
+    assert bot.runtime.interactions == [
+        (second.coord, second.kind, second.blueprint_id, second.object_id)
+    ]
+
+
+def test_connection_loss_preserves_pending_interaction_and_global_lease() -> None:
+    bot = bare_bot()
+    interaction = InteractionAction(InteractionTargetKind.IMMEDIATE, (1, 1), "milk", 10)
+    bot._live_cells[interaction.coord] = LiveCellState(True, "milk", interaction.object_id)
+
+    def disconnect(*_args) -> ActionResult:
+        raise RuntimeConnectionError("temporary disconnect")
+
+    bot.runtime.submit_board_interaction = disconnect
+
+    with pytest.raises(RuntimeConnectionError, match="temporary disconnect"):
+        bot._submit_interaction(interaction, health(advancing=True))
+
+    assert bot._interaction_workflow.pending is not None
+    assert bot._actions().active is not None
+    assert not bot._submit_merge(
+        action(ItemRef("ingredients", "milk", 1)), health(advancing=True)
+    )

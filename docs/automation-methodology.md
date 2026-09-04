@@ -244,10 +244,16 @@ the source object.
 Submissions return one of `submitted`, `busy`, `unavailable`, `rejected`,
 `stale-source`, `invalid-target`, or `invalid-destination`. A submitted action stays pending while
 the heartbeat is frozen, the interaction handler is busy, or the target reloads.
+One shared action coordinator permits only one merge, tile interaction, storage
+bubble, shop, or marketplace operation to be pending at a time. Pending intent is
+recorded before dispatch so a lost transport response can be verified after runtime
+reconnection instead of being submitted blindly again.
 Once the game is active, it waits for board state to settle before confirming
 the intended result, recognizing a different board change, or recording an
-authoritative no-op. Failed actions cool down, and three no-ops for the same
-action pause the bot instead of repeatedly submitting the same drop.
+authoritative no-op. Retry state is keyed by the specific target, allowing other
+eligible interactions or shop orders to proceed while a failed target cools down.
+Three no-ops for the same merge action pause the bot instead of repeatedly
+submitting the same drop.
 
 The active loop rate-limits repeated capability discovery. Temporary waits,
 individual plans, submissions, confirmations, slow-stage timings, cached

@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from farm_merge_valet.automation.action_control import OperationKey, OperationKind
 from farm_merge_valet.automation.board_space import BoardSpaceAssessment
 from farm_merge_valet.automation.runtime import ActionStatus, RuntimeHealth
 from farm_merge_valet.core.shops import (
@@ -38,6 +39,10 @@ class PendingShopAction:
 @dataclass
 class ShopWorkflow:
     pending: PendingShopAction | None = None
+
+    @staticmethod
+    def _action_key(action: ShopAction) -> OperationKey:
+        return action.kind.value, action.shop_id, action.recipe_id
 
     def _verify_pending_shop_action(
         self,
@@ -84,6 +89,7 @@ class ShopWorkflow:
         )
         if succeeded:
             self.pending = None
+            bot._actions().complete(OperationKind.SHOP, self._action_key(pending.action))
             bot._last_wait_reason = None
             bot._last_idle_reason = None
             event = (
@@ -110,6 +116,12 @@ class ShopWorkflow:
                 bot._report_wait("the submitted shop action is still resolving")
             return False
         self.pending = None
+        bot._actions().fail(
+            OperationKind.SHOP,
+            self._action_key(pending.action),
+            now,
+            base_delay=_ACTION_MAX_PENDING_SECONDS,
+        )
         log_event(
             logger,
             logging.WARNING,
@@ -127,12 +139,9 @@ class ShopWorkflow:
         return True
 
     def _submit_shop_action(self, bot: Bot, action: ShopAction, health: RuntimeHealth) -> bool:
-        if any(
-            (
-                bot._merge_workflow.pending,
-                bot._interaction_workflow.pending,
-                self.pending,
-            )
+        action_key = self._action_key(action)
+        if self.pending is not None or not bot._actions().begin(
+            OperationKind.SHOP, action_key, bot._now()
         ):
             return False
         log_event(
@@ -147,13 +156,13 @@ class ShopWorkflow:
             recipe_id=action.recipe_id,
             action_kind=action.kind.value,
         )
+        self.pending = PendingShopAction(action, health.scene_id, bot._now())
         result = (
             bot.runtime.start_shop_order(action.shop_id, action.recipe_id)
             if action.kind is ShopActionKind.START
             else bot.runtime.claim_shop_order(action.shop_id, action.recipe_id)
         )
         if result.status is ActionStatus.SUBMITTED:
-            self.pending = PendingShopAction(action, health.scene_id, bot._now())
             bot._last_wait_reason = None
             log_event(
                 logger,
@@ -169,9 +178,17 @@ class ShopWorkflow:
                 action_kind=action.kind.value,
             )
             return True
+        self.pending = None
+        bot._actions().release(OperationKind.SHOP, action_key)
         if result.status in (ActionStatus.BUSY, ActionStatus.UNAVAILABLE):
             bot._report_wait(result.detail or "shop action capability unavailable")
         else:
+            bot._actions().fail(
+                OperationKind.SHOP,
+                action_key,
+                bot._now(),
+                base_delay=_ACTION_MAX_PENDING_SECONDS,
+            )
             log_event(
                 logger,
                 logging.WARNING,
@@ -198,7 +215,24 @@ class ShopWorkflow:
         board_space: BoardSpaceAssessment,
     ) -> bool:
         policy = bot._shop_policy()
-        action = plan_shop_action(orders, policy, board_space.empty_cells)
+        now = bot._now()
+        available_orders = tuple(
+            order
+            for order in orders
+            if order.state not in {ShopOrderState.READY, ShopOrderState.AVAILABLE}
+            or bot._actions().available(
+                OperationKind.SHOP,
+                (
+                    ShopActionKind.CLAIM.value
+                    if order.state is ShopOrderState.READY
+                    else ShopActionKind.START.value,
+                    order.shop_id,
+                    order.recipe_id,
+                ),
+                now,
+            )
+        )
+        action = plan_shop_action(available_orders, policy, board_space.empty_cells)
         if action is not None:
             bot._set_phase(bot.phase.__class__.SHOPS)
             bot._submit_shop_action(action, health)

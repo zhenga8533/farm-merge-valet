@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from threading import Event, Lock
 
+from farm_merge_valet.automation.action_control import OperationKind
 from farm_merge_valet.automation.bot import Bot, Phase
 from farm_merge_valet.automation.runtime import (
     ActionResult,
@@ -191,7 +192,7 @@ def test_rejected_action_logs_detail_and_cools_down(monkeypatch, caplog) -> None
     with caplog.at_level(logging.WARNING):
         assert not bot._submit_merge(move, health(advancing=True))
 
-    assert bot._merge_workflow.retry_at[bot._action_key(move)] == 30.0
+    assert bot._actions().retry_at(OperationKind.MERGE, bot._action_key(move)) == 30.0
     assert any("source-drag-cancelled" in message for message in caplog.messages)
 
 
@@ -378,7 +379,14 @@ def test_three_genuine_noops_pause_instead_of_repeating(monkeypatch) -> None:
     bot.board.set_cell(move.start, Cell(CellKind.ITEM, item))
     bot.board.set_cell(move.end, Cell(CellKind.EMPTY))
     signature = bot._action_signature(move)
-    bot._merge_workflow.failures[bot._action_key(move)] = 2
+    for _ in range(2):
+        bot._actions().fail(
+            OperationKind.MERGE,
+            bot._action_key(move),
+            0.0,
+            base_delay=10.0,
+            max_delay=10.0,
+        )
     bot._merge_workflow.pending = PendingMergeAction(move, signature, 7, 1.0, signature, 1.0)
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 5.0)
 

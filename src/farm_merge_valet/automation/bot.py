@@ -12,6 +12,7 @@ from queue import Empty, Queue
 from threading import Event, Lock, Thread
 from typing import Literal
 
+from farm_merge_valet.automation.action_control import ActionCoordinator, OperationKind
 from farm_merge_valet.automation.board_space import BoardSpaceAssessment
 from farm_merge_valet.automation.perception import build_board, build_perceived_state
 from farm_merge_valet.automation.runtime import (
@@ -40,6 +41,7 @@ from farm_merge_valet.catalog.marketplace import marketplace_catalog
 from farm_merge_valet.catalog.provider import CatalogProvider
 from farm_merge_valet.catalog.store import CatalogUnavailableError
 from farm_merge_valet.config import AppConfig
+from farm_merge_valet.config.change_policy import changed_fields, live_config
 from farm_merge_valet.core.board import (
     BoardGrid,
     Cell,
@@ -146,6 +148,7 @@ class Bot:
         self._interaction_workflow = InteractionWorkflow()
         self._shop_workflow = ShopWorkflow()
         self._marketplace_workflow = MarketplaceWorkflow()
+        self._action_control = ActionCoordinator()
         self._last_health: RuntimeHealth | None = None
         self._last_wait_reason: str | None = None
         self._last_wait_log_at = 0.0
@@ -173,27 +176,30 @@ class Bot:
         if pending is None:
             return
         previous = self.config
+        applied = live_config(previous, pending)
         configure_delays = getattr(self.runtime, "configure_crate_delays", None)
         if callable(configure_delays) and (
-            previous.crate_delay_min != pending.crate_delay_min
-            or previous.crate_delay_max != pending.crate_delay_max
+            previous.crate_delay_min != applied.crate_delay_min
+            or previous.crate_delay_max != applied.crate_delay_max
         ):
-            configure_delays(pending.crate_delay_min, pending.crate_delay_max)
-        self.config = pending
-        self._next_loop_delay = pending.loop_interval
-        changed_fields = tuple(
-            name
-            for name in AppConfig.model_fields
-            if getattr(previous, name) != getattr(pending, name)
-        )
+            configure_delays(applied.crate_delay_min, applied.crate_delay_max)
+        self.config = applied
+        self._next_loop_delay = applied.loop_interval
+        applied_fields = changed_fields(previous, applied)
         log_event(
             logger,
             logging.DEBUG,
             "bot.config_applied",
             "Applied updated configuration (%d field(s)).",
-            len(changed_fields),
-            changed_fields=changed_fields,
+            len(applied_fields),
+            changed_fields=applied_fields,
         )
+
+    def _actions(self) -> ActionCoordinator:
+        control = getattr(self, "_action_control", None)
+        if control is None:
+            control = self._action_control = ActionCoordinator()
+        return control
 
     def _wait_for_next_iteration(self, delay: float) -> None:
         self._loop_wakeup.clear()
@@ -984,6 +990,7 @@ class Bot:
         pending = getattr(self, "_pending_storage_bubble", None)
         if pending is None:
             return True
+        operation_key = (pending.initial_state.object_id,)
         now = self._now()
         age = now - pending.submitted_at
         if self._storage_bubbles is None:
@@ -1002,6 +1009,7 @@ class Bot:
                 current.content_ids if current is not None else ()
             )
             self._pending_storage_bubble = None
+            self._actions().complete(OperationKind.STORAGE_BUBBLE, operation_key)
             self._storage_bubble_next_action_at = now + random.uniform(
                 self.config.item_action_delay_min,
                 self.config.item_action_delay_max,
@@ -1036,7 +1044,12 @@ class Bot:
         ):
             return False
         self._pending_storage_bubble = None
-        self._storage_bubble_next_action_at = now + _ACTION_RETRY_SECONDS
+        self._actions().fail(
+            OperationKind.STORAGE_BUBBLE,
+            operation_key,
+            now,
+            base_delay=_ACTION_RETRY_SECONDS,
+        )
         log_event(
             logger,
             logging.WARNING,
@@ -1052,15 +1065,17 @@ class Bot:
     def _step_storage_bubbles(self, health: RuntimeHealth) -> bool:
         if not self.config.auto_pop_storage_bubbles:
             return False
+        now = self._now()
+        if now < getattr(self, "_storage_bubble_next_action_at", 0.0):
+            return True
         bubbles = tuple(
             bubble
             for bubble in (getattr(self, "_storage_bubbles", None) or ())
             if bubble.content_ids
+            and self._actions().available(OperationKind.STORAGE_BUBBLE, (bubble.object_id,), now)
         )
         if not bubbles or not self.board.find_empty():
             return False
-        if self._now() < getattr(self, "_storage_bubble_next_action_at", 0.0):
-            return True
         if not self._ensure_capability(
             health,
             RuntimeCapability.STORAGE_BUBBLES,
@@ -1068,6 +1083,9 @@ class Bot:
         ):
             return True
         bubble = min(bubbles, key=lambda value: value.object_id)
+        operation_key = (bubble.object_id,)
+        if not self._actions().begin(OperationKind.STORAGE_BUBBLE, operation_key, now):
+            return True
         log_event(
             logger,
             logging.DEBUG,
@@ -1079,16 +1097,16 @@ class Bot:
             contained_items=len(bubble.content_ids),
             empty_cells=len(self.board.find_empty()),
         )
+        submitted_at = self._now()
+        self._pending_storage_bubble = _PendingStorageBubble(
+            bubble,
+            health.scene_id,
+            submitted_at,
+            bubble,
+            submitted_at,
+        )
         result = self.runtime.submit_storage_bubble_pop(bubble.object_id)
         if result.submitted:
-            submitted_at = self._now()
-            self._pending_storage_bubble = _PendingStorageBubble(
-                bubble,
-                health.scene_id,
-                submitted_at,
-                bubble,
-                submitted_at,
-            )
             self._last_wait_reason = None
             log_event(
                 logger,
@@ -1099,10 +1117,18 @@ class Bot:
                 object_id=bubble.object_id,
                 scene_id=health.scene_id,
             )
-        elif result.status in {ActionStatus.BUSY, ActionStatus.UNAVAILABLE}:
-            self._report_wait(result.detail or "storage-bubble interaction unavailable")
         else:
-            self._storage_bubble_next_action_at = self._now() + _ACTION_RETRY_SECONDS
+            self._pending_storage_bubble = None
+            self._actions().release(OperationKind.STORAGE_BUBBLE, operation_key)
+        if result.status in {ActionStatus.BUSY, ActionStatus.UNAVAILABLE}:
+            self._report_wait(result.detail or "storage-bubble interaction unavailable")
+        elif not result.submitted:
+            self._actions().fail(
+                OperationKind.STORAGE_BUBBLE,
+                operation_key,
+                self._now(),
+                base_delay=_ACTION_RETRY_SECONDS,
+            )
             log_event(
                 logger,
                 logging.WARNING,
@@ -1705,6 +1731,21 @@ class Bot:
                 except RuntimeCancelledError:
                     if not self._interrupt_event.is_set():
                         raise
+                    continue
+                except RuntimeConnectionError as exc:
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        "runtime.connection_lost",
+                        "Lost the game runtime connection: %s Retrying discovery.",
+                        exc,
+                        detail=str(exc),
+                        retry_delay_seconds=retry_delay,
+                    )
+                    needs_initialization = True
+                    if self._interrupt_event.wait(retry_delay):
+                        continue
+                    retry_delay = min(10.0, max(self.config.loop_interval, retry_delay * 2))
                     continue
                 delay = self._effective_loop_delay(self._next_loop_delay)
                 self._next_loop_delay = self.config.loop_interval
