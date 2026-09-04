@@ -3,6 +3,47 @@
 The bot uses a persistent perceive → plan → internal action → verify loop. The
 game's live cell map is authoritative.
 
+## Automation control flow
+
+The diagram shows decision precedence, not a queue of actions. Each pass takes a
+fresh snapshot, finishes verification of any submitted action, and then advances
+at most one prioritized workflow step. Supply-crate batches are the exception at
+this level: the runtime adapter still submits and verifies their individual claims
+sequentially.
+
+```mermaid
+flowchart TD
+    start["Start or resume"] --> discover["Reuse cached scene<br/>or discover runtime"]
+    discover --> snapshot["Read atomic snapshot"]
+    snapshot --> usable{"Board state usable?"}
+    usable -- No --> wait["Wait or recover"]
+    usable -- Yes --> overlay{"Reward overlay?"}
+    overlay -- "Known and enabled" --> dismiss["Run one native transition"]
+    overlay -- "Unsupported or disabled" --> wait
+    overlay -- No --> sync["Apply authoritative state"]
+
+    sync --> corePending{"Merge, tile, bubble, or<br/>shop action resolved?"}
+    corePending -- No --> next
+    corePending -- Yes --> heartbeat{"Heartbeat advancing?"}
+    heartbeat -- No --> wait
+    heartbeat -- Yes --> marketPending{"Marketplace purchase resolved?"}
+    marketPending -- No --> next
+    marketPending -- Yes --> choose["Choose first eligible workflow:<br/>1. retained output-space merge<br/>2. immediate non-clear tile action<br/>3. storage bubble<br/>4. remaining tile / obstacle / producer<br/>5. shop order<br/>6. marketplace purchase<br/>7. supply-crate / merge phase"]
+
+    choose -- "Action ready" --> act["Revalidate capability and target;<br/>submit one workflow step"]
+    choose -- "No productive work" --> idle["Report blocked or idle state"]
+    dismiss --> next["Adaptive delay"]
+    wait --> next
+    act --> next
+    idle --> next
+    next --> snapshot
+```
+
+The shared action coordinator permits only one merge, tile interaction, storage
+bubble, shop, or marketplace operation to be in flight. A transport loss does
+not clear that intent: after reconnection, the next authoritative snapshot is
+used to confirm the result before another submission is allowed.
+
 ## Runtime acquisition
 
 CDP pairs the Farm Merge Valley iframe with its owning Reddit page. Target
@@ -192,6 +233,21 @@ reward-spawn, order-consumption, discovery, analytics, and action paths without
 changing the viewport. Every submission is
 held pending until authoritative order state confirms the transition; it is not
 duplicated during a frozen heartbeat or reload.
+
+## Marketplace purchases
+
+Marketplace state is included in the atomic snapshot whenever at least one offer
+policy is enabled or a purchase is pending. The catalog gives every flash candidate
+a stable slot-plus-candidate key and every genuine free claim a stable offer key.
+Flash purchases default off, while the four free claims default on; per-offer GUI
+overrides take precedence.
+
+Planning considers only enabled catalog entries whose exact live identity, reward,
+payment, price, and stock still match. It selects deterministically, checks live
+affordability, and buys one unit. The purchase remains pending until a later
+snapshot shows the expected stock decrease and, for paid offers, the exact balance
+decrease. A timeout or lost submission response is treated as ambiguous and enters
+a bounded cooldown rather than being blindly replayed.
 
 ## Merge planning and submission
 

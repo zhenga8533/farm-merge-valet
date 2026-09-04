@@ -207,8 +207,9 @@ rewards reserve one empty cell per reward object and ask the merge planner to
 create space before claiming when necessary.
 
 The Marketplace page is a persistent catalog of all 50 known flash candidates
-and four genuine free claims. Auto-purchase is disabled by default for every
-offer. Selections use stable slot-plus-candidate identities, so a rotating flash
+and four genuine free claims. Flash purchases are disabled by default; the four
+free claims are enabled by default, and every offer can be overridden individually.
+Selections use stable slot-plus-candidate identities, so a rotating flash
 slot cannot cause a different item to be bought. Enabled finite stock is drained
 one verified unit per bot iteration; the bot never buys ordinary marketplace
 offers or refreshes flash deals.
