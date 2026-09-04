@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterator
 from functools import partial
 
 from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSize, Qt, Signal
@@ -20,6 +21,8 @@ from farm_merge_valet.catalog.models import (
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
+from farm_merge_valet.gui.components.incremental_work import IncrementalWorkRunner
+from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_ROW_HEIGHT,
     POLICY_ICON_SIZE,
@@ -89,6 +92,16 @@ class ShopsPage(AppPage):
             1,
             Qt.AlignmentFlag.AlignCenter,
         )
+        self.loading_state = LoadingState(
+            "Loading shops\u2026",
+            "Preparing locally cached shops, recipes, and controls.",
+        )
+        self.loading_state.setVisible(False)
+        self.page_layout.addWidget(
+            self.loading_state,
+            1,
+            Qt.AlignmentFlag.AlignCenter,
+        )
         scaffold = create_policy_tree(
             header_labels=("Shop / recipe", "Type", ""),
             bulk_labels={2: "Enabled"},
@@ -117,6 +130,8 @@ class ShopsPage(AppPage):
         self.toolbar.filter_requested.connect(self._filter)
         self._catalog_loaded = False
         self._populated = False
+        self._population_pending = False
+        self._population_runner = IncrementalWorkRunner(self)
         self._catalog_keys: list[tuple[str, str]] = []
         self._toggles: dict[tuple[str, str], PolicyCheckBox] = {}
         self._tree_items: dict[tuple[str, str], QTreeWidgetItem] = {}
@@ -150,9 +165,18 @@ class ShopsPage(AppPage):
         if self._populated and not self._catalog_loaded:
             self.populate()
 
-    def ensure_populated(self) -> None:
-        if not self._populated:
+    def ensure_populated(self, *, deferred: bool = False) -> None:
+        if self._populated or self._population_pending:
+            return
+        if not deferred:
             self.populate()
+            return
+        self._population_pending = True
+        self._show_loading()
+        self._population_runner.start(self._populate_steps(), self._finish_deferred_population)
+
+    def _finish_deferred_population(self) -> None:
+        self._population_pending = False
 
     def _apply_sort_preference(self) -> None:
         column = _SHOP_SORT_COLUMNS[self._config.shops_sort_column]
@@ -195,6 +219,12 @@ class ShopsPage(AppPage):
         self.configuration_header.mark_error(message)
 
     def populate(self) -> None:
+        self._population_runner.cancel()
+        self._population_pending = False
+        for _step in self._populate_steps():
+            pass
+
+    def _populate_steps(self) -> Iterator[None]:
         self._populated = True
         expanded = expanded_policy_keys(self.tree)
         sort_column = self.tree.sortColumn()
@@ -213,7 +243,6 @@ class ShopsPage(AppPage):
             self.tree.blockSignals(False)
             return
         self._catalog_loaded = True
-        self._show_catalog_content()
         recipes: dict[str, list[CatalogItem]] = defaultdict(list)
         for item in catalog.items.values():
             if item.recipe is not None:
@@ -221,6 +250,7 @@ class ShopsPage(AppPage):
         if not recipes:
             self._show_empty("No shops or recipes have been discovered yet")
             self.tree.blockSignals(False)
+            self._show_catalog_content()
             return
         for shop_id in sorted(recipes):
             shop = catalog.items.get(shop_id)
@@ -276,6 +306,7 @@ class ShopsPage(AppPage):
                     )
                 ),
             )
+            yield
         self._lazy_branches.restore_expanded(expanded)
         fit_policy_widget_column(
             self.tree,
@@ -288,6 +319,7 @@ class ShopsPage(AppPage):
         self.tree.sortByColumn(sort_column, sort_order)
         self._sync_bulk_header()
         self._filter(self.search.text())
+        self._show_catalog_content()
 
     def _filter(self, text: str) -> None:
         self._lazy_branches.apply_filter(text)
@@ -360,14 +392,22 @@ class ShopsPage(AppPage):
         self.bulk_header.set_state(2, Qt.CheckState.Unchecked, enabled=False)
 
     def _show_catalog_onboarding(self) -> None:
+        self.loading_state.setVisible(False)
         self.catalog_onboarding.setVisible(True)
         self.toolbar.setVisible(False)
         self.tree.setVisible(False)
 
     def _show_catalog_content(self) -> None:
+        self.loading_state.setVisible(False)
         self.catalog_onboarding.setVisible(False)
         self.toolbar.setVisible(True)
         self.tree.setVisible(True)
+
+    def _show_loading(self) -> None:
+        self.catalog_onboarding.setVisible(False)
+        self.toolbar.setVisible(False)
+        self.tree.setVisible(False)
+        self.loading_state.setVisible(True)
 
     def set_catalog_setup_busy(self, busy: bool) -> None:
         self.catalog_onboarding.set_busy(busy)

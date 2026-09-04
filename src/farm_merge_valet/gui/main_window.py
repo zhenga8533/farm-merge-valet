@@ -185,7 +185,7 @@ class MainWindow(QMainWindow):
         if page is self.items_page:
             self.items_page.ensure_populated(deferred=True)
         elif page is self.shops_page:
-            self.shops_page.ensure_populated()
+            self.shops_page.ensure_populated(deferred=True)
         if page is self.browser_page and not self.browser_page.browser_status_known:
             self.controller.refresh_browser()
         app = QApplication.instance()

@@ -201,11 +201,19 @@ def test_catalog_pages_populate_lazily_and_ignore_hidden_refreshes(tmp_path, mon
 
     window.navigation.setCurrentRow(1)
     assert not window.items_page.loading_state.isHidden()
-    time.sleep(0.02)
-    app.processEvents()
+    deadline = time.monotonic() + 1
+    while not window.items_page.loading_state.isHidden() and time.monotonic() < deadline:
+        QTest.qWait(10)
     assert window.items_page.table.topLevelItemCount() == 3
     assert window.shops_page.tree.topLevelItemCount() == 0
     assert progress_reads == []
+
+    window.navigation.setCurrentRow(2)
+    assert not window.shops_page.loading_state.isHidden()
+    deadline = time.monotonic() + 1
+    while not window.shops_page.loading_state.isHidden() and time.monotonic() < deadline:
+        QTest.qWait(10)
+    assert window.shops_page.loading_state.isHidden()
 
     window.quit_application()
     app.processEvents()

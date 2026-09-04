@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QProgressBar, QPushButton
+from PySide6.QtWidgets import QPushButton
 
+from farm_merge_valet.gui.components.progress import IndeterminateProgressBar
 from farm_merge_valet.gui.components.state_panel import StatePanel
 from farm_merge_valet.gui.components.status import StatusLabel
 
@@ -26,10 +27,7 @@ class CatalogOnboarding(StatePanel):
         )
         self.status_label.setAccessibleName("Catalog synchronization status")
         self.status_label.setWordWrap(True)
-        self.progress = QProgressBar()
-        self.progress.setAccessibleName("Catalog synchronization progress")
-        self.progress.setRange(0, 0)
-        self.progress.setTextVisible(False)
+        self.progress = IndeterminateProgressBar("Catalog synchronization progress")
         self.progress.setVisible(False)
         self.setup_button = QPushButton("Open game and synchronize")
         self.setup_button.setAccessibleName("Open the managed game and synchronize its catalog")

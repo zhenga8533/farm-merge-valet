@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import partial
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QHeaderView,
@@ -26,6 +27,7 @@ from farm_merge_valet.core.upgrade_progress import (
 )
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
+from farm_merge_valet.gui.components.incremental_work import IncrementalWorkRunner
 from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_BADGE_COLUMN_WIDTH,
@@ -161,6 +163,7 @@ class ItemsPage(AppPage):
         self._catalog_loaded = False
         self._populated = False
         self._population_pending = False
+        self._population_runner = IncrementalWorkRunner(self)
         self._row_definitions: list[_ItemPolicyRow] = []
         self._policy_controls: list[
             tuple[QTreeWidgetItem, PolicyCheckBox, tuple[_ItemPolicyRow, ...], str]
@@ -203,13 +206,10 @@ class ItemsPage(AppPage):
             return
         self._population_pending = True
         self._show_loading()
-        QTimer.singleShot(16, self._finish_deferred_population)
+        self._population_runner.start(self._populate_steps(), self._finish_deferred_population)
 
     def _finish_deferred_population(self) -> None:
-        try:
-            self.populate()
-        finally:
-            self._population_pending = False
+        self._population_pending = False
 
     def set_upgrade_progress(self, progress: UpgradeProgress | None) -> None:
         if progress == self._upgrade_progress:
@@ -260,6 +260,12 @@ class ItemsPage(AppPage):
         self.configuration_header.mark_error(message)
 
     def populate(self) -> None:
+        self._population_runner.cancel()
+        self._population_pending = False
+        for _step in self._populate_steps():
+            pass
+
+    def _populate_steps(self) -> Iterator[None]:
         self._populated = True
         expanded_keys = expanded_policy_keys(self.table)
         sort_column = self.table.sortColumn()
@@ -276,7 +282,6 @@ class ItemsPage(AppPage):
             self._show_catalog_onboarding()
             return
         self._catalog_loaded = True
-        self._show_catalog_content()
         grouped: dict[str, list[CatalogItem]] = defaultdict(list)
         for item in catalog.items.values():
             grouped[item.presentation_key].append(item)
@@ -337,6 +342,7 @@ class ItemsPage(AppPage):
         )
         if not families:
             self._show_empty("No configurable item families have been discovered yet")
+            self._show_catalog_content()
             return
         roots_by_family_id: dict[str, QTreeWidgetItem] = {}
         for family_key, items in families:
@@ -366,6 +372,7 @@ class ItemsPage(AppPage):
                 )
                 self._set_category_badge(root, representative)
                 self._add_policy_controls(root, definitions[0], family_name)
+                yield
                 continue
             root = self._new_policy_item(
                 family_name,
@@ -405,6 +412,7 @@ class ItemsPage(AppPage):
                     )
                 ),
             )
+            yield
         self._lazy_branches.restore_expanded(expanded_keys)
         fit_policy_widget_column(
             self.table,
@@ -416,6 +424,7 @@ class ItemsPage(AppPage):
         self.table.sortByColumn(sort_column, sort_order)
         self._sync_bulk_header()
         self._filter(self.search.text())
+        self._show_catalog_content()
 
     def _populate_item_tiers(
         self,
