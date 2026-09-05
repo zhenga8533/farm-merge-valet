@@ -350,6 +350,5 @@ network or server-side interruption, and backend connectivity is not detected
 separately yet. Global pause/quit hotkeys and Ctrl+C remain available as inbound
 controls without being part of game interaction.
 
-Future phases may visit friends and handle expansions or events.
-Network-dependent phases should add explicit backend-connectivity
-monitoring when implemented.
+Future phases, supporting work, and non-blocking research are tracked in
+[Open Items](open-items.md).

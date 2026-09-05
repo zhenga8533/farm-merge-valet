@@ -315,3 +315,5 @@ taxonomy and asset workflow are documented in
 [Item Catalog and Compiled Assets](docs/item-catalog.md).
 Runtime cadence, recovery safeguards, persistent diagnostics, and read-only
 profiling are documented in [Runtime Performance](docs/runtime-performance.md).
+Planned features, supporting work, and non-blocking research are tracked in
+[Open Items](docs/open-items.md).

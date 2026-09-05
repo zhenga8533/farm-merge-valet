@@ -99,8 +99,6 @@ Facebook/TikTok community posts, and direct in-app observation (marked
   new farm land.
 - Unwanted orders can be discarded, but discarding has a time delay/cost.
 
-## Tier-4 Producers
-
 ## Marketplace
 
 The marketplace rotates six flash-deal slots on a four-hour cycle. The observed
@@ -155,10 +153,20 @@ event energy is exposed only while its event shop is active.
 - The train station is central to the visiting/social loop described
   above.
 
-## Unresolved / not found in research
+## Implementation notes for incompletely documented mechanics
 
-- Exact tree/rock (non-toolbox) stage counts and energy costs per tier.
-- Precise UI flow for fulfilling an order (what "Complete an order"
-  opens, and what the fulfillment screen requires).
-- Full list of distinct crate visual types beyond the general "Supplies"
-  crate (if any exist beyond the tiered reward chests/keys).
+- A static table of exact tree/rock stage counts and energy costs per tier has
+  not been recorded. This does not block obstacle automation: the runtime reads
+  each obstacle's live total stages, remaining stages, current energy cost, and
+  worker requirement.
+- The precise player-visible order-screen flow has not been documented. The bot
+  does not depend on it: it observes order state through the game's order
+  service, starts affordable orders through the public order handler, and claims
+  completed rewards through the same progression events used by the game.
+- A hand-maintained list of every distinct crate visual has not been recorded.
+  Catalog synchronization discovers supply crates, reward containers, and keys
+  from live blueprint identities and capabilities, so recognition does not
+  depend on such a list.
+
+Remaining feature work and optional research are tracked in
+[Open Items](open-items.md).
