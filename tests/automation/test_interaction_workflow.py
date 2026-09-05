@@ -158,7 +158,7 @@ def bare_bot() -> Bot:
     bot._last_health = None
     bot._last_wait_reason = None
     bot._last_wait_log_at = 0.0
-    bot._last_idle_reason = None
+    bot._idle_active = False
     bot._last_idle_log_at = 0.0
     bot._next_loop_delay = 1.0
     bot._last_cooling_producer_count = None
@@ -445,9 +445,6 @@ def test_reward_container_is_not_planned_until_requirements_are_met(monkeypatch)
     }
 
     assert bot._interaction_actions() == ([], [], [])
-    reason = bot._reward_container_idle_reason()
-    assert reason is not None
-    assert reason[0] == ("reward container at (71, 64) requires 2 reward_crate_key_gold")
 
     bot._live_cells[(71, 64)] = LiveCellState(
         True,
@@ -603,7 +600,6 @@ def test_obstacle_stage_starts_can_be_disabled_without_disabling_loot(monkeypatc
     bot._obstacle_focus = ((3, 4), 91)
 
     assert bot._interaction_actions() == ([], [], [])
-    assert bot._obstacle_idle_reason() is None
 
     lootable = ObstacleState(4, 5, None, False, clearing=True)
     bot._live_cells = {

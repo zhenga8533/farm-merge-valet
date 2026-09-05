@@ -70,7 +70,7 @@ class StorageBubbleWorkflow:
                 bot.config.item_action_delay_max,
             )
             bot._last_wait_reason = None
-            bot._last_idle_reason = None
+            bot._idle_active = False
             log_event(
                 logger,
                 logging.DEBUG,

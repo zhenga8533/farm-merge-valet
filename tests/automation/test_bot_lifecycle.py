@@ -152,7 +152,7 @@ def bare_bot() -> Bot:
     bot._last_health = None
     bot._last_wait_reason = None
     bot._last_wait_log_at = 0.0
-    bot._last_idle_reason = None
+    bot._idle_active = False
     bot._last_idle_log_at = 0.0
     bot._next_loop_delay = 1.0
     bot._last_cooling_producer_count = None

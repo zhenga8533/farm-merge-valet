@@ -140,7 +140,7 @@ class Bot:
         self._last_health: RuntimeHealth | None = None
         self._last_wait_reason: str | None = None
         self._last_wait_log_at = 0.0
-        self._last_idle_reason: str | None = None
+        self._idle_active = False
         self._last_idle_log_at = 0.0
         self._next_loop_delay = self.config.loop_interval
         self._last_cooling_producer_count: int | None = None
@@ -731,79 +731,6 @@ class Bot:
             self._obstacle_focus = selected.coord, selected.object_id
         return selected
 
-    def _obstacle_idle_reason(self) -> tuple[str, dict[str, object]] | None:
-        if (
-            not self.config.item_automation_enabled
-            or not self.config.allow_obstacle_stage_starts
-        ):
-            return None
-        focus = getattr(self, "_obstacle_focus", None)
-        if focus is None:
-            return None
-        coord, object_id = focus
-        live = self._live_cells.get(coord)
-        if live is None or live.object_id != object_id or live.obstacle is None:
-            return None
-        obstacle = live.obstacle
-        if obstacle.clearing:
-            return None
-
-        energy = getattr(self, "_energy", None)
-        workers = getattr(self, "_workers", None)
-        context: dict[str, object] = {
-            "coord": coord,
-            "blueprint_id": live.blueprint_id,
-            "energy_cost": obstacle.energy_cost,
-            "energy_available": energy,
-            "required_workers": obstacle.required_workers,
-            "workers_available": workers.available if workers is not None else None,
-        }
-        if obstacle.energy_cost is None or energy is None:
-            return f"waiting for energy data for the focused obstacle at {coord}", context
-        if obstacle.required_workers is None or workers is None:
-            return f"waiting for worker data for the focused obstacle at {coord}", context
-        if energy < obstacle.energy_cost:
-            return (
-                f"focused obstacle at {coord} needs {obstacle.energy_cost} energy; "
-                f"{energy} available",
-                context,
-            )
-        if workers.available < obstacle.required_workers:
-            return (
-                f"focused obstacle at {coord} needs {obstacle.required_workers} available "
-                f"worker(s); {workers.available} available",
-                context,
-            )
-        return None
-
-    def _reward_container_idle_reason(self) -> tuple[str, dict[str, object]] | None:
-        if not self.config.item_automation_enabled:
-            return None
-        for coord, state in sorted(self._live_cells.items()):
-            if state.blueprint_id not in getattr(self, "_reward_container_ids", frozenset()):
-                continue
-            policy_key = self._live_policy_key(state)
-            if policy_key is None:
-                continue
-            policy = self.config.item_policy(policy_key)
-            if not policy.enabled or not policy.interact or state.reward_requirements_met is True:
-                continue
-            context: dict[str, object] = {
-                "coord": coord,
-                "blueprint_id": state.blueprint_id,
-                "requirements": [
-                    {"blueprint_id": item.blueprint_id, "amount": item.amount}
-                    for item in state.reward_requirements
-                ],
-            }
-            if state.reward_requirements_met is None:
-                return f"waiting for requirement data for reward container at {coord}", context
-            requirements = ", ".join(
-                f"{item.amount} {item.blueprint_id}" for item in state.reward_requirements
-            )
-            return f"reward container at {coord} requires {requirements}", context
-        return None
-
     def _interaction_actions(
         self,
     ) -> tuple[list[InteractionAction], list[InteractionAction], list[InteractionAction]]:
@@ -1104,7 +1031,7 @@ class Bot:
         if not self.config.item_automation_enabled:
             self._merge_workflow.blocked_requirement = None
             if required_empty_cells is not None or board_space.needs_merge:
-                self._defer_idle("item automation is disabled; no automated merge can create space")
+                self._defer_idle()
             else:
                 self._set_phase(Phase.CLAIM_CRATES)
             return
@@ -1437,6 +1364,7 @@ class Bot:
         return max(requested_delay, scheduler.active_delay(self.config.loop_interval))
 
     def _report_wait(self, reason: str, **context: object) -> None:
+        self._idle_active = False
         now = time.monotonic()
         if reason != self._last_wait_reason or now - self._last_wait_log_at >= 15:
             normalized_reason = reason.rstrip(".")
@@ -1452,24 +1380,20 @@ class Bot:
             self._last_wait_reason = reason
             self._last_wait_log_at = now
 
-    def _defer_idle(self, reason: str, **context: object) -> None:
+    def _defer_idle(self) -> None:
         now = time.monotonic()
         delay = max(self.config.loop_interval, self.config.idle_wait_seconds)
         self._next_loop_delay = delay
-        if reason != self._last_idle_reason or now - self._last_idle_log_at >= 900:
-            normalized_reason = reason.rstrip(".")
+        if not self._idle_active or now - self._last_idle_log_at >= 900:
             log_event(
                 logger,
                 logging.INFO,
                 "bot.idle",
-                "Idle: %s; polling every %.0fs until state changes.",
-                normalized_reason,
+                "Idle: no automation action is currently available; checking again in %.0fs.",
                 delay,
-                reason=normalized_reason,
                 poll_interval_seconds=delay,
-                **context,
             )
-            self._last_idle_reason = reason
+            self._idle_active = True
             self._last_idle_log_at = now
 
     def run_forever(self, *, on_initialized: Callable[[], None] | None = None) -> None:

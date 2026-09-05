@@ -29,7 +29,6 @@ from farm_merge_valet.core.items import (
     ItemRef,
 )
 from farm_merge_valet.core.merge_planner import MergeAction, MergeActionKind, MoveEffect
-from farm_merge_valet.core.obstacles import ObstacleState, WorkerState
 from farm_merge_valet.core.shops import ShopOrder
 
 
@@ -140,7 +139,7 @@ def bare_bot() -> Bot:
     bot._last_health = None
     bot._last_wait_reason = None
     bot._last_wait_log_at = 0.0
-    bot._last_idle_reason = None
+    bot._idle_active = False
     bot._last_idle_log_at = 0.0
     bot._next_loop_delay = 1.0
     bot._last_cooling_producer_count = None
@@ -238,44 +237,14 @@ def test_exhausted_crates_use_configured_idle_delay(monkeypatch, caplog) -> None
 
     assert bot._next_loop_delay == 30.0
     record = next(record for record in caplog.records if record.fmv_event == "bot.idle")
-    assert record.message.endswith("polling every 30s until state changes.")
+    assert record.message == (
+        "Idle: no automation action is currently available; checking again in 30s."
+    )
     assert record.fmv_context["poll_interval_seconds"] == 30.0
+    assert "reason" not in record.fmv_context
     assert not any(
         getattr(record, "fmv_event", None) == "crate.claim_started" for record in caplog.records
     )
-
-
-def test_idle_log_explains_when_focused_obstacle_needs_more_energy(monkeypatch, caplog) -> None:
-    bot = bare_bot()
-    bot.board.set_cell((0, 0), Cell(CellKind.EMPTY))
-    bot._merge_actions_for_policy = lambda: []
-    bot.runtime.spawn_supply_crates = lambda _limit: CrateSpawnResult(ActionStatus.REJECTED, 0, 0)
-    bot._obstacle_focus = ((61, 60), 91)
-    bot._energy = 13
-    bot._workers = WorkerState(total=2, available=1)
-    bot._live_cells = {
-        (61, 60): LiveCellState(
-            True,
-            "rock_medium",
-            91,
-            obstacle=ObstacleState(
-                stages_remaining=1,
-                total_stages=5,
-                energy_cost=25,
-                movable=False,
-                required_workers=1,
-            ),
-        )
-    }
-    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 10.0)
-
-    with caplog.at_level(logging.INFO):
-        bot._step_claim_crates(bot._assess_board_space())
-
-    record = next(record for record in caplog.records if record.fmv_event == "bot.idle")
-    assert "needs 25 energy; 13 available" in record.message
-    assert record.fmv_context["coord"] == (61, 60)
-    assert record.fmv_context["required_workers"] == 1
 
 
 def test_merge_five_policy_does_not_fall_back_while_space_remains(monkeypatch) -> None:

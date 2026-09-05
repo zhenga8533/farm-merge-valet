@@ -91,7 +91,7 @@ class ShopWorkflow:
             self.pending = None
             bot._actions().complete(OperationKind.SHOP, self._action_key(pending.action))
             bot._last_wait_reason = None
-            bot._last_idle_reason = None
+            bot._idle_active = False
             event = (
                 "shop.order_started"
                 if pending.action.kind is ShopActionKind.START

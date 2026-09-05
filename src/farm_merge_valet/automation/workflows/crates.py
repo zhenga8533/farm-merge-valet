@@ -28,9 +28,7 @@ class CrateWorkflow:
             if board_space.merge_actions:
                 bot._set_phase(phase_type.MERGE)
             else:
-                bot._defer_idle(
-                    "supply-crate claiming is disabled and no merge action is available"
-                )
+                bot._defer_idle()
             return
         if board_space.needs_merge:
             bot._set_phase(phase_type.MERGE)
@@ -66,7 +64,7 @@ class CrateWorkflow:
             self.last_claim_log_at = now
         if result.spawned:
             bot._last_wait_reason = None
-            bot._last_idle_reason = None
+            bot._idle_active = False
             self.last_claim_limit = None
             log_event(
                 logger,
@@ -86,17 +84,7 @@ class CrateWorkflow:
             bot._report_wait(result.detail or "crate claim capability unavailable")
         elif result.remaining == 0 and not merge_actions_available:
             self.last_claim_limit = None
-            obstacle_wait = bot._obstacle_idle_reason()
-            if obstacle_wait is not None:
-                reason, context = obstacle_wait
-                bot._defer_idle(reason, **context)
-            else:
-                reward_container_wait = bot._reward_container_idle_reason()
-                if reward_container_wait is not None:
-                    reason, context = reward_container_wait
-                    bot._defer_idle(reason, **context)
-                else:
-                    bot._defer_idle("no supply crates or merge actions are currently available")
+            bot._defer_idle()
         elif result.status is ActionStatus.REJECTED:
             bot._report_wait(result.detail or "crate spawn was not accepted")
         if result.remaining == 0 and merge_actions_available:

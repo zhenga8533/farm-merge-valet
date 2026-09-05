@@ -259,7 +259,7 @@ class InteractionWorkflow:
             self.pending = None
             bot._actions().complete(OperationKind.INTERACTION, action_key)
             bot._last_wait_reason = None
-            bot._last_idle_reason = None
+            bot._idle_active = False
             log_event(
                 logger,
                 logging.DEBUG,

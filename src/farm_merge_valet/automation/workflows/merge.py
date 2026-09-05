@@ -66,12 +66,7 @@ class MergeWorkflow:
                 required_empty_cells=required_empty_cells,
             )
             self.blocked_requirement = signature
-        bot._defer_idle(
-            f"board has {board_space.empty_cells} open cells but needs "
-            f"{required_empty_cells}; no policy-compliant merge can create space",
-            empty_cells=board_space.empty_cells,
-            required_empty_cells=required_empty_cells,
-        )
+        bot._defer_idle()
 
     def _merge_action_succeeded(self, bot: Bot, action: MergeAction) -> bool:
         def has_item(coord: GridCoord, item: ItemRef) -> bool:
@@ -122,7 +117,7 @@ class MergeWorkflow:
             bot._actions().complete(OperationKind.MERGE, action_key)
             bot._schedule_next_item_action(now)
             bot._last_wait_reason = None
-            bot._last_idle_reason = None
+            bot._idle_active = False
             log_event(
                 logger,
                 logging.DEBUG,
@@ -339,4 +334,4 @@ class MergeWorkflow:
             self._report_blocked_space(bot, board_space, 1)
         else:
             self.blocked_requirement = None
-            bot._defer_idle("no item, producer, or crate action is currently available")
+            bot._defer_idle()
