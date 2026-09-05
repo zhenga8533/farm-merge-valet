@@ -31,6 +31,12 @@ def test_legacy_marketplace_live_sort_normalizes_to_offer() -> None:
     assert config.marketplace_sort_column == "offer"
 
 
+def test_legacy_shop_start_toggle_is_discarded() -> None:
+    config = AppConfig.model_validate({"allow_shop_order_starts": False})
+
+    assert "allow_shop_order_starts" not in config.model_dump()
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

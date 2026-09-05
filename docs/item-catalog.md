@@ -132,6 +132,8 @@ image.
 
 Item automation resolves global field defaults, partial category defaults,
 item-specific defaults, and finally user overrides keyed by `policy_key`.
+The item master switch pauses merging, interaction, and removal while preserving
+all of those policy selections.
 Automation and merge-5 are enabled by default for every current and newly
 discovered merge family; for example,
 `{"animals/cow":{"prefer_merge_five":false},"crops/wheat":{"merge":false}}`

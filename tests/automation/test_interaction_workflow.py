@@ -244,6 +244,16 @@ def test_ground_product_is_interacted_with_before_ready_producer(monkeypatch) ->
     assert bot.runtime.spawn_limits == []
 
 
+def test_item_master_switch_disables_new_interactions() -> None:
+    bot = bare_bot()
+    bot.config.item_automation_enabled = False
+    bot._live_cells = {
+        (1, 0): LiveCellState(True, "milk", 10, collectable=True),
+    }
+
+    assert bot._interaction_actions() == ([], [], [])
+
+
 def test_only_enabled_immediate_catalog_items_become_tile_interaction_actions(monkeypatch) -> None:
     bot = bare_bot()
     bot._direct_interaction_ids = frozenset({"ticket", "crate_1", "coin_1"})

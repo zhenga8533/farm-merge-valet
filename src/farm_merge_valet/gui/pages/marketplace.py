@@ -13,6 +13,7 @@ from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.core.marketplace import MarketplaceOffer
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
+from farm_merge_valet.gui.components.input_controls import SettingsToggleRow
 from farm_merge_valet.gui.components.metrics import (
     POLICY_ICON_SIZE,
     POLICY_MEDIA_BADGE_COLUMN_WIDTH,
@@ -65,15 +66,16 @@ class MarketplacePage(AppPage):
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
-        self.master_toggle = PolicyCheckBox("Enable marketplace automation")
-        configure_policy_toggle(self.master_toggle)
-        self.master_toggle.setChecked(config.marketplace_automation_enabled)
-        self.master_toggle.setAccessibleName("Enable marketplace automation")
-        self.master_toggle.setToolTip(
-            "Pause all marketplace purchases without changing individual offer selections."
+        master_control = SettingsToggleRow(
+            "Enable marketplace automation",
+            checked=config.marketplace_automation_enabled,
+            tooltip=(
+                "Pause all marketplace purchases without changing individual offer selections."
+            ),
         )
+        self.master_toggle = master_control.toggle
         self.master_toggle.toggled.connect(self._set_master_enabled)
-        self.page_layout.addWidget(self.master_toggle)
+        self.page_layout.addWidget(master_control)
         scaffold = create_policy_tree(
             header_labels=("Offer", "Cost", ""),
             bulk_labels={2: "Auto-purchase"},

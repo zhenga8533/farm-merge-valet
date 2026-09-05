@@ -223,8 +223,7 @@ and newly discovered content is automated without a hardcoded list. An explicit
 shop or recipe override takes precedence, allowing individual entries to be
 disabled. A master switch can pause all shop automation while preserving those
 selections. Complete enabled orders take priority over starting enabled affordable
-orders. A separate control can prevent new orders from spending ingredients
-while leaving completed enabled orders claimable. Claims require one open board cell per reward object; when space is
+orders. Claims require one open board cell per reward object; when space is
 insufficient, merge planning preempts the claim and supply crates.
 
 Starting uses the game's public order handler, which revalidates the current

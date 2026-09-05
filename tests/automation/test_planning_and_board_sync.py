@@ -290,6 +290,17 @@ def test_merge_five_policy_does_not_fall_back_while_space_remains(monkeypatch) -
     assert bot._merge_actions_for_policy() == []
 
 
+def test_item_master_switch_disables_merge_planning() -> None:
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    bot._max_item_tiers[("crops", "wheat")] = 4
+    for x in range(5):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+    bot.config.item_automation_enabled = False
+
+    assert bot._merge_actions_for_policy() == []
+
+
 def test_item_policy_can_enable_merge_three_for_one_family(monkeypatch) -> None:
     from farm_merge_valet.config import ItemPolicyOverride
 

@@ -28,6 +28,7 @@ from farm_merge_valet.core.upgrade_progress import (
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.incremental_work import IncrementalWorkRunner
+from farm_merge_valet.gui.components.input_controls import SettingsToggleRow
 from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_BADGE_COLUMN_WIDTH,
@@ -108,6 +109,16 @@ class ItemsPage(AppPage):
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
+        master_control = SettingsToggleRow(
+            "Enable item automation",
+            checked=config.item_automation_enabled,
+            tooltip=(
+                "Pause item merging, interaction, and removal without changing item policies."
+            ),
+        )
+        self.master_toggle = master_control.toggle
+        self.master_toggle.toggled.connect(self._set_master_enabled)
+        self.page_layout.addWidget(master_control)
         self.catalog_onboarding = CatalogOnboarding()
         self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
         self.page_layout.addWidget(
@@ -180,6 +191,9 @@ class ItemsPage(AppPage):
             or config.items_sort_descending != self._config.items_sort_descending
         )
         self._config = config
+        self.master_toggle.blockSignals(True)
+        self.master_toggle.setChecked(config.item_automation_enabled)
+        self.master_toggle.blockSignals(False)
         self._icons.set_catalog_dir(config.catalog_dir)
         if sort_changed:
             self._apply_sort_preference()
@@ -252,6 +266,9 @@ class ItemsPage(AppPage):
             self._config.model_copy(update=changes).model_dump()
         )
         self.config_edited.emit(ConfigEdit(changes, source="items"))
+
+    def _set_master_enabled(self, enabled: bool) -> None:
+        self._emit(item_automation_enabled=enabled)
 
     def mark_saving(self, _field: str | None = None) -> None:
         self.configuration_header.mark_saving()

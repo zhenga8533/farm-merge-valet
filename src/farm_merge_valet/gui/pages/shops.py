@@ -22,6 +22,7 @@ from farm_merge_valet.config import AppConfig
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.incremental_work import IncrementalWorkRunner
+from farm_merge_valet.gui.components.input_controls import SettingsToggleRow
 from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_ROW_HEIGHT,
@@ -85,25 +86,16 @@ class ShopsPage(AppPage):
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
-        self.master_toggle = PolicyCheckBox("Enable shop automation")
-        configure_policy_toggle(self.master_toggle)
-        self.master_toggle.setChecked(config.shop_automation_enabled)
-        self.master_toggle.setAccessibleName("Enable shop automation")
-        self.master_toggle.setToolTip(
-            "Pause all shop starts and claims without changing shop or recipe selections."
+        master_control = SettingsToggleRow(
+            "Enable shop automation",
+            checked=config.shop_automation_enabled,
+            tooltip=(
+                "Pause all shop starts and claims without changing shop or recipe selections."
+            ),
         )
+        self.master_toggle = master_control.toggle
         self.master_toggle.toggled.connect(self._set_master_enabled)
-        self.page_layout.addWidget(self.master_toggle)
-        self.order_starts_toggle = PolicyCheckBox("Start new orders automatically")
-        configure_policy_toggle(self.order_starts_toggle)
-        self.order_starts_toggle.setChecked(config.allow_shop_order_starts)
-        self.order_starts_toggle.setAccessibleName("Start new shop orders automatically")
-        self.order_starts_toggle.setToolTip(
-            "Allow enabled, affordable orders to start. Completed orders can still be claimed "
-            "when this is off."
-        )
-        self.order_starts_toggle.toggled.connect(self._set_order_starts_enabled)
-        self.page_layout.addWidget(self.order_starts_toggle)
+        self.page_layout.addWidget(master_control)
         self.catalog_onboarding = CatalogOnboarding()
         self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
         self.page_layout.addWidget(
@@ -169,9 +161,6 @@ class ShopsPage(AppPage):
         self.master_toggle.blockSignals(True)
         self.master_toggle.setChecked(config.shop_automation_enabled)
         self.master_toggle.blockSignals(False)
-        self.order_starts_toggle.blockSignals(True)
-        self.order_starts_toggle.setChecked(config.allow_shop_order_starts)
-        self.order_starts_toggle.blockSignals(False)
         self._icons.set_catalog_dir(config.catalog_dir)
         if sort_changed:
             self._apply_sort_preference()
@@ -457,9 +446,6 @@ class ShopsPage(AppPage):
 
     def _set_master_enabled(self, enabled: bool) -> None:
         self._emit(shop_automation_enabled=enabled)
-
-    def _set_order_starts_enabled(self, enabled: bool) -> None:
-        self._emit(allow_shop_order_starts=enabled)
 
     def _set_all(self, _column: int, value: bool) -> None:
         shop_overrides = dict(self._config.shop_overrides)

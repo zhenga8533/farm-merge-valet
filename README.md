@@ -205,11 +205,10 @@ inventory, production timer, and rewards. It can start affordable orders and
 claim completed rewards without opening shop UI or moving the camera. Ingredient
 spending policy uses global shop and recipe defaults, both enabled by default.
 Per-ID GUI overrides take precedence, so one shop or recipe can be disabled
-without hardcoding the discovered catalog. Completed
-rewards reserve one empty cell per reward object and ask the merge planner to
-create space before claiming when necessary. Starting new orders can be disabled
-globally while completed enabled orders continue to be claimed. A shop master
-switch pauses both behaviors without discarding per-shop or per-recipe selections.
+without hardcoding the discovered catalog. Completed rewards reserve one empty
+cell per reward object and ask the merge planner to create space before claiming
+when necessary. A shop master switch pauses both starting and claiming without
+discarding per-shop or per-recipe selections.
 
 The Marketplace page is a persistent catalog of all 50 known flash candidates
 and four genuine free claims. Flash purchases are disabled by default; the four

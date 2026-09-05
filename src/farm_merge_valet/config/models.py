@@ -90,6 +90,7 @@ class AppConfig(BaseModel):
     auto_claim_supply_crates: bool = True
     allow_obstacle_stage_starts: bool = True
     prefer_merge_five: bool = True
+    item_automation_enabled: bool = True
     item_policy_defaults: ItemPolicy = Field(default_factory=ItemPolicy)
     item_category_defaults: dict[str, ItemPolicyOverride] = Field(default_factory=dict)
     item_default_overrides: dict[str, ItemPolicyOverride] = Field(default_factory=dict)
@@ -97,7 +98,6 @@ class AppConfig(BaseModel):
     shop_default_enabled: bool = True
     recipe_default_enabled: bool = True
     shop_automation_enabled: bool = True
-    allow_shop_order_starts: bool = True
     shop_overrides: dict[str, bool] = Field(default_factory=dict)
     recipe_overrides: dict[str, bool] = Field(default_factory=dict)
     marketplace_policy_overrides: dict[str, bool] = Field(default_factory=dict)
@@ -144,6 +144,14 @@ class AppConfig(BaseModel):
     def __init__(self, **data: Any) -> None:
         data.pop("_env_file", None)
         super().__init__(**data)
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_shop_start_toggle(cls, value: object) -> object:
+        if isinstance(value, Mapping) and "allow_shop_order_starts" in value:
+            value = dict(value)
+            value.pop("allow_shop_order_starts")
+        return value
 
     @field_validator("discord_webhook_url", mode="before")
     @classmethod

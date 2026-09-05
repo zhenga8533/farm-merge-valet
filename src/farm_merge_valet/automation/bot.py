@@ -410,7 +410,7 @@ class Bot:
             self._reward_interaction_ids,
         )
         self._live_cells = raw
-        if self.config.allow_obstacle_stage_starts:
+        if self.config.item_automation_enabled and self.config.allow_obstacle_stage_starts:
             read_energy = getattr(self.runtime, "read_energy", None)
             try:
                 self._energy = read_energy() if callable(read_energy) else None
@@ -436,8 +436,10 @@ class Bot:
     def _snapshot_options(self) -> SnapshotOptions:
         marketplace_workflow = getattr(self, "_marketplace_workflow", None)
         storage_bubble_workflow = getattr(self, "_storage_bubble_workflow", None)
-        obstacle_resources = self.config.allow_obstacle_stage_starts and any(
-            self._interaction_enabled(blueprint_id) for blueprint_id in self._clearable_ids
+        obstacle_resources = (
+            self.config.item_automation_enabled
+            and self.config.allow_obstacle_stage_starts
+            and any(self._interaction_enabled(blueprint_id) for blueprint_id in self._clearable_ids)
         )
         return SnapshotOptions(
             include_obstacle_resources=obstacle_resources,
@@ -530,6 +532,8 @@ class Bot:
         prefer_smallest_trigger: bool = False,
         prefer_merge_five: bool | None = None,
     ) -> list[MergeAction]:
+        if not self.config.item_automation_enabled:
+            return []
         ranked = [
             (rank, action)
             for item in sorted(self.board.items_present(), key=self._item_sort_key)
@@ -666,6 +670,8 @@ class Bot:
         )
 
     def _interaction_enabled(self, blueprint_id: str) -> bool:
+        if not self.config.item_automation_enabled:
+            return False
         policy_key = self._blueprint_policy_keys.get(blueprint_id)
         if policy_key is None:
             return False
@@ -726,7 +732,10 @@ class Bot:
         return selected
 
     def _obstacle_idle_reason(self) -> tuple[str, dict[str, object]] | None:
-        if not self.config.allow_obstacle_stage_starts:
+        if (
+            not self.config.item_automation_enabled
+            or not self.config.allow_obstacle_stage_starts
+        ):
             return None
         focus = getattr(self, "_obstacle_focus", None)
         if focus is None:
@@ -768,6 +777,8 @@ class Bot:
         return None
 
     def _reward_container_idle_reason(self) -> tuple[str, dict[str, object]] | None:
+        if not self.config.item_automation_enabled:
+            return None
         for coord, state in sorted(self._live_cells.items()):
             if state.blueprint_id not in getattr(self, "_reward_container_ids", frozenset()):
                 continue
@@ -796,6 +807,9 @@ class Bot:
     def _interaction_actions(
         self,
     ) -> tuple[list[InteractionAction], list[InteractionAction], list[InteractionAction]]:
+        if not self.config.item_automation_enabled:
+            self._obstacle_focus = None
+            return [], [], []
         immediate: list[InteractionAction] = []
         obstacles: list[ObstacleCandidate] = []
         depleted: list[InteractionAction] = []
@@ -1052,6 +1066,9 @@ class Bot:
         ready: list[InteractionAction],
         board_space: BoardSpaceAssessment | None = None,
     ) -> bool:
+        if not self.config.item_automation_enabled:
+            self._interaction_workflow.output_space_request = None
+            return False
         board_space = board_space or self._assess_board_space()
         requested = self._interaction_workflow.requested_output_claim(immediate, depleted, ready)
         if requested is None:
@@ -1084,6 +1101,13 @@ class Bot:
         *,
         required_empty_cells: int | None = None,
     ) -> None:
+        if not self.config.item_automation_enabled:
+            self._merge_workflow.blocked_requirement = None
+            if required_empty_cells is not None or board_space.needs_merge:
+                self._defer_idle("item automation is disabled; no automated merge can create space")
+            else:
+                self._set_phase(Phase.CLAIM_CRATES)
+            return
         self._merge_workflow._step_merge(
             self, health, board_space, required_empty_cells=required_empty_cells
         )
@@ -1102,7 +1126,6 @@ class Bot:
             recipe_default_enabled=self.config.recipe_default_enabled,
             shop_overrides=self.config.shop_overrides,
             recipe_overrides=self.config.recipe_overrides,
-            allow_starts=self.config.allow_shop_order_starts,
             automation_enabled=self.config.shop_automation_enabled,
         )
 

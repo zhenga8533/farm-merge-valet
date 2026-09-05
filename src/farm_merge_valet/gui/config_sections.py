@@ -19,6 +19,7 @@ class ConfigSection(StrEnum):
 SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
     ConfigSection.ITEMS: (
         "prefer_merge_five",
+        "item_automation_enabled",
         "item_policy_defaults",
         "item_category_defaults",
         "item_default_overrides",
@@ -26,7 +27,6 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
     ),
     ConfigSection.SHOPS: (
         "shop_automation_enabled",
-        "allow_shop_order_starts",
         "shop_default_enabled",
         "recipe_default_enabled",
         "shop_overrides",

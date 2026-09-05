@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QHBoxLayout,
+    QLabel,
     QSlider,
     QSpinBox,
     QStyle,
@@ -217,3 +219,31 @@ class SettingsToggle(QCheckBox):
             painter.setPen(focus_pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(QRectF(0.5, 2.5, 41.0, 19.0), 9.5, 9.5)
+
+
+class SettingsToggleRow(QWidget):
+    """A labeled switch row for prominent page-level settings."""
+
+    def __init__(
+        self,
+        label: str,
+        *,
+        checked: bool = False,
+        tooltip: str = "",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        text = QLabel(label)
+        self.toggle = SettingsToggle()
+        self.toggle.setChecked(checked)
+        self.toggle.setAccessibleName(label)
+        text.setBuddy(self.toggle)
+        if tooltip:
+            text.setToolTip(tooltip)
+            self.toggle.setToolTip(tooltip)
+        layout.addWidget(text)
+        layout.addWidget(self.toggle)
+        layout.addStretch()
