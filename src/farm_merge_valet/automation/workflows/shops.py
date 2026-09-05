@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 _ACTION_SETTLE_SECONDS = 3.0
 _ACTION_MAX_PENDING_SECONDS = 8.0
+_CLAIM_REFRESH_READ_LIMIT = 3
 
 
 @dataclass
@@ -37,8 +38,15 @@ class PendingShopAction:
 
 
 @dataclass
+class PendingClaimRefresh:
+    shop_id: str
+    empty_reads_remaining: int = _CLAIM_REFRESH_READ_LIMIT
+
+
+@dataclass
 class ShopWorkflow:
     pending: PendingShopAction | None = None
+    claim_refresh: PendingClaimRefresh | None = None
 
     @staticmethod
     def _action_key(action: ShopAction) -> OperationKey:
@@ -92,6 +100,15 @@ class ShopWorkflow:
             bot._actions().complete(OperationKind.SHOP, self._action_key(pending.action))
             bot._last_wait_reason = None
             bot._idle_active = False
+            if pending.action.kind is ShopActionKind.CLAIM:
+                replacement_visible = any(
+                    order.shop_id == pending.action.shop_id for order in orders
+                )
+                self.claim_refresh = (
+                    None
+                    if replacement_visible or not bot._shop_policy().may_enable_orders
+                    else PendingClaimRefresh(pending.action.shop_id)
+                )
             event = (
                 "shop.order_started"
                 if pending.action.kind is ShopActionKind.START
@@ -207,6 +224,19 @@ class ShopWorkflow:
             )
         return False
 
+    def _waiting_for_claim_refresh(self, orders: tuple[ShopOrder, ...]) -> bool:
+        refresh = self.claim_refresh
+        if refresh is None:
+            return False
+        if any(order.shop_id == refresh.shop_id for order in orders):
+            self.claim_refresh = None
+            return False
+        refresh.empty_reads_remaining -= 1
+        if refresh.empty_reads_remaining <= 0:
+            self.claim_refresh = None
+            return False
+        return True
+
     def _step_shops(
         self,
         bot: Bot,
@@ -216,6 +246,7 @@ class ShopWorkflow:
     ) -> bool:
         policy = bot._shop_policy()
         now = bot._now()
+        waiting_for_claim_refresh = self._waiting_for_claim_refresh(orders)
         available_orders = tuple(
             order
             for order in orders
@@ -245,6 +276,8 @@ class ShopWorkflow:
                 board_space,
                 required_empty_cells=required_empty_cells,
             )
+            return True
+        if waiting_for_claim_refresh:
             return True
         phase_type = bot.phase.__class__
         if bot.phase is phase_type.SHOPS:

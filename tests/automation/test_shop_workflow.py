@@ -174,6 +174,44 @@ def test_shop_claim_is_submitted_and_verified() -> None:
     assert bot.runtime.claimed_orders == [("bakery", "recipe_bread")]
     assert bot._verify_pending_shop_action(health(advancing=True), ())
     assert bot._shop_workflow.pending is None
+    assert bot._shop_workflow.claim_refresh is not None
+
+
+def test_claim_refresh_prevents_idle_until_replacement_order_appears() -> None:
+    bot = bare_bot()
+    claim = ShopAction(ShopActionKind.CLAIM, "bakery", "recipe_bread", 1)
+    board_space = BoardSpaceAssessment(1, 0, ())
+
+    assert bot._submit_shop_action(claim, health(advancing=True))
+    assert bot._verify_pending_shop_action(health(advancing=True), ())
+    assert bot._step_shops(health(advancing=True), (), board_space)
+
+    replacement = ShopOrder(
+        "bakery",
+        "recipe_cake",
+        ShopOrderState.AVAILABLE,
+        (),
+        ("coin_1",),
+        60,
+    )
+    assert bot._step_shops(health(advancing=True), (replacement,), board_space)
+
+    assert bot._shop_workflow.claim_refresh is None
+    assert bot.runtime.started_orders == [("bakery", "recipe_cake")]
+
+
+def test_claim_refresh_is_bounded_when_replacement_never_appears() -> None:
+    bot = bare_bot()
+    claim = ShopAction(ShopActionKind.CLAIM, "bakery", "recipe_bread", 1)
+    board_space = BoardSpaceAssessment(1, 0, ())
+
+    assert bot._submit_shop_action(claim, health(advancing=True))
+    assert bot._verify_pending_shop_action(health(advancing=True), ())
+
+    assert bot._step_shops(health(advancing=True), (), board_space)
+    assert bot._step_shops(health(advancing=True), (), board_space)
+    assert not bot._step_shops(health(advancing=True), (), board_space)
+    assert bot._shop_workflow.claim_refresh is None
 
 
 def test_global_action_lease_prevents_shop_submission_during_merge() -> None:
