@@ -1,4 +1,4 @@
-"""Stateful crate-claiming and merge automation loop."""
+"""Stateful automation orchestration loop."""
 
 from __future__ import annotations
 
@@ -410,15 +410,19 @@ class Bot:
             self._reward_interaction_ids,
         )
         self._live_cells = raw
-        read_energy = getattr(self.runtime, "read_energy", None)
-        try:
-            self._energy = read_energy() if callable(read_energy) else None
-        except RuntimeConnectionError:
+        if self.config.allow_obstacle_stage_starts:
+            read_energy = getattr(self.runtime, "read_energy", None)
+            try:
+                self._energy = read_energy() if callable(read_energy) else None
+            except RuntimeConnectionError:
+                self._energy = None
+            read_workers = getattr(self.runtime, "read_workers", None)
+            try:
+                self._workers = read_workers() if callable(read_workers) else None
+            except RuntimeConnectionError:
+                self._workers = None
+        else:
             self._energy = None
-        read_workers = getattr(self.runtime, "read_workers", None)
-        try:
-            self._workers = read_workers() if callable(read_workers) else None
-        except RuntimeConnectionError:
             self._workers = None
         read_storage_bubbles = getattr(self.runtime, "read_storage_bubbles", None)
         try:
@@ -722,6 +726,8 @@ class Bot:
         return selected
 
     def _obstacle_idle_reason(self) -> tuple[str, dict[str, object]] | None:
+        if not self.config.allow_obstacle_stage_starts:
+            return None
         focus = getattr(self, "_obstacle_focus", None)
         if focus is None:
             return None
@@ -1092,12 +1098,12 @@ class Bot:
 
     def _shop_policy(self) -> ShopPolicy:
         return ShopPolicy(
-            self.config.shop_default_enabled,
-            self.config.recipe_default_enabled,
-            self.config.shop_overrides,
-            self.config.recipe_overrides,
-            self.config.allow_shop_order_starts,
-            self.config.shop_automation_enabled,
+            shop_default_enabled=self.config.shop_default_enabled,
+            recipe_default_enabled=self.config.recipe_default_enabled,
+            shop_overrides=self.config.shop_overrides,
+            recipe_overrides=self.config.recipe_overrides,
+            allow_starts=self.config.allow_shop_order_starts,
+            automation_enabled=self.config.shop_automation_enabled,
         )
 
     def step(self) -> None:

@@ -373,6 +373,32 @@ def test_live_sync_distinguishes_empty_structure_placeholder(monkeypatch) -> Non
     assert bot.board.get_cell((1, 0)).kind is CellKind.STRUCTURE
 
 
+def test_live_sync_skips_obstacle_resources_when_stage_starts_are_disabled(
+    monkeypatch,
+) -> None:
+    bot = bare_bot()
+    bot.config.allow_obstacle_stage_starts = False
+    bot._blueprint_items = {}
+    resource_reads: list[str] = []
+    monkeypatch.setattr(
+        bot.runtime,
+        "read_energy",
+        lambda: resource_reads.append("energy"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        bot.runtime,
+        "read_workers",
+        lambda: resource_reads.append("workers"),
+        raising=False,
+    )
+
+    assert bot._sync_board_from_live_state()
+    assert resource_reads == []
+    assert bot._energy is None
+    assert bot._workers is None
+
+
 def test_live_sync_keeps_upgrade_card_targets_as_distinct_variants(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_items = {"upgrade_card_1": ItemRef("upgrade_cards", "upgrade_card", 1)}

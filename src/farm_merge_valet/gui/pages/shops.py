@@ -94,6 +94,16 @@ class ShopsPage(AppPage):
         )
         self.master_toggle.toggled.connect(self._set_master_enabled)
         self.page_layout.addWidget(self.master_toggle)
+        self.order_starts_toggle = PolicyCheckBox("Start new orders automatically")
+        configure_policy_toggle(self.order_starts_toggle)
+        self.order_starts_toggle.setChecked(config.allow_shop_order_starts)
+        self.order_starts_toggle.setAccessibleName("Start new shop orders automatically")
+        self.order_starts_toggle.setToolTip(
+            "Allow enabled, affordable orders to start. Completed orders can still be claimed "
+            "when this is off."
+        )
+        self.order_starts_toggle.toggled.connect(self._set_order_starts_enabled)
+        self.page_layout.addWidget(self.order_starts_toggle)
         self.catalog_onboarding = CatalogOnboarding()
         self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
         self.page_layout.addWidget(
@@ -159,6 +169,9 @@ class ShopsPage(AppPage):
         self.master_toggle.blockSignals(True)
         self.master_toggle.setChecked(config.shop_automation_enabled)
         self.master_toggle.blockSignals(False)
+        self.order_starts_toggle.blockSignals(True)
+        self.order_starts_toggle.setChecked(config.allow_shop_order_starts)
+        self.order_starts_toggle.blockSignals(False)
         self._icons.set_catalog_dir(config.catalog_dir)
         if sort_changed:
             self._apply_sort_preference()
@@ -443,12 +456,10 @@ class ShopsPage(AppPage):
         self._sync_bulk_header()
 
     def _set_master_enabled(self, enabled: bool) -> None:
-        self._config = AppConfig.model_validate(
-            self._config.model_copy(update={"shop_automation_enabled": enabled}).model_dump()
-        )
-        self.config_edited.emit(
-            ConfigEdit({"shop_automation_enabled": enabled}, source="shops")
-        )
+        self._emit(shop_automation_enabled=enabled)
+
+    def _set_order_starts_enabled(self, enabled: bool) -> None:
+        self._emit(allow_shop_order_starts=enabled)
 
     def _set_all(self, _column: int, value: bool) -> None:
         shop_overrides = dict(self._config.shop_overrides)

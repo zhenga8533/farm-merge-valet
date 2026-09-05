@@ -245,29 +245,23 @@ class MarketplacePage(AppPage):
             default=None,
         )
 
+    def _emit(self, **changes: object) -> None:
+        self._config = AppConfig.model_validate(
+            self._config.model_copy(update=changes).model_dump()
+        )
+        self.config_edited.emit(ConfigEdit(changes, source="marketplace"))
+
     def _set_enabled(self, key: str, enabled: bool) -> None:
         values = dict(self._config.marketplace_policy_overrides)
         if enabled == self._config.marketplace_policy_default_enabled(key):
             values.pop(key, None)
         else:
             values[key] = enabled
-        self._config = AppConfig.model_validate(
-            self._config.model_copy(update={"marketplace_policy_overrides": values}).model_dump()
-        )
-        self.config_edited.emit(
-            ConfigEdit({"marketplace_policy_overrides": values}, source="marketplace")
-        )
+        self._emit(marketplace_policy_overrides=values)
         self._sync_controls()
 
     def _set_master_enabled(self, enabled: bool) -> None:
-        self._config = AppConfig.model_validate(
-            self._config.model_copy(
-                update={"marketplace_automation_enabled": enabled}
-            ).model_dump()
-        )
-        self.config_edited.emit(
-            ConfigEdit({"marketplace_automation_enabled": enabled}, source="marketplace")
-        )
+        self._emit(marketplace_automation_enabled=enabled)
 
     def _set_group(self, policy_keys: tuple[str, ...], enabled: bool) -> None:
         values = dict(self._config.marketplace_policy_overrides)
@@ -276,12 +270,7 @@ class MarketplacePage(AppPage):
                 values.pop(key, None)
             else:
                 values[key] = enabled
-        self._config = AppConfig.model_validate(
-            self._config.model_copy(update={"marketplace_policy_overrides": values}).model_dump()
-        )
-        self.config_edited.emit(
-            ConfigEdit({"marketplace_policy_overrides": values}, source="marketplace")
-        )
+        self._emit(marketplace_policy_overrides=values)
         self._sync_controls()
 
     def _set_all(self, _column: int, enabled: bool) -> None:
@@ -290,12 +279,7 @@ class MarketplacePage(AppPage):
             for offer in marketplace_catalog()
             if enabled != self._config.marketplace_policy_default_enabled(offer.policy_key)
         }
-        self._config = AppConfig.model_validate(
-            self._config.model_copy(update={"marketplace_policy_overrides": values}).model_dump()
-        )
-        self.config_edited.emit(
-            ConfigEdit({"marketplace_policy_overrides": values}, source="marketplace")
-        )
+        self._emit(marketplace_policy_overrides=values)
         self._sync_controls()
 
     def _sync_controls(self) -> None:
@@ -338,7 +322,4 @@ class MarketplacePage(AppPage):
         }
         if all(getattr(self._config, name) == value for name, value in changes.items()):
             return
-        self._config = AppConfig.model_validate(
-            self._config.model_copy(update=changes).model_dump()
-        )
-        self.config_edited.emit(ConfigEdit(changes, source="marketplace"))
+        self._emit(**changes)

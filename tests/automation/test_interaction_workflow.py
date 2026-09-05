@@ -590,8 +590,10 @@ def test_obstacle_stage_starts_can_be_disabled_without_disabling_loot(monkeypatc
     )
     obstacle = ObstacleState(4, 5, 10, False, required_workers=1)
     bot._live_cells = {(3, 4): LiveCellState(True, "rock_medium", 91, obstacle=obstacle)}
+    bot._obstacle_focus = ((3, 4), 91)
 
     assert bot._interaction_actions() == ([], [], [])
+    assert bot._obstacle_idle_reason() is None
 
     lootable = ObstacleState(4, 5, None, False, clearing=True)
     bot._live_cells = {

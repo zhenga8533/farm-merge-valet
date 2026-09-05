@@ -26,6 +26,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
     ),
     ConfigSection.SHOPS: (
         "shop_automation_enabled",
+        "allow_shop_order_starts",
         "shop_default_enabled",
         "recipe_default_enabled",
         "shop_overrides",
@@ -53,7 +54,6 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "auto_pop_storage_bubbles",
         "auto_claim_supply_crates",
         "allow_obstacle_stage_starts",
-        "allow_shop_order_starts",
         "loop_interval",
         "idle_wait_seconds",
         "item_action_delay_min",

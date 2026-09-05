@@ -197,7 +197,6 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     assert "Automatically pop stored items" in labels
     assert "Automatically claim supply crates" in labels
     assert "Allow obstacle energy spending" in labels
-    assert "Allow starting new shop orders" in labels
     assert "Close managed browser when quitting" in labels
     assert "Reset all" in {
         button.text() for button in window.settings_page.findChildren(QPushButton)
@@ -343,6 +342,7 @@ def test_shop_bulk_toggle_updates_all_shops_and_recipes(tmp_path) -> None:
     store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
     window = MainWindow(ApplicationController(store))
     assert window.shops_page.master_toggle.isChecked()
+    assert window.shops_page.order_starts_toggle.isChecked()
 
     bakery = window.shops_page.tree.topLevelItem(0)
     assert bakery is not None and bakery.childCount() == 0
@@ -384,6 +384,8 @@ def test_shop_bulk_toggle_updates_all_shops_and_recipes(tmp_path) -> None:
     assert not window.shops_page._config.shop_automation_enabled
     assert window.shops_page._config.shop_overrides == selected_shops
     assert window.shops_page._config.recipe_overrides == selected_recipes
+    window.shops_page.order_starts_toggle.click()
+    assert not window.shops_page._config.allow_shop_order_starts
     bakery = window.shops_page.tree.topLevelItem(0)
     assert bakery is not None
     window.shops_page.expansion_controls.collapse_button.click()
