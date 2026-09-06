@@ -75,14 +75,14 @@ Facebook/TikTok community posts, and direct in-app observation (marked
   each stage consumes progressively more energy and takes progressively
   longer, and drops resources (lumber from trees, stone from rocks, tools
   from toolboxes) at each stage if board space is available.
-- Toolbox clearing by tier (rock/tree stage counts were not confirmed by
-  research, but likely follow a similar progressive pattern):
-  - **Tier 1**: 3 stages, energy cost 5 -> 10 -> 15, final stage takes 15
-    in-game minutes.
-  - **Tier 2**: 5 stages, energy cost increases by 5 each stage up to 25,
-    final stage takes 25 in-game minutes.
-  - **Tier 3**: 10 stages, energy cost increases by 5 each stage up to 50,
-    final stage takes 2 in-game hours.
+- Trees, rocks, and toolboxes share the same tier progression:
+  - **Tier 1**: 3 stages.
+  - **Tier 2**: 5 stages.
+  - **Tier 3**: 10 stages.
+- Stage energy starts at **5**, increases by **5** per stage, and is capped at
+  **50**. A tier-3 obstacle therefore progresses from 5 to 50 energy.
+- Toolbox final-stage clearing times are 15 in-game minutes for tier 1,
+  25 minutes for tier 2, and 2 hours for tier 3.
 
 ## Energy
 
@@ -98,6 +98,22 @@ Facebook/TikTok community posts, and direct in-app observation (marked
 - Coins are spent to unlock new buildings, repair structures, and open up
   new farm land.
 - Unwanted orders can be discarded, but discarding has a time delay/cost.
+
+### Player-visible workshop order flow
+
+Selecting an active workshop opens its current order panel. The order moves
+through three states:
+
+1. **Available** shows the recipe's required ingredients and rewards. Starting
+   it consumes the ingredients when the inventory contains the full amount.
+2. **Producing** shows the active production timer and its remaining duration.
+3. **Ready** allows the completed rewards to be claimed. Reward objects spawn
+   onto the board, after which the workshop receives its next order.
+
+The bot observes and advances this same lifecycle through the game's order
+service without opening the panel or moving the camera. It starts only
+affordable enabled recipes and reserves one empty board cell per reward object
+before claiming.
 
 ## Marketplace
 
@@ -153,20 +169,4 @@ event energy is exposed only while its event shop is active.
 - The train station is central to the visiting/social loop described
   above.
 
-## Implementation notes for incompletely documented mechanics
-
-- A static table of exact tree/rock stage counts and energy costs per tier has
-  not been recorded. This does not block obstacle automation: the runtime reads
-  each obstacle's live total stages, remaining stages, current energy cost, and
-  worker requirement.
-- The precise player-visible order-screen flow has not been documented. The bot
-  does not depend on it: it observes order state through the game's order
-  service, starts affordable orders through the public order handler, and claims
-  completed rewards through the same progression events used by the game.
-- A hand-maintained list of every distinct crate visual has not been recorded.
-  Catalog synchronization discovers supply crates, reward containers, and keys
-  from live blueprint identities and capabilities, so recognition does not
-  depend on such a list.
-
-Remaining feature work and optional research are tracked in
-[Open Items](open-items.md).
+Remaining feature and supporting work is tracked in [Open Items](open-items.md).

@@ -88,7 +88,7 @@ builds write disposable output beneath repository-local `.tmp/`.
 
 Tests mirror production packages under `tests/automation`, `tests/catalog`,
 `tests/config`, `tests/core`, `tests/cdp`, `tests/gui`, `tests/browser`, and
-`tests/observability`. Live integration tests belong in `tests/integration`
-once an explicitly marked live test exists. Architecture tests parse imports,
+`tests/observability`. Explicitly opted-in live tests reside in `tests/integration`.
+Architecture tests parse imports,
 enforce inward dependencies, and reject retired module paths so old structure
 cannot return unnoticed.

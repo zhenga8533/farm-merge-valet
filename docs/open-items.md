@@ -8,9 +8,9 @@ feature gaps.
 
 ### Land and board expansion
 
-Discover eligible locked plots and automate expansion while respecting player
-level, currency type, price, and user policy. Standard coin plots and premium
-gem or crystal plots must remain distinguishable.
+Automate expansion of the locked and purchasable plot types the board reader
+already classifies. Add authoritative eligibility, player-level, currency,
+price, and policy checks before submitting an expansion.
 
 ### Event workflows
 
@@ -22,41 +22,22 @@ The scope must be defined per event because event scenes and rules can change.
 
 ### Backend-connectivity monitoring
 
-Distinguish a renderer that is alive but disconnected from the game backend
-from an ordinarily idle or locally frozen renderer. This is particularly
-important for visiting and before adding expansion or event workflows that
-depend on server-confirmed navigation or purchases.
+Detect backend-only connectivity failures that occur before the game displays
+its disconnection layer or an action fails. This is particularly important for
+visiting and before adding expansion or event workflows that depend on
+server-confirmed navigation or purchases.
 
 Renderer and action-pipeline freezes are already detected separately: three
 consecutive submitted actions without authoritative progress trigger one bounded
-managed-page reload. This does not yet identify backend-only disconnections.
-
-### Live integration coverage
-
-Add explicitly marked, opt-in live tests under `tests/integration`. The regular
-test suite currently covers the domain, workflows, CDP parsing, and submitted
-action expressions with synthetic state, but does not exercise a real loaded
-game.
-
-## Non-blocking documentation research
-
-These are not missing automation capabilities:
-
-- Record a static reference table of tree and rock stage counts and energy
-  costs, if useful. Automation already reads each obstacle's live total stages,
-  remaining stages, current energy cost, and worker requirement.
-- Document the player-visible order screens, if desired. Automation already
-  observes available, producing, and ready orders, starts affordable orders,
-  and claims completed orders without opening those screens.
-- Record every distinct supply and reward-container visual, if desired. Catalog
-  synchronization already classifies discovered content from runtime identity
-  and capabilities rather than relying on a hand-maintained visual list.
+managed-page reload. Explicit in-game disconnection layers are already detected
+as blocking overlays.
 
 ## Known constraints, not scheduled work
 
-- The managed browser must remain open. Bot startup can open the configured game
-  page and request Play, but a changed or unavailable Reddit launcher may still
-  require the user to start the game manually.
-- Minimized and headless operation are unsupported.
-- An alternative merge-submission mode has been identified as a possible future
-  policy/action concern, but no new mode is currently specified.
+- The managed game browser must remain open. Bot startup can open the configured
+  game page and request Play, but a changed or unavailable Reddit launcher may
+  still require the user to start the game manually.
+- Minimizing the Farm Merge Valet application to the tray is supported.
+  Minimizing the managed game browser and headless operation are unsupported;
+  the browser may instead remain unfocused, occluded, on another virtual
+  desktop, or showing another tab.
