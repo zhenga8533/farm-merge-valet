@@ -7,6 +7,7 @@ from farm_merge_valet.automation.runtime import (
     CrateSpawnResult,
     GameRuntime,
     LiveCellState,
+    RuntimeConnectionError,
     RuntimeHealth,
     RuntimeRecoveryRequired,
 )
@@ -20,5 +21,6 @@ __all__ = [
     "LiveCellState",
     "Phase",
     "RuntimeHealth",
+    "RuntimeConnectionError",
     "RuntimeRecoveryRequired",
 ]

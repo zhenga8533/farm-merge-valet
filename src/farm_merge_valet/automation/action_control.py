@@ -14,6 +14,7 @@ class OperationKind(StrEnum):
     SHOP = "shop"
     MARKETPLACE = "marketplace"
     FARM_VISIT = "farm-visit"
+    CRATE = "crate"
 
 
 OperationKey = tuple[Hashable, ...]

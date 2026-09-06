@@ -1,7 +1,8 @@
 # Open Items
 
-This document is the canonical list of known work that is not implemented.
-Game facts that the runtime already discovers dynamically are not feature gaps.
+This document is the canonical list of feature and supporting work that is not
+implemented. Game facts that the runtime already discovers dynamically are not
+feature gaps.
 
 ## Planned feature work
 
@@ -23,8 +24,8 @@ The scope must be defined per event because event scenes and rules can change.
 
 Distinguish a renderer that is alive but disconnected from the game backend
 from an ordinarily idle or locally frozen renderer. This is particularly
-important before adding visiting, expansion, or event workflows that depend on
-server-confirmed navigation or purchases.
+important for visiting and before adding expansion or event workflows that
+depend on server-confirmed navigation or purchases.
 
 Renderer and action-pipeline freezes are already detected separately: three
 consecutive submitted actions without authoritative progress trigger one bounded

@@ -13,6 +13,7 @@ from farm_merge_valet.automation.runtime import (
     LiveCellState,
     RuntimeConnectionError,
     RuntimeHealth,
+    RuntimeSnapshot,
     TransientOverlayKind,
 )
 from farm_merge_valet.automation.workflows import (
@@ -52,6 +53,16 @@ class FakeRuntime:
 
     def configure_crate_delays(self, minimum, maximum):
         self.configured_crate_delays.append((minimum, maximum))
+
+    def read_runtime_health(self):
+        return health(advancing=True)
+
+    def read_snapshot(self, _options):
+        return RuntimeSnapshot(
+            self.read_runtime_health(),
+            self.board_state,
+            shop_orders=self.shop_orders,
+        )
 
     def read_board_state(self):
         return self.board_state
@@ -126,7 +137,7 @@ def health(
 
 
 def bare_bot() -> Bot:
-    bot = Bot.__new__(Bot)
+    bot = Bot(AppConfig(), FakeRuntime(), FakeCatalogProvider())
     bot.runtime = FakeRuntime()
     bot.config = AppConfig()
     bot.catalog_provider = FakeCatalogProvider()

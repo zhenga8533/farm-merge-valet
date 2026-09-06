@@ -6,14 +6,18 @@ import logging
 import random
 import time
 from collections.abc import Callable
-from enum import Enum, auto
 from queue import Empty, Queue
 from threading import Event, Lock, Thread
 from typing import Literal
 
 from farm_merge_valet.automation.action_control import ActionCoordinator
-from farm_merge_valet.automation.board_space import BoardSpaceAssessment
-from farm_merge_valet.automation.perception import build_board, build_perceived_state
+from farm_merge_valet.automation.board_space import (
+    BoardSpaceAssessment,
+    BoardSpaceRequest,
+    BoardSpaceStatus,
+)
+from farm_merge_valet.automation.perception import build_perceived_state
+from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.automation.runtime import (
     ActionStatus,
     FarmSceneKind,
@@ -73,6 +77,7 @@ from farm_merge_valet.core.shops import (
     ShopAction,
     ShopOrder,
     ShopPolicy,
+    required_shop_claim_empty_cells,
 )
 from farm_merge_valet.observability.logging import log_event
 
@@ -87,15 +92,6 @@ def _marketplace_policy_enabled(config: AppConfig) -> bool:
         config.marketplace_policy_enabled(offer.policy_key)
         for offer in marketplace_catalog()
     )
-
-class Phase(Enum):
-    INTERACT_TILES = auto()
-    SHOPS = auto()
-    MARKETPLACE = auto()
-    CLAIM_CRATES = auto()
-    MERGE = auto()
-    FARM_VISITS = auto()
-
 
 class Bot:
     def __init__(
@@ -112,8 +108,7 @@ class Bot:
         self._pending_config: AppConfig | None = None
         self._resume_requested = Event()
         self.runtime = runtime
-        if callable(set_cancel_event := getattr(self.runtime, "set_cancel_event", None)):
-            set_cancel_event(self._interrupt_event)
+        self.runtime.set_cancel_event(self._interrupt_event)
         self.paused = False
         self._quit_requested = False
         self._quit_lock = Lock()
@@ -143,6 +138,7 @@ class Bot:
         self._storage_bubble_workflow = StorageBubbleWorkflow()
         self._farm_visit_workflow = FarmVisitWorkflow()
         self._action_control = ActionCoordinator()
+        self._board_space_request: BoardSpaceRequest | None = None
         self._last_health: RuntimeHealth | None = None
         self._runtime_initialization_started_at: float | None = None
         self._runtime_initializing_reported = False
@@ -192,12 +188,13 @@ class Bot:
             return
         previous = self.config
         applied = live_config(previous, pending)
-        configure_delays = getattr(self.runtime, "configure_crate_delays", None)
-        if callable(configure_delays) and (
+        if (
             previous.crate_delay_min != applied.crate_delay_min
             or previous.crate_delay_max != applied.crate_delay_max
         ):
-            configure_delays(applied.crate_delay_min, applied.crate_delay_max)
+            self.runtime.configure_crate_delays(
+                applied.crate_delay_min, applied.crate_delay_max
+            )
         self.config = applied
         self._next_loop_delay = applied.loop_interval
         applied_fields = changed_fields(previous, applied)
@@ -211,10 +208,7 @@ class Bot:
         )
 
     def _actions(self) -> ActionCoordinator:
-        control = getattr(self, "_action_control", None)
-        if control is None:
-            control = self._action_control = ActionCoordinator()
-        return control
+        return self._action_control
 
     def _wait_for_next_iteration(self, delay: float) -> None:
         self._loop_wakeup.clear()
@@ -429,73 +423,24 @@ class Bot:
         return True
 
     def _sync_board_from_live_state(self) -> bool:
-        read_snapshot = getattr(self.runtime, "read_snapshot", None)
-        if callable(read_snapshot):
-            try:
-                snapshot = read_snapshot(self._snapshot_options())
-            except RuntimeConnectionError as exc:
-                log_event(
-                    logger,
-                    logging.DEBUG,
-                    "runtime.snapshot_failed",
-                    "Could not read live runtime snapshot: %s",
-                    exc,
-                    detail=str(exc),
-                )
-                return False
-            if snapshot is None or snapshot.cells is None:
-                return False
-            self._apply_runtime_snapshot(snapshot)
-            return True
         try:
-            raw = self.runtime.read_board_state()
+            snapshot = self.runtime.read_snapshot(self._snapshot_options())
         except RuntimeConnectionError as exc:
             log_event(
                 logger,
                 logging.DEBUG,
-                "runtime.board_read_failed",
-                "Could not read live board state: %s",
+                "runtime.snapshot_failed",
+                "Could not read live runtime snapshot: %s",
                 exc,
                 detail=str(exc),
             )
             return False
-        if raw is None:
+        if snapshot is None or snapshot.cells is None:
             return False
-        self.board = build_board(
-            raw,
-            self._blueprint_items,
-            self._direct_interaction_ids,
-            self._reward_interaction_ids,
-        )
-        self._live_cells = raw
-        if self.config.item_automation_enabled and self.config.allow_obstacle_stage_starts:
-            read_energy = getattr(self.runtime, "read_energy", None)
-            try:
-                self._energy = read_energy() if callable(read_energy) else None
-            except RuntimeConnectionError:
-                self._energy = None
-            read_workers = getattr(self.runtime, "read_workers", None)
-            try:
-                self._workers = read_workers() if callable(read_workers) else None
-            except RuntimeConnectionError:
-                self._workers = None
-        else:
-            self._energy = None
-            self._workers = None
-        read_storage_bubbles = getattr(self.runtime, "read_storage_bubbles", None)
-        try:
-            self._storage_bubbles = (
-                read_storage_bubbles() if callable(read_storage_bubbles) else ()
-            )
-        except RuntimeConnectionError:
-            self._storage_bubbles = None
+        self._apply_runtime_snapshot(snapshot)
         return True
 
     def _snapshot_options(self) -> SnapshotOptions:
-        marketplace_workflow = getattr(self, "_marketplace_workflow", None)
-        storage_bubble_workflow = getattr(self, "_storage_bubble_workflow", None)
-        farm_visit_workflow = getattr(self, "_farm_visit_workflow", None)
-        last_health = getattr(self, "_last_health", None)
         obstacle_resources = (
             self.config.item_automation_enabled
             and self.config.allow_obstacle_stage_starts
@@ -505,22 +450,22 @@ class Bot:
             include_obstacle_resources=obstacle_resources,
             include_storage_bubbles=(
                 self.config.auto_pop_storage_bubbles
-                or (
-                    storage_bubble_workflow is not None
-                    and storage_bubble_workflow.pending is not None
-                )
+                or self._storage_bubble_workflow.pending is not None
             ),
             include_shop_orders=(
                 self._shop_policy().may_enable_orders or self._shop_workflow.pending is not None
             ),
             include_marketplace=(
                 _marketplace_policy_enabled(self.config)
-                or (marketplace_workflow is not None and marketplace_workflow.pending is not None)
+                or self._marketplace_workflow.pending is not None
             ),
             include_farm_visit=(
                 self.config.farm_visit_automation_enabled
-                or (farm_visit_workflow is not None and farm_visit_workflow.pending is not None)
-                or (last_health is not None and last_health.farm_scene is FarmSceneKind.VISITOR)
+                or self._farm_visit_workflow.pending is not None
+                or (
+                    self._last_health is not None
+                    and self._last_health.farm_scene is FarmSceneKind.VISITOR
+                )
             ),
         )
 
@@ -539,9 +484,8 @@ class Bot:
         self._storage_bubbles = perceived.storage_bubbles
         self._shop_orders = perceived.shop_orders
         self._marketplace_offers = snapshot.marketplace_offers
-        scheduler = getattr(self, "_scheduler", None)
-        if scheduler is not None and snapshot.metrics is not None:
-            scheduler.record_snapshot(snapshot.metrics.wall_duration_ms / 1000.0)
+        if snapshot.metrics is not None:
+            self._scheduler.record_snapshot(snapshot.metrics.wall_duration_ms / 1000.0)
 
     def sync_board_from_live_state(self) -> bool:
         """Synchronize the local board model from the live game state."""
@@ -704,7 +648,7 @@ class Bot:
             "producer_kind": action.producer_kind.value if action.producer_kind else None,
         }
         if action.obstacle is not None:
-            workers = getattr(self, "_workers", None)
+            workers = self._workers
             context.update(
                 obstacle_movable=action.obstacle.movable,
                 obstacle_in_progress=action.obstacle.in_progress,
@@ -746,13 +690,13 @@ class Bot:
     def _live_policy_key(self, state: LiveCellState) -> str | None:
         if state.blueprint_id is None:
             return None
-        item = getattr(self, "_blueprint_items", {}).get(state.blueprint_id)
+        item = self._blueprint_items.get(state.blueprint_id)
         if item is not None and state.item_variant is not None:
             return ItemRef(item.category, item.name, item.tier, state.item_variant).tier_policy_key
         return self._blueprint_policy_keys.get(state.blueprint_id)
 
     def _focused_obstacle(self, candidates: list[ObstacleCandidate]) -> ObstacleCandidate | None:
-        focus = getattr(self, "_obstacle_focus", None)
+        focus = self._obstacle_focus
         if focus is not None:
             focused_coord, focused_object_id = focus
             for candidate in candidates:
@@ -765,7 +709,7 @@ class Bot:
                 current is not None
                 and current.object_id == focused_object_id
                 and current_blueprint_id is not None
-                and current_blueprint_id in getattr(self, "_clearable_ids", frozenset())
+                and current_blueprint_id in self._clearable_ids
                 and self._interaction_enabled(current_blueprint_id)
             ):
                 return None
@@ -784,8 +728,8 @@ class Bot:
         if focused is None:
             return None
 
-        energy = getattr(self, "_energy", None)
-        workers = getattr(self, "_workers", None)
+        energy = self._energy
+        workers = self._workers
         if not focused.state.clearing:
             return plan_obstacle_clear([focused], energy, workers)
         if workers is None or workers.available == 0:
@@ -827,7 +771,7 @@ class Bot:
                 continue
             if not policy.interact:
                 continue
-            if state.blueprint_id in getattr(self, "_reward_container_ids", frozenset()):
+            if state.blueprint_id in self._reward_container_ids:
                 if (
                     state.claim_output_capacity is not None
                     and state.reward_requirements_met is True
@@ -844,7 +788,7 @@ class Bot:
                         )
                     )
                 continue
-            if state.blueprint_id in getattr(self, "_upgrade_interaction_ids", frozenset()):
+            if state.blueprint_id in self._upgrade_interaction_ids:
                 if (
                     state.tier is not None
                     and state.item_variant is not None
@@ -863,7 +807,7 @@ class Bot:
                     )
                 continue
             if (
-                state.blueprint_id in getattr(self, "_clearable_ids", frozenset())
+                state.blueprint_id in self._clearable_ids
                 and state.obstacle is not None
             ):
                 obstacles.append(
@@ -992,16 +936,12 @@ class Bot:
         return self._interaction_workflow._submit_interaction(self, action, health)
 
     def _verify_pending_storage_bubble(self, health: RuntimeHealth) -> bool:
-        workflow = getattr(self, "_storage_bubble_workflow", None)
-        if workflow is None:
-            workflow = self._storage_bubble_workflow = StorageBubbleWorkflow()
-        return workflow.verify_pending(self, health)
+        return self._storage_bubble_workflow.verify_pending(self, health)
 
-    def _step_storage_bubbles(self, health: RuntimeHealth) -> bool:
-        workflow = getattr(self, "_storage_bubble_workflow", None)
-        if workflow is None:
-            workflow = self._storage_bubble_workflow = StorageBubbleWorkflow()
-        return workflow.step(self, health)
+    def _step_storage_bubbles(
+        self, health: RuntimeHealth, board_space: BoardSpaceAssessment
+    ) -> bool:
+        return self._storage_bubble_workflow.step(self, health, board_space)
 
     @staticmethod
     def _shop_order_for_action(
@@ -1071,6 +1011,43 @@ class Bot:
         if required_empty_cells is None:
             self._interaction_workflow.output_space_request = None
             return False
+        return self._request_board_space(
+            health,
+            board_space,
+            requester="interaction-output",
+            required_empty_cells=required_empty_cells,
+            resume_phase=Phase.INTERACT_TILES,
+            action_key=(requested.coord, requested.kind.value),
+        )
+
+    def _step_claim_crates(
+        self, health: RuntimeHealth, board_space: BoardSpaceAssessment
+    ) -> None:
+        self._crate_workflow.step(self, health, board_space)
+
+    def _request_board_space(
+        self,
+        health: RuntimeHealth,
+        board_space: BoardSpaceAssessment,
+        *,
+        requester: str,
+        required_empty_cells: int,
+        resume_phase: Phase,
+        action_key: tuple[object, ...] = (),
+    ) -> bool:
+        if board_space.status_for(required_empty_cells) is BoardSpaceStatus.AVAILABLE:
+            if (
+                self._board_space_request is not None
+                and self._board_space_request.requester == requester
+            ):
+                self._board_space_request = None
+            return False
+        self._board_space_request = BoardSpaceRequest(
+            requester,
+            required_empty_cells,
+            resume_phase,
+            action_key,
+        )
         self._set_phase(Phase.MERGE)
         if self._ensure_capability(health, RuntimeCapability.MERGE_DROP):
             self._step_merge(
@@ -1080,11 +1057,64 @@ class Bot:
             )
         return True
 
-    def _step_claim_crates(self, board_space: BoardSpaceAssessment) -> None:
-        workflow = getattr(self, "_crate_workflow", None)
-        if workflow is None:
-            workflow = self._crate_workflow = CrateWorkflow()
-        workflow.step(self, board_space)
+    def _continue_board_space_request(
+        self,
+        health: RuntimeHealth,
+        board_space: BoardSpaceAssessment,
+        immediate: list[InteractionAction],
+        depleted: list[InteractionAction],
+        ready: list[InteractionAction],
+    ) -> bool:
+        request = self._board_space_request
+        if request is None:
+            return False
+        if not self._board_space_request_is_current(
+            request, board_space, immediate, depleted, ready
+        ):
+            self._board_space_request = None
+            return False
+        if (
+            board_space.status_for(request.required_empty_cells)
+            is BoardSpaceStatus.AVAILABLE
+        ):
+            self._board_space_request = None
+            self._set_phase(request.resume_phase)
+            return False
+        self._set_phase(Phase.MERGE)
+        if self._ensure_capability(health, RuntimeCapability.MERGE_DROP):
+            self._step_merge(
+                health,
+                board_space,
+                required_empty_cells=request.required_empty_cells,
+            )
+        return True
+
+    def _board_space_request_is_current(
+        self,
+        request: BoardSpaceRequest,
+        board_space: BoardSpaceAssessment,
+        immediate: list[InteractionAction],
+        depleted: list[InteractionAction],
+        ready: list[InteractionAction],
+    ) -> bool:
+        if request.requester == "crate-reserve":
+            return self.config.auto_claim_supply_crates and board_space.needs_merge
+        if request.requester == "shop-claim":
+            required = required_shop_claim_empty_cells(
+                self._shop_orders or (), self._shop_policy()
+            )
+            return required is not None and board_space.empty_cells < required
+        if request.requester == "storage-bubble":
+            object_id = request.action_key[0] if request.action_key else None
+            return self.config.auto_pop_storage_bubbles and any(
+                bubble.object_id == object_id and bubble.content_ids
+                for bubble in (self._storage_bubbles or ())
+            )
+        candidates = (*immediate, *depleted, *ready)
+        return any(
+            (action.coord, action.kind.value) == request.action_key
+            for action in candidates
+        )
 
     def _step_merge(
         self,
@@ -1123,20 +1153,12 @@ class Bot:
 
     def step(self) -> None:
         """Run one perceive -> plan -> internal action -> verify iteration."""
-        snapshot_reader = getattr(self.runtime, "read_snapshot", None)
-        atomic_snapshot = False
         try:
-            if callable(snapshot_reader):
-                atomic_snapshot = True
-                snapshot = snapshot_reader(self._snapshot_options())
-                if snapshot is None:
-                    self._report_wait("authoritative runtime snapshot unavailable")
-                    return
-                health = snapshot.health
-            else:
-                health_started = time.monotonic()
-                health = self.runtime.read_runtime_health()
-                self._log_slow_stage("runtime health read", health_started)
+            snapshot = self.runtime.read_snapshot(self._snapshot_options())
+            if snapshot is None:
+                self._report_wait("authoritative runtime snapshot unavailable")
+                return
+            health = snapshot.health
             self._last_health = health
             if health.scene_transition_active:
                 self._report_wait("game scene transition is still resolving")
@@ -1187,14 +1209,9 @@ class Bot:
                     detail=result.detail,
                 )
             return
-        if atomic_snapshot:
-            board_synced = snapshot.cells is not None
-            if board_synced:
-                self._apply_runtime_snapshot(snapshot)
-        else:
-            board_started = time.monotonic()
-            board_synced = self._sync_board_from_live_state()
-            self._log_slow_stage("board-state read", board_started)
+        board_synced = snapshot.cells is not None
+        if board_synced:
+            self._apply_runtime_snapshot(snapshot)
         if not board_synced:
             if self._interrupt_event.is_set():
                 return
@@ -1206,26 +1223,12 @@ class Bot:
             return
         if not self._verify_pending_storage_bubble(health):
             return
-        farm_visit_workflow = getattr(self, "_farm_visit_workflow", None)
-        if farm_visit_workflow is None:
-            farm_visit_workflow = self._farm_visit_workflow = FarmVisitWorkflow()
-        farm_visit_state = snapshot.farm_visit if atomic_snapshot else None
+        farm_visit_workflow = self._farm_visit_workflow
+        farm_visit_state = snapshot.farm_visit
         if not farm_visit_workflow.verify_pending(self, health, farm_visit_state):
             return
         shop_policy_enabled = self._shop_policy().may_enable_orders
-        shop_orders: tuple[ShopOrder, ...] | None = self._shop_orders if atomic_snapshot else ()
-        if not atomic_snapshot and self._shop_workflow.pending is not None:
-            if not self._ensure_capability(health, RuntimeCapability.SHOPS):
-                return
-            shop_orders = self.runtime.read_shop_orders()
-            if shop_orders is None:
-                self._report_wait("authoritative shop-order state unavailable")
-                return
-        elif not atomic_snapshot and shop_policy_enabled and health.shop_available:
-            shop_orders = self.runtime.read_shop_orders()
-            if shop_orders is None:
-                self._report_wait("authoritative shop-order state unavailable")
-                shop_orders = ()
+        shop_orders: tuple[ShopOrder, ...] | None = self._shop_orders
         if not self._verify_pending_shop_action(health, shop_orders):
             return
         if not health.heartbeat_advancing:
@@ -1247,22 +1250,18 @@ class Bot:
             farm_visit_workflow.step(self, health, farm_visit_state)
             return
         marketplace_enabled = _marketplace_policy_enabled(self.config)
-        marketplace_workflow = getattr(self, "_marketplace_workflow", None)
-        if marketplace_workflow is None:
-            marketplace_workflow = self._marketplace_workflow = MarketplaceWorkflow()
-        marketplace_offers = self._marketplace_offers if atomic_snapshot else ()
-        if not atomic_snapshot and (
-            marketplace_enabled or marketplace_workflow.pending is not None
-        ):
-            if not self._ensure_capability(health, RuntimeCapability.MARKETPLACE):
-                return
-            marketplace_offers = self.runtime.read_marketplace_offers()
+        marketplace_workflow = self._marketplace_workflow
+        marketplace_offers = self._marketplace_offers
         if not marketplace_workflow.verify_pending(
             bot=self, health=health, offers=marketplace_offers
         ):
             return
         board_space = self._assess_board_space()
         immediate, depleted, ready = self._interaction_actions()
+        if self._continue_board_space_request(
+            health, board_space, immediate, depleted, ready
+        ):
+            return
         if self._continue_output_space_request(
             health, immediate, depleted, ready, board_space
         ):
@@ -1271,7 +1270,7 @@ class Bot:
             self, immediate, depleted, ready
         )
         claim_is_ready = immediate and immediate[0].kind is not InteractionTargetKind.CLEAR
-        if not claim_is_ready and self._step_storage_bubbles(health):
+        if not claim_is_ready and self._step_storage_bubbles(health, board_space):
             return
         if immediate or depleted or ready:
             self._last_cooling_producer_count = None
@@ -1343,7 +1342,7 @@ class Bot:
                 )
             ):
                 return
-            self._step_claim_crates(board_space)
+            self._step_claim_crates(health, board_space)
         else:
             if not self._ensure_capability(health, RuntimeCapability.MERGE_DROP):
                 return
@@ -1356,9 +1355,7 @@ class Bot:
         *,
         label: str | None = None,
     ) -> bool:
-        retries = getattr(self, "_capability_retries", None)
-        if retries is None:
-            retries = self._capability_retries = {}
+        retries = self._capability_retries
         if health.supports(capability):
             retries.pop(capability, None)
             return True
@@ -1440,7 +1437,7 @@ class Bot:
     def _effective_loop_delay(self, requested_delay: float) -> float:
         if (
             self.config.loop_interval < MINIMUM_ACTIVE_INTERVAL
-            and not getattr(self, "_poll_floor_reported", False)
+            and not self._poll_floor_reported
         ):
             log_event(
                 logger,
@@ -1453,10 +1450,10 @@ class Bot:
                 effective_interval=MINIMUM_ACTIVE_INTERVAL,
             )
             self._poll_floor_reported = True
-        scheduler = getattr(self, "_scheduler", None)
-        if scheduler is None:
-            scheduler = self._scheduler = AdaptiveScheduler()
-        return max(requested_delay, scheduler.active_delay(self.config.loop_interval))
+        return max(
+            requested_delay,
+            self._scheduler.active_delay(self.config.loop_interval),
+        )
 
     def _report_wait(self, reason: str, **context: object) -> None:
         self._idle_active = False

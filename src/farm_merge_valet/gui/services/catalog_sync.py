@@ -9,12 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from farm_merge_valet.automation import RuntimeConnectionError
 from farm_merge_valet.browser import BrowserManagerError, BrowserStatus
 from farm_merge_valet.catalog.models import ItemCatalog
 from farm_merge_valet.catalog.provider import CatalogProvider
 from farm_merge_valet.catalog.store import CatalogUnavailableError
 from farm_merge_valet.catalog.sync import CatalogSynchronizer
-from farm_merge_valet.cdp.transport import CdpConnectionError
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.core.upgrade_progress import UpgradeProgress
 from farm_merge_valet.observability.logging import log_event
@@ -101,7 +101,7 @@ class CatalogSyncService:
         self._callbacks.raise_if_cancelled()
         try:
             self._dependencies.catalog_synchronizer_factory(self._config).sync()
-        except (CdpConnectionError, OSError, RuntimeError, ValueError) as exc:
+        except (RuntimeConnectionError, OSError, RuntimeError, ValueError) as exc:
             return f"Catalog ready · Icons were not synchronized: {exc}"
         self._callbacks.raise_if_cancelled()
         refreshed = self._dependencies.catalog_loader(self._config.catalog_dir / "catalog.json")
@@ -131,7 +131,12 @@ class CatalogSyncService:
                 try:
                     runtime.discover()
                     catalog = self._dependencies.catalog_provider_factory(self._config).load()
-                except (CatalogUnavailableError, CdpConnectionError, OSError, ValueError) as exc:
+                except (
+                    CatalogUnavailableError,
+                    RuntimeConnectionError,
+                    OSError,
+                    ValueError,
+                ) as exc:
                     last_error = exc
                 else:
                     if catalog.items:
@@ -149,7 +154,7 @@ class CatalogSyncService:
             progress = self._dependencies.upgrade_progress_reader(
                 self._config.cdp_port, self._config.window_title
             )
-        except CdpConnectionError as exc:
+        except RuntimeConnectionError as exc:
             log_event(
                 logger,
                 logging.WARNING,

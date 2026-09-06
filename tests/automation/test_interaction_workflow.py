@@ -16,6 +16,7 @@ from farm_merge_valet.automation.runtime import (
     RewardRequirement,
     RuntimeConnectionError,
     RuntimeHealth,
+    RuntimeSnapshot,
     StorageBubbleState,
 )
 from farm_merge_valet.automation.workflows import (
@@ -58,6 +59,17 @@ class FakeRuntime:
 
     def set_cancel_event(self, cancel_event):
         self.cancel_event = cancel_event
+
+    def configure_crate_delays(self, _minimum, _maximum):
+        pass
+
+    def read_snapshot(self, _options):
+        return RuntimeSnapshot(
+            health(advancing=True),
+            self.board_state,
+            storage_bubbles=self.storage_bubbles,
+            shop_orders=self.shop_orders,
+        )
 
     def read_board_state(self):
         return self.board_state
@@ -130,7 +142,7 @@ def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
 
 
 def bare_bot() -> Bot:
-    bot = Bot.__new__(Bot)
+    bot = Bot(AppConfig(), FakeRuntime(), FakeCatalogProvider())
     bot.runtime = FakeRuntime()
     bot.config = AppConfig()
     bot.catalog_provider = FakeCatalogProvider()
@@ -178,12 +190,14 @@ def test_storage_bubble_pop_requires_open_board_space() -> None:
     bubble = StorageBubbleState(41, ("energy_1",))
     bot._storage_bubbles = (bubble,)
 
-    assert not bot._step_storage_bubbles(health(advancing=True))
+    assert bot._step_storage_bubbles(health(advancing=True), bot._assess_board_space())
     assert bot.runtime.popped_storage_bubbles == []
 
     bot.board.set_cell((1, 1), Cell(CellKind.EMPTY))
 
-    assert bot._step_storage_bubbles(health(advancing=True))
+    assert bot._step_storage_bubbles(
+        health(advancing=True), bot._assess_board_space()
+    )
     assert bot.runtime.popped_storage_bubbles == [41]
     assert bot._storage_bubble_workflow.pending is not None
 
@@ -194,7 +208,9 @@ def test_storage_bubble_pop_respects_global_toggle() -> None:
     bot.board.set_cell((1, 1), Cell(CellKind.EMPTY))
     bot._storage_bubbles = (StorageBubbleState(41, ("energy_1",)),)
 
-    assert not bot._step_storage_bubbles(health(advancing=True))
+    assert not bot._step_storage_bubbles(
+        health(advancing=True), bot._assess_board_space()
+    )
     assert bot.runtime.popped_storage_bubbles == []
 
 
@@ -202,7 +218,7 @@ def test_storage_bubble_partial_pop_is_confirmed() -> None:
     bot = bare_bot()
     bot.board.set_cell((1, 1), Cell(CellKind.EMPTY))
     bot._storage_bubbles = (StorageBubbleState(41, ("energy_1", "coin_1")),)
-    bot._step_storage_bubbles(health(advancing=True))
+    bot._step_storage_bubbles(health(advancing=True), bot._assess_board_space())
     bot._storage_bubbles = (StorageBubbleState(41, ("energy_1",)),)
 
     assert bot._verify_pending_storage_bubble(health(advancing=True))
@@ -496,16 +512,13 @@ def test_reward_container_waits_when_full_output_space_cannot_be_created(monkeyp
     for column in range(3):
         bot.board.set_cell((column, 0), Cell(CellKind.EMPTY))
     monkeypatch.setattr(bot, "_merge_actions_for_policy", lambda: [])
-    waits: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(
-        bot, "_report_wait", lambda reason, **context: waits.append((reason, context))
-    )
-
     bot._step_interact_tiles(health(advancing=True), [action], [], [])
 
     assert bot.runtime.interactions == []
     assert bot._interaction_workflow.output_space_request == action
-    assert waits[0][1]["desired_empty_cells"] == 7
+    assert bot._board_space_request is not None
+    assert bot._board_space_request.required_empty_cells == 7
+    assert bot._board_space_request.action_key == ((3, 4), "reward-container")
 
 
 def test_remove_policy_plans_shovelable_item_without_interact_policy(monkeypatch) -> None:

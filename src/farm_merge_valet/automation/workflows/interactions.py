@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 
 from farm_merge_valet.automation.action_control import OperationKey, OperationKind
 from farm_merge_valet.automation.board_space import BoardSpaceAssessment
+from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.automation.runtime import (
     ActionStatus,
     LiveCellState,
-    RuntimeCapability,
     RuntimeHealth,
 )
 from farm_merge_valet.core.items import (
@@ -427,20 +427,24 @@ class InteractionWorkflow:
             return
         if board_space.merge_actions:
             self.output_space_request = action
-            bot._set_phase(bot.phase.__class__.MERGE)
-            if bot._ensure_capability(health, RuntimeCapability.MERGE_DROP):
-                bot._step_merge(
-                    health, board_space, required_empty_cells=desired_empty_cells
-                )
+            bot._request_board_space(
+                health,
+                board_space,
+                requester="interaction-output",
+                required_empty_cells=desired_empty_cells,
+                resume_phase=Phase.INTERACT_TILES,
+                action_key=(action.coord, action.kind.value),
+            )
             return
         if action.requires_full_output_space:
             self.output_space_request = action
-            bot._set_phase(bot.phase.__class__.MERGE)
-            bot._report_wait(
-                "a reward container needs its full output space before opening",
-                empty_cells=empty_count,
-                desired_empty_cells=desired_empty_cells,
-                **bot._interaction_event_context(action),
+            bot._request_board_space(
+                health,
+                board_space,
+                requester="interaction-output",
+                required_empty_cells=desired_empty_cells,
+                resume_phase=Phase.INTERACT_TILES,
+                action_key=(action.coord, action.kind.value),
             )
             return
         if empty_count > 0:
@@ -462,8 +466,14 @@ class InteractionWorkflow:
             bot._submit_interaction(action, health)
             return
         self.output_space_request = action
-        bot._set_phase(bot.phase.__class__.MERGE)
-        bot._step_merge(health, board_space, required_empty_cells=1)
+        bot._request_board_space(
+            health,
+            board_space,
+            requester="interaction-output",
+            required_empty_cells=1,
+            resume_phase=Phase.INTERACT_TILES,
+            action_key=(action.coord, action.kind.value),
+        )
 
     def _step_interact_tiles(
         self,
@@ -495,9 +505,15 @@ class InteractionWorkflow:
                 bot._submit_interaction(action, health)
                 return
         if available_depleted:
-            bot._set_phase(bot.phase.__class__.MERGE)
-            if bot._ensure_capability(health, RuntimeCapability.MERGE_DROP):
-                bot._step_merge(health, board_space, required_empty_cells=1)
+            action = available_depleted[0]
+            bot._request_board_space(
+                health,
+                board_space,
+                requester="depleted-crop",
+                required_empty_cells=1,
+                resume_phase=Phase.INTERACT_TILES,
+                action_key=(action.coord, action.kind.value),
+            )
             return
         if ready:
             action = next(
@@ -506,4 +522,4 @@ class InteractionWorkflow:
             if action is not None:
                 self._step_output_claim(bot, health, action, board_space)
             return
-        bot._set_phase(bot.phase.__class__.CLAIM_CRATES)
+        bot._set_phase(Phase.CLAIM_CRATES)

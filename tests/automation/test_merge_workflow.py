@@ -14,6 +14,7 @@ from farm_merge_valet.automation.runtime import (
     LiveCellState,
     RuntimeHealth,
     RuntimeRecoveryRequired,
+    RuntimeSnapshot,
 )
 from farm_merge_valet.automation.workflows import (
     InteractionWorkflow,
@@ -49,6 +50,14 @@ class FakeRuntime:
 
     def set_cancel_event(self, cancel_event):
         self.cancel_event = cancel_event
+
+    def configure_crate_delays(self, _minimum, _maximum):
+        pass
+
+    def read_snapshot(self, _options):
+        return RuntimeSnapshot(
+            health(advancing=True), self.board_state, shop_orders=self.shop_orders
+        )
 
     def read_board_state(self):
         return self.board_state
@@ -111,7 +120,7 @@ def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
 
 
 def bare_bot() -> Bot:
-    bot = Bot.__new__(Bot)
+    bot = Bot(AppConfig(), FakeRuntime(), FakeCatalogProvider())
     bot.runtime = FakeRuntime()
     bot.config = AppConfig()
     bot.catalog_provider = FakeCatalogProvider()

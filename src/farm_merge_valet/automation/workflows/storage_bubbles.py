@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from farm_merge_valet.automation.action_control import OperationKind
+from farm_merge_valet.automation.board_space import BoardSpaceAssessment
+from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.automation.runtime import (
     ActionStatus,
     RuntimeCapability,
@@ -119,7 +121,9 @@ class StorageBubbleWorkflow:
         )
         return True
 
-    def step(self, bot: Bot, health: RuntimeHealth) -> bool:
+    def step(
+        self, bot: Bot, health: RuntimeHealth, board_space: BoardSpaceAssessment
+    ) -> bool:
         if not bot.config.auto_pop_storage_bubbles:
             return False
         now = bot._now()
@@ -131,8 +135,18 @@ class StorageBubbleWorkflow:
             if bubble.content_ids
             and bot._actions().available(OperationKind.STORAGE_BUBBLE, (bubble.object_id,), now)
         )
-        if not bubbles or not bot.board.find_empty():
+        if not bubbles:
             return False
+        if not bot.board.find_empty():
+            bot._request_board_space(
+                health,
+                board_space,
+                requester="storage-bubble",
+                required_empty_cells=1,
+                resume_phase=Phase.CLAIM_CRATES,
+                action_key=(bubbles[0].object_id,),
+            )
+            return True
         if not bot._ensure_capability(
             health,
             RuntimeCapability.STORAGE_BUBBLES,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from threading import Event, Lock
 
+from farm_merge_valet.automation.board_space import BoardSpaceRequest
 from farm_merge_valet.automation.bot import Bot, Phase
 from farm_merge_valet.automation.runtime import (
     ActionResult,
@@ -45,6 +46,14 @@ class FakeRuntime:
 
     def set_cancel_event(self, cancel_event):
         self.cancel_event = cancel_event
+
+    def configure_crate_delays(self, _minimum, _maximum):
+        pass
+
+    def read_snapshot(self, _options):
+        return RuntimeSnapshot(
+            health(advancing=True), self.board_state, shop_orders=self.shop_orders
+        )
 
     def read_board_state(self):
         return self.board_state
@@ -112,7 +121,7 @@ def health(*, advancing: bool, item_action_busy: bool = False) -> RuntimeHealth:
 
 
 def bare_bot() -> Bot:
-    bot = Bot.__new__(Bot)
+    bot = Bot(AppConfig(), FakeRuntime(), FakeCatalogProvider())
     bot.runtime = FakeRuntime()
     bot.config = AppConfig()
     bot.catalog_provider = FakeCatalogProvider()
@@ -196,9 +205,9 @@ def test_crate_limit_preserves_policy_reserve(monkeypatch, caplog) -> None:
     monkeypatch.setattr(bot.config, "merge_empty_cell_reserve", 1)
 
     with caplog.at_level(logging.DEBUG):
-        bot._step_claim_crates(bot._assess_board_space())
+        bot._step_claim_crates(health(advancing=True), bot._assess_board_space())
 
-    assert bot.runtime.spawn_limits == [3]
+    assert bot.runtime.spawn_limits == [1]
     events = [record.fmv_event for record in caplog.records if hasattr(record, "fmv_event")]
     assert events[:2] == ["crate.claim_started", "crate.claim_completed"]
     records = {
@@ -206,9 +215,9 @@ def test_crate_limit_preserves_policy_reserve(monkeypatch, caplog) -> None:
     }
     assert records["crate.claim_started"].levelno == logging.DEBUG
     assert records["crate.claim_started"].message == (
-        "Claiming up to 3 of 3 available supply crate(s); board capacity is 3."
+        "Claiming up to 1 of 1 available supply crate(s); board capacity is 3."
     )
-    assert records["crate.claim_started"].fmv_context["available_crates"] == 3
+    assert records["crate.claim_started"].fmv_context["available_crates"] == 1
     assert records["crate.claim_completed"].levelno == logging.INFO
 
 
@@ -218,14 +227,45 @@ def test_supply_crate_claiming_can_be_disabled() -> None:
     bot.board.set_cell((0, 0), Cell(CellKind.EMPTY))
     bot._merge_actions_for_policy = lambda: []
 
-    bot._step_claim_crates(bot._assess_board_space())
+    bot._step_claim_crates(health(advancing=True), bot._assess_board_space())
 
+    assert bot.runtime.spawn_limits == []
+
+
+def test_crate_reserve_stays_in_explicit_blocked_space_request() -> None:
+    bot = bare_bot()
+    bot._merge_actions_for_policy = lambda: []
+    runtime_health = health(advancing=True)
+
+    bot._step_claim_crates(runtime_health, bot._assess_board_space())
+
+    assert bot.phase is Phase.MERGE
+    assert bot._board_space_request is not None
+    assert bot._board_space_request.requester == "crate-reserve"
+    assert bot._continue_board_space_request(
+        runtime_health, bot._assess_board_space(), [], [], []
+    )
+    assert bot.phase is Phase.MERGE
     assert bot.runtime.spawn_limits == []
     assert bot._next_loop_delay == bot.config.idle_wait_seconds
 
 
+def test_stale_board_space_request_is_cancelled_from_new_snapshot() -> None:
+    bot = bare_bot()
+    bot._storage_bubbles = ()
+    bot._board_space_request = BoardSpaceRequest(
+        "storage-bubble", 1, Phase.CLAIM_CRATES, (41,)
+    )
+
+    assert not bot._continue_board_space_request(
+        health(advancing=True), bot._assess_board_space(), [], [], []
+    )
+    assert bot._board_space_request is None
+
+
 def test_exhausted_crates_use_configured_idle_delay(monkeypatch, caplog) -> None:
     bot = bare_bot()
+    bot.config.merge_empty_cell_reserve = 0
     bot.board.set_cell((0, 0), Cell(CellKind.EMPTY))
     bot._merge_actions_for_policy = lambda: []
     bot.runtime.spawn_supply_crates = lambda _limit: CrateSpawnResult(ActionStatus.REJECTED, 0, 0)
@@ -233,7 +273,7 @@ def test_exhausted_crates_use_configured_idle_delay(monkeypatch, caplog) -> None
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 10.0)
 
     with caplog.at_level(logging.DEBUG):
-        bot._step_claim_crates(bot._assess_board_space())
+        bot._step_claim_crates(health(advancing=True), bot._assess_board_space())
 
     assert bot._next_loop_delay == 30.0
     record = next(record for record in caplog.records if record.fmv_event == "bot.idle")
@@ -339,14 +379,10 @@ def test_item_policy_can_disable_merging_for_one_tier(monkeypatch) -> None:
 def test_live_sync_distinguishes_empty_structure_placeholder(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_items = {}
-    monkeypatch.setattr(
-        bot.runtime,
-        "read_board_state",
-        lambda *_, **__: {
-            (0, 0): LiveCellState(False, None),
-            (1, 0): LiveCellState(True, "empty"),
-        },
-    )
+    bot.runtime.board_state = {
+        (0, 0): LiveCellState(False, None),
+        (1, 0): LiveCellState(True, "empty"),
+    }
 
     assert bot._sync_board_from_live_state()
     assert bot.board.get_cell((0, 0)).kind is CellKind.EMPTY
@@ -382,14 +418,10 @@ def test_live_sync_skips_obstacle_resources_when_stage_starts_are_disabled(
 def test_live_sync_keeps_upgrade_card_targets_as_distinct_variants(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_items = {"upgrade_card_1": ItemRef("upgrade_cards", "upgrade_card", 1)}
-    monkeypatch.setattr(
-        bot.runtime,
-        "read_board_state",
-        lambda *_, **__: {
-            (0, 0): LiveCellState(True, "upgrade_card_1", item_variant="wheat"),
-            (1, 0): LiveCellState(True, "upgrade_card_1", item_variant="cow"),
-        },
-    )
+    bot.runtime.board_state = {
+        (0, 0): LiveCellState(True, "upgrade_card_1", item_variant="wheat"),
+        (1, 0): LiveCellState(True, "upgrade_card_1", item_variant="cow"),
+    }
 
     assert bot._sync_board_from_live_state()
     assert bot.board.get_cell((0, 0)).item == ItemRef("upgrade_cards", "upgrade_card", 1, "wheat")
@@ -400,15 +432,13 @@ def test_live_sync_classifies_only_catalogued_collectable_items(monkeypatch) -> 
     bot = bare_bot()
     bot._blueprint_items = {}
     bot._direct_interaction_ids = frozenset({"milk", "ticket", "crate_1"})
-    monkeypatch.setattr(
-        bot.runtime,
-        "read_board_state",
-        lambda *_, **__: {
-            (0, 0): LiveCellState(True, "milk", collectable=True, collectable_ingredient=True),
-            (1, 0): LiveCellState(True, "ticket", collectable=True),
-            (2, 0): LiveCellState(True, "upgrade_card_1", collectable=True),
-        },
-    )
+    bot.runtime.board_state = {
+        (0, 0): LiveCellState(
+            True, "milk", collectable=True, collectable_ingredient=True
+        ),
+        (1, 0): LiveCellState(True, "ticket", collectable=True),
+        (2, 0): LiveCellState(True, "upgrade_card_1", collectable=True),
+    }
 
     assert bot._sync_board_from_live_state()
     assert bot.board.get_cell((0, 0)).kind is CellKind.INTERACTABLE

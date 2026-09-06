@@ -11,6 +11,7 @@ from farm_merge_valet.automation.board_space import (
     BoardSpaceAssessment,
     BoardSpaceStatus,
 )
+from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.automation.runtime import ActionStatus, RuntimeHealth
 from farm_merge_valet.core.board import Cell
 from farm_merge_valet.core.items import GridCoord, ItemRef
@@ -318,7 +319,7 @@ class MergeWorkflow:
             self._report_blocked_space(bot, board_space, required_empty_cells)
         elif not board_space.needs_merge:
             self.blocked_requirement = None
-            bot._set_phase(bot.phase.__class__.CLAIM_CRATES)
+            bot._set_phase(Phase.CLAIM_CRATES)
         elif board_space.status_for(1) is BoardSpaceStatus.BLOCKED:
             self._report_blocked_space(bot, board_space, 1)
         else:

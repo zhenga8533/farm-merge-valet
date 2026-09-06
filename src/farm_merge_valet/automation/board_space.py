@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.core.merge_planner import MergeAction
 
 
@@ -12,6 +13,14 @@ class BoardSpaceStatus(Enum):
     AVAILABLE = "available"
     RECOVERABLE = "recoverable"
     BLOCKED = "blocked"
+
+
+@dataclass(frozen=True)
+class BoardSpaceRequest:
+    requester: str
+    required_empty_cells: int
+    resume_phase: Phase
+    action_key: tuple[object, ...] = ()
 
 
 @dataclass(frozen=True)

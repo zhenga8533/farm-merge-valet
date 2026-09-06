@@ -26,6 +26,9 @@ GUI / CLI -> automation and catalog services -> core
   `automation.perception` converts atomic snapshots into planning state, and
   `automation.scheduler` owns renderer-load-aware polling cadence. Marketplace purchases use
   stable `flash:<slot>:<candidate>` or `free:<offer>` identities.
+  Workflow objects are internal stateful collaborators of `Bot`, not standalone
+  services: they may use the bot's orchestration context, while shared planner
+  phases and adapter contracts remain independently defined modules.
 - `catalog` owns catalog models, taxonomy, labels, construction, persistence,
   blueprint mapping, asset compilation, and synchronization orchestration.
   Its synchronization service accepts resource and metadata readers; concrete

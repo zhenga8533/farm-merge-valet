@@ -257,6 +257,15 @@ _HEARTBEAT_EXPRESSION = r"""
 })()
 """
 
+def _overlay_context_expression() -> str:
+    return r"""let stage = scene;
+  while (stage?.parent) stage = stage.parent;
+  const layerRoot = stage?.children?.[0];
+  const popupLayer = layerRoot?.children?.find((child) => child?.name === 'popup');
+  const activePopup = popupLayer?.children?.find((child) =>
+    child?.visible !== false && child?.renderable !== false && child?._destroyed !== true);"""
+
+
 _HEALTH_EXPRESSION = r"""
 (() => {
   const board = window.__fmvBoardCells;
@@ -351,12 +360,7 @@ _HEALTH_EXPRESSION = r"""
         visitorActionHandler._isActive !== false &&
         typeof visitorActionHandler._onActivityTapped === 'function' &&
         typeof visitorReturnHud?._returnButtonClicked === 'function');
-  let stage = scene;
-  while (stage?.parent) stage = stage.parent;
-  const layerRoot = stage?.children?.[0];
-  const popupLayer = layerRoot?.children?.find((child) => child?.name === 'popup');
-  const activePopup = popupLayer?.children?.find((child) =>
-    child?.visible !== false && child?.renderable !== false && child?._destroyed !== true);
+""" + _overlay_context_expression() + r"""
   const trainPopup = activePopup?._name === 'TrainstationPopup' &&
     activePopup?._state === 4 &&
     typeof activePopup._onVisitButtonPressed === 'function' ? activePopup : null;
@@ -677,6 +681,13 @@ _READ_STORAGE_BUBBLES_EXPRESSION = r"""
 """
 
 
+def _runtime_scene_identity(handler: str) -> str:
+    return f"""const identity = window.__fmvGameplayServices?.mapGrid ||
+    window.__fmvGameplayMapScreen || {handler} || board;
+  const currentSceneId = identity && window.__fmvRuntimeSceneIds
+    ? window.__fmvRuntimeSceneIds.get(identity) : null;"""
+
+
 def _storage_bubble_pop_expression(object_id: int, scene_id: int | None) -> str:
     return f"""
 (() => {{
@@ -685,10 +696,7 @@ def _storage_bubble_pop_expression(object_id: int, scene_id: int | None) -> str:
   const services = window.__fmvGameplayServices;
   const interactionHandler = window.__fmvStorageBubbleInteractionHandler;
   const popHandler = window.__fmvStorageBubblePopHandler;
-  const identity = services?.mapGrid || window.__fmvGameplayMapScreen ||
-    window.__fmvItemInteractionHandler || board;
-  const currentSceneId = identity && window.__fmvRuntimeSceneIds
-    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  {_runtime_scene_identity('window.__fmvItemInteractionHandler')}
   if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
       currentSceneId !== {json.dumps(scene_id)} ||
       interactionHandler?._services !== services || popHandler?._services !== services)
@@ -720,19 +728,12 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
   const board = window.__fmvBoardCells;
   const services = window.__fmvGameplayServices;
   const scene = window.__fmvGameplayMapScreen;
-  const identity = services?.mapGrid || scene || window.__fmvItemInteractionHandler || board;
-  const currentSceneId = identity && window.__fmvRuntimeSceneIds
-    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  {_runtime_scene_identity('window.__fmvItemInteractionHandler')}
   if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
       currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
 
-  let stage = scene;
-  while (stage?.parent) stage = stage.parent;
-  const layerRoot = stage?.children?.[0];
-  const popupLayer = layerRoot?.children?.find((child) => child?.name === 'popup');
-  const activePopup = popupLayer?.children?.find((child) =>
-    child?.visible !== false && child?.renderable !== false && child?._destroyed !== true);
+  {_overlay_context_expression()}
   const popupAnimationBusy = (popup) =>
     popup?._baseAnimationContent?.isAnimationPlaying?.('open') === true ||
     popup?._baseAnimationBackground?.isAnimationPlaying?.('open') === true ||
@@ -908,10 +909,7 @@ def _drop_expression(start: GridCoord, end: GridCoord, scene_id: int | None) -> 
   const endCoord = {_coord(end)};
   const board = window.__fmvBoardCells;
   const handler = window.__fmvItemInteractionHandler;
-  const identity = window.__fmvGameplayServices?.mapGrid ||
-    window.__fmvGameplayMapScreen || handler || board;
-  const currentSceneId = identity && window.__fmvRuntimeSceneIds
-    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  {_runtime_scene_identity('handler')}
   if (!board || window.__fmvRuntimeBoard !== board || !handler ||
       currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
@@ -1040,10 +1038,7 @@ def _crate_expression(limit: int, scene_id: int | None) -> str:
   const board = window.__fmvBoardCells;
   const signal = window.__fmvCrateSpawnSignal;
   const services = window.__fmvGameplayServices;
-  const identity = services?.mapGrid ||
-    window.__fmvGameplayMapScreen || window.__fmvItemInteractionHandler || board;
-  const currentSceneId = identity && window.__fmvRuntimeSceneIds
-    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  {_runtime_scene_identity('window.__fmvItemInteractionHandler')}
   if (!board || window.__fmvRuntimeBoard !== board || !signal ||
       currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', spawned: 0, detail: 'runtime-scene-changed'}};
@@ -1127,10 +1122,7 @@ def _interaction_expression(
   const rewardContainerHandler = window.__fmvRewardContainerHandler;
   const services = window.__fmvGameplayServices;
   const upgradeHandler = services?.upgradeCard;
-  const identity = window.__fmvGameplayServices?.mapGrid ||
-    window.__fmvGameplayMapScreen || handler || board;
-  const currentSceneId = identity && window.__fmvRuntimeSceneIds
-    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  {_runtime_scene_identity('handler')}
   if (!board || window.__fmvRuntimeBoard !== board ||
       (!['reward', 'reward-container', 'clear', 'upgrade'].includes(expectedKind) && !handler) ||
       (expectedKind === 'clear' && !obstacleHandler) ||
@@ -1308,9 +1300,7 @@ def _removal_expression(
   const services = window.__fmvGameplayServices;
   const handler = window.__fmvShovelHandler;
   const itemHandler = window.__fmvItemInteractionHandler;
-  const identity = services?.mapGrid || window.__fmvGameplayMapScreen || itemHandler || board;
-  const currentSceneId = identity && window.__fmvRuntimeSceneIds
-    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  {_runtime_scene_identity('itemHandler')}
   if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
       handler?._services !== services ||
       handler._services?.shovelService !== services?.shovelService ||
@@ -1397,10 +1387,7 @@ def _shop_start_expression(shop_id: str, recipe_id: str, scene_id: int | None) -
   const board = window.__fmvBoardCells;
   const services = window.__fmvGameplayServices;
   const orders = window.__fmvOrdersService;
-  const identity = services?.mapGrid || window.__fmvGameplayMapScreen ||
-    window.__fmvItemInteractionHandler || board;
-  const currentSceneId = identity && window.__fmvRuntimeSceneIds
-    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  {_runtime_scene_identity('window.__fmvItemInteractionHandler')}
   if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
       services?.ordersService !== orders || currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
@@ -1433,10 +1420,7 @@ def _shop_claim_expression(shop_id: str, recipe_id: str, scene_id: int | None) -
   const board = window.__fmvBoardCells;
   const services = window.__fmvGameplayServices;
   const orders = window.__fmvOrdersService;
-  const identity = services?.mapGrid || window.__fmvGameplayMapScreen ||
-    window.__fmvItemInteractionHandler || board;
-  const currentSceneId = identity && window.__fmvRuntimeSceneIds
-    ? window.__fmvRuntimeSceneIds.get(identity) : null;
+  {_runtime_scene_identity('window.__fmvItemInteractionHandler')}
   if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
       services?.ordersService !== orders || currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from farm_merge_valet.automation.action_control import OperationKey, OperationKind
 from farm_merge_valet.automation.board_space import BoardSpaceAssessment
+from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.automation.runtime import ActionStatus, RuntimeHealth
 from farm_merge_valet.core.shops import (
     ShopAction,
@@ -270,21 +271,21 @@ class ShopWorkflow:
         )
         action = plan_shop_action(available_orders, policy, board_space.empty_cells)
         if action is not None:
-            bot._set_phase(bot.phase.__class__.SHOPS)
+            bot._set_phase(Phase.SHOPS)
             bot._submit_shop_action(action, health)
             return True
         required_empty_cells = required_shop_claim_empty_cells(orders, policy)
         if required_empty_cells is not None and board_space.empty_cells < required_empty_cells:
-            bot._set_phase(bot.phase.__class__.MERGE)
-            bot._step_merge(
+            bot._request_board_space(
                 health,
                 board_space,
+                requester="shop-claim",
                 required_empty_cells=required_empty_cells,
+                resume_phase=Phase.SHOPS,
             )
             return True
         if waiting_for_claim_refresh:
             return True
-        phase_type = bot.phase.__class__
-        if bot.phase is phase_type.SHOPS:
-            bot._set_phase(phase_type.CLAIM_CRATES)
+        if bot.phase is Phase.SHOPS:
+            bot._set_phase(Phase.CLAIM_CRATES)
         return False
