@@ -41,11 +41,15 @@ targeted. The dedicated profile persists cookies and the Reddit login across
 managed-browser restarts; changing its directory or browser creates a separate
 session.
 
-Open the Reddit post and click **Play**. The managed browser must remain open and
-the game loaded; minimized and headless operation are outside the supported
-scope. The window may be unfocused, on another virtual desktop, or showing a
-different tab. The bot does not change fullscreen state, zoom, the cursor, or
-the foreground application, and it does not intentionally pan the game camera.
+With default automatic browser launch enabled, starting the bot opens the
+configured Reddit page when needed and requests Play through the game's
+launcher until the game iframe is present or the 20-second startup timeout is
+reached. If Reddit does not expose the launcher control, open the post and click
+**Play** manually. The managed browser must remain open while automation runs;
+minimized and headless operation are outside the supported scope. The window may
+be unfocused, on another virtual desktop, or showing a different tab. The bot
+does not change fullscreen state, zoom, the cursor, or the foreground
+application, and it does not intentionally pan the game camera.
 
 ## Usage
 
@@ -147,9 +151,13 @@ Each iteration follows a short, fail-closed cycle:
 A `requestAnimationFrame` heartbeat must advance before actions are sent. If it
 stalls, the bot observes without queueing or retrying. A submitted item action
 remains pending until active, settled board state confirms success, a different
-change, or a genuine no-op. Genuine no-ops cool down before retry, and three
-failures of the same action pause the bot. Runtime incompatibility reports an
-unavailable capability; there is no mouse-input fallback.
+change, or a genuine no-op. Genuine no-ops cool down before retry. Three
+consecutive submitted actions without authoritative progress mark the game
+action pipeline unresponsive. By default, the application reloads the verified
+managed game page once, rebuilds runtime state, and resumes only after discovery
+succeeds. A second failure stops the run instead of creating a reload loop.
+Runtime incompatibility reports an unavailable capability; there is no
+mouse-input fallback for gameplay actions.
 Connection loss during submission triggers runtime rediscovery while preserving
 the pending intent for authoritative verification. Interaction and shop retries
 are target-specific, so one rejected target does not block unrelated work.
@@ -251,6 +259,9 @@ overwritten; startup offers an explicit reset to safe defaults. The Browser page
 combines status and restart actions with browser, game-connection, and asset-cache
 configuration. Settings groups automation, startup controls, notifications, and
 appearance; scoped reset controls preserve unrelated policy sections.
+The Browser page also controls default-enabled automatic recovery for a frozen
+game. Automatic page opening and reload are restricted to the verified managed
+browser profile; an unowned browser is never modified.
 
 On a fresh installation, the Items and Shops pages present a shared catalog
 onboarding state instead of empty tables. “Open game and synchronize” prepares
@@ -272,6 +283,10 @@ waiting for energy or workers, the idle message reports that constraint instead
 of describing the state only in terms of crates and merge actions. An enabled
 reward container waiting for keys likewise reports its required objects instead
 of producing repeated rejected-interaction warnings.
+Expected runtime-discovery misses during the first 30 seconds after the game
+iframe loads are informational. If the action runtime remains unavailable, one
+warning is emitted after that grace period. A previously ready runtime becoming
+unavailable warns immediately.
 
 All long-running operational records use one Python logging pipeline. The
 console, dashboard, compact overlay, and webhook are independent sinks attached

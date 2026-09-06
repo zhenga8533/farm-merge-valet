@@ -172,6 +172,73 @@ def test_bot_construction_does_not_load_catalog_eagerly() -> None:
     assert bot._blueprint_items == {}
 
 
+def test_initial_runtime_loading_warns_once_only_after_grace_period(
+    monkeypatch, caplog
+) -> None:
+    class LoadingRuntime(FakeRuntime):
+        def discover(self) -> RuntimeHealth:
+            return RuntimeHealth(
+                False,
+                None,
+                False,
+                False,
+                False,
+                False,
+                None,
+                None,
+                False,
+                detail="not-ready",
+            )
+
+    bot = Bot(AppConfig(), LoadingRuntime(), FakeCatalogProvider())
+    clock = iter((100.0, 101.0, 110.0, 111.0, 131.0, 132.0, 140.0, 141.0))
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: next(clock))
+
+    with caplog.at_level(logging.INFO):
+        for _ in range(4):
+            assert not bot.initialize()
+
+    events = [getattr(record, "fmv_event", None) for record in caplog.records]
+    assert events.count("runtime.initializing") == 1
+    assert events.count("runtime.unavailable") == 1
+    unavailable = next(
+        record
+        for record in caplog.records
+        if getattr(record, "fmv_event", None) == "runtime.unavailable"
+    )
+    assert unavailable.levelno == logging.WARNING
+
+
+def test_previously_ready_runtime_warns_immediately_when_unavailable(caplog) -> None:
+    class UnavailableRuntime(FakeRuntime):
+        def discover(self) -> RuntimeHealth:
+            return RuntimeHealth(
+                False,
+                None,
+                False,
+                False,
+                False,
+                False,
+                None,
+                None,
+                False,
+                detail="lost-runtime",
+            )
+
+    bot = Bot(AppConfig(), UnavailableRuntime(), FakeCatalogProvider())
+    bot._runtime_ready_once = True
+
+    with caplog.at_level(logging.INFO):
+        assert not bot.initialize()
+
+    warning = next(
+        record
+        for record in caplog.records
+        if getattr(record, "fmv_event", None) == "runtime.unavailable"
+    )
+    assert warning.levelno == logging.WARNING
+
+
 def test_config_update_is_applied_as_a_deep_snapshot_at_loop_boundary(caplog) -> None:
     runtime = FakeRuntime()
     bot = Bot(AppConfig(), runtime, FakeCatalogProvider())

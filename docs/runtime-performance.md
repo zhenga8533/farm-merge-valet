@@ -29,11 +29,25 @@ timeouts, JavaScript failures, heap scans, and action commands
 are not immediately replayed. An action with an ambiguous transport result is
 replanned from a later authoritative snapshot.
 
+The animation-frame heartbeat proves renderer availability, not that the game's
+own action pipeline is responsive. A cross-workflow progress watchdog therefore
+counts submitted actions that settle without any authoritative state change.
+Confirmed actions and successful supply-crate spawns reset the count. Three
+consecutive no-progress submissions request runtime recovery. When automatic
+game recovery is enabled, the application reloads the game page in its verified
+managed browser once and creates a fresh bot/runtime. A repeated failure ends
+the run; unowned browser processes and pages are never reloaded automatically.
+
 Board discovery normally uses the cached active map. If that reference is lost,
 recovery first confirms that the renderer can produce a frame, performs one
 heap query, and identifies the map through its active map-grid owner. Failed
-attempts cool down for 5, 15, 60, and then 300 seconds. Recovery never uses
-render bounds to score every cell.
+initial searches are expected while the game scene is loading and remain
+informational during a 30-second startup grace period. One warning is emitted if
+the action runtime is still unavailable after that period; losing a runtime that
+was previously ready warns immediately.
+
+Failed recovery attempts cool down for 5, 15, 60, and then 300 seconds.
+Recovery never uses render bounds to score every cell.
 
 ## Diagnostics
 

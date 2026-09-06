@@ -78,6 +78,7 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
     assert set(window.browser_page.controls) == {
         "browser",
         "browser_auto_launch",
+        "auto_recover_game",
         "browser_executable",
         "browser_profile_dir",
         "game_url",

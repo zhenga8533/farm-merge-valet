@@ -19,7 +19,11 @@ from farm_merge_valet.cdp.targets import (
     REQUIRED_BACKGROUND_FLAGS,
     close_browser,
     has_game_target_pair,
+    has_page_url,
+    open_browser_page,
     read_browser_metadata,
+    reload_game_page,
+    try_start_game,
 )
 from farm_merge_valet.cdp.transport import CdpConnectionError
 from farm_merge_valet.config import AppConfig
@@ -31,6 +35,8 @@ _MANAGED_MARKER = ".farm-merge-valet-browser.json"
 _LAUNCH_TIMEOUT = 20.0
 _STOP_TIMEOUT = 15.0
 _LAUNCH_ATTEMPTS = 2
+_GAME_LOAD_TIMEOUT = 20.0
+_GAME_START_RETRY_SECONDS = 2.0
 _MANAGED_SWITCHES = (*REQUIRED_BACKGROUND_FLAGS, "--disable-background-mode")
 
 
@@ -420,6 +426,83 @@ class BrowserManager:
                 status.detail or f"Browser is incompatible; missing switches: {missing}"
             )
         return status
+
+    def ensure_game_open(self) -> BrowserStatus:
+        """Ensure a managed browser has a page for the configured game URL."""
+        status = self.ensure_running()
+        if status.game_loaded or not self.settings.game_url:
+            return status
+        if not status.managed:
+            raise BrowserManagerError(
+                "Refusing to open the game automatically in an unowned browser."
+            )
+        if not has_page_url(self.settings.cdp_port, self.settings.game_url):
+            open_browser_page(self.settings.cdp_port, self.settings.game_url)
+            log_event(
+                logger,
+                logging.INFO,
+                "browser.game_page_opened",
+                "Opened the configured game page in the managed browser.",
+            )
+        deadline = time.monotonic() + _GAME_LOAD_TIMEOUT
+        start_attempted = False
+        next_start_attempt_at = 0.0
+        while time.monotonic() < deadline:
+            status = self.status()
+            if status.game_loaded:
+                return status
+            now = time.monotonic()
+            if now >= next_start_attempt_at:
+                next_start_attempt_at = now + _GAME_START_RETRY_SECONDS
+                try:
+                    start_requested = try_start_game(
+                        self.settings.cdp_port, self.settings.window_title
+                    )
+                except CdpConnectionError as exc:
+                    start_requested = False
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        "browser.game_start_retry",
+                        "The Reddit launcher target changed during Play; retrying.",
+                        detail=str(exc),
+                    )
+                if start_requested:
+                    if not start_attempted:
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            "browser.game_start_requested",
+                            "Requested game startup through the Reddit launcher.",
+                        )
+                    start_attempted = True
+            time.sleep(0.25)
+        status = self.status()
+        if status.game_loaded:
+            return status
+        raise BrowserManagerError(
+            "The game did not finish loading after the Play request. "
+            "Open the configured Reddit page, click Play manually, and start the bot again."
+        )
+
+    def recover_game(self) -> BrowserStatus:
+        """Reload a frozen game page or restore its managed browser and page."""
+        status = self.ensure_running()
+        if not status.managed:
+            raise BrowserManagerError(
+                "Refusing to recover the game in an unowned browser."
+            )
+        if status.game_loaded:
+            reload_game_page(self.settings.cdp_port, self.settings.window_title)
+            log_event(
+                logger,
+                logging.WARNING,
+                "browser.game_reloaded",
+                "Reloaded the game page after its action pipeline stopped responding.",
+            )
+            time.sleep(0.25)
+            return self.ensure_game_open()
+        return self.ensure_game_open()
 
     def stop(self) -> None:
         status = self.status()

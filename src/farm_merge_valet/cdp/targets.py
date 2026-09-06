@@ -26,6 +26,24 @@ logger = logging.getLogger(__name__)
 GAME_FRAME_URL_MARKER = "playfmv-"
 GAME_FRAME_ENTRYPOINT = "/index.html"
 _REDDIT_PAGE_URL_MARKER = "reddit.com"
+_LAUNCHER_FRAME_LOOKUP_SCRIPT = """
+const findLauncherFrame = launcherUrl => {
+  const frames = [];
+  const visit = root => {
+    for (const element of root.querySelectorAll('*')) {
+      if (element instanceof HTMLIFrameElement && element.src === launcherUrl) {
+        frames.push(element);
+      }
+      if (element.shadowRoot) visit(element.shadowRoot);
+    }
+  };
+  visit(document);
+  return frames.find(element => {
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }) || null;
+};
+"""
 _T = TypeVar("_T")
 _TargetPair = tuple[str, str]
 _TargetKey = tuple[int, str | None]
@@ -130,25 +148,18 @@ def _parse_version_page(text: str) -> dict[str, str]:
 def _version_page_metadata(browser_ws: str) -> dict[str, str]:
     for url in ("chrome://version/", "edge://version/", "brave://version/"):
         created = _command_target(
-            browser_ws, "Target.createTarget", {"url": url, "background": True}
+            browser_ws,
+            "Target.createTarget",
+            {"url": url, "background": True, "hidden": True},
         )
         target_id = created.get("targetId")
         if not isinstance(target_id, str):
             continue
         try:
-            ws_url: str | None = None
-            for _ in range(30):
-                for target in _load_targets_from_browser_ws(browser_ws):
-                    if target.get("id") == target_id and isinstance(
-                        target.get("webSocketDebuggerUrl"), str
-                    ):
-                        ws_url = _normalize_local_ws_url(target["webSocketDebuggerUrl"])
-                        break
-                if ws_url is not None:
-                    break
-                time.sleep(0.05)
-            if ws_url is None:
-                continue
+            browser_parts = urlsplit(browser_ws)
+            ws_url = urlunsplit(
+                (browser_parts.scheme, browser_parts.netloc, f"/devtools/page/{target_id}", "", "")
+            )
             time.sleep(0.1)
             result = _command_target(
                 ws_url,
@@ -164,13 +175,6 @@ def _version_page_metadata(browser_ws: str) -> dict[str, str]:
             except CdpConnectionError:
                 pass
     raise CdpConnectionError("Could not inspect the browser's internal version page.")
-
-
-def _load_targets_from_browser_ws(browser_ws: str) -> list[dict[str, Any]]:
-    port = urlsplit(browser_ws).port
-    if port is None:
-        raise CdpConnectionError("Browser DevTools target did not include a port.")
-    return _load_targets(port)
 
 
 def read_browser_metadata(port: int, *, cancel_event: Event | None = None) -> dict[str, object]:
@@ -223,6 +227,174 @@ def close_browser(port: int) -> None:
     if not isinstance(ws_url, str):
         raise CdpConnectionError("Browser did not expose its DevTools target.")
     _command_target(_normalize_local_ws_url(ws_url), "Browser.close")
+
+
+def open_browser_page(port: int, url: str) -> None:
+    """Open a URL in the browser exposed by the configured DevTools endpoint."""
+    version = _load_json_endpoint(port, "/json/version")
+    ws_url = version.get("webSocketDebuggerUrl") if isinstance(version, dict) else None
+    if not isinstance(ws_url, str):
+        raise CdpConnectionError("Browser did not expose its DevTools target.")
+    result = _command_target(
+        _normalize_local_ws_url(ws_url),
+        "Target.createTarget",
+        {"url": url},
+    )
+    if not isinstance(result.get("targetId"), str):
+        raise CdpConnectionError("Browser did not create the requested game page.")
+
+
+def has_page_url(port: int, url: str) -> bool:
+    """Return whether a top-level page already has the configured URL open."""
+    expected = urlsplit(url)
+    expected_path = expected.path.rstrip("/") or "/"
+    return any(
+        target.get("type") == "page"
+        and (actual := urlsplit(str(target.get("url", "")))).scheme == expected.scheme
+        and actual.netloc.casefold() == expected.netloc.casefold()
+        and (actual.path.rstrip("/") or "/") == expected_path
+        for target in _load_targets(port)
+    )
+
+
+def try_start_game(port: int, page_title: str | None = None) -> bool:
+    """Click the Reddit launcher Play control with a trusted browser input event."""
+    title_filter = page_title.casefold() if page_title else None
+    targets = _load_targets(port)
+    pages = {
+        target.get("id"): target
+        for target in targets
+        if target.get("type") == "page"
+        and _REDDIT_PAGE_URL_MARKER in str(target.get("url", "")).casefold()
+        and (
+            title_filter is None
+            or title_filter in str(target.get("title", "")).casefold()
+            or title_filter in str(target.get("url", "")).casefold()
+        )
+    }
+    launcher = next(
+        (
+            target
+            for target in targets
+            if target.get("type") == "iframe"
+            and target.get("parentId") in pages
+            and "/launcher/launcher.html" in str(target.get("url", "")).casefold()
+            and isinstance(target.get("webSocketDebuggerUrl"), str)
+        ),
+        None,
+    )
+    if launcher is None:
+        return False
+    button_result = _command_target(
+        _normalize_local_ws_url(launcher["webSocketDebuggerUrl"]),
+        "Runtime.evaluate",
+        {
+            "expression": """
+(() => {
+  const button = document.querySelector('#start-button');
+  if (!(button instanceof HTMLElement)) return null;
+  const rect = button.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0 || innerWidth <= 0 || innerHeight <= 0) return null;
+  return {
+    xRatio: (rect.x + rect.width / 2) / innerWidth,
+    yRatio: (rect.y + rect.height / 2) / innerHeight,
+  };
+})()
+""",
+            "returnByValue": True,
+        },
+    )
+    button_position = button_result.get("result", {}).get("value")
+    if not isinstance(button_position, dict):
+        return False
+    x_ratio = button_position.get("xRatio")
+    y_ratio = button_position.get("yRatio")
+    if not isinstance(x_ratio, (int, float)) or not isinstance(y_ratio, (int, float)):
+        return False
+
+    page = pages[launcher.get("parentId")]
+    page_ws_url = page.get("webSocketDebuggerUrl")
+    if not isinstance(page_ws_url, str):
+        return False
+    launcher_url = json.dumps(str(launcher.get("url", "")))
+    normalized_page_ws_url = _normalize_local_ws_url(page_ws_url)
+    frame_result = _command_target(
+        normalized_page_ws_url,
+        "Runtime.evaluate",
+        {
+            "expression": f"""
+(() => {{
+{_LAUNCHER_FRAME_LOOKUP_SCRIPT}
+  const frame = findLauncherFrame({launcher_url});
+  if (!frame) return null;
+  frame.scrollIntoView({{block: 'center', inline: 'center'}});
+  return true;
+}})()
+""",
+            "returnByValue": True,
+        },
+    )
+    if frame_result.get("result", {}).get("value") is not True:
+        return False
+
+    click_position: object = None
+    for _ in range(20):
+        time.sleep(0.05)
+        frame_result = _command_target(
+            normalized_page_ws_url,
+            "Runtime.evaluate",
+            {
+                "expression": f"""
+(() => {{
+{_LAUNCHER_FRAME_LOOKUP_SCRIPT}
+  const frame = findLauncherFrame({launcher_url});
+  if (!frame) return null;
+  const rect = frame.getBoundingClientRect();
+  const x = rect.x + rect.width * {float(x_ratio)};
+  const y = rect.y + rect.height * {float(y_ratio)};
+  return x >= 0 && x < innerWidth && y >= 0 && y < innerHeight ? {{x, y}} : null;
+}})()
+""",
+                "returnByValue": True,
+            },
+        )
+        click_position = frame_result.get("result", {}).get("value")
+        if isinstance(click_position, dict):
+            break
+    if not isinstance(click_position, dict):
+        return False
+    x = click_position.get("x")
+    y = click_position.get("y")
+    if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+        return False
+    _command_target(
+        normalized_page_ws_url,
+        "Input.dispatchMouseEvent",
+        {"type": "mouseMoved", "x": x, "y": y},
+    )
+    _command_target(
+        normalized_page_ws_url,
+        "Input.dispatchMouseEvent",
+        {"type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1},
+    )
+    _command_target(
+        normalized_page_ws_url,
+        "Input.dispatchMouseEvent",
+        {"type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": 1},
+    )
+    return True
+
+
+def reload_game_page(port: int, page_title: str | None = None) -> None:
+    """Reload the top-level page that owns the active game iframe."""
+    try:
+        _run_top_page_operation(
+            port,
+            page_title,
+            lambda ws_url: _command_target(ws_url, "Page.reload"),
+        )
+    finally:
+        _invalidate_target_pair(port, page_title)
 
 
 def _select_target_pair(

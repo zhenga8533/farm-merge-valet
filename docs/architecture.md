@@ -30,9 +30,11 @@ GUI / CLI -> automation and catalog services -> core
   blueprint mapping, asset compilation, and synchronization orchestration.
   Its synchronization service accepts resource and metadata readers; concrete
   CDP readers are supplied only by the application composition root.
-- `cdp` owns browser protocol transport, target/resource access, atomic
-  game-state snapshots, embedded scripts, profiling, and `GameRuntimeAdapter`.
-- `browser` owns managed browser process discovery, launch, and shutdown.
+- `cdp` owns browser protocol transport, target/resource access, trusted launcher
+  input and page-control primitives, atomic game-state snapshots, embedded
+  scripts, profiling, and `GameRuntimeAdapter`.
+- `browser` owns managed browser process discovery, launch, shutdown, game-page
+  startup, and bounded page recovery.
 - `config` owns stable platform paths, validated schema-version-1 models,
   canonical hotkey values, and atomic persistence. Its package root defines
   the public configuration API.

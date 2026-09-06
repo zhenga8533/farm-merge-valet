@@ -113,6 +113,10 @@ class StorageBubbleWorkflow:
             object_id=pending.initial_state.object_id,
             elapsed_seconds=age,
         )
+        bot._record_action_no_progress(
+            "storage-bubble interaction",
+            object_id=pending.initial_state.object_id,
+        )
         return True
 
     def step(self, bot: Bot, health: RuntimeHealth) -> bool:

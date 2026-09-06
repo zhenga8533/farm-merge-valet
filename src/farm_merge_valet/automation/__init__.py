@@ -8,6 +8,7 @@ from farm_merge_valet.automation.runtime import (
     GameRuntime,
     LiveCellState,
     RuntimeHealth,
+    RuntimeRecoveryRequired,
 )
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "LiveCellState",
     "Phase",
     "RuntimeHealth",
+    "RuntimeRecoveryRequired",
 ]

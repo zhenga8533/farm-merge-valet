@@ -51,6 +51,7 @@ def _bot(now: list[float], live: MarketplaceLiveOffer):
         _shop_workflow=SimpleNamespace(pending=None),
         _last_wait_reason=None,
         _actions=lambda: action_control,
+        _record_action_no_progress=lambda *_args, **_kwargs: action_control.record_no_progress(),
     )
 
 

@@ -11,6 +11,7 @@ from enum import StrEnum
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from farm_merge_valet.automation.bot import Bot
+from farm_merge_valet.automation.runtime import RuntimeRecoveryRequired
 from farm_merge_valet.browser import BrowserManager, BrowserManagerError, BrowserStatus
 from farm_merge_valet.composition import create_bot, create_catalog_sync_service
 from farm_merge_valet.config import AppConfig, ConfigStore
@@ -212,6 +213,8 @@ class ApplicationController(QObject):
                 raise BrowserManagerError(
                     browser_status.detail or "A compatible managed browser is not running."
                 )
+            if config.browser_auto_launch and not browser_status.game_loaded:
+                browser_status = manager.ensure_game_open()
             self.browser_status_changed.emit(self._browser_status_text(browser_status))
             self.browser_state_changed.emit(browser_status)
             browser_name = browser_status.kind.value if browser_status.kind else "browser"
@@ -233,12 +236,6 @@ class ApplicationController(QObject):
                 if config.discord_webhook_url is not None
                 else None
             )
-            self._bot = create_bot(config)
-            latest_config = self.store.current
-            if latest_config != config:
-                self._bot.update_config(latest_config)
-            if self._shutting_down or self._stopping:
-                self._bot.request_quit()
 
             def refresh_startup_data() -> None:
                 self._catalog_sync_service(config).refresh_upgrade_progress(source="bot startup")
@@ -248,7 +245,27 @@ class ApplicationController(QObject):
                 config.webhook_summary_interval,
                 config.webhook_status_interval,
             ):
-                self._bot.run_forever(on_initialized=refresh_startup_data)
+                recovery_attempted = False
+                while not self._shutting_down and not self._stopping:
+                    self._bot = create_bot(config)
+                    latest_config = self.store.current
+                    if latest_config != config:
+                        self._bot.update_config(latest_config)
+                    try:
+                        self._bot.run_forever(on_initialized=refresh_startup_data)
+                        break
+                    except RuntimeRecoveryRequired as exc:
+                        if recovery_attempted or not self.store.current.auto_recover_game:
+                            raise
+                        recovery_attempted = True
+                        log_event(
+                            logger,
+                            logging.WARNING,
+                            "runtime.recovery_started",
+                            "Recovering the managed game after an unresponsive action pipeline.",
+                            detail=str(exc),
+                        )
+                        manager.recover_game()
         except BrowserManagerError as exc:
             failure = str(exc)
             log_event(

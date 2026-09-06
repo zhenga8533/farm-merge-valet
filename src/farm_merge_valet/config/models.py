@@ -78,6 +78,7 @@ class AppConfig(BaseModel):
     browser_executable: Path | None = None
     browser_profile_dir: Path | None = None
     browser_auto_launch: bool = True
+    auto_recover_game: bool = True
     game_url: str = "https://www.reddit.com/r/FarmMergeValley/"
     cdp_port: int = Field(default=9222, ge=1, le=65535)
     catalog_dir: Path = Field(default_factory=lambda: user_cache_root() / "catalog")

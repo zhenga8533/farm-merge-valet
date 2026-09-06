@@ -108,6 +108,10 @@ class MarketplaceWorkflow:
             policy_key=pending.action.policy_key,
             elapsed_seconds=age,
         )
+        bot._record_action_no_progress(
+            "marketplace purchase",
+            policy_key=pending.action.policy_key,
+        )
         return False
 
     def step(

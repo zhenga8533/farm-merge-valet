@@ -312,8 +312,8 @@ Once the game is active, it waits for board state to settle before confirming
 the intended result, recognizing a different board change, or recording an
 authoritative no-op. Retry state is keyed by the specific target, allowing other
 eligible interactions or shop orders to proceed while a failed target cools down.
-Three no-ops for the same merge action pause the bot instead of repeatedly
-submitting the same drop.
+Three consecutive submitted actions without authoritative progress request
+runtime recovery, regardless of which supported workflow submitted them.
 
 The active loop rate-limits repeated capability discovery. Temporary waits,
 individual plans, submissions, confirmations, slow-stage timings, cached
@@ -344,11 +344,20 @@ channel. The message ID is persisted without storing the webhook URL or token.
 
 ## Operational boundaries
 
-The managed browser and loaded game must remain open. Minimized and headless operation
-are unsupported. Background flags reduce browser throttling but cannot prevent
-network or server-side interruption, and backend connectivity is not detected
-separately yet. Global pause/quit hotkeys and Ctrl+C remain available as inbound
-controls without being part of game interaction.
+The managed browser must remain open while automation runs. Minimized and
+headless operation are unsupported. Background flags reduce browser throttling
+but cannot prevent network or server-side interruption, and backend connectivity
+is not detected separately yet. Global pause/quit hotkeys and Ctrl+C remain
+available as inbound controls without being part of game interaction.
+
+When default automatic browser launch is enabled, starting automation ensures
+the managed browser is running, opens the configured game page when absent, and
+requests Play at bounded intervals until the game iframe appears or the
+20-second startup timeout expires. Three consecutive submitted actions with no
+authoritative progress classify the action pipeline as unresponsive even when
+browser animation frames continue. Default-enabled recovery reloads the verified
+managed game page once and rebuilds bot state. A repeated failure stops
+automation, and recovery never reloads or restarts an unowned browser.
 
 Future phases, supporting work, and non-blocking research are tracked in
 [Open Items](open-items.md).

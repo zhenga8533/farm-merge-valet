@@ -71,6 +71,10 @@ class RuntimeCancelledError(RuntimeConnectionError):
     """Raised when an in-flight runtime operation is cancelled."""
 
 
+class RuntimeRecoveryRequired(RuntimeError):
+    """Raised when the runtime is reachable but no longer processes actions."""
+
+
 @dataclass(frozen=True)
 class ActionResult:
     status: ActionStatus

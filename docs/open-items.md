@@ -34,6 +34,10 @@ from an ordinarily idle or locally frozen renderer. This is particularly
 important before adding visiting, expansion, or event workflows that depend on
 server-confirmed navigation or purchases.
 
+Renderer and action-pipeline freezes are already detected separately: three
+consecutive submitted actions without authoritative progress trigger one bounded
+managed-page reload. This does not yet identify backend-only disconnections.
+
 ### Live integration coverage
 
 Add explicitly marked, opt-in live tests under `tests/integration`. The regular
@@ -57,8 +61,9 @@ These are not missing automation capabilities:
 
 ## Known constraints, not scheduled work
 
-- The managed browser and loaded game must remain open.
+- The managed browser must remain open. Bot startup can open the configured game
+  page and request Play, but a changed or unavailable Reddit launcher may still
+  require the user to start the game manually.
 - Minimized and headless operation are unsupported.
 - An alternative merge-submission mode has been identified as a possible future
   policy/action concern, but no new mode is currently specified.
-

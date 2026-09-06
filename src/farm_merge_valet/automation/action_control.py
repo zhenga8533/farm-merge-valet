@@ -36,6 +36,7 @@ class ActionCoordinator:
 
     active: ActiveOperation | None = None
     retries: dict[tuple[OperationKind, OperationKey], RetryState] = field(default_factory=dict)
+    consecutive_no_progress: int = 0
 
     def available(self, kind: OperationKind, key: OperationKey, now: float) -> bool:
         retry = self.retries.get((kind, key))
@@ -50,6 +51,14 @@ class ActionCoordinator:
     def complete(self, kind: OperationKind, key: OperationKey) -> None:
         self._release(kind, key)
         self.retries.pop((kind, key), None)
+        self.consecutive_no_progress = 0
+
+    def record_no_progress(self) -> int:
+        self.consecutive_no_progress += 1
+        return self.consecutive_no_progress
+
+    def record_progress(self) -> None:
+        self.consecutive_no_progress = 0
 
     def release(self, kind: OperationKind, key: OperationKey) -> None:
         self._release(kind, key)

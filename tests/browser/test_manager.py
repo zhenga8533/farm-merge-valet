@@ -12,6 +12,7 @@ from farm_merge_valet.browser.manager import (
     BrowserStatus,
     SupportTier,
 )
+from farm_merge_valet.cdp.transport import CdpConnectionError
 from farm_merge_valet.config import AppConfig
 
 
@@ -278,3 +279,83 @@ def test_launch_retries_after_profile_handoff_exit(tmp_path, monkeypatch) -> Non
 
     assert manager.launch() is ready
     assert launches == 2
+
+
+def test_ensure_game_open_opens_configured_url_once_in_managed_browser(monkeypatch) -> None:
+    settings = AppConfig(game_url="https://reddit.example/game")
+    manager = BrowserManager(settings)
+    waiting = BrowserStatus(True, True, True, kind=BrowserKind.CHROME, game_loaded=False)
+    monkeypatch.setattr(manager, "ensure_running", lambda: waiting)
+    monkeypatch.setattr(manager, "status", lambda: waiting)
+    monkeypatch.setattr("farm_merge_valet.browser.manager._GAME_LOAD_TIMEOUT", 0.0)
+    monkeypatch.setattr("farm_merge_valet.browser.manager.has_page_url", lambda *_args: False)
+    opened: list[tuple[int, str]] = []
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.open_browser_page",
+        lambda port, url: opened.append((port, url)),
+    )
+
+    with pytest.raises(BrowserManagerError, match="did not finish loading"):
+        manager.ensure_game_open()
+    assert opened == [(9222, "https://reddit.example/game")]
+
+
+def test_ensure_game_open_refuses_unowned_browser(monkeypatch) -> None:
+    manager = BrowserManager(AppConfig())
+    monkeypatch.setattr(
+        manager,
+        "ensure_running",
+        lambda: BrowserStatus(True, True, False, game_loaded=False),
+    )
+
+    with pytest.raises(BrowserManagerError, match="unowned browser"):
+        manager.ensure_game_open()
+
+
+def test_ensure_game_open_retries_transient_play_error_until_game_is_loaded(
+    monkeypatch,
+) -> None:
+    manager = BrowserManager(AppConfig())
+    waiting = BrowserStatus(True, True, True, game_loaded=False)
+    loaded = BrowserStatus(True, True, True, game_loaded=True)
+    statuses = iter((waiting, waiting, loaded))
+    clock = iter(index / 10 for index in range(20))
+    attempts: list[bool] = []
+    outcomes = iter((CdpConnectionError("launcher changed"), True))
+
+    def try_start(*_args) -> bool:
+        attempts.append(True)
+        outcome = next(outcomes)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(manager, "ensure_running", lambda: waiting)
+    monkeypatch.setattr(manager, "status", lambda: next(statuses))
+    monkeypatch.setattr("farm_merge_valet.browser.manager.has_page_url", lambda *_args: True)
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.try_start_game",
+        try_start,
+    )
+    monkeypatch.setattr("farm_merge_valet.browser.manager._GAME_START_RETRY_SECONDS", 0.0)
+    monkeypatch.setattr("farm_merge_valet.browser.manager.time.monotonic", lambda: next(clock))
+    monkeypatch.setattr("farm_merge_valet.browser.manager.time.sleep", lambda _seconds: None)
+
+    assert manager.ensure_game_open() is loaded
+    assert attempts == [True, True]
+
+
+def test_recover_game_reloads_loaded_managed_page(monkeypatch) -> None:
+    manager = BrowserManager(AppConfig(window_title="game title"))
+    loaded = BrowserStatus(True, True, True, game_loaded=True)
+    monkeypatch.setattr(manager, "ensure_running", lambda: loaded)
+    reloaded: list[tuple[int, str | None]] = []
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.reload_game_page",
+        lambda port, title: reloaded.append((port, title)),
+    )
+    monkeypatch.setattr(manager, "status", lambda: loaded)
+    monkeypatch.setattr("farm_merge_valet.browser.manager.time.sleep", lambda _seconds: None)
+
+    assert manager.recover_game() is loaded
+    assert reloaded == [(9222, "game title")]

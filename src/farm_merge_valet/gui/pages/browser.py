@@ -84,6 +84,7 @@ class BrowserPage(ConfigFormPage):
         self._add_form_row(managed_form, "Status", self.status_label)
         self._add_form_row(managed_form, "Preferred browser", self.browser_choice)
         self._add_toggle(managed_form, "Launch automatically when needed", "browser_auto_launch")
+        self._add_toggle(managed_form, "Reload frozen game automatically", "auto_recover_game")
         buttons = QHBoxLayout()
         self.refresh_button = secondary_button("Refresh status")
         self.browser_action_button = QPushButton("Launch managed browser")

@@ -38,3 +38,17 @@ def test_success_clears_target_failure_history() -> None:
     actions.complete(OperationKind.MERGE, key)
 
     assert actions.retry_at(OperationKind.MERGE, key) == 0.0
+
+
+def test_confirmed_progress_resets_cross_action_no_progress_streak() -> None:
+    actions = ActionCoordinator()
+
+    assert actions.record_no_progress() == 1
+    assert actions.record_no_progress() == 2
+    actions.record_progress()
+    assert actions.record_no_progress() == 1
+
+    key = ("confirmed",)
+    assert actions.begin(OperationKind.INTERACTION, key, 0.0)
+    actions.complete(OperationKind.INTERACTION, key)
+    assert actions.consecutive_no_progress == 0

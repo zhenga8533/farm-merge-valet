@@ -22,6 +22,7 @@ from farm_merge_valet.automation.runtime import (
     RuntimeCapability,
     RuntimeConnectionError,
     RuntimeHealth,
+    RuntimeRecoveryRequired,
     RuntimeSnapshot,
     SnapshotOptions,
     StorageBubbleState,
@@ -76,6 +77,7 @@ from farm_merge_valet.observability.logging import log_event
 logger = logging.getLogger(__name__)
 
 _ACTION_FAILURE_LIMIT = 3
+_RUNTIME_STARTUP_GRACE_SECONDS = 30.0
 
 
 def _marketplace_policy_enabled(config: AppConfig) -> bool:
@@ -138,6 +140,10 @@ class Bot:
         self._storage_bubble_workflow = StorageBubbleWorkflow()
         self._action_control = ActionCoordinator()
         self._last_health: RuntimeHealth | None = None
+        self._runtime_initialization_started_at: float | None = None
+        self._runtime_initializing_reported = False
+        self._runtime_unavailable_warned = False
+        self._runtime_ready_once = False
         self._last_wait_reason: str | None = None
         self._last_wait_log_at = 0.0
         self._idle_active = False
@@ -154,6 +160,25 @@ class Bot:
         with self._config_lock:
             self._pending_config = snapshot
         self._loop_wakeup.set()
+
+    def _record_action_no_progress(self, action: str, **context: object) -> None:
+        failures = self._actions().record_no_progress()
+        if failures < _ACTION_FAILURE_LIMIT:
+            return
+        log_event(
+            logger,
+            logging.ERROR,
+            "runtime.action_pipeline_unresponsive",
+            "The game accepted %d consecutive action submissions without changing "
+            "authoritative state; requesting runtime recovery.",
+            failures,
+            consecutive_failures=failures,
+            last_action=action,
+            **context,
+        )
+        raise RuntimeRecoveryRequired(
+            f"game action pipeline made no progress after {failures} submissions"
+        )
 
     def _apply_pending_config(self) -> None:
         with self._config_lock:
@@ -215,6 +240,9 @@ class Bot:
         return time.monotonic()
 
     def initialize(self) -> bool:
+        now = time.monotonic()
+        if self._runtime_initialization_started_at is None:
+            self._runtime_initialization_started_at = now
         self.board = BoardGrid()
         flag_status = self.runtime.read_background_flag_status()
         if flag_status.get("available") is True and flag_status.get("all_present") is False:
@@ -242,25 +270,47 @@ class Bot:
             )
         self._last_health = self.runtime.discover()
         if not self._last_health.available:
-            log_event(
-                logger,
-                logging.WARNING,
-                "runtime.unavailable",
-                "Game target found, but action runtime is unavailable: %s "
-                "(board=%s, item actions=%s, board interactions=%s, reward interactions=%s, "
-                "removals=%s, crate claims=%s, shop orders=%s, inventory=%s).",
-                self._last_health.detail or "no diagnostic detail",
-                self._last_health.board_available,
-                self._last_health.item_drop_available,
-                self._last_health.interaction_available,
-                self._last_health.reward_interaction_available,
-                self._last_health.removal_available,
-                self._last_health.crate_spawn_available,
-                self._last_health.shop_available,
-                self._last_health.inventory_available,
-                scene_id=self._last_health.scene_id,
-                detail=self._last_health.detail,
+            initialization_elapsed = (
+                time.monotonic() - self._runtime_initialization_started_at
             )
+            should_warn = (
+                self._runtime_ready_once
+                or initialization_elapsed >= _RUNTIME_STARTUP_GRACE_SECONDS
+            )
+            if should_warn and not self._runtime_unavailable_warned:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "runtime.unavailable",
+                    "Game target found, but action runtime is unavailable after %.1fs: %s "
+                    "(board=%s, item actions=%s, board interactions=%s, reward interactions=%s, "
+                    "removals=%s, crate claims=%s, shop orders=%s, inventory=%s).",
+                    initialization_elapsed,
+                    self._last_health.detail or "no diagnostic detail",
+                    self._last_health.board_available,
+                    self._last_health.item_drop_available,
+                    self._last_health.interaction_available,
+                    self._last_health.reward_interaction_available,
+                    self._last_health.removal_available,
+                    self._last_health.crate_spawn_available,
+                    self._last_health.shop_available,
+                    self._last_health.inventory_available,
+                    scene_id=self._last_health.scene_id,
+                    detail=self._last_health.detail,
+                    initialization_elapsed_seconds=initialization_elapsed,
+                )
+                self._runtime_unavailable_warned = True
+            elif not self._runtime_initializing_reported:
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "runtime.initializing",
+                    "Game iframe loaded; waiting for its action runtime to initialize.",
+                    scene_id=self._last_health.scene_id,
+                    detail=self._last_health.detail,
+                    startup_grace_seconds=_RUNTIME_STARTUP_GRACE_SECONDS,
+                )
+                self._runtime_initializing_reported = True
             return False
         if self._last_health.detail:
             log_event(
@@ -346,6 +396,10 @@ class Bot:
                 self._last_health.scene_id,
                 scene_id=self._last_health.scene_id,
             )
+        self._runtime_initialization_started_at = None
+        self._runtime_initializing_reported = False
+        self._runtime_unavailable_warned = False
+        self._runtime_ready_once = True
         return True
 
     def _resume_cached_runtime(self) -> bool:
@@ -1497,6 +1551,8 @@ class Bot:
                 self._wait_for_next_iteration(delay)
         except KeyboardInterrupt:
             log_event(logger, logging.INFO, "bot.interrupted", "Stopped by user.")
+        except RuntimeRecoveryRequired:
+            raise
         except Exception:
             log_event(
                 logger,

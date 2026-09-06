@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from threading import Event, Lock
 
+import pytest
+
 from farm_merge_valet.automation.action_control import OperationKind
 from farm_merge_valet.automation.bot import Bot, Phase
 from farm_merge_valet.automation.runtime import (
@@ -11,6 +13,7 @@ from farm_merge_valet.automation.runtime import (
     CrateSpawnResult,
     LiveCellState,
     RuntimeHealth,
+    RuntimeRecoveryRequired,
 )
 from farm_merge_valet.automation.workflows import (
     InteractionWorkflow,
@@ -370,7 +373,7 @@ def test_genuine_noop_delays_before_trying_an_alternative(monkeypatch) -> None:
     assert bot.runtime.drops == []
 
 
-def test_three_genuine_noops_pause_instead_of_repeating(monkeypatch) -> None:
+def test_three_genuine_noops_request_runtime_recovery(monkeypatch) -> None:
     bot = bare_bot()
     item = ItemRef("crops", "wheat", 1)
     move = action(item)
@@ -385,12 +388,12 @@ def test_three_genuine_noops_pause_instead_of_repeating(monkeypatch) -> None:
             base_delay=10.0,
             max_delay=10.0,
         )
+        bot._actions().record_no_progress()
     bot._merge_workflow.pending = PendingMergeAction(move, signature, 7, 1.0, signature, 1.0)
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 5.0)
 
-    assert not bot._verify_pending_action(health(advancing=True))
-    assert bot.paused
-    assert bot._interrupt_event.is_set()
+    with pytest.raises(RuntimeRecoveryRequired, match="made no progress"):
+        bot._verify_pending_action(health(advancing=True))
 
 
 def test_full_board_without_safe_recovery_keeps_polling(caplog) -> None:

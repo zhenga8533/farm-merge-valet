@@ -153,6 +153,11 @@ class ShopWorkflow:
             recipe_id=pending.action.recipe_id,
             action_kind=pending.action.kind.value,
         )
+        bot._record_action_no_progress(
+            f"shop {pending.action.kind.value}",
+            shop_id=pending.action.shop_id,
+            recipe_id=pending.action.recipe_id,
+        )
         return True
 
     def _submit_shop_action(self, bot: Bot, action: ShopAction, health: RuntimeHealth) -> bool:

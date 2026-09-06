@@ -194,22 +194,11 @@ class MergeWorkflow:
                 attempt_limit=_ACTION_FAILURE_LIMIT,
                 **bot._action_event_context(action),
             )
-            if failure_count >= _ACTION_FAILURE_LIMIT:
-                log_event(
-                    logger,
-                    logging.ERROR,
-                    "action.failure_limit_reached",
-                    "%s %s -> %s failed %d times; pausing to avoid repeated attempts.",
-                    action.effect.name.title(),
-                    action.start,
-                    action.end,
-                    failure_count,
-                    attempt=failure_count,
-                    **bot._action_event_context(action),
-                )
-                bot.paused = True
-                bot._interrupt_event.set()
-                return False
+            bot._record_action_no_progress(
+                f"{action.effect.value} action",
+                attempt=failure_count,
+                **bot._action_event_context(action),
+            )
         return True
 
     def _submit_merge(self, bot: Bot, action: MergeAction, health: RuntimeHealth) -> bool:

@@ -10,10 +10,12 @@ from farm_merge_valet.cdp.targets import (
     _invalidate_target_pair,
     _normalize_local_ws_url,
     _select_target_pair,
+    _version_page_metadata,
     find_game_frame_target,
     find_top_page_target,
     read_background_flag_status,
     read_browser_metadata,
+    try_start_game,
 )
 from farm_merge_valet.cdp.transport import (
     CdpCancelledError,
@@ -101,6 +103,81 @@ def test_select_target_pair_ignores_title_match_without_game_frame() -> None:
         "ws://frame/game-frame",
         "ws://page/game",
     )
+
+
+def test_try_start_game_clicks_launcher_for_matching_page(monkeypatch) -> None:
+    page = _page("game", "Crates are waiting! : r/FarmMergeValley")
+    launcher = {
+        **_frame("launcher", "game"),
+        "url": "https://playfmv-example.devvit.net/launcher/launcher.html",
+    }
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets._load_targets",
+        lambda _port: [page, launcher],
+    )
+    commands: list[tuple[str, str, dict[str, object] | None]] = []
+
+    def command(ws_url, method, params=None):
+        commands.append((ws_url, method, params))
+        if method != "Runtime.evaluate":
+            return {}
+        if ws_url == "ws://frame/launcher":
+            return {"result": {"value": {"xRatio": 0.5, "yRatio": 0.8}}}
+        if len([command for command in commands if command[1] == "Runtime.evaluate"]) == 2:
+            return {"result": {"value": True}}
+        return {"result": {"value": {"x": 500, "y": 400}}}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.targets._command_target", command)
+
+    assert try_start_game(9222, "r/FarmMergeValley")
+    assert commands[0][1] == "Runtime.evaluate"
+    assert "#start-button" in str(commands[0][2])
+    assert [method for _url, method, _params in commands[1:]] == [
+        "Runtime.evaluate",
+        "Runtime.evaluate",
+        "Input.dispatchMouseEvent",
+        "Input.dispatchMouseEvent",
+        "Input.dispatchMouseEvent",
+    ]
+    assert commands[-2][2] == {
+        "type": "mousePressed",
+        "x": 500,
+        "y": 400,
+        "button": "left",
+        "buttons": 1,
+        "clickCount": 1,
+    }
+
+
+def test_version_page_metadata_uses_hidden_target(monkeypatch) -> None:
+    commands: list[tuple[str, str, dict[str, object] | None]] = []
+
+    def command(ws_url, method, params=None):
+        commands.append((ws_url, method, params))
+        if method == "Target.createTarget":
+            return {"targetId": "version-target"}
+        if method == "Runtime.evaluate":
+            return {
+                "result": {
+                    "value": "Command Line\tchrome.exe --remote-debugging-port=9222\n"
+                    "Executable Path\tC:\\Chrome\\chrome.exe\n"
+                    "Profile Path\tC:\\Profile\\Default"
+                }
+            }
+        return {}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.targets._command_target", command)
+    monkeypatch.setattr("farm_merge_valet.cdp.targets.time.sleep", lambda _seconds: None)
+
+    metadata = _version_page_metadata("ws://127.0.0.1:9222/devtools/browser/id")
+
+    assert metadata["Executable Path"] == "C:\\Chrome\\chrome.exe"
+    assert commands[0][2] == {
+        "url": "chrome://version/",
+        "background": True,
+        "hidden": True,
+    }
+    assert commands[1][0] == "ws://127.0.0.1:9222/devtools/page/version-target"
 
 
 def test_local_websocket_urls_use_numeric_loopback() -> None:

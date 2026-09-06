@@ -307,6 +307,10 @@ class InteractionWorkflow:
             elapsed_seconds=age,
             **bot._interaction_event_context(pending.action),
         )
+        bot._record_action_no_progress(
+            f"{pending.action.kind.value} interaction",
+            **bot._interaction_event_context(pending.action),
+        )
         return True
 
     def _submit_interaction(

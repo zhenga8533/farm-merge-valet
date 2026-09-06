@@ -63,6 +63,7 @@ class CrateWorkflow:
             self.last_claim_limit = limit
             self.last_claim_log_at = now
         if result.spawned:
+            bot._actions().record_progress()
             bot._last_wait_reason = None
             bot._idle_active = False
             self.last_claim_limit = None

@@ -10,6 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
+from farm_merge_valet.automation.runtime import RuntimeRecoveryRequired
 from farm_merge_valet.browser.manager import BrowserKind, BrowserStatus
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.core.upgrade_progress import UpgradeProgress, UpgradeTargetProgress
@@ -213,6 +214,58 @@ def test_bot_start_refreshes_upgrade_progress_without_synchronizing_assets(
 
     assert progress_updates == [progress]
     assert asset_syncs == []
+    controller.shutdown()
+    app.processEvents()
+
+
+def test_unresponsive_runtime_reloads_once_and_restarts_bot(tmp_path, monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig())
+    controller = ApplicationController(store)
+    browser_status = BrowserStatus(
+        running=True,
+        compatible=True,
+        managed=True,
+        kind=BrowserKind.CHROME,
+        game_loaded=True,
+    )
+    recoveries: list[bool] = []
+
+    class BrowserManagerStub:
+        def __init__(self, _config: AppConfig) -> None:
+            pass
+
+        def ensure_running(self) -> BrowserStatus:
+            return browser_status
+
+        def recover_game(self) -> BrowserStatus:
+            recoveries.append(True)
+            return browser_status
+
+    class BotStub:
+        paused = False
+
+        def __init__(self, fail: bool) -> None:
+            self.fail = fail
+
+        def update_config(self, _config: AppConfig) -> None:
+            pass
+
+        def request_quit(self) -> None:
+            pass
+
+        def run_forever(self, *, on_initialized) -> None:
+            if self.fail:
+                raise RuntimeRecoveryRequired("unresponsive")
+
+    bots = iter((BotStub(True), BotStub(False)))
+    monkeypatch.setattr("farm_merge_valet.gui.controller.BrowserManager", BrowserManagerStub)
+    monkeypatch.setattr("farm_merge_valet.gui.controller.create_bot", lambda _config: next(bots))
+
+    controller._run_bot()
+
+    assert recoveries == [True]
     controller.shutdown()
     app.processEvents()
 

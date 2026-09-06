@@ -333,7 +333,7 @@ class GameRuntimeAdapter:
                     self._recovery_failures[key] = (failures, time.monotonic() + cooldown)
             log_event(
                 logger,
-                logging.INFO if recovered else logging.WARNING,
+                logging.INFO,
                 "runtime.heap_recovery_completed",
                 "Board heap recovery finished in %.1fs: %s.",
                 elapsed,

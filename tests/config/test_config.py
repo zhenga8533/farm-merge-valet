@@ -304,6 +304,7 @@ def test_managed_browser_defaults_to_auto_launch() -> None:
 
     assert settings.browser == "auto"
     assert settings.browser_auto_launch
+    assert settings.auto_recover_game
     assert settings.browser_profile_dir is None
 
 
