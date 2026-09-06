@@ -39,6 +39,7 @@ from farm_merge_valet.automation.workflows import (
     FarmVisitWorkflow,
     InteractionAction,
     InteractionWorkflow,
+    LandExpansionWorkflow,
     MarketplaceWorkflow,
     MergeWorkflow,
     PendingInteraction,
@@ -61,6 +62,7 @@ from farm_merge_valet.core.items import (
     ProducerKind,
     ProducerState,
 )
+from farm_merge_valet.core.land_expansion import LandExpansionCandidate
 from farm_merge_valet.core.marketplace import MarketplaceLiveOffer
 from farm_merge_valet.core.merge_planner import (
     MergeAction,
@@ -129,6 +131,7 @@ class Bot:
         self._storage_bubbles: tuple[StorageBubbleState, ...] | None = None
         self._shop_orders: tuple[ShopOrder, ...] | None = None
         self._marketplace_offers: tuple[MarketplaceLiveOffer, ...] | None = None
+        self._land_expansions: tuple[LandExpansionCandidate, ...] | None = None
         self._obstacle_focus: tuple[GridCoord, int | None] | None = None
         self._merge_workflow = MergeWorkflow()
         self._interaction_workflow = InteractionWorkflow()
@@ -137,6 +140,7 @@ class Bot:
         self._crate_workflow = CrateWorkflow()
         self._storage_bubble_workflow = StorageBubbleWorkflow()
         self._farm_visit_workflow = FarmVisitWorkflow()
+        self._land_expansion_workflow = LandExpansionWorkflow()
         self._action_control = ActionCoordinator()
         self._board_space_request: BoardSpaceRequest | None = None
         self._last_health: RuntimeHealth | None = None
@@ -467,6 +471,10 @@ class Bot:
                     and self._last_health.farm_scene is FarmSceneKind.VISITOR
                 )
             ),
+            include_land_expansion=(
+                self.config.land_expansion_automation_enabled
+                or self._land_expansion_workflow.pending is not None
+            ),
         )
 
     def _apply_runtime_snapshot(self, snapshot: RuntimeSnapshot) -> None:
@@ -484,6 +492,7 @@ class Bot:
         self._storage_bubbles = perceived.storage_bubbles
         self._shop_orders = perceived.shop_orders
         self._marketplace_offers = snapshot.marketplace_offers
+        self._land_expansions = snapshot.land_expansions
         if snapshot.metrics is not None:
             self._scheduler.record_snapshot(snapshot.metrics.wall_duration_ms / 1000.0)
 
@@ -1234,6 +1243,10 @@ class Bot:
         farm_visit_state = snapshot.farm_visit
         if not farm_visit_workflow.verify_pending(self, health, farm_visit_state):
             return
+        land_expansion_workflow = self._land_expansion_workflow
+        land_expansions = self._land_expansions
+        if not land_expansion_workflow.verify_pending(self, health, land_expansions):
+            return
         shop_policy_enabled = self._shop_policy().may_enable_orders
         shop_orders: tuple[ShopOrder, ...] | None = self._shop_orders
         if not self._verify_pending_shop_action(health, shop_orders):
@@ -1316,6 +1329,10 @@ class Bot:
                 cooling_producers=cooling_producers,
             )
         self._last_cooling_producer_count = cooling_producers or None
+        if land_expansions is not None and land_expansion_workflow.step(
+            self, health, land_expansions
+        ):
+            return
         if shop_policy_enabled and shop_orders is not None:
             if not health.supports(RuntimeCapability.SHOPS):
                 if not self._ensure_capability(health, RuntimeCapability.SHOPS):

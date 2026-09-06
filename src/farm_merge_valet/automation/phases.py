@@ -10,3 +10,4 @@ class Phase(Enum):
     CLAIM_CRATES = auto()
     MERGE = auto()
     FARM_VISITS = auto()
+    LAND_EXPANSION = auto()

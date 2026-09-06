@@ -7,6 +7,7 @@ import json
 from farm_merge_valet.automation.runtime import SnapshotOptions
 from farm_merge_valet.cdp.board_store import _READ_EXPRESSION
 from farm_merge_valet.cdp.inventory_store import _READ_ENERGY_EXPRESSION
+from farm_merge_valet.cdp.land_expansion import _READ_LAND_EXPANSION_EXPRESSION
 from farm_merge_valet.cdp.marketplace import _READ_MARKETPLACE_EXPRESSION
 from farm_merge_valet.cdp.scripts import (
     _HEALTH_EXPRESSION,
@@ -23,10 +24,12 @@ def snapshot_expression(options: SnapshotOptions) -> str:
     shops = json.dumps(options.include_shop_orders)
     marketplace = json.dumps(options.include_marketplace)
     farm_visit = json.dumps(options.include_farm_visit)
+    land_expansion = json.dumps(options.include_land_expansion)
     return f"""
 (() => {{
   const startedAt = performance.now();
   const farmVisit = {farm_visit} ? ({_READ_FARM_VISIT_EXPRESSION}) : null;
+  const landExpansions = {land_expansion} ? ({_READ_LAND_EXPANSION_EXPRESSION}) : null;
   const health = ({_HEALTH_EXPRESSION});
   const cells = health?.board ? ({_READ_EXPRESSION}) : null;
   const energy = {obstacle} ? ({_READ_ENERGY_EXPRESSION}) : null;
@@ -44,6 +47,7 @@ def snapshot_expression(options: SnapshotOptions) -> str:
     shopOrders,
     marketplace,
     farmVisit,
+    landExpansions,
     rendererDurationMs,
     cellCount: Array.isArray(cells) ? cells.length : 0,
     occupiedCellCount: Array.isArray(cells)

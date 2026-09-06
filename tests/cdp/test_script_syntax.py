@@ -9,6 +9,10 @@ from farm_merge_valet.automation.runtime import (
     InteractionTargetKind,
     TransientOverlayKind,
 )
+from farm_merge_valet.cdp.land_expansion import (
+    _READ_LAND_EXPANSION_EXPRESSION,
+    land_expansion_action_expression,
+)
 from farm_merge_valet.cdp.scripts import (
     _HEALTH_EXPRESSION,
     _crate_expression,
@@ -28,6 +32,8 @@ from farm_merge_valet.cdp.scripts import (
     "expression",
     (
         _HEALTH_EXPRESSION,
+        _READ_LAND_EXPANSION_EXPRESSION,
+        land_expansion_action_expression("A1", False, (("coins", 10),), 7),
         _farm_visit_action_expression("open", 7),
         _storage_bubble_pop_expression(11, 7),
         _dismiss_overlay_expression(7),

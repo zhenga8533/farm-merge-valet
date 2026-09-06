@@ -123,6 +123,10 @@ _DISCOVER_EXPRESSION = r"""
     typeof marketplace?.getMarketplacePopupData === 'function' &&
     typeof marketplace?.getItemConfigsByShop === 'function' &&
     typeof marketplace?.getStockItem === 'function';
+  const validLandExpansion = [services?.mapAreaService, services?.premiumAreaService]
+    .every((service) => service?._services === services && service._isActive !== false &&
+      typeof service.getNextAreaToUnlock === 'function' &&
+      typeof service.canUnlockArea === 'function' && typeof service.unlockArea === 'function');
 
   window.__fmvGameplayServices = services;
   window.__fmvGameplayMapScreen = screen;
@@ -185,6 +189,7 @@ _DISCOVER_EXPRESSION = r"""
     inventory: Boolean(validInventory),
     shopOrders: Boolean(validShopOrders),
     marketplace: Boolean(validMarketplace),
+    landExpansion: validLandExpansion,
     farmVisit: Boolean(visitorScene ? visitorActionHandler && returnHud : trainHandler),
     farmScene: visitorScene ? 'visitor' : 'own',
     missing,
@@ -205,6 +210,7 @@ _DISCOVER_EXPRESSION = r"""
     inventory: Boolean(validInventory),
     shopOrders: Boolean(validShopOrders),
     marketplace: Boolean(validMarketplace),
+    landExpansion: validLandExpansion,
     farmVisit: Boolean(visitorScene ? visitorActionHandler && returnHud : trainHandler),
     farmScene: visitorScene ? 'visitor' : 'own',
     detail: missing.length ? `${missing.join(',')}-not-found` : null,
@@ -368,6 +374,11 @@ _HEALTH_EXPRESSION = r"""
     typeof marketplace?.getMarketplacePopupData === 'function' &&
     typeof marketplace?.getItemConfigsByShop === 'function' &&
     typeof marketplace?.getStockItem === 'function';
+  const currentLandExpansion = currentBoard &&
+    [services?.mapAreaService, services?.premiumAreaService].every((service) =>
+      service?._services === services && service._isActive !== false &&
+      typeof service.getNextAreaToUnlock === 'function' &&
+      typeof service.canUnlockArea === 'function' && typeof service.unlockArea === 'function');
   const currentFarmVisit = currentBoard && (
     farmScene === 'own'
       ? trainHandler?._services === services &&
@@ -537,6 +548,7 @@ _HEALTH_EXPRESSION = r"""
     inventory: Boolean(currentInventory),
     shopOrders: Boolean(currentShopOrders),
     marketplace: Boolean(currentMarketplace),
+    landExpansion: Boolean(currentLandExpansion),
     farmVisit: Boolean(currentFarmVisit),
     farmScene,
     backendConnected: currentBackendConnection

@@ -6,6 +6,14 @@ from pydantic import ValidationError
 from farm_merge_valet.config import AppConfig, ConfigStore
 
 
+def test_land_expansion_requires_explicit_enablement_and_spending_limits() -> None:
+    config = AppConfig()
+
+    assert not config.land_expansion_automation_enabled
+    assert config.land_expansion_max_coin_cost == 0
+    assert config.land_expansion_max_gem_cost == 0
+
+
 def test_marketplace_policies_default_free_claims_enabled_and_validate_semantic_keys() -> None:
     config = AppConfig()
     assert config.marketplace_policy_enabled("free:gems_5_no_ads")

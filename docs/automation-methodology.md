@@ -261,6 +261,23 @@ changing the viewport. Every submission is
 held pending until authoritative order state confirms the transition; it is not
 duplicated during a frozen heartbeat or reload.
 
+## Land expansion
+
+The atomic snapshot optionally reads the next standard and premium area from
+the game's separate map-area services. Each candidate includes its stable area
+ID, cell count, exact level and currency requirements, and the service's live
+affordability result. Expansion automation and both per-purchase currency
+ceilings default to disabled or zero. Standard areas require an allowed coin
+cost; premium areas independently require an allowed crystal cost.
+
+Planning preserves the native service order and prefers the standard candidate
+when both are permitted. Immediately before submission, the runtime revalidates
+the scene, service identity, next area, purchasable state, exact requirements,
+and native affordability check. It then calls the game's native unlock handler,
+which deducts requirements and emits normal progression events. The action
+remains single-flight until a later snapshot confirms that the area is no
+longer the current locked candidate.
+
 ## Marketplace purchases
 
 Marketplace state is included in the atomic snapshot whenever the master switch

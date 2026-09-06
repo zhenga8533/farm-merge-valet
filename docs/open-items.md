@@ -6,12 +6,6 @@ feature gaps.
 
 ## Planned feature work
 
-### Land and board expansion
-
-Automate expansion of the locked and purchasable plot types the board reader
-already classifies. Add authoritative eligibility, player-level, currency,
-price, and policy checks before submitting an expansion.
-
 ### Event workflows
 
 Add event-specific navigation and actions beyond the event items and marketplace

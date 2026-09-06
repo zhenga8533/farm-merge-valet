@@ -10,6 +10,7 @@ from farm_merge_valet.automation.workflows.interactions import (
     InteractionWorkflow,
     PendingInteraction,
 )
+from farm_merge_valet.automation.workflows.land_expansion import LandExpansionWorkflow
 from farm_merge_valet.automation.workflows.marketplace import (
     MarketplaceWorkflow,
     PendingMarketplacePurchase,
@@ -26,6 +27,7 @@ __all__ = [
     "FarmVisitWorkflow",
     "InteractionAction",
     "InteractionWorkflow",
+    "LandExpansionWorkflow",
     "MergeWorkflow",
     "MarketplaceWorkflow",
     "PendingInteraction",

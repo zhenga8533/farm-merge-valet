@@ -27,6 +27,7 @@ from farm_merge_valet.automation.runtime import (
 from farm_merge_valet.cdp.board_store import arm_board_store, parse_board_state, read_board_state
 from farm_merge_valet.cdp.evaluation import apply_background_overrides, evaluate
 from farm_merge_valet.cdp.inventory_store import read_energy
+from farm_merge_valet.cdp.land_expansion import land_expansion_action_expression
 from farm_merge_valet.cdp.marketplace import (
     _READ_MARKETPLACE_EXPRESSION,
     marketplace_purchase_expression,
@@ -57,6 +58,10 @@ from farm_merge_valet.cdp.scripts import (
 from farm_merge_valet.cdp.snapshot import snapshot_expression
 from farm_merge_valet.cdp.targets import read_background_flag_status
 from farm_merge_valet.core.items import GridCoord, InteractionTargetKind
+from farm_merge_valet.core.land_expansion import (
+    ExpansionRequirement,
+    LandExpansionCandidate,
+)
 from farm_merge_valet.core.marketplace import MarketplaceAction, MarketplaceLiveOffer
 from farm_merge_valet.core.obstacles import WorkerState
 from farm_merge_valet.core.shops import ShopIngredient, ShopOrder, ShopOrderState
@@ -449,6 +454,7 @@ class GameRuntimeAdapter:
             interaction_available=interaction,
             shop_available=raw.get("shopOrders") is True,
             marketplace_available=raw.get("marketplace") is True,
+            land_expansion_available=raw.get("landExpansion") is True,
             removal_available=removal,
             reward_interaction_available=reward_interaction,
             obstacle_clear_available=raw.get("obstacleClear") is True,
@@ -553,8 +559,57 @@ class GameRuntimeAdapter:
             shop_orders=self._parse_shop_orders(raw.get("shopOrders")),
             marketplace_offers=parse_marketplace_offers(raw.get("marketplace")),
             farm_visit=self._parse_farm_visit(raw.get("farmVisit")),
+            land_expansions=self._parse_land_expansions(raw.get("landExpansions")),
             metrics=metrics,
         )
+
+    @staticmethod
+    def _parse_land_expansions(raw: object) -> tuple[LandExpansionCandidate, ...] | None:
+        if not isinstance(raw, list):
+            return None
+        candidates: list[LandExpansionCandidate] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            area_id = entry.get("areaID")
+            premium = entry.get("premium")
+            cell_count = entry.get("cellCount")
+            affordable = entry.get("affordable")
+            raw_requirements = entry.get("requirements")
+            if (
+                not isinstance(area_id, str)
+                or not isinstance(premium, bool)
+                or not isinstance(cell_count, int)
+                or isinstance(cell_count, bool)
+                or cell_count <= 0
+                or not isinstance(affordable, bool)
+                or not isinstance(raw_requirements, list)
+            ):
+                continue
+            requirements: list[ExpansionRequirement] = []
+            for requirement in raw_requirements:
+                if not isinstance(requirement, dict):
+                    break
+                key, amount = requirement.get("key"), requirement.get("amount")
+                if (
+                    not isinstance(key, str)
+                    or not isinstance(amount, int)
+                    or isinstance(amount, bool)
+                    or amount < 0
+                ):
+                    break
+                requirements.append(ExpansionRequirement(key, amount))
+            else:
+                candidates.append(
+                    LandExpansionCandidate(
+                        area_id,
+                        premium,
+                        cell_count,
+                        tuple(requirements),
+                        affordable,
+                    )
+                )
+        return tuple(candidates)
 
     @staticmethod
     def _parse_farm_visit(raw: object) -> FarmVisitState | None:
@@ -812,6 +867,21 @@ class GameRuntimeAdapter:
             marketplace_purchase_expression(action, self._scene_id), retry=False
         )
         return parse_marketplace_action_result(raw)
+
+    def submit_land_expansion(self, candidate: LandExpansionCandidate) -> ActionResult:
+        raw = self._evaluate(
+            land_expansion_action_expression(
+                candidate.area_id,
+                candidate.premium,
+                tuple(
+                    (requirement.key, requirement.amount)
+                    for requirement in candidate.requirements
+                ),
+                self._scene_id,
+            ),
+            retry=False,
+        )
+        return self._action_result(raw)
 
     def open_farm_visit(self) -> ActionResult:
         return self._action_result(

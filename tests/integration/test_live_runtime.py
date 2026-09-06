@@ -25,6 +25,7 @@ def test_live_runtime_snapshot_is_coherent(live_runtime: GameRuntimeAdapter) -> 
         SnapshotOptions(
             include_marketplace=True,
             include_farm_visit=True,
+            include_land_expansion=True,
         )
     )
 
@@ -43,6 +44,7 @@ def test_live_runtime_snapshot_is_coherent(live_runtime: GameRuntimeAdapter) -> 
     )
     assert snapshot.energy is not None
     assert snapshot.workers is not None
+    assert snapshot.land_expansions is not None
 
 
 def test_live_runtime_capabilities_are_bound(live_runtime: GameRuntimeAdapter) -> None:

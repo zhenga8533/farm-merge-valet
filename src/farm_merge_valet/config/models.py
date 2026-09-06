@@ -104,6 +104,9 @@ class AppConfig(BaseModel):
     marketplace_policy_overrides: dict[str, bool] = Field(default_factory=dict)
     marketplace_automation_enabled: bool = True
     farm_visit_automation_enabled: bool = False
+    land_expansion_automation_enabled: bool = False
+    land_expansion_max_coin_cost: int = Field(default=0, ge=0, le=1_000_000_000)
+    land_expansion_max_gem_cost: int = Field(default=0, ge=0, le=1_000_000_000)
     items_sort_column: Literal[
         "item", "category", "enabled", "merge", "merge_five", "interact", "remove"
     ] = "item"

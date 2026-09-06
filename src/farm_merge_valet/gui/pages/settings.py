@@ -95,6 +95,25 @@ class SettingsPage(ConfigFormPage):
             "Visit other farms automatically",
             "farm_visit_automation_enabled",
         )
+        self._add_toggle(
+            automation_form,
+            "Expand farm land automatically",
+            "land_expansion_automation_enabled",
+        )
+        self._add_int(
+            automation_form,
+            "Maximum coins per expansion",
+            "land_expansion_max_coin_cost",
+            0,
+            1_000_000_000,
+        )
+        self._add_int(
+            automation_form,
+            "Maximum crystals per expansion",
+            "land_expansion_max_gem_cost",
+            0,
+            1_000_000_000,
+        )
         automation_advanced, form = disclosure_section("Advanced timing")
         self._add_float(form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)
         self._add_float(form, "Loop interval (seconds)", "loop_interval", 0.25, 60, 0.1)

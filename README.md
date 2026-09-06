@@ -228,6 +228,13 @@ cell per reward object and ask the merge planner to create space before claiming
 when necessary. A shop master switch pauses both starting and claiming without
 discarding per-shop or per-recipe selections.
 
+Land expansion is disabled by default. When enabled, the bot reads the next
+standard and premium plots from their separate native area services and only
+unlocks an affordable plot whose coin or crystal cost is within its configured
+per-purchase maximum. Both maxima default to zero, so enabling the master switch
+alone cannot spend currency. The exact area, requirements, affordability, and
+runtime scene are revalidated immediately before the native unlock call.
+
 The Marketplace page is a persistent catalog of all 50 known flash candidates
 and four genuine free claims. Flash purchases are disabled by default; the four
 free claims are enabled by default, and every offer can be overridden individually.

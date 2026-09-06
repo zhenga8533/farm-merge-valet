@@ -197,6 +197,9 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     assert "Automatically pop stored items" in labels
     assert "Automatically claim supply crates" in labels
     assert "Allow obstacle energy spending" in labels
+    assert "Expand farm land automatically" in labels
+    assert "Maximum coins per expansion" in labels
+    assert "Maximum crystals per expansion" in labels
     assert "Close managed browser when quitting" in labels
     assert "Reset all" in {
         button.text() for button in window.settings_page.findChildren(QPushButton)

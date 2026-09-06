@@ -14,6 +14,7 @@ from farm_merge_valet.core.items import (
     ProducerKind,
     ProducerState,
 )
+from farm_merge_valet.core.land_expansion import LandExpansionCandidate
 from farm_merge_valet.core.marketplace import MarketplaceAction, MarketplaceLiveOffer
 from farm_merge_valet.core.obstacles import ObstacleState, WorkerState
 from farm_merge_valet.core.shops import ShopOrder
@@ -64,6 +65,7 @@ class RuntimeCapability(StrEnum):
     SHOPS = "shops"
     MARKETPLACE = "marketplace"
     FARM_VISITS = "farm-visits"
+    LAND_EXPANSION = "land-expansion"
 
 
 class FarmSceneKind(StrEnum):
@@ -150,6 +152,7 @@ class RuntimeHealth:
     backend_connected: bool | None = None
     backend_connectivity_state: int | None = None
     backend_consecutive_hanging_pings: int | None = None
+    land_expansion_available: bool = False
 
     def supports(self, capability: RuntimeCapability) -> bool:
         return {
@@ -166,6 +169,7 @@ class RuntimeHealth:
             RuntimeCapability.SHOPS: self.shop_available,
             RuntimeCapability.MARKETPLACE: self.marketplace_available,
             RuntimeCapability.FARM_VISITS: self.farm_visit_available,
+            RuntimeCapability.LAND_EXPANSION: self.land_expansion_available,
         }[capability]
 
 
@@ -190,6 +194,7 @@ class SnapshotOptions:
     include_shop_orders: bool = True
     include_marketplace: bool = False
     include_farm_visit: bool = False
+    include_land_expansion: bool = False
 
 
 @dataclass(frozen=True)
@@ -212,6 +217,7 @@ class RuntimeSnapshot:
     marketplace_offers: tuple[MarketplaceLiveOffer, ...] | None = None
     metrics: RuntimeReadMetrics | None = None
     farm_visit: FarmVisitState | None = None
+    land_expansions: tuple[LandExpansionCandidate, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -290,3 +296,5 @@ class GameRuntime(Protocol):
     def submit_visitor_action(self, action: VisitorActionState) -> ActionResult: ...
 
     def return_from_farm_visit(self) -> ActionResult: ...
+
+    def submit_land_expansion(self, candidate: LandExpansionCandidate) -> ActionResult: ...
