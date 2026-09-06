@@ -372,11 +372,22 @@ _HEALTH_EXPRESSION = r"""
   const currentStickerView = stickerNavigation?._viewStack?.at(-1);
   const packOpeningView = stickerNavigation?._packOpeningView;
   const stickerController = packOpeningView?._currentPackAnimation;
-  const stickerPackActive = stickerNavigation?.visible !== false &&
+  const stickerPackViewActive = stickerNavigation?.visible !== false &&
     packOpeningView?.visible !== false && packOpeningView?.parent === stickerNavigation &&
+    currentStickerView === packOpeningView && packOpeningView?._destroyed !== true;
+  const stickerPackActive = stickerPackViewActive &&
     stickerController?.parent === packOpeningView && stickerController?._isAnimating === true;
   const stickerSpineView = stickerPackActive ? stickerController._spineAnimation : null;
   const stickerRevealView = stickerPackActive ? stickerController._revealAnimation : null;
+  const stickerRaffleFlow = stickerPackActive
+    ? stickerController.children?.find((child) =>
+        typeof child?.startRaffle === 'function' && typeof child?._start === 'function')
+    : null;
+  const stickerRaffleProposal = stickerRaffleFlow?.children?.find((child) =>
+    child?.parent === stickerRaffleFlow && child?._destroyed !== true &&
+    typeof child?.startRaffleProposal === 'function' &&
+    typeof child?._close === 'function' && Array.isArray(child?._raffleButtons) &&
+    Array.isArray(child?._duplicate4PlusStarsStickers));
   const liveSkipText = stickerSpineView?._skipText &&
     !stickerSpineView._skipText._destroyed;
   const stickerSkip = liveSkipText && (
@@ -479,7 +490,9 @@ _HEALTH_EXPRESSION = r"""
     : promotionalPopup ? 'promotional-popup'
     : stickerSkip ? 'sticker-pack-skip'
     : collectPending ? 'sticker-pack-collect'
-    : stickerPackActive ? 'sticker-pack-transition'
+    : stickerRaffleProposal && stickerRaffleProposal._closing !== true
+      ? 'sticker-raffle-proposal'
+    : stickerPackViewActive ? 'sticker-pack-transition'
     : stickerSetSubmitted ? 'sticker-set-transition'
     : stickerSetActive && stickerSetButton ? 'sticker-set-collect'
     : stickerSetActive ? 'sticker-set-transition'
@@ -825,10 +838,14 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
   const currentStickerView = stickerNavigation?._viewStack?.at(-1);
   const packOpeningView = stickerNavigation?._packOpeningView;
   const stickerController = packOpeningView?._currentPackAnimation;
-  const stickerPackActive = stickerNavigation?.visible !== false &&
+  const stickerPackViewActive = stickerNavigation?.visible !== false &&
     packOpeningView?.visible !== false && packOpeningView?.parent === stickerNavigation &&
+    currentStickerView === packOpeningView && packOpeningView?._destroyed !== true;
+  const stickerPackActive = stickerPackViewActive &&
     stickerController?.parent === packOpeningView && stickerController?._isAnimating === true;
   if (!stickerPackActive) {{
+    if (stickerPackViewActive)
+      return {{status: 'busy', detail: 'sticker-pack-transition'}};
     const stickerAlbumTransition = stickerNavigation?.visible !== false &&
       currentStickerView && currentStickerView !== packOpeningView &&
       currentStickerView.parent === stickerNavigation && currentStickerView.visible !== false &&
@@ -866,6 +883,23 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
 
   const stickerSpineView = stickerController._spineAnimation;
   const stickerRevealView = stickerController._revealAnimation;
+  const stickerRaffleFlow = stickerController.children?.find((child) =>
+    typeof child?.startRaffle === 'function' && typeof child?._start === 'function');
+  const stickerRaffleProposal = stickerRaffleFlow?.children?.find((child) =>
+    child?.parent === stickerRaffleFlow && child?._destroyed !== true &&
+    typeof child?.startRaffleProposal === 'function' &&
+    typeof child?._close === 'function' && Array.isArray(child?._raffleButtons) &&
+    Array.isArray(child?._duplicate4PlusStarsStickers));
+  if (stickerRaffleProposal) {{
+    if (stickerRaffleProposal._closing === true)
+      return {{status: 'busy', detail: 'sticker-pack-transition'}};
+    try {{
+      stickerRaffleProposal._close(undefined);
+      return {{status: 'submitted', detail: 'sticker-raffle-proposal'}};
+    }} catch (error) {{
+      return {{status: 'rejected', detail: String(error?.message || error)}};
+    }}
+  }}
   const liveSkipText = stickerSpineView?._skipText &&
     !stickerSpineView._skipText._destroyed;
   const skip = typeof stickerSpineView?._onSkippedPressed === 'function'

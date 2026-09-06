@@ -180,6 +180,7 @@ def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) ->
     assert "travel-summary-reward" in expressions[0]
     assert "activePopup._rewardCollected" in expressions[0]
     assert "sticker-album-transition" in expressions[0]
+    assert "stickerRaffleProposal._close(undefined)" in expressions[0]
     assert "services?.specialOfferService" in expressions[0]
     assert "services?.recurringConversionService" in expressions[0]
     assert "currentSceneId !== 4" in expressions[0]
@@ -196,6 +197,8 @@ def test_health_detects_each_supported_reward_overlay_phase() -> None:
     assert "stickerController?._isAnimating === true" in _HEALTH_EXPRESSION
     assert "sticker-pack-transition" in _HEALTH_EXPRESSION
     assert "sticker-pack-collect" in _HEALTH_EXPRESSION
+    assert "sticker-raffle-proposal" in _HEALTH_EXPRESSION
+    assert "Array.isArray(child?._duplicate4PlusStarsStickers)" in _HEALTH_EXPRESSION
     assert "sticker-set-transition" in _HEALTH_EXPRESSION
     assert "sticker-set-collect" in _HEALTH_EXPRESSION
     assert "daily-bonus-collect" in _HEALTH_EXPRESSION

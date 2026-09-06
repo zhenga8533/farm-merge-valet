@@ -37,6 +37,7 @@ class TransientOverlayKind(StrEnum):
     TIMED_EVENT = "timed-event"
     TIMED_EVENT_TRANSITION = "timed-event-transition"
     STICKER_PACK_SKIP = "sticker-pack-skip"
+    STICKER_RAFFLE_PROPOSAL = "sticker-raffle-proposal"
     STICKER_PACK_TRANSITION = "sticker-pack-transition"
     STICKER_PACK_COLLECT = "sticker-pack-collect"
     STICKER_SET_COLLECT = "sticker-set-collect"

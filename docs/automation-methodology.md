@@ -88,7 +88,9 @@ mistaken for an action failure.
 
 A strict, default-enabled reward-overlay
 step runs before this gate: Level Up invokes its native close callback, while
-sticker packs use their native Skip and subsequent Collect transitions. Each
+sticker packs use their native Skip and subsequent Collect transitions. Optional
+high-rank duplicate raffle proposals are declined through their native close
+transition so pack collection can continue. Each
 transition is handled in a separate loop iteration, and intermediate sticker
 animation states block board actions until Collect becomes available. Sticker
 pack state is read from its dedicated top-level navigation view rather than the
