@@ -68,6 +68,9 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
                 "itemActionBusy": True,
                 "transientOverlay": "sticker-pack-collect",
                 "transientOverlayDetail": "sticker-pack-collect",
+                "backendConnected": False,
+                "backendConnectivityState": 3,
+                "backendConsecutiveHangingPings": 3,
             },
         ]
     )
@@ -82,6 +85,9 @@ def test_runtime_health_tracks_heartbeat_advancement(monkeypatch) -> None:
     assert health.reward_interaction_available
     assert health.transient_overlay is TransientOverlayKind.STICKER_PACK_COLLECT
     assert health.transient_overlay_detail == "sticker-pack-collect"
+    assert health.backend_connected is False
+    assert health.backend_connectivity_state == 3
+    assert health.backend_consecutive_hanging_pings == 3
 
 
 def test_runtime_health_accepts_background_frame_cadence_but_rejects_stale_frame(
@@ -223,6 +229,8 @@ def test_health_detects_each_supported_reward_overlay_phase() -> None:
     assert "'upsellPopupOptions' in activePopup" in _HEALTH_EXPRESSION
     assert "unsupportedOverlayDetail" in _HEALTH_EXPRESSION
     assert "['disconnection', 'onboarding', 'fake_ad']" in _HEALTH_EXPRESSION
+    assert "backendConnection?.isConnected" in _HEALTH_EXPRESSION
+    assert "backendConnection?._consecutiveHangingPings" in _HEALTH_EXPRESSION
 
 
 def test_scene_change_invalidates_cached_identity(monkeypatch) -> None:

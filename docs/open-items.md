@@ -18,20 +18,6 @@ Add event-specific navigation and actions beyond the event items and marketplace
 offers that the generic catalog and marketplace automation already recognize.
 The scope must be defined per event because event scenes and rules can change.
 
-## Supporting work
-
-### Backend-connectivity monitoring
-
-Detect backend-only connectivity failures that occur before the game displays
-its disconnection layer or an action fails. This is particularly important for
-visiting and before adding expansion or event workflows that depend on
-server-confirmed navigation or purchases.
-
-Renderer and action-pipeline freezes are already detected separately: three
-consecutive submitted actions without authoritative progress trigger one bounded
-managed-page reload. Explicit in-game disconnection layers are already detected
-as blocking overlays.
-
 ## Known constraints, not scheduled work
 
 - The managed game browser must remain open. Bot startup can open the configured

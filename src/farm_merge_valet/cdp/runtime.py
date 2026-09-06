@@ -458,6 +458,23 @@ class GameRuntimeAdapter:
             farm_visit_available=raw.get("farmVisit") is True,
             farm_scene=farm_scene,
             scene_transition_active=raw.get("sceneTransitionActive") is True,
+            backend_connected=(
+                raw["backendConnected"]
+                if isinstance(raw.get("backendConnected"), bool)
+                else None
+            ),
+            backend_connectivity_state=(
+                raw["backendConnectivityState"]
+                if isinstance(raw.get("backendConnectivityState"), int)
+                and not isinstance(raw.get("backendConnectivityState"), bool)
+                else None
+            ),
+            backend_consecutive_hanging_pings=(
+                raw["backendConsecutiveHangingPings"]
+                if isinstance(raw.get("backendConsecutiveHangingPings"), int)
+                and not isinstance(raw.get("backendConsecutiveHangingPings"), bool)
+                else None
+            ),
             transient_overlay=transient_overlay,
             transient_overlay_detail=(
                 raw["transientOverlayDetail"]

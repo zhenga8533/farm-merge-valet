@@ -54,3 +54,5 @@ def test_live_runtime_capabilities_are_bound(live_runtime: GameRuntimeAdapter) -
     assert health.interaction_available
     assert health.heartbeat_installed
     assert health.farm_scene is not None
+    assert health.backend_connected is True
+    assert health.backend_connectivity_state is not None

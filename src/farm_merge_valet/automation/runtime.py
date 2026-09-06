@@ -147,6 +147,9 @@ class RuntimeHealth:
     farm_visit_available: bool = False
     farm_scene: FarmSceneKind | None = None
     scene_transition_active: bool = False
+    backend_connected: bool | None = None
+    backend_connectivity_state: int | None = None
+    backend_consecutive_hanging_pings: int | None = None
 
     def supports(self, capability: RuntimeCapability) -> bool:
         return {

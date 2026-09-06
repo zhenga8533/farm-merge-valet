@@ -576,6 +576,41 @@ def test_frozen_heartbeat_reports_wait_reason(caplog) -> None:
     assert any("heartbeat is not advancing" in message for message in caplog.messages)
 
 
+def test_disconnected_backend_blocks_automation_before_board_sync(caplog) -> None:
+    class DisconnectedRuntime(FakeRuntime):
+        def read_runtime_health(self):
+            return RuntimeHealth(
+                True,
+                7,
+                True,
+                True,
+                True,
+                True,
+                10,
+                1.0,
+                True,
+                backend_connected=False,
+                backend_connectivity_state=3,
+                backend_consecutive_hanging_pings=3,
+            )
+
+    bot = bare_bot()
+    bot.runtime = DisconnectedRuntime()
+    board_syncs = 0
+
+    def apply_snapshot(_snapshot) -> None:
+        nonlocal board_syncs
+        board_syncs += 1
+
+    bot._apply_runtime_snapshot = apply_snapshot
+
+    with caplog.at_level(logging.DEBUG):
+        bot.step()
+
+    assert board_syncs == 0
+    assert any("backend connection is unavailable" in message for message in caplog.messages)
+
+
 def test_known_overlay_is_dismissed_before_frozen_heartbeat_and_board_sync(caplog) -> None:
     class OverlayRuntime(FakeRuntime):
         def read_runtime_health(self):

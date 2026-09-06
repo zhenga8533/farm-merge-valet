@@ -369,8 +369,10 @@ channel. The message ID is persisted without storing the webhook URL or token.
 
 The managed browser must remain open while automation runs. Minimized and
 headless operation are unsupported. Background flags reduce browser throttling
-but cannot prevent network or server-side interruption, and backend connectivity
-is not detected separately yet. Global pause/quit hotkeys and Ctrl+C remain
+but cannot prevent network or server-side interruption. Runtime health reads the
+game's authoritative connection state and game-defined consecutive-hanging-ping
+threshold; automation pauses before submitting actions while that connection is
+unavailable. Global pause/quit hotkeys and Ctrl+C remain
 available as inbound controls without being part of game interaction.
 
 When default automatic browser launch is enabled, starting automation ensures

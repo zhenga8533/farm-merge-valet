@@ -1160,6 +1160,13 @@ class Bot:
                 return
             health = snapshot.health
             self._last_health = health
+            if health.backend_connected is False:
+                self._report_wait(
+                    "game backend connection is unavailable",
+                    backend_connectivity_state=health.backend_connectivity_state,
+                    consecutive_hanging_pings=health.backend_consecutive_hanging_pings,
+                )
+                return
             if health.scene_transition_active:
                 self._report_wait("game scene transition is still resolving")
                 return

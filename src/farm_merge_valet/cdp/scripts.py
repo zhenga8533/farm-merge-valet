@@ -347,6 +347,22 @@ _HEALTH_EXPRESSION = r"""
     orders?._isActive !== false && typeof orders?.getCurrentOrders === 'function' &&
     typeof orders?.startOrder === 'function' &&
     typeof orders?.onOrderRewarded?.fire === 'function';
+  const autoSaveService = services?.ordersService?._autoSaveService;
+  const sharedServices = autoSaveService?.services || autoSaveService?._services;
+  const backendConnection = sharedServices?.connection;
+  const currentBackendConnection = currentBoard &&
+    typeof backendConnection?.isConnected === 'boolean' &&
+    typeof backendConnection?.attemptReconnection === 'function' &&
+    typeof backendConnection?.onDisconnect?.fire === 'function';
+  const backendHangingPings = Number.isInteger(
+    backendConnection?._consecutiveHangingPings
+  ) ? backendConnection._consecutiveHangingPings : null;
+  const backendMaxHangingPings = Number.isInteger(
+    backendConnection?._maxConsecutiveHangingPings
+  ) ? backendConnection._maxConsecutiveHangingPings : null;
+  const backendPingLimitReached = backendHangingPings !== null &&
+    backendMaxHangingPings !== null && backendMaxHangingPings > 0 &&
+    backendHangingPings >= backendMaxHangingPings;
   const marketplace = services?.marketplaceService;
   const currentMarketplace = currentBoard && marketplace?._isActive !== false &&
     typeof marketplace?.getMarketplacePopupData === 'function' &&
@@ -523,6 +539,13 @@ _HEALTH_EXPRESSION = r"""
     marketplace: Boolean(currentMarketplace),
     farmVisit: Boolean(currentFarmVisit),
     farmScene,
+    backendConnected: currentBackendConnection
+      ? backendConnection.isConnected && !backendPingLimitReached : null,
+    backendConnectivityState: currentBackendConnection &&
+      Number.isInteger(backendConnection._lastConnectivityState)
+      ? backendConnection._lastConnectivityState : null,
+    backendConsecutiveHangingPings: currentBackendConnection
+      ? backendHangingPings : null,
     sceneTransitionActive,
     heartbeat: beat ? beat.frame : null,
     heartbeatAgeMs: beat ? Math.max(0, performance.now() - beat.timestamp) : null,
