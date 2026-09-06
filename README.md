@@ -10,7 +10,8 @@ The current loop can interact with enabled ground items, harvest and retire enab
 tier-4 producers, fulfill shop orders, claim supply crates, and plan
 merge-3/merge-5 actions including swaps. It also clears enabled obstacles using
 live energy and worker availability, and claims their staged output. Farm visits
-are not implemented yet.
+use collected train tickets, claim designated visitor rewards, and return through
+the game's native scene transitions.
 
 ## Setup
 
@@ -161,6 +162,15 @@ mouse-input fallback for gameplay actions.
 Connection loss during submission triggers runtime rediscovery while preserving
 the pending intent for authoritative verification. Interaction and shop retries
 are target-specific, so one rejected target does not block unrelated work.
+
+The default-disabled `farm_visit_automation_enabled` setting spends available
+train tickets after higher-priority local work is exhausted but before opening
+HUD supply crates. Spending held tickets first leaves room below the three-ticket
+cap for tickets dropped by those crates. The workflow opens the native train
+panel, uses its selected eligible destination, claims the remote scene's
+authoritative `visitorAction` targets one at a time, and returns home. Opening,
+entering, each reward, and returning are independently verified; local board
+automation is never applied to a visited farm.
 
 Known reward overlays are handled before the heartbeat gate because Level Up
 and sticker-pack presentation can pause the game loop. The default-enabled

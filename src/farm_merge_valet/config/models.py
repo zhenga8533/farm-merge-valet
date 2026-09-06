@@ -103,6 +103,7 @@ class AppConfig(BaseModel):
     recipe_overrides: dict[str, bool] = Field(default_factory=dict)
     marketplace_policy_overrides: dict[str, bool] = Field(default_factory=dict)
     marketplace_automation_enabled: bool = True
+    farm_visit_automation_enabled: bool = False
     items_sort_column: Literal[
         "item", "category", "enabled", "merge", "merge_five", "interact", "remove"
     ] = "item"

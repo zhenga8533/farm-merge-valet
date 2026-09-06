@@ -16,6 +16,7 @@ from farm_merge_valet.automation.board_space import BoardSpaceAssessment
 from farm_merge_valet.automation.perception import build_board, build_perceived_state
 from farm_merge_valet.automation.runtime import (
     ActionStatus,
+    FarmSceneKind,
     GameRuntime,
     LiveCellState,
     RuntimeCancelledError,
@@ -31,6 +32,7 @@ from farm_merge_valet.automation.runtime import (
 from farm_merge_valet.automation.scheduler import MINIMUM_ACTIVE_INTERVAL, AdaptiveScheduler
 from farm_merge_valet.automation.workflows import (
     CrateWorkflow,
+    FarmVisitWorkflow,
     InteractionAction,
     InteractionWorkflow,
     MarketplaceWorkflow,
@@ -92,6 +94,7 @@ class Phase(Enum):
     MARKETPLACE = auto()
     CLAIM_CRATES = auto()
     MERGE = auto()
+    FARM_VISITS = auto()
 
 
 class Bot:
@@ -138,6 +141,7 @@ class Bot:
         self._marketplace_workflow = MarketplaceWorkflow()
         self._crate_workflow = CrateWorkflow()
         self._storage_bubble_workflow = StorageBubbleWorkflow()
+        self._farm_visit_workflow = FarmVisitWorkflow()
         self._action_control = ActionCoordinator()
         self._last_health: RuntimeHealth | None = None
         self._runtime_initialization_started_at: float | None = None
@@ -490,6 +494,8 @@ class Bot:
     def _snapshot_options(self) -> SnapshotOptions:
         marketplace_workflow = getattr(self, "_marketplace_workflow", None)
         storage_bubble_workflow = getattr(self, "_storage_bubble_workflow", None)
+        farm_visit_workflow = getattr(self, "_farm_visit_workflow", None)
+        last_health = getattr(self, "_last_health", None)
         obstacle_resources = (
             self.config.item_automation_enabled
             and self.config.allow_obstacle_stage_starts
@@ -510,6 +516,11 @@ class Bot:
             include_marketplace=(
                 _marketplace_policy_enabled(self.config)
                 or (marketplace_workflow is not None and marketplace_workflow.pending is not None)
+            ),
+            include_farm_visit=(
+                self.config.farm_visit_automation_enabled
+                or (farm_visit_workflow is not None and farm_visit_workflow.pending is not None)
+                or (last_health is not None and last_health.farm_scene is FarmSceneKind.VISITOR)
             ),
         )
 
@@ -1126,6 +1137,10 @@ class Bot:
                 health_started = time.monotonic()
                 health = self.runtime.read_runtime_health()
                 self._log_slow_stage("runtime health read", health_started)
+            self._last_health = health
+            if health.scene_transition_active:
+                self._report_wait("game scene transition is still resolving")
+                return
             if not self._ensure_capability(health, RuntimeCapability.BOARD):
                 return
         except RuntimeConnectionError as exc:
@@ -1133,7 +1148,6 @@ class Bot:
                 return
             self._report_wait(str(exc))
             return
-        self._last_health = health
         if health.transient_overlay is not None:
             overlay_detail = health.transient_overlay_detail or health.transient_overlay.value
             if health.transient_overlay is TransientOverlayKind.UNSUPPORTED:
@@ -1192,6 +1206,12 @@ class Bot:
             return
         if not self._verify_pending_storage_bubble(health):
             return
+        farm_visit_workflow = getattr(self, "_farm_visit_workflow", None)
+        if farm_visit_workflow is None:
+            farm_visit_workflow = self._farm_visit_workflow = FarmVisitWorkflow()
+        farm_visit_state = snapshot.farm_visit if atomic_snapshot else None
+        if not farm_visit_workflow.verify_pending(self, health, farm_visit_state):
+            return
         shop_policy_enabled = self._shop_policy().may_enable_orders
         shop_orders: tuple[ShopOrder, ...] | None = self._shop_orders if atomic_snapshot else ()
         if not atomic_snapshot and self._shop_workflow.pending is not None:
@@ -1213,6 +1233,18 @@ class Bot:
                 "game heartbeat is not advancing",
                 heartbeat_age_ms=health.heartbeat_age_ms,
             )
+            return
+        if farm_visit_state is not None and farm_visit_state.scene.value == "visitor":
+            if not self._ensure_capability(health, RuntimeCapability.FARM_VISITS):
+                return
+            self._set_phase(Phase.FARM_VISITS)
+            farm_visit_workflow.step(self, health, farm_visit_state)
+            return
+        if farm_visit_state is not None and farm_visit_state.panel_open:
+            if not self._ensure_capability(health, RuntimeCapability.FARM_VISITS):
+                return
+            self._set_phase(Phase.FARM_VISITS)
+            farm_visit_workflow.step(self, health, farm_visit_state)
             return
         marketplace_enabled = _marketplace_policy_enabled(self.config)
         marketplace_workflow = getattr(self, "_marketplace_workflow", None)
@@ -1293,6 +1325,15 @@ class Bot:
                 return
         if self.phase is Phase.INTERACT_TILES:
             self._set_phase(Phase.CLAIM_CRATES)
+        if self.phase in {Phase.CLAIM_CRATES, Phase.FARM_VISITS} and farm_visit_state is not None:
+            if self.config.farm_visit_automation_enabled and farm_visit_state.tickets:
+                self._set_phase(Phase.FARM_VISITS)
+                if not self._ensure_capability(health, RuntimeCapability.FARM_VISITS):
+                    return
+                farm_visit_workflow.step(self, health, farm_visit_state)
+                return
+            if self.phase is Phase.FARM_VISITS:
+                self._set_phase(Phase.CLAIM_CRATES)
         if self.phase is Phase.CLAIM_CRATES:
             if (
                 self.config.auto_claim_supply_crates

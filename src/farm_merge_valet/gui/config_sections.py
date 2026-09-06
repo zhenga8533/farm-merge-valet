@@ -55,6 +55,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "auto_pop_storage_bubbles",
         "auto_claim_supply_crates",
         "allow_obstacle_stage_starts",
+        "farm_visit_automation_enabled",
         "loop_interval",
         "idle_wait_seconds",
         "item_action_delay_min",

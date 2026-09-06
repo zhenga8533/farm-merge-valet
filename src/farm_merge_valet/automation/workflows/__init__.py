@@ -1,6 +1,10 @@
 """State owned by the automation action workflows."""
 
 from farm_merge_valet.automation.workflows.crates import CrateWorkflow
+from farm_merge_valet.automation.workflows.farm_visits import (
+    FarmVisitWorkflow,
+    PendingFarmVisitAction,
+)
 from farm_merge_valet.automation.workflows.interactions import (
     InteractionAction,
     InteractionWorkflow,
@@ -19,11 +23,13 @@ from farm_merge_valet.automation.workflows.storage_bubbles import (
 
 __all__ = [
     "CrateWorkflow",
+    "FarmVisitWorkflow",
     "InteractionAction",
     "InteractionWorkflow",
     "MergeWorkflow",
     "MarketplaceWorkflow",
     "PendingInteraction",
+    "PendingFarmVisitAction",
     "PendingMergeAction",
     "PendingMarketplacePurchase",
     "PendingShopAction",

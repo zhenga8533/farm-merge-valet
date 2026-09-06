@@ -52,6 +52,17 @@ _DISCOVER_EXPRESSION = r"""
     systemsOwner = systemsOwner.parent || systemsOwner._parent || null;
   }
   const gameplaySystems = Array.isArray(systemsOwner?._systems) ? systemsOwner._systems : [];
+  const visitorScene = systemsOwner?._options?.startOnTrainStation === true &&
+    Boolean(systemsOwner?._commonFriendEvents);
+  const trainHandler = gameplaySystems.find((candidate) =>
+    candidate?._services === services &&
+    typeof candidate._openTrainstationPopup === 'function') || null;
+  const visitorActionHandler = gameplaySystems.find((candidate) =>
+    candidate?._services === services && candidate._visitorActionsFamily &&
+    typeof candidate._onActivityTapped === 'function') || null;
+  const returnHud = visitorActionHandler?._notificationEvent?._subscribers
+    ?.map((subscriber) => subscriber?.context)
+    .find((candidate) => typeof candidate?._returnButtonClicked === 'function') || null;
   const shovelHandler = gameplaySystems.find((candidate) =>
         candidate?._services === services &&
         candidate._services?.shovelService === services?.shovelService &&
@@ -128,6 +139,13 @@ _DISCOVER_EXPRESSION = r"""
   window.__fmvEnergyInventoryItem = energy?._key === 'energy' &&
     Number.isInteger(energy.amount) && energy.amount >= 0 ? energy : null;
   window.__fmvOrdersService = validShopOrders ? orders : null;
+  window.__fmvFarmSceneKind = visitorScene ? 'visitor' : 'own';
+  window.__fmvTrainHandler = trainHandler;
+  window.__fmvVisitorActionHandler = visitorActionHandler;
+  window.__fmvVisitorReturnHud = returnHud;
+  window.__fmvTrainPopup = null;
+  window.__fmvFarmVisitPanelExpected = false;
+  window.__fmvFarmVisitTransitionStartedAt = null;
   window.__fmvRuntimeBoard = board;
   window.__fmvRuntimeSceneIds ||= new WeakMap();
   window.__fmvNextRuntimeSceneId ||= 1;
@@ -167,6 +185,8 @@ _DISCOVER_EXPRESSION = r"""
     inventory: Boolean(validInventory),
     shopOrders: Boolean(validShopOrders),
     marketplace: Boolean(validMarketplace),
+    farmVisit: Boolean(visitorScene ? visitorActionHandler && returnHud : trainHandler),
+    farmScene: visitorScene ? 'visitor' : 'own',
     missing,
   };
   return {
@@ -185,6 +205,8 @@ _DISCOVER_EXPRESSION = r"""
     inventory: Boolean(validInventory),
     shopOrders: Boolean(validShopOrders),
     marketplace: Boolean(validMarketplace),
+    farmVisit: Boolean(visitorScene ? visitorActionHandler && returnHud : trainHandler),
+    farmScene: visitorScene ? 'visitor' : 'own',
     detail: missing.length ? `${missing.join(',')}-not-found` : null,
     discovery: window.__fmvRuntimeDiscovery,
   };
@@ -213,6 +235,7 @@ _DISCOVERY_DIAGNOSTICS_EXPRESSION = r"""
   storageBubble: false,
   upgradeInteraction: false,
   shopOrders: false, marketplace: false,
+  farmVisit: false, farmScene: null,
   inventory: Boolean(window.__fmvCrateInventoryItem), missing: ['discovery-not-run'],
 })()
 """
@@ -250,6 +273,10 @@ _HEALTH_EXPRESSION = r"""
   const beat = window.__fmvHeartbeat;
   const services = window.__fmvGameplayServices;
   const scene = window.__fmvGameplayMapScreen;
+  const farmScene = window.__fmvFarmSceneKind;
+  const trainHandler = window.__fmvTrainHandler;
+  const visitorActionHandler = window.__fmvVisitorActionHandler;
+  const visitorReturnHud = window.__fmvVisitorReturnHud;
   const subscribers = (signal) => Array.isArray(signal?._subscribers)
     ? signal._subscribers : [];
   const firstCell = board instanceof Map ? board.values().next().value : null;
@@ -316,12 +343,24 @@ _HEALTH_EXPRESSION = r"""
     typeof marketplace?.getMarketplacePopupData === 'function' &&
     typeof marketplace?.getItemConfigsByShop === 'function' &&
     typeof marketplace?.getStockItem === 'function';
+  const currentFarmVisit = currentBoard && (
+    farmScene === 'own'
+      ? trainHandler?._services === services &&
+        typeof trainHandler._openTrainstationPopup === 'function'
+      : farmScene === 'visitor' && visitorActionHandler?._services === services &&
+        visitorActionHandler._isActive !== false &&
+        typeof visitorActionHandler._onActivityTapped === 'function' &&
+        typeof visitorReturnHud?._returnButtonClicked === 'function');
   let stage = scene;
   while (stage?.parent) stage = stage.parent;
   const layerRoot = stage?.children?.[0];
   const popupLayer = layerRoot?.children?.find((child) => child?.name === 'popup');
   const activePopup = popupLayer?.children?.find((child) =>
     child?.visible !== false && child?.renderable !== false && child?._destroyed !== true);
+  const trainPopup = activePopup?._name === 'TrainstationPopup' &&
+    activePopup?._state === 4 &&
+    typeof activePopup._onVisitButtonPressed === 'function' ? activePopup : null;
+  if (trainPopup) window.__fmvTrainPopup = trainPopup;
   const levelUpPopup = activePopup?._name === 'LevelUpPopup' &&
     typeof activePopup.close === 'function' ? activePopup : null;
   const stickerNavigation = stage?.children?.find((child) =>
@@ -387,22 +426,33 @@ _HEALTH_EXPRESSION = r"""
     typeof activePopup.close === 'function' && (
       activePopup?.rewardService === services?.rewardService ||
       activePopup?._rewardService === services?.rewardService);
+  const travelSummaryRewardPopup = activePopup?._name === 'TravelSummaryRewardPopup' &&
+    typeof activePopup.close === 'function';
   const promotionalPopup = activePopup && activePopup !== levelUpPopup &&
     typeof activePopup.close === 'function' && (
       [services?.specialOfferService, services?.recurringConversionService]
         .includes(activePopupService) ||
       'upsellPopupOptions' in activePopup || '_upsellPopupOptions' in activePopup);
+  const activeBlockingLayer = (layer) => layer?.children?.some((child) =>
+    child?.visible !== false && child?.renderable !== false && child?._destroyed !== true &&
+    (child?.interactive === true || child?.children?.length > 0));
+  const sceneTransitionLayer = layerRoot?.children?.find((layer) =>
+    layer?.name === 'transition' && activeBlockingLayer(layer));
   const blockingLayer = layerRoot?.children?.find((layer) =>
-    ['disconnection', 'onboarding', 'transition', 'fake_ad'].includes(layer?.name) &&
-    layer?.children?.some((child) => child?.visible !== false &&
-      child?.renderable !== false && child?._destroyed !== true &&
-      (child?.interactive === true || child?.children?.length > 0)));
+    ['disconnection', 'onboarding', 'fake_ad'].includes(layer?.name) &&
+    activeBlockingLayer(layer));
+  const farmVisitTransitionAge = Number.isFinite(window.__fmvFarmVisitTransitionStartedAt)
+    ? performance.now() - window.__fmvFarmVisitTransitionStartedAt : null;
+  const sceneTransitionActive = Boolean(sceneTransitionLayer) ||
+    (!currentBoard && farmVisitTransitionAge !== null && farmVisitTransitionAge < 5000);
   const unknownStageView = stage?.children?.slice(1).find((child) =>
-    child !== stickerNavigation && child?.visible !== false &&
+    child !== stickerNavigation && child !== window.__fmvTrainPopup &&
+    child?.visible !== false &&
     child?.renderable !== false && child?._destroyed !== true);
   const unsupportedOverlayDetail = activePopup && activePopup !== levelUpPopup &&
+      activePopup !== window.__fmvTrainPopup && activePopup !== trainPopup &&
       !dailyChallengePopup && !timedEventPopup && !dailyBonusPopup &&
-      !albumStartedPopup && !rewardPopup && !promotionalPopup
+      !albumStartedPopup && !rewardPopup && !travelSummaryRewardPopup && !promotionalPopup
     ? `popup:${activePopup._name || activePopup.name || activePopup.constructor?.name || 'unknown'}`
     : blockingLayer
       ? `layer:${blockingLayer.name || 'unknown'}`
@@ -420,6 +470,7 @@ _HEALTH_EXPRESSION = r"""
     : dailyBonusPopup && activePopup._rewardCollected ? 'daily-bonus-transition'
     : dailyBonusPopup ? 'daily-bonus-collect'
     : albumStartedPopup ? 'sticker-album-started'
+    : travelSummaryRewardPopup ? 'travel-summary-reward'
     : rewardPopup ? 'reward-popup'
     : promotionalPopup ? 'promotional-popup'
     : stickerSkip ? 'sticker-pack-skip'
@@ -453,6 +504,9 @@ _HEALTH_EXPRESSION = r"""
     inventory: Boolean(currentInventory),
     shopOrders: Boolean(currentShopOrders),
     marketplace: Boolean(currentMarketplace),
+    farmVisit: Boolean(currentFarmVisit),
+    farmScene,
+    sceneTransitionActive,
     heartbeat: beat ? beat.frame : null,
     heartbeatAgeMs: beat ? Math.max(0, performance.now() - beat.timestamp) : null,
     heartbeatInstalled: Boolean(window.__fmvHeartbeatInstalled && beat),
@@ -460,6 +514,144 @@ _HEALTH_EXPRESSION = r"""
     transientOverlayDetail: unsupportedOverlayDetail || transientOverlay,
   };
 })()
+"""
+
+_READ_FARM_VISIT_EXPRESSION = r"""
+(() => {
+  const board = window.__fmvBoardCells;
+  const services = window.__fmvGameplayServices;
+  if (!(board instanceof Map) || services?.mapGrid?._cells !== board) return null;
+  const scene = window.__fmvFarmSceneKind;
+  if (scene === 'visitor') {
+    const actions = [];
+    for (const cell of board.values()) {
+      const object = cell?.content;
+      const behavior = object?.getBehavior?.('visitorAction');
+      if (!behavior || typeof behavior.actionType !== 'string') continue;
+      actions.push({
+        column: cell.column,
+        row: cell.row,
+        blueprintID: object.getBlueprintID?.(),
+        objectID: Number.isInteger(object.id) ? object.id :
+          (Number.isInteger(object._id) ? object._id : null),
+        actionType: behavior.actionType,
+      });
+    }
+    actions.sort((left, right) => left.column - right.column || left.row - right.row);
+    return {scene, tickets: null, panelOpen: false, destinationAvailable: false, actions};
+  }
+  if (scene !== 'own') return null;
+  let popup = window.__fmvTrainPopup;
+  if ((!popup || popup._destroyed === true || popup._state !== 4) &&
+      window.__fmvFarmVisitPanelExpected === true) {
+    let root = window.__fmvGameplayMapScreen;
+    while (root?.parent) root = root.parent;
+    const queue = [root];
+    const seen = new Set();
+    popup = null;
+    while (queue.length && seen.size < 15000) {
+      const candidate = queue.shift();
+      if (!candidate || seen.has(candidate)) continue;
+      seen.add(candidate);
+      if (typeof candidate._onVisitButtonPressed === 'function' &&
+          candidate._state === 4 && candidate._destroyed !== true) {
+        popup = candidate;
+        break;
+      }
+      for (const child of candidate.children || []) queue.push(child);
+    }
+    window.__fmvTrainPopup = popup;
+  }
+  const tickets = services?.ordersService?._inventory?.getInventoryItem?.('tickets');
+  const destinationAvailable = Boolean(popup?._chosenPlayerDestination &&
+    popup?._mainScreen?._visitButton?._isEnabled !== false &&
+    popup?._creatingContext !== true);
+  return {
+    scene,
+    tickets: Number.isInteger(tickets?.amount) ? tickets.amount : null,
+    panelOpen: Boolean(popup),
+    destinationAvailable,
+    actions: [],
+  };
+})()
+"""
+
+
+def _farm_visit_action_expression(kind: str, scene_id: int | None, **expected: object) -> str:
+    payload = json.dumps({"kind": kind, "sceneID": scene_id, **expected})
+    return f"""
+(() => {{
+  const expected = {payload};
+  if (window.__fmvRuntimeSceneIdentity !== expected.sceneID)
+    return {{status: 'stale-source', detail: 'runtime-scene-changed'}};
+  const board = window.__fmvBoardCells;
+  const services = window.__fmvGameplayServices;
+  if (!(board instanceof Map) || services?.mapGrid?._cells !== board)
+    return {{status: 'unavailable', detail: 'farm-scene-not-current'}};
+  try {{
+    if (expected.kind === 'open') {{
+      const handler = window.__fmvTrainHandler;
+      const tickets = services?.ordersService?._inventory?.getInventoryItem?.('tickets');
+      if (window.__fmvFarmSceneKind !== 'own' ||
+          handler?._services !== services || typeof handler._openTrainstationPopup !== 'function')
+        return {{status: 'unavailable', detail: 'train-handler-not-current'}};
+      if (!Number.isInteger(tickets?.amount) || tickets.amount < 1)
+        return {{status: 'rejected', detail: 'no-train-tickets'}};
+      handler._openTrainstationPopup();
+      window.__fmvFarmVisitPanelExpected = true;
+      return {{status: 'submitted'}};
+    }}
+    if (expected.kind === 'start') {{
+      const popup = window.__fmvTrainPopup;
+      if (window.__fmvFarmSceneKind !== 'own' || !popup || popup._state !== 4)
+        return {{status: 'unavailable', detail: 'train-popup-not-current'}};
+      if (!popup._chosenPlayerDestination || popup._creatingContext === true ||
+          popup?._mainScreen?._visitButton?._isEnabled === false)
+        return {{status: 'busy', detail: 'visit-destination-unavailable'}};
+      window.__fmvFarmVisitTransitionStartedAt = performance.now();
+      popup._onVisitButtonPressed(popup._chosenPlayerDestination);
+      return {{status: 'submitted'}};
+    }}
+    if (expected.kind === 'close') {{
+      const popup = window.__fmvTrainPopup;
+      if (window.__fmvFarmSceneKind !== 'own' || !popup ||
+          typeof popup.close !== 'function')
+        return {{status: 'unavailable', detail: 'train-popup-not-current'}};
+      popup.close();
+      window.__fmvTrainPopup = null;
+      window.__fmvFarmVisitPanelExpected = false;
+      return {{status: 'submitted'}};
+    }}
+    if (expected.kind === 'claim') {{
+      const handler = window.__fmvVisitorActionHandler;
+      const cell = services.mapGrid.getCell?.(expected.column, expected.row);
+      const object = cell?.content;
+      const objectID = Number.isInteger(object?.id) ? object.id : object?._id;
+      const behavior = object?.getBehavior?.('visitorAction');
+      if (window.__fmvFarmSceneKind !== 'visitor' || handler?._services !== services)
+        return {{status: 'unavailable', detail: 'visitor-handler-not-current'}};
+      if (!object || object.getBlueprintID?.() !== expected.blueprintID ||
+          objectID !== expected.objectID || behavior?.actionType !== expected.actionType)
+        return {{status: 'stale-source', detail: 'visitor-action-changed'}};
+      handler._onActivityTapped(object);
+      return {{status: 'submitted'}};
+    }}
+    if (expected.kind === 'return') {{
+      const hud = window.__fmvVisitorReturnHud;
+      if (window.__fmvFarmSceneKind !== 'visitor' ||
+          typeof hud?._returnButtonClicked !== 'function')
+        return {{status: 'unavailable', detail: 'return-handler-not-current'}};
+      window.__fmvFarmVisitTransitionStartedAt = performance.now();
+      hud._returnButtonClicked();
+      return {{status: 'submitted'}};
+    }}
+    return {{status: 'rejected', detail: 'unknown-farm-visit-action'}};
+  }} catch (error) {{
+    if (expected.kind === 'start' || expected.kind === 'return')
+      window.__fmvFarmVisitTransitionStartedAt = null;
+    return {{status: 'rejected', detail: String(error?.message || error)}};
+  }}
+}})()
 """
 
 _READ_STORAGE_BUBBLES_EXPRESSION = r"""
@@ -581,10 +773,14 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
   const albumStartedPopup = activePopup?._name === 'AlbumStartedPopup' &&
     typeof activePopup.close === 'function' &&
     typeof activePopup.awaitPopupClosed === 'function';
-  if (dailyChallengePopup || timedEventPopup || dailyBonusPopup || albumStartedPopup) {{
+  const travelSummaryRewardPopup = activePopup?._name === 'TravelSummaryRewardPopup' &&
+    typeof activePopup.close === 'function';
+  if (dailyChallengePopup || timedEventPopup || dailyBonusPopup || albumStartedPopup ||
+      travelSummaryRewardPopup) {{
     const detail = dailyChallengePopup ? 'daily-challenge'
       : timedEventPopup ? 'timed-event'
-      : dailyBonusPopup ? 'daily-bonus-collect' : 'sticker-album-started';
+      : dailyBonusPopup ? 'daily-bonus-collect'
+      : albumStartedPopup ? 'sticker-album-started' : 'travel-summary-reward';
     if (timedEventPopup && window.__fmvTimedEventPopupSubmission === activePopup)
       return {{status: 'busy', detail: 'timed-event-transition'}};
     if (dailyBonusPopup && activePopup._rewardCollected)

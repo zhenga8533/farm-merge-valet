@@ -14,12 +14,15 @@ from farm_merge_valet.automation.runtime import (
     ActionResult,
     ActionStatus,
     CrateSpawnResult,
+    FarmSceneKind,
+    FarmVisitState,
     RuntimeHealth,
     RuntimeReadMetrics,
     RuntimeSnapshot,
     SnapshotOptions,
     StorageBubbleState,
     TransientOverlayKind,
+    VisitorActionState,
 )
 from farm_merge_valet.cdp.board_store import arm_board_store, parse_board_state, read_board_state
 from farm_merge_valet.cdp.evaluation import apply_background_overrides, evaluate
@@ -44,6 +47,7 @@ from farm_merge_valet.cdp.scripts import (
     _crate_expression,
     _dismiss_overlay_expression,
     _drop_expression,
+    _farm_visit_action_expression,
     _interaction_expression,
     _removal_expression,
     _shop_claim_expression,
@@ -217,11 +221,14 @@ class GameRuntimeAdapter:
         if is_cancelled():
             return self.read_runtime_health()
         raw: object = None
+        discovery_attempted = False
         if not cached_board_is_current and not is_cancelled():
+            self._discovery_detail = "board-recovery-pending"
             recovered = self._recover_board_from_heap(force=False)
             self._reload_recovery_pending = False
             if recovered and not is_cancelled():
                 refresh_started = time.monotonic()
+                discovery_attempted = True
                 raw = self._evaluate(_DISCOVER_EXPRESSION)
                 log_event(
                     logger,
@@ -234,6 +241,7 @@ class GameRuntimeAdapter:
                 )
         elif cached_board_is_current:
             refresh_started = time.monotonic()
+            discovery_attempted = True
             raw = self._evaluate(_DISCOVER_EXPRESSION)
             refresh_elapsed = time.monotonic() - refresh_started
             log_event(
@@ -252,7 +260,7 @@ class GameRuntimeAdapter:
                 self._scene_id = raw["sceneId"]
             detail = raw.get("detail")
             self._discovery_detail = detail if isinstance(detail, str) else None
-        else:
+        elif discovery_attempted:
             self._discovery_detail = "invalid-runtime-discovery-response"
         # A second sample makes the initial health result meaningful when the
         # animation loop is running at normal foreground cadence.
@@ -286,6 +294,7 @@ class GameRuntimeAdapter:
             with self._recovery_state_lock:
                 failures, retry_at = self._recovery_failures.get(key, (0, 0.0))
             if now < retry_at:
+                self._discovery_detail = "board-recovery-cooldown"
                 log_event(
                     logger,
                     logging.INFO,
@@ -300,6 +309,7 @@ class GameRuntimeAdapter:
                 _RECOVERY_FRAME_PROBE_EXPRESSION, timeout=1.0, retry=False
             )
             if frame_ready is not True:
+                self._discovery_detail = "game-loop-not-advancing"
                 log_event(
                     logger,
                     logging.WARNING,
@@ -322,6 +332,8 @@ class GameRuntimeAdapter:
             status = raw_status if isinstance(raw_status, str) else "invalid-board-search-response"
             elapsed = time.monotonic() - scan_started
             recovered = status.startswith("found")
+            if not recovered:
+                self._discovery_detail = status
             with self._recovery_state_lock:
                 if recovered:
                     self._recovery_failures.pop(key, None)
@@ -397,6 +409,13 @@ class GameRuntimeAdapter:
         crate_spawn = raw.get("crateSpawn") is True
         board = raw.get("board") is True
         transient_overlay = None
+        farm_scene = None
+        raw_farm_scene = raw.get("farmScene")
+        if isinstance(raw_farm_scene, str):
+            try:
+                farm_scene = FarmSceneKind(raw_farm_scene)
+            except ValueError:
+                pass
         raw_transient_overlay = raw.get("transientOverlay")
         if isinstance(raw_transient_overlay, str):
             try:
@@ -413,6 +432,7 @@ class GameRuntimeAdapter:
                 or reward_container
                 or upgrade_interaction
                 or crate_spawn
+                or raw.get("farmVisit") is True
             )
             and scene_id is not None,
             scene_id=scene_id,
@@ -435,6 +455,9 @@ class GameRuntimeAdapter:
             upgrade_interaction_available=upgrade_interaction,
             reward_container_available=reward_container,
             storage_bubble_available=storage_bubble,
+            farm_visit_available=raw.get("farmVisit") is True,
+            farm_scene=farm_scene,
+            scene_transition_active=raw.get("sceneTransitionActive") is True,
             transient_overlay=transient_overlay,
             transient_overlay_detail=(
                 raw["transientOverlayDetail"]
@@ -512,7 +535,50 @@ class GameRuntimeAdapter:
             storage_bubbles=self._parse_storage_bubbles(raw.get("storageBubbles")),
             shop_orders=self._parse_shop_orders(raw.get("shopOrders")),
             marketplace_offers=parse_marketplace_offers(raw.get("marketplace")),
+            farm_visit=self._parse_farm_visit(raw.get("farmVisit")),
             metrics=metrics,
+        )
+
+    @staticmethod
+    def _parse_farm_visit(raw: object) -> FarmVisitState | None:
+        if not isinstance(raw, dict):
+            return None
+        scene_value = raw.get("scene")
+        if not isinstance(scene_value, str):
+            return None
+        try:
+            scene = FarmSceneKind(scene_value)
+        except ValueError:
+            return None
+        actions = []
+        for entry in raw.get("actions", []):
+            if not isinstance(entry, dict):
+                continue
+            blueprint_id = entry.get("blueprintID")
+            action_type = entry.get("actionType")
+            column, row = entry.get("column"), entry.get("row")
+            if (
+                isinstance(blueprint_id, str)
+                and isinstance(action_type, str)
+                and isinstance(column, int)
+                and isinstance(row, int)
+            ):
+                object_id = entry.get("objectID")
+                actions.append(
+                    VisitorActionState(
+                        (column, row),
+                        blueprint_id,
+                        object_id if isinstance(object_id, int) else None,
+                        action_type,
+                    )
+                )
+        tickets = raw.get("tickets")
+        return FarmVisitState(
+            scene,
+            tickets if isinstance(tickets, int) else None,
+            raw.get("destinationAvailable") is True,
+            raw.get("panelOpen") is True,
+            tuple(actions),
         )
 
     def _record_snapshot_metrics(self, metrics: RuntimeReadMetrics) -> None:
@@ -729,6 +795,42 @@ class GameRuntimeAdapter:
             marketplace_purchase_expression(action, self._scene_id), retry=False
         )
         return parse_marketplace_action_result(raw)
+
+    def open_farm_visit(self) -> ActionResult:
+        return self._action_result(
+            self._evaluate(_farm_visit_action_expression("open", self._scene_id), retry=False)
+        )
+
+    def start_farm_visit(self) -> ActionResult:
+        return self._action_result(
+            self._evaluate(_farm_visit_action_expression("start", self._scene_id), retry=False)
+        )
+
+    def close_farm_visit(self) -> ActionResult:
+        return self._action_result(
+            self._evaluate(_farm_visit_action_expression("close", self._scene_id), retry=False)
+        )
+
+    def submit_visitor_action(self, action: VisitorActionState) -> ActionResult:
+        return self._action_result(
+            self._evaluate(
+                _farm_visit_action_expression(
+                    "claim",
+                    self._scene_id,
+                    column=action.coord[0],
+                    row=action.coord[1],
+                    blueprintID=action.blueprint_id,
+                    objectID=action.object_id,
+                    actionType=action.action_type,
+                ),
+                retry=False,
+            )
+        )
+
+    def return_from_farm_visit(self) -> ActionResult:
+        return self._action_result(
+            self._evaluate(_farm_visit_action_expression("return", self._scene_id), retry=False)
+        )
 
     def _shop_action_result(self, expression: str) -> ActionResult:
         raw = self._evaluate(expression, retry=False)

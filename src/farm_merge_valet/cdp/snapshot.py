@@ -10,6 +10,7 @@ from farm_merge_valet.cdp.inventory_store import _READ_ENERGY_EXPRESSION
 from farm_merge_valet.cdp.marketplace import _READ_MARKETPLACE_EXPRESSION
 from farm_merge_valet.cdp.scripts import (
     _HEALTH_EXPRESSION,
+    _READ_FARM_VISIT_EXPRESSION,
     _READ_SHOP_ORDERS_EXPRESSION,
     _READ_STORAGE_BUBBLES_EXPRESSION,
     _READ_WORKERS_EXPRESSION,
@@ -21,9 +22,11 @@ def snapshot_expression(options: SnapshotOptions) -> str:
     bubbles = json.dumps(options.include_storage_bubbles)
     shops = json.dumps(options.include_shop_orders)
     marketplace = json.dumps(options.include_marketplace)
+    farm_visit = json.dumps(options.include_farm_visit)
     return f"""
 (() => {{
   const startedAt = performance.now();
+  const farmVisit = {farm_visit} ? ({_READ_FARM_VISIT_EXPRESSION}) : null;
   const health = ({_HEALTH_EXPRESSION});
   const cells = health?.board ? ({_READ_EXPRESSION}) : null;
   const energy = {obstacle} ? ({_READ_ENERGY_EXPRESSION}) : null;
@@ -40,6 +43,7 @@ def snapshot_expression(options: SnapshotOptions) -> str:
     storageBubbles,
     shopOrders,
     marketplace,
+    farmVisit,
     rendererDurationMs,
     cellCount: Array.isArray(cells) ? cells.length : 0,
     occupiedCellCount: Array.isArray(cells)

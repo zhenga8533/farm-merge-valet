@@ -90,6 +90,11 @@ class SettingsPage(ConfigFormPage):
             "Allow obstacle energy spending",
             "allow_obstacle_stage_starts",
         )
+        self._add_toggle(
+            automation_form,
+            "Visit other farms automatically",
+            "farm_visit_automation_enabled",
+        )
         automation_advanced, form = disclosure_section("Advanced timing")
         self._add_float(form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)
         self._add_float(form, "Loop interval (seconds)", "loop_interval", 0.25, 60, 0.1)

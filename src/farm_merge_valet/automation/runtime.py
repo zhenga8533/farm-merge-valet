@@ -44,6 +44,7 @@ class TransientOverlayKind(StrEnum):
     STICKER_ALBUM_STARTED = "sticker-album-started"
     STICKER_ALBUM_TRANSITION = "sticker-album-transition"
     REWARD_POPUP = "reward-popup"
+    TRAVEL_SUMMARY_REWARD = "travel-summary-reward"
     PROMOTIONAL_POPUP = "promotional-popup"
     UNSUPPORTED = "unsupported"
 
@@ -61,6 +62,29 @@ class RuntimeCapability(StrEnum):
     CRATES = "crates"
     SHOPS = "shops"
     MARKETPLACE = "marketplace"
+    FARM_VISITS = "farm-visits"
+
+
+class FarmSceneKind(StrEnum):
+    OWN = "own"
+    VISITOR = "visitor"
+
+
+@dataclass(frozen=True)
+class VisitorActionState:
+    coord: GridCoord
+    blueprint_id: str
+    object_id: int | None
+    action_type: str
+
+
+@dataclass(frozen=True)
+class FarmVisitState:
+    scene: FarmSceneKind
+    tickets: int | None = None
+    destination_available: bool = False
+    panel_open: bool = False
+    actions: tuple[VisitorActionState, ...] = ()
 
 
 class RuntimeConnectionError(RuntimeError):
@@ -119,6 +143,9 @@ class RuntimeHealth:
     marketplace_available: bool = False
     transient_overlay: TransientOverlayKind | None = None
     transient_overlay_detail: str | None = None
+    farm_visit_available: bool = False
+    farm_scene: FarmSceneKind | None = None
+    scene_transition_active: bool = False
 
     def supports(self, capability: RuntimeCapability) -> bool:
         return {
@@ -134,6 +161,7 @@ class RuntimeHealth:
             RuntimeCapability.CRATES: self.crate_spawn_available and self.inventory_available,
             RuntimeCapability.SHOPS: self.shop_available,
             RuntimeCapability.MARKETPLACE: self.marketplace_available,
+            RuntimeCapability.FARM_VISITS: self.farm_visit_available,
         }[capability]
 
 
@@ -157,6 +185,7 @@ class SnapshotOptions:
     include_storage_bubbles: bool = True
     include_shop_orders: bool = True
     include_marketplace: bool = False
+    include_farm_visit: bool = False
 
 
 @dataclass(frozen=True)
@@ -178,6 +207,7 @@ class RuntimeSnapshot:
     shop_orders: tuple[ShopOrder, ...] | None = None
     marketplace_offers: tuple[MarketplaceLiveOffer, ...] | None = None
     metrics: RuntimeReadMetrics | None = None
+    farm_visit: FarmVisitState | None = None
 
 
 @dataclass(frozen=True)
@@ -256,3 +286,13 @@ class GameRuntime(Protocol):
     def read_marketplace_offers(self) -> tuple[MarketplaceLiveOffer, ...] | None: ...
 
     def submit_marketplace_purchase(self, action: MarketplaceAction) -> ActionResult: ...
+
+    def open_farm_visit(self) -> ActionResult: ...
+
+    def start_farm_visit(self) -> ActionResult: ...
+
+    def close_farm_visit(self) -> ActionResult: ...
+
+    def submit_visitor_action(self, action: VisitorActionState) -> ActionResult: ...
+
+    def return_from_farm_visit(self) -> ActionResult: ...

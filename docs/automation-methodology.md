@@ -210,6 +210,27 @@ distinguish detected crate inventory from board capacity. There is no
 configurable click batch size. A short randomized delay between accepted claims
 preserves normal rapid-click cadence without submitting claims concurrently.
 
+## Visit other farms
+
+Farm visiting is default-disabled because it spends train tickets. Once enabled,
+it runs after higher-priority local work has no action to submit and before HUD
+supply crates are opened. This spends held tickets before crates can drop more,
+leaving room below the three-ticket cap. The workflow opens the live train
+system, waits for an eligible native destination, and enters through the game's
+connection and scene-transition path so the local farm snapshot is preserved.
+
+A visited farm is a distinct runtime scene. Normal local-farm automation is not
+applied there. The runtime reads only objects carrying the game's transient
+`visitorAction` behavior and submits them through the visitor-action system.
+Each reward is confirmed by removal of that exact behavior before another is
+attempted. When no actions remain, the workflow fires the friend HUD's native
+Home event and waits for a fresh authoritative local scene. Disabling the
+setting during a visit still allows the return-home transition to complete.
+Expected scene transitions receive a short bounded grace period before runtime
+board recovery, avoiding heap searches while neither farm's map grid is active.
+The native travel-summary reward popup is then closed through the standard
+verified overlay path before local automation resumes.
+
 ## Shop orders
 
 The runtime reads current orders from the game's order service. Each typed order

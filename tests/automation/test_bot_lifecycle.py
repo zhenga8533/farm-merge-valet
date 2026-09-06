@@ -469,6 +469,38 @@ def test_step_rediscovers_a_capability_missing_from_a_partial_runtime() -> None:
     assert bot.runtime.discoveries == 1
 
 
+def test_visit_transition_waits_without_heap_rediscovery(caplog) -> None:
+    class TransitionRuntime(FakeRuntime):
+        discoveries = 0
+
+        def read_runtime_health(self):
+            return RuntimeHealth(
+                False,
+                None,
+                False,
+                False,
+                False,
+                False,
+                10,
+                1.0,
+                True,
+                scene_transition_active=True,
+            )
+
+        def discover(self):
+            self.discoveries += 1
+            raise AssertionError("active visit transition must not trigger heap discovery")
+
+    bot = bare_bot()
+    bot.runtime = TransitionRuntime()
+
+    with caplog.at_level(logging.DEBUG):
+        bot.step()
+
+    assert bot.runtime.discoveries == 0
+    assert any("scene transition is still resolving" in message for message in caplog.messages)
+
+
 def test_resume_reuses_a_healthy_cached_scene_without_discovery() -> None:
     class CachedRuntime(FakeRuntime):
         def read_runtime_health(self):

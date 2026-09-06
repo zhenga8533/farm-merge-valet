@@ -35,6 +35,7 @@ def test_runtime_health_exposes_adapter_neutral_capabilities() -> None:
         reward_container_available=True,
         storage_bubble_available=True,
         marketplace_available=True,
+        farm_visit_available=True,
     )
 
     assert all(health.supports(capability) for capability in RuntimeCapability)
@@ -122,6 +123,26 @@ def test_unknown_transient_overlay_kind_fails_closed(monkeypatch) -> None:
     assert health.transient_overlay_detail == "popup:FuturePopup"
 
 
+def test_health_parses_visit_transition_and_travel_summary(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.evaluate",
+        lambda *_, **__: {
+            "sceneId": 3,
+            "board": True,
+            "itemDrop": True,
+            "heartbeat": 10,
+            "heartbeatAgeMs": 1,
+            "sceneTransitionActive": True,
+            "transientOverlay": "travel-summary-reward",
+        },
+    )
+
+    health = GameRuntimeAdapter(9222, "Farm").read_runtime_health()
+
+    assert health.scene_transition_active
+    assert health.transient_overlay is TransientOverlayKind.TRAVEL_SUMMARY_REWARD
+
+
 def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) -> None:
     expressions: list[str] = []
 
@@ -155,6 +176,8 @@ def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) ->
     assert "listener?.fn === levelUpPopup.close" in expressions[0]
     assert "level-up-handler-not-current" not in expressions[0]
     assert "activePopup?._name === 'AlbumStartedPopup'" in expressions[0]
+    assert "activePopup?._name === 'TravelSummaryRewardPopup'" in expressions[0]
+    assert "travel-summary-reward" in expressions[0]
     assert "activePopup._rewardCollected" in expressions[0]
     assert "sticker-album-transition" in expressions[0]
     assert "services?.specialOfferService" in expressions[0]
@@ -185,6 +208,10 @@ def test_health_detects_each_supported_reward_overlay_phase() -> None:
     assert "child?._name === 'DailyBonusPopup'" not in _HEALTH_EXPRESSION
     assert "activePopup?._name === 'DailyBonusPopup'" in _HEALTH_EXPRESSION
     assert "activePopup?._name === 'AlbumStartedPopup'" in _HEALTH_EXPRESSION
+    assert "activePopup?._name === 'TravelSummaryRewardPopup'" in _HEALTH_EXPRESSION
+    assert "travel-summary-reward" in _HEALTH_EXPRESSION
+    assert "activePopup?._name === 'TrainstationPopup'" in _HEALTH_EXPRESSION
+    assert "sceneTransitionActive" in _HEALTH_EXPRESSION
     assert "sticker-album-started" in _HEALTH_EXPRESSION
     assert "sticker-album-transition" in _HEALTH_EXPRESSION
     assert "reward-popup" in _HEALTH_EXPRESSION
@@ -192,7 +219,7 @@ def test_health_detects_each_supported_reward_overlay_phase() -> None:
     assert "activePopup?._rewardService === services?.rewardService" in _HEALTH_EXPRESSION
     assert "'upsellPopupOptions' in activePopup" in _HEALTH_EXPRESSION
     assert "unsupportedOverlayDetail" in _HEALTH_EXPRESSION
-    assert "['disconnection', 'onboarding', 'transition', 'fake_ad']" in _HEALTH_EXPRESSION
+    assert "['disconnection', 'onboarding', 'fake_ad']" in _HEALTH_EXPRESSION
 
 
 def test_scene_change_invalidates_cached_identity(monkeypatch) -> None:
@@ -869,6 +896,36 @@ def test_discovery_rearms_a_stale_cached_board(monkeypatch) -> None:
     assert health.available
 
 
+def test_failed_board_recovery_preserves_the_specific_status(monkeypatch) -> None:
+    responses = iter(
+        [
+            False,
+            False,
+            True,
+            {"frame": 20, "ageMs": 0},
+            {
+                "sceneId": None,
+                "board": False,
+                "heartbeat": 21,
+                "heartbeatAgeMs": 1,
+                "heartbeatInstalled": True,
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.apply_background_overrides", lambda *_, **__: None
+    )
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", lambda *_, **__: next(responses))
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.time.sleep", lambda *_: None)
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.arm_board_store", lambda *_, **__: "not-found"
+    )
+
+    health = GameRuntimeAdapter(9555, "Visit transition recovery").discover()
+
+    assert health.detail == "not-found"
+
+
 def test_concurrent_heap_recovery_is_single_flight_per_target(monkeypatch) -> None:
     recovered = Event()
     scan_started = Event()
@@ -979,3 +1036,4 @@ def test_atomic_snapshot_reads_requested_state_once_without_retry(monkeypatch) -
     assert len(calls) == 1
     assert calls[0][1]["retry"] is False
     assert "const energy = false" in calls[0][0]
+    assert calls[0][0].index("const farmVisit =") < calls[0][0].index("const health =")

@@ -13,6 +13,7 @@ class OperationKind(StrEnum):
     STORAGE_BUBBLE = "storage-bubble"
     SHOP = "shop"
     MARKETPLACE = "marketplace"
+    FARM_VISIT = "farm-visit"
 
 
 OperationKey = tuple[Hashable, ...]

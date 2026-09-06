@@ -5,14 +5,6 @@ Game facts that the runtime already discovers dynamically are not feature gaps.
 
 ## Planned feature work
 
-### Visit other farms
-
-Automate the train-ticket social loop, including entering and leaving another
-farm and interacting with eligible rewards from its train, shop, tree or rock
-stump, and tier-4 producers. Visiting must preserve the local-farm scene and
-pending-action safety guarantees described in the
-[automation methodology](automation-methodology.md).
-
 ### Land and board expansion
 
 Discover eligible locked plots and automate expansion while respecting player
