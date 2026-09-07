@@ -35,13 +35,12 @@ class ActivityChart:
             cutoff = bucket - self._bucket_count + 1
             self._buckets = {key: value for key, value in self._buckets.items() if key >= cutoff}
 
-    def render(self, now: float, *, final: bool = False) -> DiscordAttachment | None:
+    def render(self, now: float) -> DiscordAttachment | None:
         current = int(now // self._bucket_seconds)
         start = current - self._bucket_count + 1
         with self._lock:
             populated = dict(self._buckets)
-            if final:
-                self._buckets.clear()
+            self._buckets.clear()
         if not populated:
             return None
 

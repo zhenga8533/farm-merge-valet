@@ -207,7 +207,7 @@ def test_crate_limit_preserves_policy_reserve(monkeypatch, caplog) -> None:
     with caplog.at_level(logging.DEBUG):
         bot._step_claim_crates(health(advancing=True), bot._assess_board_space())
 
-    assert bot.runtime.spawn_limits == [1]
+    assert bot.runtime.spawn_limits == [3]
     events = [record.fmv_event for record in caplog.records if hasattr(record, "fmv_event")]
     assert events[:2] == ["crate.claim_started", "crate.claim_completed"]
     records = {
@@ -215,9 +215,10 @@ def test_crate_limit_preserves_policy_reserve(monkeypatch, caplog) -> None:
     }
     assert records["crate.claim_started"].levelno == logging.DEBUG
     assert records["crate.claim_started"].message == (
-        "Claiming up to 1 of 1 available supply crate(s); board capacity is 3."
+        "Claiming up to 3 of 3 available supply crate(s); board capacity is 3."
     )
-    assert records["crate.claim_started"].fmv_context["available_crates"] == 1
+    assert records["crate.claim_started"].fmv_context["claim_limit"] == 3
+    assert records["crate.claim_started"].fmv_context["available_crates"] == 3
     assert records["crate.claim_completed"].levelno == logging.INFO
 
 

@@ -255,7 +255,7 @@ class DiscordStatusMixin:
         with self._metrics_lock:
             metrics = self._metrics
             self._metrics = Counter()
-        if not metrics and final:
+        if not metrics:
             return None
         elapsed = max(0.0, now - self._started_at)
         period = "Final" if final else "Periodic"

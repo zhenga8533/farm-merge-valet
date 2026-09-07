@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Full, Queue
 from threading import Lock, Thread
+from typing import Literal
 
 import httpx
 
@@ -61,7 +62,7 @@ class _PostMessage:
 
 @dataclass(frozen=True)
 class _RefreshStatus:
-    replace: bool = False
+    pass
 
 
 class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, logging.Handler):
@@ -74,7 +75,7 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
         status_interval: float = 60.0,
         *,
         status_state_path: Path = _DEFAULT_STATUS_STATE_PATH,
-        notification_profile: str = "balanced",
+        notification_profile: Literal["minimal", "balanced", "detailed"] = "balanced",
         include_charts: bool = True,
     ) -> None:
         if not url.startswith("https://"):
@@ -133,7 +134,7 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
 
     def _run(self) -> None:
         with httpx.Client(timeout=_DELIVERY_TIMEOUT_SECONDS) as client:
-            self._refresh_status(client, time.monotonic(), replace=False)
+            self._refresh_status(client, time.monotonic())
             while True:
                 now = time.monotonic()
                 timeout = max(0.0, min(self._next_summary_at, self._next_status_at) - now)
@@ -149,37 +150,37 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
                             self._activity_chart.render(now) if self._include_charts else None
                         )
                         self._send(client, summary, attachment)
-                        self._refresh_status(client, now, replace=False)
+                        self._refresh_status(client, now)
                     self._next_summary_at = now + self._summary_interval
                     self._next_status_at = (
                         now + self._status_interval if self._status_interval > 0 else float("inf")
                     )
                 elif now >= self._next_status_at:
-                    self._refresh_status(client, now, replace=False)
+                    self._refresh_status(client, now)
                     self._next_status_at = now + self._status_interval
                 if item is _STOP:
                     final_summary = self._take_summary(now, final=True)
                     if final_summary is not None:
                         attachment = (
-                            self._activity_chart.render(now, final=True)
+                            self._activity_chart.render(now)
                             if self._include_charts
                             else None
                         )
                         self._send(client, final_summary, attachment)
-                        self._refresh_status(client, now, replace=False)
+                        self._refresh_status(client, now)
                     else:
-                        self._refresh_status(client, now, replace=False)
+                        self._refresh_status(client, now)
                     return
                 if isinstance(item, _PostMessage):
                     if self._send(client, item.payload, item.attachment) is not None:
-                        self._refresh_status(client, now, replace=False)
+                        self._refresh_status(client, now)
                         self._next_status_at = (
                             now + self._status_interval
                             if self._status_interval > 0
                             else float("inf")
                         )
                 elif isinstance(item, _RefreshStatus):
-                    self._refresh_status(client, now, replace=item.replace)
+                    self._refresh_status(client, now)
 
     def shutdown(self, timeout: float = 5.0) -> None:
         try:
@@ -195,7 +196,7 @@ def discord_webhook_sink(
     summary_interval: float,
     status_interval: float = 60.0,
     *,
-    notification_profile: str = "balanced",
+    notification_profile: Literal["minimal", "balanced", "detailed"] = "balanced",
     include_charts: bool = True,
 ) -> Iterator[None]:
     """Attach the Discord sink only for the bot run command."""

@@ -58,13 +58,13 @@ class CrateWorkflow:
         operation_key = ("supply",)
         if not bot._actions().begin(OperationKind.CRATE, operation_key, now):
             return
-        result = bot.runtime.spawn_supply_crates(1)
+        result = bot.runtime.spawn_supply_crates(limit)
         if (
             result.available_before is not None
             and result.available_before > 0
             and (limit != self.last_claim_limit or now - self.last_claim_log_at >= 15)
         ):
-            claim_count = min(1, result.available_before)
+            claim_count = min(limit, result.available_before)
             log_event(
                 logger,
                 logging.DEBUG,
@@ -73,7 +73,7 @@ class CrateWorkflow:
                 claim_count,
                 result.available_before,
                 limit,
-                claim_limit=1,
+                claim_limit=limit,
                 available_crates=result.available_before,
                 empty_cells=board_space.empty_cells,
                 reserved_empty_cells=reserve,

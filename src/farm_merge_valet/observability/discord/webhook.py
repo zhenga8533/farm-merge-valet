@@ -173,48 +173,31 @@ class DiscordWebhookTransportMixin:
         status_url = self._status_message_url()
         if status_url is None:
             return "missing"
-        try:
-            payload = self._status_payload(now)
-            payload.pop("username", None)
-            response = client.patch(status_url, json=payload)
-            response.raise_for_status()
-            return "updated"
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
-                self._status_message_id = None
-                self._persist_status_message_id(None)
-                return "missing"
-            self._log_delivery_failure(exc)
-            return "failed"
-        except httpx.HTTPError as exc:
-            self._log_delivery_failure(exc)
-            return "failed"
+        payload = self._status_payload(now)
+        payload.pop("username", None)
+        last_error: httpx.HTTPError | None = None
+        for attempt in range(3):
+            try:
+                response = client.patch(status_url, json=payload)
+                response.raise_for_status()
+                return "updated"
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    self._status_message_id = None
+                    self._persist_status_message_id(None)
+                    return "missing"
+                last_error = exc
+                if exc.response.status_code < 500 and exc.response.status_code != 429:
+                    break
+            except httpx.HTTPError as exc:
+                last_error = exc
+            if attempt < 2:
+                time.sleep(0.25 * (2**attempt))
+        if last_error is not None:
+            self._log_delivery_failure(last_error)
+        return "failed"
 
-    def _delete_status(self, client: httpx.Client) -> bool:
-        status_url = self._status_message_url()
-        if status_url is None:
-            return True
-        try:
-            response = client.delete(status_url)
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 404:
-                self._log_delivery_failure(exc)
-                return False
-        except httpx.HTTPError as exc:
-            self._log_delivery_failure(exc)
-            return False
-        self._status_message_id = None
-        self._persist_status_message_id(None)
-        return True
-
-    def _refresh_status(self, client: httpx.Client, now: float, *, replace: bool) -> None:
-        if replace and self._status_message_id is not None:
-            if self._delete_status(client):
-                self._create_status(client, now)
-            else:
-                self._edit_status(client, now)
-            return
+    def _refresh_status(self, client: httpx.Client, now: float) -> None:
         edit_result = self._edit_status(client, now)
         if edit_result == "missing":
             self._create_status(client, now)
