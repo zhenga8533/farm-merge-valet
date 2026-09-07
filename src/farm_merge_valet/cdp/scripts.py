@@ -409,9 +409,10 @@ _HEALTH_EXPRESSION = r"""
   const currentStickerView = stickerNavigation?._viewStack?.at(-1);
   const packOpeningView = stickerNavigation?._packOpeningView;
   const stickerController = packOpeningView?._currentPackAnimation;
-  const stickerPackViewActive = stickerNavigation?.visible !== false &&
+  const stickerPackViewActive = Boolean(stickerNavigation && packOpeningView &&
+    stickerNavigation.visible !== false &&
     packOpeningView?.visible !== false && packOpeningView?.parent === stickerNavigation &&
-    currentStickerView === packOpeningView && packOpeningView?._destroyed !== true;
+    currentStickerView === packOpeningView && packOpeningView?._destroyed !== true);
   const stickerPackActive = stickerPackViewActive &&
     stickerController?.parent === packOpeningView && stickerController?._isAnimating === true;
   const stickerSpineView = stickerPackActive ? stickerController._spineAnimation : null;
@@ -527,8 +528,7 @@ _HEALTH_EXPRESSION = r"""
     : promotionalPopup ? 'promotional-popup'
     : stickerSkip ? 'sticker-pack-skip'
     : collectPending ? 'sticker-pack-collect'
-    : stickerRaffleProposal && stickerRaffleProposal._closing !== true
-      ? 'sticker-raffle-proposal'
+    : stickerRaffleProposal ? 'sticker-raffle-proposal'
     : stickerPackViewActive ? 'sticker-pack-transition'
     : stickerSetSubmitted ? 'sticker-set-transition'
     : stickerSetActive && stickerSetButton ? 'sticker-set-collect'
@@ -883,9 +883,10 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
   const currentStickerView = stickerNavigation?._viewStack?.at(-1);
   const packOpeningView = stickerNavigation?._packOpeningView;
   const stickerController = packOpeningView?._currentPackAnimation;
-  const stickerPackViewActive = stickerNavigation?.visible !== false &&
+  const stickerPackViewActive = Boolean(stickerNavigation && packOpeningView &&
+    stickerNavigation.visible !== false &&
     packOpeningView?.visible !== false && packOpeningView?.parent === stickerNavigation &&
-    currentStickerView === packOpeningView && packOpeningView?._destroyed !== true;
+    currentStickerView === packOpeningView && packOpeningView?._destroyed !== true);
   const stickerPackActive = stickerPackViewActive &&
     stickerController?.parent === packOpeningView && stickerController?._isAnimating === true;
   if (!stickerPackActive) {{
@@ -936,10 +937,25 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     typeof child?._close === 'function' && Array.isArray(child?._raffleButtons) &&
     Array.isArray(child?._duplicate4PlusStarsStickers));
   if (stickerRaffleProposal) {{
-    if (stickerRaffleProposal._closing === true)
-      return {{status: 'busy', detail: 'sticker-pack-transition'}};
+    const proposalResolve = stickerRaffleProposal._animationResolve;
+    if (typeof proposalResolve !== 'function')
+      return {{status: 'busy', detail: 'sticker-raffle-proposal-initializing'}};
+    if (stickerRaffleProposal._closing === true) {{
+      try {{
+        proposalResolve(undefined);
+        return {{status: 'submitted', detail: 'sticker-raffle-proposal-recovery'}};
+      }} catch (error) {{
+        return {{status: 'rejected', detail: String(error?.message || error)}};
+      }}
+    }}
+    const notNowLink = stickerRaffleProposal._notNowLink;
+    const dismissEvent = ['pointertap', 'pointerup', 'click'].find((event) =>
+      notNowLink?._events?.[event]);
+    if (notNowLink?._destroyed === true || notNowLink?.interactive !== true ||
+        typeof notNowLink?.emit !== 'function' || !dismissEvent)
+      return {{status: 'busy', detail: 'sticker-raffle-proposal-initializing'}};
     try {{
-      stickerRaffleProposal._close(undefined);
+      notNowLink.emit(dismissEvent);
       return {{status: 'submitted', detail: 'sticker-raffle-proposal'}};
     }} catch (error) {{
       return {{status: 'rejected', detail: String(error?.message || error)}};

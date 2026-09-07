@@ -48,8 +48,10 @@ used to confirm the result before another submission is allowed.
 
 CDP pairs the Farm Merge Valley iframe with its owning Reddit page. Target
 pairs are cached and rediscovered after a reload. On acquisition, the bot
-applies supported focus-emulation, unlocked/user-active, and active-lifecycle
-overrides. The managed browser must also be launched with the background-throttling switches
+applies each supported focus-emulation, unlocked/user-active, and
+active-lifecycle override once per browser target. Unsupported optional
+overrides are logged once at debug level. The managed browser must also be
+launched with the background-throttling switches
 documented in the README.
 
 Pause/resume uses a fast health check against the cached scene. The cache is
@@ -69,10 +71,13 @@ stale connection is closed. Snapshot timeouts, JavaScript failures, heap scans,
 and actions are not immediately replayed. Temporary objects created for
 `Runtime.queryObjects`, including the prototype handle, are released after use.
 
-Heap recovery first verifies that the renderer can produce a frame. It locates
+Before heap recovery, a bounded bootstrap check waits for the game document,
+JavaScript bundle, and render canvas to become ready and stable. Heap recovery
+then verifies that the renderer can produce a frame. It locates
 the exact active board through its map-grid service owner instead of measuring
 render bounds across candidate maps. Failed scans use a 5, 15, 60, then
-300-second cooldown.
+300-second cooldown. Expected startup probes, failed scans, and cooldowns are
+debug diagnostics; successful recovery remains an informational event.
 
 The runtime adapter locates and validates the active gameplay screen, board
 map, tile-interaction handler, shop-order service, live HUD crate event, and supply inventory. References
@@ -89,8 +94,10 @@ mistaken for an action failure.
 A strict, default-enabled reward-overlay
 step runs before this gate: Level Up invokes its native close callback, while
 sticker packs use their native Skip and subsequent Collect transitions. Optional
-high-rank duplicate raffle proposals are declined through their native close
-transition so pack collection can continue. Each
+high-rank duplicate raffle proposals are declined through their registered
+"Not now" interaction after its animation resolver is ready. A partially closed
+proposal left by an interrupted transition completes that resolver before pack
+collection continues. Each
 transition is handled in a separate loop iteration, and intermediate sticker
 animation states block board actions until Collect becomes available. Sticker
 pack state is read from its dedicated top-level navigation view rather than the

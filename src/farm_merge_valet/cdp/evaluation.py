@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from threading import Event
+from threading import Event, Lock
 
 from websockets.exceptions import WebSocketException
 
@@ -23,6 +23,8 @@ from farm_merge_valet.cdp.transport import (
 from farm_merge_valet.observability.logging import log_event
 
 logger = logging.getLogger(__name__)
+_background_override_attempts: set[tuple[str, str]] = set()
+_background_override_attempts_lock = Lock()
 
 
 def _evaluate_target(
@@ -111,9 +113,16 @@ def apply_background_overrides(
             ("Emulation.setIdleOverride", {"isUserActive": True, "isScreenUnlocked": True}),
             ("Page.setWebLifecycleState", {"state": "active"}),
         ):
+            attempt = (ws_url, method)
+            with _background_override_attempts_lock:
+                if attempt in _background_override_attempts:
+                    continue
+                _background_override_attempts.add(attempt)
             try:
                 _command_target(ws_url, method, params, cancel_event=cancel_event)
             except CdpCancelledError:
+                with _background_override_attempts_lock:
+                    _background_override_attempts.discard(attempt)
                 raise
             except CdpConnectionError:
                 log_event(

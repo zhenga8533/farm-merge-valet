@@ -110,7 +110,6 @@ class GameRuntimeAdapter:
         self._last_heartbeat: int | None = None
         self._discovery_detail: str | None = "runtime-discovery-not-run"
         self._cancel_event: Event | None = None
-        self._reload_recovery_pending = False
         self._snapshot_metrics: deque[RuntimeReadMetrics] = deque(maxlen=240)
         self._last_snapshot_summary_at = time.monotonic()
         self._heartbeat_stalled = False
@@ -235,10 +234,9 @@ class GameRuntimeAdapter:
             recovered = False
             if bootstrap_ready:
                 self._discovery_detail = "board-recovery-pending"
-                recovered = self._recover_board_from_heap(force=False)
+                recovered = self._recover_board_from_heap()
             else:
                 self._discovery_detail = "game-runtime-initializing"
-            self._reload_recovery_pending = False
             if recovered and not is_cancelled():
                 refresh_started = time.monotonic()
                 discovery_attempted = True
@@ -281,10 +279,9 @@ class GameRuntimeAdapter:
             time.sleep(0.05)
         health = self.read_runtime_health()
         elapsed = time.monotonic() - started
-        level = logging.DEBUG if cached_board_is_current and elapsed < 1.0 else logging.INFO
         log_event(
             logger,
-            level,
+            logging.DEBUG,
             "runtime.discovery_completed",
             "Runtime discovery finished in %.1fs (cached board=%s, scene=%s).",
             elapsed,
@@ -306,7 +303,7 @@ class GameRuntimeAdapter:
             return _RUNTIME_BOOTSTRAP_SETTLE_SECONDS <= 0
         return now - self._runtime_bootstrap_ready_at >= _RUNTIME_BOOTSTRAP_SETTLE_SECONDS
 
-    def _recover_board_from_heap(self, *, force: bool) -> bool:
+    def _recover_board_from_heap(self) -> bool:
         key = (self.port, self.page_title)
         with self._recovery_state_lock:
             recovery_lock = self._recovery_locks.setdefault(key, Lock())
@@ -320,7 +317,7 @@ class GameRuntimeAdapter:
                 self._discovery_detail = "board-recovery-cooldown"
                 log_event(
                     logger,
-                    logging.INFO,
+                    logging.DEBUG,
                     "runtime.heap_recovery_deferred",
                     "Board heap recovery is cooling down for %.1fs after a failed search.",
                     retry_at - now,
@@ -343,10 +340,9 @@ class GameRuntimeAdapter:
                 return False
             log_event(
                 logger,
-                logging.INFO,
+                logging.DEBUG,
                 "runtime.heap_recovery_started",
                 "Cached board is absent or stale; scanning the heap for the active board.",
-                forced=False,
             )
             scan_started = time.monotonic()
             raw_status = arm_board_store(
@@ -368,7 +364,7 @@ class GameRuntimeAdapter:
                     self._recovery_failures[key] = (failures, time.monotonic() + cooldown)
             log_event(
                 logger,
-                logging.INFO,
+                logging.INFO if recovered else logging.DEBUG,
                 "runtime.heap_recovery_completed",
                 "Board heap recovery finished in %.1fs: %s.",
                 elapsed,
@@ -421,7 +417,6 @@ class GameRuntimeAdapter:
         if self._scene_id is not None and scene_id != self._scene_id:
             self._scene_id = None
             self._discovery_detail = "runtime-scene-changed"
-            self._reload_recovery_pending = True
         item_drop = raw.get("itemDrop") is True
         interaction = raw.get("interaction") is True
         removal = raw.get("removal") is True

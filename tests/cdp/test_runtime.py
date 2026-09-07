@@ -187,7 +187,10 @@ def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) ->
     assert "travel-summary-reward" in expressions[0]
     assert "activePopup._rewardCollected" in expressions[0]
     assert "sticker-album-transition" in expressions[0]
-    assert "stickerRaffleProposal._close(undefined)" in expressions[0]
+    assert "typeof proposalResolve !== 'function'" in expressions[0]
+    assert "proposalResolve(undefined)" in expressions[0]
+    assert "notNowLink.emit(dismissEvent)" in expressions[0]
+    assert "stickerRaffleProposal._close(undefined)" not in expressions[0]
     assert "services?.specialOfferService" in expressions[0]
     assert "services?.recurringConversionService" in expressions[0]
     assert "currentSceneId !== 4" in expressions[0]
@@ -202,9 +205,11 @@ def test_health_detects_each_supported_reward_overlay_phase() -> None:
     assert "typeof stickerSpineView._onSkippedPressed === 'function'" in _HEALTH_EXPRESSION
     assert "child?.name === 'ConsentButton'" in _HEALTH_EXPRESSION
     assert "stickerController?._isAnimating === true" in _HEALTH_EXPRESSION
+    assert "Boolean(stickerNavigation && packOpeningView" in _HEALTH_EXPRESSION
     assert "sticker-pack-transition" in _HEALTH_EXPRESSION
     assert "sticker-pack-collect" in _HEALTH_EXPRESSION
     assert "sticker-raffle-proposal" in _HEALTH_EXPRESSION
+    assert "stickerRaffleProposal._closing" not in _HEALTH_EXPRESSION
     assert "Array.isArray(child?._duplicate4PlusStarsStickers)" in _HEALTH_EXPRESSION
     assert "sticker-set-transition" in _HEALTH_EXPRESSION
     assert "sticker-set-collect" in _HEALTH_EXPRESSION
@@ -1000,9 +1005,9 @@ def test_concurrent_heap_recovery_is_single_flight_per_target(monkeypatch) -> No
         GameRuntimeAdapter(9333, "Single flight"),
     )
     results: list[bool] = []
-    first = Thread(target=lambda: results.append(adapters[0]._recover_board_from_heap(force=False)))
+    first = Thread(target=lambda: results.append(adapters[0]._recover_board_from_heap()))
     second = Thread(
-        target=lambda: results.append(adapters[1]._recover_board_from_heap(force=False))
+        target=lambda: results.append(adapters[1]._recover_board_from_heap())
     )
 
     first.start()
@@ -1016,7 +1021,7 @@ def test_concurrent_heap_recovery_is_single_flight_per_target(monkeypatch) -> No
     assert results == [True, True]
 
 
-def test_failed_heap_recovery_cools_down_but_reload_can_retry(monkeypatch) -> None:
+def test_failed_heap_recovery_uses_cooldown(monkeypatch) -> None:
     scans: list[int] = []
     adapter = GameRuntimeAdapter(9444, "Recovery cooldown")
     monkeypatch.setattr(
@@ -1029,11 +1034,8 @@ def test_failed_heap_recovery_cools_down_but_reload_can_retry(monkeypatch) -> No
         lambda *_args, **_kwargs: scans.append(1) or "cells-map-not-found",
     )
 
-    assert not adapter._recover_board_from_heap(force=False)
-    assert not adapter._recover_board_from_heap(force=False)
-    assert scans == [1]
-
-    assert not adapter._recover_board_from_heap(force=True)
+    assert not adapter._recover_board_from_heap()
+    assert not adapter._recover_board_from_heap()
     assert scans == [1]
 
 
