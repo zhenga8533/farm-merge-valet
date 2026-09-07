@@ -382,7 +382,7 @@ def test_animal_upgrade_progress_uses_product_identity_but_nests_under_producer(
     app.processEvents()
 
 
-def test_item_bulk_toggle_targets_full_catalog_independent_of_filter(tmp_path) -> None:
+def test_item_bulk_toggle_targets_only_filtered_items(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     catalog_dir = tmp_path / "catalog"
     write_item_catalog(catalog_dir / "catalog.json", _catalog())
@@ -402,7 +402,7 @@ def test_item_bulk_toggle_targets_full_catalog_independent_of_filter(tmp_path) -
 
     saved = ConfigStore(store.path).load()
     assert not saved.item_policy("crops/wheat").enabled
-    assert not saved.item_policy("ingredients/milk").enabled
+    assert saved.item_policy("ingredients/milk").enabled
     assert window.items_page.saved_label.text() == "Saved"
 
     window.quit_application()

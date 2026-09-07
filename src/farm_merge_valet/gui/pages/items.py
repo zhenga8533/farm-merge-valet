@@ -176,6 +176,7 @@ class ItemsPage(AppPage):
         self._population_pending = False
         self._population_runner = IncrementalWorkRunner(self)
         self._row_definitions: list[_ItemPolicyRow] = []
+        self._search_text_by_policy_key: dict[str, str] = {}
         self._policy_controls: list[
             tuple[QTreeWidgetItem, PolicyCheckBox, tuple[_ItemPolicyRow, ...], str]
         ] = []
@@ -290,6 +291,7 @@ class ItemsPage(AppPage):
         self.table.setSortingEnabled(False)
         self.table.clear()
         self._row_definitions = []
+        self._search_text_by_policy_key = {}
         self._policy_controls = []
         self._lazy_branches.reset()
         self._upgrade_targets = {}
@@ -372,6 +374,17 @@ class ItemsPage(AppPage):
             family_name = (
                 "Upgrade cards" if upgrade_target else representative.presentation_group_name
             )
+            for definition in definitions:
+                self._search_text_by_policy_key[definition.policy_key] = " ".join(
+                    (
+                        family_name,
+                        representative.category.replace("_", " ").title(),
+                        family_key,
+                        definition.item.game_id,
+                        " ".join(sorted(definition.item.traits)),
+                        f"Tier {definition.item.tier} {definition.item.display_name}",
+                    )
+                ).casefold()
             if len(definitions) == 1:
                 root = self._new_policy_item(
                     family_name,
@@ -824,6 +837,17 @@ class ItemsPage(AppPage):
 
     def _filter(self, text: str) -> None:
         self._lazy_branches.apply_filter(text)
+        self._sync_bulk_header()
+
+    def _bulk_definitions(self) -> list[_ItemPolicyRow]:
+        if not self.search.text().strip():
+            return self._row_definitions
+        query = self.search.text().casefold().strip()
+        return [
+            definition
+            for definition in self._row_definitions
+            if query in self._search_text_by_policy_key[definition.policy_key]
+        ]
 
     def set_override(self, key: str, family_key: str, field: str, value: bool) -> None:
         overrides = dict(self._config.item_policy_overrides)
@@ -867,7 +891,7 @@ class ItemsPage(AppPage):
     def _set_all(self, column: int, value: bool) -> None:
         field = self._policy_fields()[column]
         overrides = dict(self._config.item_policy_overrides)
-        for definition in self._row_definitions:
+        for definition in self._bulk_definitions():
             if not definition.supports(field):
                 continue
             key = definition.policy_key
@@ -885,10 +909,11 @@ class ItemsPage(AppPage):
         self._sync_policy_controls()
 
     def _sync_bulk_header(self) -> None:
+        definitions = self._bulk_definitions()
         for column, field in self._policy_fields().items():
             values = [
                 getattr(self._config.item_policy(definition.policy_key), field)
-                for definition in self._row_definitions
+                for definition in definitions
                 if definition.supports(field)
             ]
             state = aggregate_check_state(values)

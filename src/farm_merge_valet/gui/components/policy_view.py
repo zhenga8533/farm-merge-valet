@@ -372,16 +372,7 @@ def filter_policy_tree(
     needle = text.casefold().strip()
 
     def update_visibility(item: QTreeWidgetItem, ancestor_matches: bool = False) -> bool:
-        searchable = " ".join(
-            " ".join(
-                (
-                    item.text(column),
-                    str(item.data(column, POLICY_SEARCH_ROLE) or ""),
-                )
-            )
-            for column in range(tree.columnCount())
-        )
-        own_matches = needle in searchable.casefold()
+        own_matches = policy_item_matches(tree, item, needle)
         indexed_matches = bool(
             needle and indexed_descendants is not None and needle in indexed_descendants(item)
         )
@@ -399,6 +390,20 @@ def filter_policy_tree(
         parent = tree.topLevelItem(index)
         if parent is not None:
             update_visibility(parent)
+
+
+def policy_item_matches(tree: QTreeWidget, item: QTreeWidgetItem, text: str) -> bool:
+    needle = text.casefold().strip()
+    searchable = " ".join(
+        " ".join(
+            (
+                item.text(column),
+                str(item.data(column, POLICY_SEARCH_ROLE) or ""),
+            )
+        )
+        for column in range(tree.columnCount())
+    )
+    return needle in searchable.casefold()
 
 
 def policy_cell(widget: QWidget, *, centered: bool = True) -> QWidget:

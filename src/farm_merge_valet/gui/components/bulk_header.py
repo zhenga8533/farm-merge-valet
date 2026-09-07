@@ -47,8 +47,10 @@ class BulkToggleHeader(QHeaderView):
             control.setTristate(True)
             control.setCursor(Qt.CursorShape.PointingHandCursor)
             control.setMinimumHeight(18)
-            control.setAccessibleName(f"Set all {label.lower()}")
-            control.setToolTip(f"Enable or disable {label.lower()} for the entire catalog")
+            control.setAccessibleName(f"Set displayed {label.lower()}")
+            control.setToolTip(
+                f"Enable or disable {label.lower()} for rows displayed by the current filter"
+            )
             control.clicked.connect(
                 lambda checked, section=column: self.toggled.emit(section, checked)
             )

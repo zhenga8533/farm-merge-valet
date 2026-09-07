@@ -192,6 +192,28 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
     app.processEvents()
 
 
+def test_marketplace_bulk_toggle_targets_only_filtered_offers(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    page = window.marketplace_page
+
+    page.toolbar.search.setText("Wheat")
+    page._set_all(2, True)
+
+    assert page._config.marketplace_policy_enabled(
+        "flash:flash_deal_ingredient:wheat"
+    )
+    assert not page._config.marketplace_policy_enabled(
+        "flash:flash_deal_ingredient:milk"
+    )
+    assert page._config.marketplace_policy_enabled("free:gems_5_no_ads")
+
+    window.quit_application()
+    app.processEvents()
+
+
 def test_ingredient_reserves_editor_uses_catalog_names_and_preserves_unknown_overrides() -> None:
     app = QApplication.instance() or QApplication([])
     catalog = _catalog()

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -165,6 +166,15 @@ class BrowserPage(ConfigFormPage):
         managed = status is not None and status.managed
         compatible = status is not None and status.compatible
         operation_busy = self._browser_busy or self._game_sync_busy
+        if operation_busy:
+            focused = QApplication.focusWidget()
+            if focused in {
+                self.refresh_button,
+                self.browser_action_button,
+                self.restart_button,
+                self.game_sync_button,
+            }:
+                focused.clearFocus()
         self.browser_action_button.setText(
             "Stop managed browser" if running and managed else "Launch managed browser"
         )

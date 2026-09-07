@@ -379,6 +379,17 @@ def test_shop_bulk_toggle_updates_all_shops_and_recipes(tmp_path) -> None:
     window._flush_config()
     assert not ConfigStore(store.path).load().recipe_overrides["bread"]
 
+    recipe_toggle.setChecked(True)
+    window._flush_config()
+    window.shops_page.search.setText("bread")
+    QTest.qWait(150)
+    window.shops_page._set_all(2, False)
+    window._flush_config()
+    filtered = ConfigStore(store.path).load()
+    assert filtered.shop_overrides == {}
+    assert not filtered.recipe_overrides["bread"]
+    window.shops_page.search.clear()
+
     window.shops_page._set_all(2, False)
     assert window.shops_page.saved_label.text() == "Saving…"
     window._flush_config()

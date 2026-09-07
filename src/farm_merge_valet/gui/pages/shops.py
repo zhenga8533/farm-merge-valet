@@ -244,6 +244,7 @@ class ShopsPage(AppPage):
         self._population_pending = False
         self._population_runner = IncrementalWorkRunner(self)
         self._catalog_keys: list[tuple[str, str]] = []
+        self._search_text_by_identity: dict[tuple[str, str], str] = {}
         self._toggles: dict[tuple[str, str], PolicyCheckBox] = {}
         self._tree_items: dict[tuple[str, str], QTreeWidgetItem] = {}
         self._lazy_branches = LazyPolicyBranches(self.tree)
@@ -347,6 +348,7 @@ class ShopsPage(AppPage):
         self.tree.blockSignals(True)
         self.tree.clear()
         self._catalog_keys = []
+        self._search_text_by_identity = {}
         self._toggles = {}
         self._tree_items = {}
         self._lazy_branches.reset()
@@ -403,11 +405,16 @@ class ShopsPage(AppPage):
                 sort_value=shop_toggle.isChecked(),
             )
             self._catalog_keys.append(("shop", shop_id))
+            shop_search_text = f"{shop_name} {shop_id} Shop"
+            self._search_text_by_identity[("shop", shop_id)] = shop_search_text.casefold()
             self._toggles[("shop", shop_id)] = shop_toggle
             self._tree_items[("shop", shop_id)] = parent
             shop_recipes = tuple(sorted(recipes[shop_id], key=lambda item: item.display_name))
             for recipe in shop_recipes:
                 self._catalog_keys.append(("recipe", recipe.game_id))
+                self._search_text_by_identity[("recipe", recipe.game_id)] = " ".join(
+                    (shop_search_text, recipe.display_name, recipe.game_id, "Recipe")
+                ).casefold()
             self._lazy_branches.register(
                 ("shop", shop_id),
                 parent,
@@ -437,6 +444,17 @@ class ShopsPage(AppPage):
 
     def _filter(self, text: str) -> None:
         self._lazy_branches.apply_filter(text)
+        self._sync_bulk_header()
+
+    def _bulk_catalog_keys(self) -> list[tuple[str, str]]:
+        if not self.search.text().strip():
+            return self._catalog_keys
+        query = self.search.text().casefold().strip()
+        return [
+            identity
+            for identity in self._catalog_keys
+            if query in self._search_text_by_identity[identity]
+        ]
 
     def _populate_shop_recipes(
         self,
@@ -566,7 +584,7 @@ class ShopsPage(AppPage):
     def _set_all(self, _column: int, value: bool) -> None:
         shop_overrides = dict(self._config.shop_overrides)
         recipe_overrides = dict(self._config.recipe_overrides)
-        for kind, key in self._catalog_keys:
+        for kind, key in self._bulk_catalog_keys():
             overrides = shop_overrides if kind == "shop" else recipe_overrides
             default = (
                 self._config.shop_default_enabled
@@ -585,7 +603,7 @@ class ShopsPage(AppPage):
             (self._config.shop_overrides.get(key, self._config.shop_default_enabled))
             if kind == "shop"
             else self._config.recipe_overrides.get(key, self._config.recipe_default_enabled)
-            for kind, key in self._catalog_keys
+            for kind, key in self._bulk_catalog_keys()
         ]
         state = aggregate_check_state(values)
         self.bulk_header.set_state(2, state, enabled=bool(values))

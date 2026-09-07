@@ -4,7 +4,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QGroupBox,
@@ -149,6 +149,25 @@ def test_browser_actions_follow_managed_browser_and_runtime_state(tmp_path) -> N
     assert not page.browser_action_button.isEnabled()
     assert not page.restart_button.isEnabled()
     assert not page.game_sync_button.isEnabled()
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_disabling_clicked_browser_action_does_not_focus_disclosure(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    page = window.browser_page
+    window.show()
+    page.refresh_button.setFocus(Qt.FocusReason.MouseFocusReason)
+
+    page.set_busy(True)
+    app.processEvents()
+
+    assert not page.browser_advanced_section.toggle.hasFocus()
+    assert page.browser_advanced_section.toggle.property("keyboardFocus") is not True
 
     window.quit_application()
     app.processEvents()

@@ -92,7 +92,7 @@ class MarketplacePage(AppPage):
         for column in range(1, 3):
             self.bulk_header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.toolbar = scaffold.toolbar
-        self.toolbar.filter_requested.connect(lambda text: filter_policy_tree(self.tree, text))
+        self.toolbar.filter_requested.connect(self._filter)
         self.page_layout.addWidget(self.toolbar)
         self.page_layout.addWidget(self.tree, 1)
         self.populate()
@@ -196,8 +196,7 @@ class MarketplacePage(AppPage):
             if self._config.marketplace_sort_descending
             else Qt.SortOrder.AscendingOrder,
         )
-        self._sync_bulk_header()
-        filter_policy_tree(self.tree, self.toolbar.search.text())
+        self._filter(self.toolbar.search.text())
 
     def _add_offer(self, parent: QTreeWidgetItem, offer: MarketplaceOffer) -> None:
         cost = (
@@ -265,6 +264,18 @@ class MarketplacePage(AppPage):
     def _set_master_enabled(self, enabled: bool) -> None:
         self._emit(marketplace_automation_enabled=enabled)
 
+    def _filter(self, text: str) -> None:
+        filter_policy_tree(self.tree, text)
+        self._sync_bulk_header()
+
+    def _bulk_policy_keys(self) -> list[str]:
+        if not self.toolbar.search.text().strip():
+            return list(self._toggles)
+        filter_policy_tree(self.tree, self.toolbar.search.text())
+        return [
+            key for key, item in self._tree_items.items() if not item.isHidden()
+        ]
+
     def _set_group(self, policy_keys: tuple[str, ...], enabled: bool) -> None:
         values = dict(self._config.marketplace_policy_overrides)
         for key in policy_keys:
@@ -276,11 +287,12 @@ class MarketplacePage(AppPage):
         self._sync_controls()
 
     def _set_all(self, _column: int, enabled: bool) -> None:
-        values = {
-            offer.policy_key: enabled
-            for offer in marketplace_catalog()
-            if enabled != self._config.marketplace_policy_default_enabled(offer.policy_key)
-        }
+        values = dict(self._config.marketplace_policy_overrides)
+        for key in self._bulk_policy_keys():
+            if enabled == self._config.marketplace_policy_default_enabled(key):
+                values.pop(key, None)
+            else:
+                values[key] = enabled
         self._emit(marketplace_policy_overrides=values)
         self._sync_controls()
 
@@ -305,7 +317,8 @@ class MarketplacePage(AppPage):
         self._sync_bulk_header()
 
     def _sync_bulk_header(self) -> None:
-        values = [self._config.marketplace_policy_enabled(key) for key in self._toggles]
+        keys = self._bulk_policy_keys()
+        values = [self._config.marketplace_policy_enabled(key) for key in keys]
         self.bulk_header.set_state(2, aggregate_check_state(values), enabled=bool(values))
 
     def _apply_sort_preference(self) -> None:
