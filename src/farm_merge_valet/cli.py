@@ -5,17 +5,20 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import typer
 from rich import print as rprint
 
 from farm_merge_valet.browser import BrowserKind, BrowserManager, BrowserManagerError
+from farm_merge_valet.cdp.feature_diagnostics import read_feature_diagnostics
 from farm_merge_valet.cdp.profiling import profile_runtime, write_profile
 from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
 from farm_merge_valet.composition import create_catalog_synchronizer
 from farm_merge_valet.config import AppConfig, ConfigStore
-from farm_merge_valet.observability.logging import configure_logging
+from farm_merge_valet.observability.logging import configure_logging, diagnostic_log_path
+from farm_merge_valet.observability.session_history import summarize_history
 
 app = typer.Typer(help="Automation tool for Farm Merge Valley.", invoke_without_command=True)
 browser_app = typer.Typer(help="Manage the dedicated Chromium-family browser.")
@@ -180,6 +183,31 @@ def profile_runtime_cmd(
         raise typer.Exit(code=1) from exc
     serialized = json.dumps(report, indent=2)
     write_profile(output, serialized)
+    typer.echo(serialized)
+
+
+@diagnostics_app.command("session-summary")
+def session_summary_cmd(
+    hours: float = typer.Option(24.0, min=0.01, max=24 * 365),
+) -> None:
+    """Summarize persisted structured activity without contacting the game."""
+    since = datetime.now(UTC) - timedelta(hours=hours)
+    rprint(json.dumps(summarize_history(diagnostic_log_path(), since).as_dict(), indent=2))
+
+
+@diagnostics_app.command("inspect-features")
+def inspect_features_cmd(
+    output: Path | None = typer.Option(None),  # noqa: B008
+) -> None:
+    """Inspect sanitized building, event, and marketplace metadata read-only."""
+    config = _config()
+    runtime = GameRuntimeAdapter(config.cdp_port, config.window_title)
+    runtime.discover()
+    serialized = json.dumps(
+        read_feature_diagnostics(config.cdp_port, config.window_title), indent=2
+    )
+    if output is not None:
+        write_profile(output, serialized)
     typer.echo(serialized)
 
 

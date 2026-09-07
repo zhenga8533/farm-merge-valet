@@ -77,6 +77,8 @@ def plan_shop_action(
     orders: tuple[ShopOrder, ...],
     policy: ShopPolicy,
     empty_cells: int,
+    ingredient_reserves: Mapping[str, int] = MappingProxyType({}),
+    default_ingredient_reserve: int = 0,
 ) -> ShopAction | None:
     eligible = tuple(order for order in orders if policy.enables(order))
     for order in eligible:
@@ -85,7 +87,11 @@ def plan_shop_action(
             if empty_cells >= required:
                 return ShopAction(ShopActionKind.CLAIM, order.shop_id, order.recipe_id, required)
     for order in eligible:
-        if order.state is ShopOrderState.AVAILABLE and order.affordable:
+        if order.state is ShopOrderState.AVAILABLE and all(
+            item.available - item.required
+            >= ingredient_reserves.get(item.item_id, default_ingredient_reserve)
+            for item in order.ingredients
+        ):
             return ShopAction(ShopActionKind.START, order.shop_id, order.recipe_id)
     return None
 

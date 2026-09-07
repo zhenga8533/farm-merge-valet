@@ -604,14 +604,23 @@ class GameRuntimeAdapter:
                 if not isinstance(requirement, dict):
                     break
                 key, amount = requirement.get("key"), requirement.get("amount")
+                available = requirement.get("available")
                 if (
                     not isinstance(key, str)
                     or not isinstance(amount, int)
                     or isinstance(amount, bool)
                     or amount < 0
+                    or (
+                        available is not None
+                        and (
+                            not isinstance(available, int)
+                            or isinstance(available, bool)
+                            or available < 0
+                        )
+                    )
                 ):
                     break
-                requirements.append(ExpansionRequirement(key, amount))
+                requirements.append(ExpansionRequirement(key, amount, available))
             else:
                 candidates.append(
                     LandExpansionCandidate(

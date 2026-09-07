@@ -20,7 +20,12 @@ _READ_LAND_EXPANSION_EXPRESSION = r"""
         !Array.isArray(area.cells) || !Array.isArray(area.requirements?.buy)) return null;
     const requirements = area.requirements.buy.flatMap((requirement) =>
       typeof requirement?.key === 'string' && Number.isInteger(requirement?.amount) &&
-      requirement.amount >= 0 ? [{key: requirement.key, amount: requirement.amount}] : []);
+      requirement.amount >= 0 ? [{
+        key: requirement.key,
+        amount: requirement.amount,
+        available: services.ordersService?._inventory?.getInventoryItem?.(
+          requirement.key)?.amount ?? null,
+      }] : []);
     if (requirements.length !== area.requirements.buy.length) return null;
     return {
       areaID: area.id,

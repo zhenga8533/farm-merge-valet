@@ -99,6 +99,8 @@ class LandExpansionWorkflow:
             enabled=bot.config.land_expansion_automation_enabled,
             maximum_coin_cost=bot.config.land_expansion_max_coin_cost,
             maximum_gem_cost=bot.config.land_expansion_max_gem_cost,
+            minimum_coin_reserve=getattr(bot.config, "minimum_coin_reserve", 0),
+            minimum_gem_reserve=getattr(bot.config, "minimum_gem_reserve", 0),
         )
         candidate = plan_land_expansion(candidates, policy)
         if candidate is None:

@@ -740,11 +740,15 @@ class Bot:
         energy = self._energy
         workers = self._workers
         if not focused.state.clearing:
-            return plan_obstacle_clear([focused], energy, workers)
+            return plan_obstacle_clear(
+                [focused], energy, workers, self.config.minimum_energy_reserve
+            )
         if workers is None or workers.available == 0:
             return None
 
-        selected = plan_obstacle_clear(candidates, energy, workers)
+        selected = plan_obstacle_clear(
+            candidates, energy, workers, self.config.minimum_energy_reserve
+        )
         if selected is not None:
             self._obstacle_focus = selected.coord, selected.object_id
         return selected
@@ -1349,7 +1353,11 @@ class Bot:
         if self.phase is Phase.INTERACT_TILES:
             self._set_phase(Phase.CLAIM_CRATES)
         if self.phase in {Phase.CLAIM_CRATES, Phase.FARM_VISITS} and farm_visit_state is not None:
-            if self.config.farm_visit_automation_enabled and farm_visit_state.tickets:
+            if (
+                self.config.farm_visit_automation_enabled
+                and farm_visit_state.tickets is not None
+                and farm_visit_state.tickets > self.config.minimum_ticket_reserve
+            ):
                 self._set_phase(Phase.FARM_VISITS)
                 if not self._ensure_capability(health, RuntimeCapability.FARM_VISITS):
                     return

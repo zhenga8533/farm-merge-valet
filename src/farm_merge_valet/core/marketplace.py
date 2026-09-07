@@ -94,6 +94,7 @@ class MarketplaceAction:
     expected_stock: int
     slot_id: str | None = None
     candidate_key: str | None = None
+    minimum_balance_after: int = 0
 
 
 def live_offer_matches_catalog(offer: MarketplaceOffer, live: MarketplaceLiveOffer) -> bool:
@@ -115,25 +116,63 @@ def plan_marketplace_purchase(
     catalog: tuple[MarketplaceOffer, ...],
     live_offers: tuple[MarketplaceLiveOffer, ...],
     enabled_policies: Mapping[str, bool],
+    currency_reserves: Mapping[str, int] | None = None,
 ) -> MarketplaceAction | None:
-    """Select one exact live offer in deterministic catalog order."""
+    """Select one exact live offer in deterministic catalog order.
+
+    Catalog entries validate known paid offers. Newly discovered free offers are
+    safe to accept directly from authoritative live state; unknown paid offers
+    remain fail-closed until synchronization supplies their definition.
+    """
     live_by_key = {offer.policy_key: offer for offer in live_offers}
-    for offer in catalog:
-        if not enabled_policies.get(offer.policy_key, False):
+    catalog_by_key = {offer.policy_key: offer for offer in catalog}
+    ordered_keys = [offer.policy_key for offer in catalog]
+    ordered_keys.extend(sorted(set(live_by_key) - set(catalog_by_key)))
+    for policy_key in ordered_keys:
+        if not enabled_policies.get(policy_key, False):
             continue
-        live = live_by_key.get(offer.policy_key)
-        if live is None or not live_offer_matches_catalog(offer, live) or not live.affordable:
+        offer = catalog_by_key.get(policy_key)
+        live = live_by_key.get(policy_key)
+        reserve = (
+            (currency_reserves or {}).get(live.payment_key, 0)
+            if live is not None and live.payment_key is not None
+            else 0
+        )
+        if (
+            live is None
+            or (
+                offer is not None and not live_offer_matches_catalog(offer, live)
+            )
+            or (
+                offer is None
+                and not (
+                    live.payment_type == MarketplacePaymentType.FREE
+                    and live.payment_key is None
+                    and live.payment_amount == 0
+                    and live.slot_id is None
+                    and live.candidate_key is None
+                    and live.remaining_stock > 0
+                )
+            )
+            or not live.affordable
+            or (
+                live.payment_key is not None
+                and live.balance is not None
+                and live.balance - live.payment_amount < reserve
+            )
+        ):
             continue
         return MarketplaceAction(
-            policy_key=offer.policy_key,
-            offer_id=offer.offer_id,
-            slot_id=offer.slot_id,
-            candidate_key=offer.candidate_key,
-            reward_key=offer.reward_key,
-            reward_amount=offer.reward_amount,
-            payment_type=offer.payment_type,
-            payment_key=offer.payment_key,
-            payment_amount=offer.payment_amount,
+            policy_key=live.policy_key,
+            offer_id=live.offer_id,
+            slot_id=live.slot_id,
+            candidate_key=live.candidate_key,
+            reward_key=live.reward_key,
+            reward_amount=live.reward_amount,
+            payment_type=live.payment_type,
+            payment_key=live.payment_key,
+            payment_amount=live.payment_amount,
             expected_stock=live.remaining_stock,
+            minimum_balance_after=reserve,
         )
     return None

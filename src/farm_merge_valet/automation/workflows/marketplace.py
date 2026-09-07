@@ -124,13 +124,23 @@ class MarketplaceWorkflow:
             return False
         now = bot._now()
         catalog = marketplace_catalog()
+        policy_keys = {offer.policy_key for offer in catalog}
+        policy_keys.update(offer.policy_key for offer in offers)
         enabled = {
-            offer.policy_key: True
-            for offer in catalog
-            if bot.config.marketplace_policy_enabled(offer.policy_key)
-            and bot._actions().available(OperationKind.MARKETPLACE, (offer.policy_key,), now)
+            policy_key: True
+            for policy_key in policy_keys
+            if bot.config.marketplace_policy_enabled(policy_key)
+            and bot._actions().available(OperationKind.MARKETPLACE, (policy_key,), now)
         }
-        action = plan_marketplace_purchase(catalog, offers, enabled)
+        action = plan_marketplace_purchase(
+            catalog,
+            offers,
+            enabled,
+            {
+                "coins": bot.config.minimum_coin_reserve,
+                "gems": bot.config.minimum_gem_reserve,
+            },
+        )
         if action is None:
             return False
         before = next(offer for offer in offers if offer.policy_key == action.policy_key)

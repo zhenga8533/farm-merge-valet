@@ -90,6 +90,12 @@ class AppConfig(BaseModel):
     auto_pop_storage_bubbles: bool = True
     auto_claim_supply_crates: bool = True
     allow_obstacle_stage_starts: bool = True
+    minimum_energy_reserve: int = Field(default=0, ge=0, le=1_000_000_000)
+    minimum_ticket_reserve: int = Field(default=0, ge=0, le=1_000_000_000)
+    minimum_coin_reserve: int = Field(default=0, ge=0, le=1_000_000_000)
+    minimum_gem_reserve: int = Field(default=0, ge=0, le=1_000_000_000)
+    shop_ingredient_reserve_default: int = Field(default=0, ge=0, le=1_000_000_000)
+    shop_ingredient_reserves: dict[str, int] = Field(default_factory=dict)
     prefer_merge_five: bool = True
     item_automation_enabled: bool = True
     item_policy_defaults: ItemPolicy = Field(default_factory=ItemPolicy)
@@ -177,6 +183,20 @@ class AppConfig(BaseModel):
     def validate_game_ids(cls, value: dict[str, bool]) -> dict[str, bool]:
         if any(not game_id.strip() or game_id != game_id.strip() for game_id in value):
             raise ValueError("game IDs must be non-empty and have no surrounding whitespace")
+        return value
+
+    @field_validator("shop_ingredient_reserves")
+    @classmethod
+    def validate_shop_ingredient_reserves(cls, value: dict[str, int]) -> dict[str, int]:
+        if any(
+            not item_id.strip()
+            or item_id != item_id.strip()
+            or isinstance(amount, bool)
+            or amount < 0
+            or amount > 1_000_000_000
+            for item_id, amount in value.items()
+        ):
+            raise ValueError("shop ingredient reserves must use valid IDs and non-negative amounts")
         return value
 
     @field_validator("marketplace_policy_overrides")

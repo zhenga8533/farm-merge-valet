@@ -24,3 +24,10 @@ managed browser and game to already be running, and perform read-only runtime ch
 ```powershell
 pytest tests/integration --live-game
 ```
+
+Tests marked `live_action` additionally require `--live-actions`. They submit real
+game actions and must only be run against an account where that mutation is intended:
+
+```powershell
+pytest tests/integration --live-game --live-actions
+```

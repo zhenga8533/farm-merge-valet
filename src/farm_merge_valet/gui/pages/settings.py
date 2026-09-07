@@ -90,6 +90,14 @@ class SettingsPage(ConfigFormPage):
             "Allow obstacle energy spending",
             "allow_obstacle_stage_starts",
         )
+        for label, field in (
+            ("Minimum energy reserve", "minimum_energy_reserve"),
+            ("Minimum train-ticket reserve", "minimum_ticket_reserve"),
+            ("Minimum coin reserve", "minimum_coin_reserve"),
+            ("Minimum crystal reserve", "minimum_gem_reserve"),
+            ("Default shop-ingredient reserve", "shop_ingredient_reserve_default"),
+        ):
+            self._add_int(automation_form, label, field, 0, 1_000_000_000)
         self._add_toggle(
             automation_form,
             "Visit other farms automatically",

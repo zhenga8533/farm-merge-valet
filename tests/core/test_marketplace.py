@@ -66,3 +66,36 @@ def test_planner_rejects_same_slot_different_candidate() -> None:
     assert (
         plan_marketplace_purchase(marketplace_catalog(), (live,), {live.policy_key: True}) is None
     )
+
+
+def test_planner_respects_currency_reserve() -> None:
+    live = _live_for()
+
+    assert (
+        plan_marketplace_purchase(
+            marketplace_catalog(),
+            (live,),
+            {live.policy_key: True},
+            {"gems": (live.balance or 0) - live.payment_amount + 1},
+        )
+        is None
+    )
+
+
+def test_planner_accepts_new_authoritative_free_offer_without_static_catalog() -> None:
+    live = replace(
+        _live_for(),
+        policy_key="free:new_daily_reward",
+        offer_id="new_daily_reward",
+        slot_id=None,
+        candidate_key=None,
+        payment_type="free",
+        payment_key=None,
+        payment_amount=0,
+        balance=None,
+    )
+
+    action = plan_marketplace_purchase((), (live,), {live.policy_key: True})
+
+    assert action is not None
+    assert action.policy_key == live.policy_key

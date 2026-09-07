@@ -14,6 +14,27 @@ def test_land_expansion_requires_explicit_enablement_and_spending_limits() -> No
     assert config.land_expansion_max_gem_cost == 0
 
 
+def test_spending_reserves_default_to_non_disruptive_values() -> None:
+    config = AppConfig()
+
+    assert config.minimum_energy_reserve == 0
+    assert config.minimum_ticket_reserve == 0
+    assert config.minimum_coin_reserve == 0
+    assert config.minimum_gem_reserve == 0
+    assert config.shop_ingredient_reserve_default == 0
+    assert config.shop_ingredient_reserves == {}
+
+
+def test_shop_ingredient_reserves_validate_ids_and_amounts() -> None:
+    assert AppConfig(shop_ingredient_reserves={"wheat": 3}).shop_ingredient_reserves == {
+        "wheat": 3
+    }
+    with pytest.raises(ValidationError):
+        AppConfig(shop_ingredient_reserves={" wheat": 3})
+    with pytest.raises(ValidationError):
+        AppConfig(shop_ingredient_reserves={"wheat": -1})
+
+
 def test_marketplace_policies_default_free_claims_enabled_and_validate_semantic_keys() -> None:
     config = AppConfig()
     assert config.marketplace_policy_enabled("free:gems_5_no_ads")

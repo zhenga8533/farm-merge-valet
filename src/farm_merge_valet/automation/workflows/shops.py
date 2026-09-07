@@ -269,7 +269,13 @@ class ShopWorkflow:
                 now,
             )
         )
-        action = plan_shop_action(available_orders, policy, board_space.empty_cells)
+        action = plan_shop_action(
+            available_orders,
+            policy,
+            board_space.empty_cells,
+            getattr(bot.config, "shop_ingredient_reserves", {}),
+            getattr(bot.config, "shop_ingredient_reserve_default", 0),
+        )
         if action is not None:
             bot._set_phase(Phase.SHOPS)
             bot._submit_shop_action(action, health)

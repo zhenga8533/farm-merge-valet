@@ -72,3 +72,10 @@ def test_obstacle_already_clearing_is_not_selected() -> None:
     ready = candidate((2, 0), movable=False, remaining=3, total=3)
 
     assert plan_obstacle_clear([clearing, ready], 5, WorkerState(1, 1)) == ready
+
+
+def test_energy_reserve_blocks_stage_that_would_cross_floor() -> None:
+    obstacle = candidate((1, 0), movable=False, remaining=2, total=3, cost=5)
+
+    assert plan_obstacle_clear([obstacle], 10, WorkerState(1, 1), 5) == obstacle
+    assert plan_obstacle_clear([obstacle], 9, WorkerState(1, 1), 5) is None

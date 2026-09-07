@@ -92,8 +92,10 @@ queues no retries. This prevents a background-tab suspension from being
 mistaken for an action failure.
 
 A strict, default-enabled reward-overlay
-step runs before this gate: Level Up invokes its native close callback, while
-sticker packs use their native Skip and subsequent Collect transitions. Optional
+step runs before this gate. It handles level-up, daily bonus/challenge, timed-event,
+ordinary reward, travel-summary, promotional, sticker album/set, and sticker-pack
+transitions through their native callbacks. Sticker packs use their native Skip and
+subsequent Collect transitions. Optional
 high-rank duplicate raffle proposals are declined through their registered
 "Not now" interaction after its animation resolver is ready. A partially closed
 proposal left by an interrupted transition completes that resolver before pack

@@ -248,9 +248,9 @@ Before each marketplace submission, the runtime rechecks the exact live reward,
 payment type, currency, price, stock, and current flash candidate. A timeout or
 connection loss is treated as ambiguous and is not blindly retried.
 
-Internet or server interruptions are not detected separately yet. The bot keeps
-using passive reconnect behavior whenever the local game loop and live state
-remain available.
+The bot reads the game's authoritative backend connection state and pauses before
+submitting actions while the backend is unavailable. It resumes from fresh live
+state after connectivity and the renderer heartbeat recover.
 
 CDP connections are persistent per browser target, bypass proxy discovery for
 the local DevTools socket, and apply bounded command deadlines. Pause and quit
@@ -258,6 +258,10 @@ cancel in-flight reads; a timeout closes the stale socket, refreshes the target,
 and retries once. Slow reads and stable waiting reasons are logged instead of
 leaving the bot apparently silent. If any required background flag is missing,
 startup pauses without taking actions.
+
+New free marketplace offers are accepted directly from validated live metadata,
+even before the static catalog knows their identity. Unknown paid offers remain
+disabled until their exact candidate and price are known.
 
 ## Configuration
 
@@ -271,6 +275,9 @@ poll is woken immediately. Browser connection, catalog/cache location, Discord
 delivery, and startup-only changes still require the corresponding restart.
 Application shutdown can optionally close the verified managed browser; it never
 closes an unowned browser process.
+Resource floors can reserve energy, train tickets, coins, and crystals. Shop
+ingredient reserves are stored by blueprint ID and prevent an order from consuming
+below the configured amount.
 `.env` and `FMV_*` variables are not read. Invalid configuration is never silently
 overwritten; startup offers an explicit reset to safe defaults. The Browser page
 combines status and restart actions with browser, game-connection, and asset-cache
@@ -340,6 +347,25 @@ ruff check .
 ruff format --check .
 mypy src
 ```
+
+Live reads and explicitly authorized live actions are separate:
+
+```powershell
+pytest tests/integration --live-game
+pytest tests/integration --live-game --live-actions
+```
+
+The second command may mutate the configured game account and currently verifies
+one free marketplace claim. Inspect evolving runtime features and summarize persisted
+activity with:
+
+```powershell
+farm-merge-valet diagnostics inspect-features
+farm-merge-valet diagnostics session-summary --hours 24
+```
+
+Version tags matching `v*` build a wheel, source distribution, and standalone
+Windows desktop executable through the release workflow.
 
 See [Automation Methodology](docs/automation-methodology.md) and
 [Game Mechanics](docs/game-mechanics.md) for additional context. The generated

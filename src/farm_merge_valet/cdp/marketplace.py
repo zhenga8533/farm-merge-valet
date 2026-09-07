@@ -129,6 +129,7 @@ def marketplace_purchase_expression(action: MarketplaceAction, scene_id: int | N
             "paymentKey": action.payment_key,
             "paymentAmount": action.payment_amount,
             "stock": action.expected_stock,
+            "minimumBalanceAfter": action.minimum_balance_after,
         }
     )
     return f"""
@@ -213,7 +214,8 @@ def marketplace_purchase_expression(action: MarketplaceAction, scene_id: int | N
   const inventory = service._inventory || service._services?.inventory ||
     window.__fmvGameplayServices?.ordersService?._inventory;
   const balance = actual.paymentKey && inventory?.getInventoryItem?.(actual.paymentKey)?.amount;
-  if (expected.slotId && (!Number.isInteger(balance) || balance < actual.paymentAmount))
+  if (expected.slotId && (!Number.isInteger(balance) ||
+      balance - actual.paymentAmount < expected.minimumBalanceAfter))
     return {{status: 'rejected', detail: 'insufficient-funds'}};
   const services = service._services || window.__fmvGameplayServices;
   const rewardService = services?.rewardService;

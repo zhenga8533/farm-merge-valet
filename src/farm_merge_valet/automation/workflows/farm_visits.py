@@ -168,7 +168,11 @@ class FarmVisitWorkflow:
             return self._submit(bot, health, FarmVisitActionKind.RETURN)
         if state.panel_open and not bot.config.farm_visit_automation_enabled:
             return self._submit(bot, health, FarmVisitActionKind.CLOSE)
-        if not bot.config.farm_visit_automation_enabled or not state.tickets:
+        if (
+            not bot.config.farm_visit_automation_enabled
+            or state.tickets is None
+            or state.tickets <= getattr(bot.config, "minimum_ticket_reserve", 0)
+        ):
             return False
         if state.panel_open:
             if not state.destination_available:

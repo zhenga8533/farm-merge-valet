@@ -138,3 +138,10 @@ def test_producing_order_has_no_action() -> None:
         )
         is None
     )
+
+
+def test_shop_order_respects_per_ingredient_reserve() -> None:
+    available = order(ShopOrderState.AVAILABLE)
+
+    assert plan_shop_action((available,), ShopPolicy(), 10, {"wheat": 3}) is None
+    assert plan_shop_action((available,), ShopPolicy(), 10, {"wheat": 0}) is not None

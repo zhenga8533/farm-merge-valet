@@ -53,6 +53,7 @@ def plan_obstacle_clear(
     candidates: list[ObstacleCandidate],
     energy: int | None,
     workers: WorkerState | None,
+    minimum_energy_reserve: int = 0,
 ) -> ObstacleCandidate | None:
     available = sorted(
         (candidate for candidate in candidates if not candidate.state.clearing),
@@ -64,7 +65,7 @@ def plan_obstacle_clear(
         or workers is None
         or available[0].state.energy_cost is None
         or available[0].state.required_workers is None
-        or energy < available[0].state.energy_cost
+        or energy - available[0].state.energy_cost < minimum_energy_reserve
         or workers.available < available[0].state.required_workers
     ):
         return None
