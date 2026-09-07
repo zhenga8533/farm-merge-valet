@@ -64,6 +64,11 @@ class LandExpansionWorkflow:
         if current is None:
             self.pending = None
             bot._actions().complete(OperationKind.LAND_EXPANSION, self._key(pending.candidate))
+            currency = (
+                ExpansionCurrency.GEMS
+                if pending.candidate.premium
+                else ExpansionCurrency.COINS
+            )
             log_event(
                 logger,
                 logging.INFO,
@@ -74,6 +79,8 @@ class LandExpansionWorkflow:
                 area_id=pending.candidate.area_id,
                 premium=pending.candidate.premium,
                 cell_count=pending.candidate.cell_count,
+                currency=currency.value,
+                cost=pending.candidate.cost(currency),
             )
             return True
         if age < _ACTION_MAX_PENDING_SECONDS or not health.heartbeat_advancing:

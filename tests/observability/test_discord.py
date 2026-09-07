@@ -43,6 +43,15 @@ class _FakeClient:
         self.requests.append({"method": "PATCH", "url": url, **kwargs})
         return _FakeResponse()
 
+
+def _request_payload(request: dict[str, object]) -> dict[str, object]:
+    payload = request.get("json")
+    if isinstance(payload, dict):
+        return payload
+    data = request.get("data")
+    assert isinstance(data, dict)
+    return json.loads(str(data["payload_json"]))
+
     def delete(self, url: str, **kwargs: object) -> _FakeResponse:
         self.requests.append({"method": "DELETE", "url": url, **kwargs})
         return _FakeResponse()
@@ -110,7 +119,7 @@ def test_webhook_routes_lifecycle_and_summarizes_actions(monkeypatch, tmp_path) 
     handler.shutdown()
 
     posts = [request for request in _FakeClient.requests if request["method"] == "POST"]
-    embeds = [post["json"]["embeds"][0] for post in posts]
+    embeds = [_request_payload(post)["embeds"][0] for post in posts]
     assert any(embed["title"] == "Game runtime ready" for embed in embeds)
     assert any(
         any(
@@ -140,18 +149,21 @@ def test_webhook_routes_lifecycle_and_summarizes_actions(monkeypatch, tmp_path) 
     assert not any(
         embed.get("footer", {}).get("text") == "INFO · crate.claim_completed" for embed in embeds
     )
-    assert all(post["json"]["allowed_mentions"] == {"parse": []} for post in posts)
+    assert all(_request_payload(post)["allowed_mentions"] == {"parse": []} for post in posts)
     notification_index = next(
         index
         for index, request in enumerate(_FakeClient.requests)
-        if request.get("json", {}).get("embeds", [{}])[0].get("title") == "Game runtime ready"
+        if _request_payload(request).get("embeds", [{}])[0].get("title")
+        == "Game runtime ready"
     )
-    assert _FakeClient.requests[notification_index + 1]["method"] == "DELETE"
-    replacement = _FakeClient.requests[notification_index + 2]
-    assert replacement["method"] == "POST"
+    replacement = _FakeClient.requests[notification_index + 1]
+    assert replacement["method"] == "PATCH"
     assert replacement["json"]["embeds"][0]["footer"]["text"] == "farm-merge-valet.status"
     assert "Actions 1" in replacement["json"]["embeds"][0]["fields"][3]["value"]
     assert "Crates 2" in replacement["json"]["embeds"][0]["fields"][3]["value"]
+    chart_posts = [post for post in posts if "files" in post]
+    assert chart_posts
+    assert chart_posts[0]["files"]["files[0]"][0] == "activity-timeline.png"
 
 
 def test_webhook_rate_limits_duplicate_warning_delivery(monkeypatch, tmp_path) -> None:
@@ -181,7 +193,7 @@ def test_webhook_rate_limits_duplicate_warning_delivery(monkeypatch, tmp_path) -
         post
         for post in _FakeClient.requests
         if post["method"] == "POST"
-        if post["json"]["embeds"][0].get("footer", {}).get("text")
+        if _request_payload(post)["embeds"][0].get("footer", {}).get("text")
         == "WARNING · runtime.unavailable"
     ]
     assert len(immediate) == 1

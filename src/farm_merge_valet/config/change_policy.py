@@ -20,6 +20,8 @@ BOT_RESTART_FIELDS = frozenset(
         "discord_webhook_url",
         "webhook_summary_interval",
         "webhook_status_interval",
+        "webhook_notification_profile",
+        "webhook_include_charts",
         "catalog_dir",
         "atlas_cache_dir",
         "start_paused",

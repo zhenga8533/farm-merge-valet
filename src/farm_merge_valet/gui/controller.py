@@ -244,6 +244,8 @@ class ApplicationController(QObject):
                 webhook,
                 config.webhook_summary_interval,
                 config.webhook_status_interval,
+                notification_profile=config.webhook_notification_profile,
+                include_charts=config.webhook_include_charts,
             ):
                 recovery_attempted = False
                 while not self._shutting_down and not self._stopping:

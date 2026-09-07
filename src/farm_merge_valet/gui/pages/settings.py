@@ -169,6 +169,20 @@ class SettingsPage(ConfigFormPage):
         self._add_form_row(notifications_form, "Discord webhook", webhook)
 
         notifications_advanced, form = disclosure_section("Advanced timing")
+        profile = FocusAwareComboBox()
+        profile.set_choices(
+            (("Balanced", "balanced"), ("Minimal", "minimal"), ("Detailed", "detailed"))
+        )
+        profile.set_current_value(config.webhook_notification_profile)
+        profile.setAccessibleName("Webhook notification profile")
+        profile.currentIndexChanged.connect(
+            lambda _index: self._request("webhook_notification_profile", profile.current_value())
+        )
+        self._register_control(
+            "webhook_notification_profile", profile, profile.set_current_value
+        )
+        self._add_form_row(form, "Notification detail", profile)
+        self._add_toggle(form, "Include activity charts", "webhook_include_charts")
         self._add_float(form, "Webhook status interval", "webhook_status_interval", 0, 3600, 1)
         self._add_float(form, "Webhook summary interval", "webhook_summary_interval", 60, 86400, 1)
         self.notifications_advanced_section = notifications_advanced

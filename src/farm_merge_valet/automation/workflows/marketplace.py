@@ -83,6 +83,9 @@ class MarketplaceWorkflow:
                 "Marketplace purchase confirmed for %s.",
                 pending.action.policy_key,
                 policy_key=pending.action.policy_key,
+                payment_type=pending.action.payment_type,
+                payment_key=pending.action.payment_key,
+                payment_amount=pending.action.payment_amount,
                 elapsed_seconds=age,
                 remaining_stock=current.remaining_stock,
             )

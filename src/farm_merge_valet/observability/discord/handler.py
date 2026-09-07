@@ -16,6 +16,7 @@ from threading import Lock, Thread
 import httpx
 
 from farm_merge_valet.config import user_data_root
+from farm_merge_valet.observability.discord.charts import ActivityChart, DiscordAttachment
 from farm_merge_valet.observability.discord.status import DiscordStatusMixin, StatusState
 from farm_merge_valet.observability.discord.webhook import DiscordWebhookTransportMixin
 from farm_merge_valet.observability.logging import (
@@ -55,6 +56,7 @@ _IMMEDIATE_STATUS_EVENTS = frozenset(
 @dataclass(frozen=True)
 class _PostMessage:
     payload: dict[str, object]
+    attachment: DiscordAttachment | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,8 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
         status_interval: float = 60.0,
         *,
         status_state_path: Path = _DEFAULT_STATUS_STATE_PATH,
+        notification_profile: str = "balanced",
+        include_charts: bool = True,
     ) -> None:
         if not url.startswith("https://"):
             raise ValueError("Discord webhook URL must use HTTPS.")
@@ -80,6 +84,9 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
         self._summary_interval = summary_interval
         self._status_interval = status_interval
         self._status_state_path = status_state_path
+        self._notification_profile = notification_profile
+        self._include_charts = include_charts
+        self._activity_chart = ActivityChart(summary_interval)
         self._webhook_fingerprint = hashlib.sha256(url.encode()).hexdigest()[:16]
         self._status_message_id = self._load_status_message_id()
         self._queue: Queue[_PostMessage | _RefreshStatus | object] = Queue(maxsize=_QUEUE_CAPACITY)
@@ -137,8 +144,12 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
                 now = time.monotonic()
                 if now >= self._next_summary_at:
                     summary = self._take_summary(now)
-                    if summary is not None and self._send(client, summary) is not None:
-                        self._refresh_status(client, now, replace=True)
+                    if summary is not None:
+                        attachment = (
+                            self._activity_chart.render(now) if self._include_charts else None
+                        )
+                        self._send(client, summary, attachment)
+                        self._refresh_status(client, now, replace=False)
                     self._next_summary_at = now + self._summary_interval
                     self._next_status_at = (
                         now + self._status_interval if self._status_interval > 0 else float("inf")
@@ -148,14 +159,20 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
                     self._next_status_at = now + self._status_interval
                 if item is _STOP:
                     final_summary = self._take_summary(now, final=True)
-                    if final_summary is not None and self._send(client, final_summary) is not None:
-                        self._refresh_status(client, now, replace=True)
+                    if final_summary is not None:
+                        attachment = (
+                            self._activity_chart.render(now, final=True)
+                            if self._include_charts
+                            else None
+                        )
+                        self._send(client, final_summary, attachment)
+                        self._refresh_status(client, now, replace=False)
                     else:
                         self._refresh_status(client, now, replace=False)
                     return
                 if isinstance(item, _PostMessage):
-                    if self._send(client, item.payload) is not None:
-                        self._refresh_status(client, now, replace=True)
+                    if self._send(client, item.payload, item.attachment) is not None:
+                        self._refresh_status(client, now, replace=False)
                         self._next_status_at = (
                             now + self._status_interval
                             if self._status_interval > 0
@@ -177,12 +194,21 @@ def discord_webhook_sink(
     url: str | None,
     summary_interval: float,
     status_interval: float = 60.0,
+    *,
+    notification_profile: str = "balanced",
+    include_charts: bool = True,
 ) -> Iterator[None]:
     """Attach the Discord sink only for the bot run command."""
     if url is None:
         yield
         return
-    handler = DiscordWebhookHandler(url, summary_interval, status_interval)
+    handler = DiscordWebhookHandler(
+        url,
+        summary_interval,
+        status_interval,
+        notification_profile=notification_profile,
+        include_charts=include_charts,
+    )
     with logging_sink(handler):
         try:
             log_event(

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from threading import Lock
 
+from farm_merge_valet.observability.discord.charts import ActivityChart
+
 _INFO_COLOR = 0x3498DB
 _WARNING_COLOR = 0xF39C12
 _ERROR_COLOR = 0xE74C3C
@@ -25,6 +27,13 @@ _EVENT_TITLES = {
     "runtime.ready": "Game runtime ready",
 }
 _LIFECYCLE_EVENTS = frozenset(_EVENT_TITLES)
+_DETAILED_EVENTS = frozenset(
+    {
+        "farm_visit.return_confirmed",
+        "land_expansion.confirmed",
+        "marketplace.purchase_confirmed",
+    }
+)
 
 
 @dataclass
@@ -35,6 +44,7 @@ class StatusState:
     phase: str = "Unknown"
     last_activity: str = "No successful action yet"
     remaining_crates: int | None = None
+    wait_reason: str | None = None
 
 
 class DiscordStatusMixin:
@@ -46,6 +56,8 @@ class DiscordStatusMixin:
     _last_warning_sent: dict[tuple[str, str], float]
     _started_at: float
     _clock: Callable[[], float]
+    _notification_profile: str
+    _activity_chart: ActivityChart
 
     def _update_status(
         self,
@@ -92,6 +104,7 @@ class DiscordStatusMixin:
             elif event == "bot.waiting":
                 self._status.mode = "Waiting"
                 reason = context.get("reason")
+                self._status.wait_reason = reason if isinstance(reason, str) else None
                 if isinstance(reason, str) and (
                     "heartbeat" in reason or "runtime" in reason or "board state" in reason
                 ):
@@ -106,6 +119,7 @@ class DiscordStatusMixin:
                 tier = context.get("item_tier")
                 self._status.last_activity = f"{effect}: {item} tier {tier}"
                 self._status.mode = "Running"
+                self._status.wait_reason = None
             elif event.startswith("interaction."):
                 self._status.phase = "Interact with Tiles"
                 if event in {"interaction.planned", "interaction.submitted"}:
@@ -115,6 +129,7 @@ class DiscordStatusMixin:
                 blueprint = str(context.get("blueprint_id", "item"))
                 self._status.last_activity = f"Interacted with {kind}: {blueprint}"
                 self._status.mode = "Running"
+                self._status.wait_reason = None
             elif event.startswith("crate."):
                 self._status.phase = "Claim Crates"
             elif event.startswith("shop."):
@@ -129,6 +144,24 @@ class DiscordStatusMixin:
                 recipe_id = str(context.get("recipe_id", "recipe"))
                 activity = "Started" if event.endswith("started") else "Claimed"
                 self._status.last_activity = f"{activity} shop recipe: {recipe_id}"
+                self._status.mode = "Running"
+            if event == "marketplace.purchase_confirmed":
+                self._status.phase = "Marketplace"
+                offer = context.get("policy_key", "offer")
+                self._status.last_activity = f"Purchased marketplace offer: {offer}"
+                self._status.mode = "Running"
+            elif event == "farm_visit.return_confirmed":
+                self._status.phase = "Farm Visits"
+                self._status.last_activity = "Completed a farm visit"
+                self._status.mode = "Running"
+            elif event == "land_expansion.confirmed":
+                self._status.phase = "Land Expansion"
+                cells = context.get("cell_count", 0)
+                self._status.last_activity = f"Expanded the board by {cells} cells"
+                self._status.mode = "Running"
+            elif event == "storage_bubble.confirmed":
+                self._status.phase = "Storage Bubbles"
+                self._status.last_activity = "Popped a storage bubble"
                 self._status.mode = "Running"
             if record.levelno >= logging.ERROR:
                 self._status.mode = "Error"
@@ -149,6 +182,23 @@ class DiscordStatusMixin:
             metric_updates["shop.started"] += 1
         elif event == "shop.order_claimed":
             metric_updates["shop.claimed"] += 1
+        elif event == "marketplace.purchase_confirmed":
+            metric_updates["workflow.marketplace"] += 1
+            payment_type = context.get("payment_key")
+            payment_amount = context.get("payment_amount")
+            if isinstance(payment_type, str) and isinstance(payment_amount, int):
+                metric_updates[f"spent.{payment_type}"] += payment_amount
+        elif event.startswith("farm_visit.") and event.endswith("_confirmed"):
+            kind = event.removeprefix("farm_visit.").removesuffix("_confirmed")
+            metric_updates[f"workflow.{kind}"] += 1
+        elif event == "land_expansion.confirmed":
+            metric_updates["workflow.land_expansion"] += 1
+            currency = context.get("currency")
+            cost = context.get("cost")
+            if isinstance(currency, str) and isinstance(cost, int):
+                metric_updates[f"spent.{currency}"] += cost
+        elif event == "storage_bubble.confirmed":
+            metric_updates["workflow.storage_bubble"] += 1
         if logging.WARNING <= level < logging.ERROR:
             metric_updates["warnings"] += 1
         if level >= logging.ERROR:
@@ -157,10 +207,17 @@ class DiscordStatusMixin:
             self._metrics.update(metric_updates)
         with self._status_lock:
             self._session_metrics.update(metric_updates)
+        record_chart = getattr(self._activity_chart, "record", None)
+        if callable(record_chart):
+            record_chart(self._clock(), metric_updates)
 
     def _should_notify(self, record: logging.LogRecord, event: str) -> bool:
         if event in _LIFECYCLE_EVENTS or record.levelno >= logging.ERROR:
             return True
+        if self._notification_profile == "detailed" and event in _DETAILED_EVENTS:
+            return True
+        if self._notification_profile == "minimal":
+            return False
         if record.levelno < logging.WARNING:
             return False
         now = self._clock()
@@ -201,7 +258,7 @@ class DiscordStatusMixin:
         if not metrics and final:
             return None
         elapsed = max(0.0, now - self._started_at)
-        period = "Final" if final else "Hourly"
+        period = "Final" if final else "Periodic"
         actions = sum(metrics[f"action.{effect}"] for effect in ("move", "swap", "merge"))
         immediate_interactions = metrics["interaction.immediate"]
         producers = metrics["interaction.producer"] + metrics["interaction.depleted-producer"]
@@ -252,6 +309,24 @@ class DiscordStatusMixin:
                             ),
                             "inline": False,
                         },
+                        {
+                            "name": "Automated workflows",
+                            "value": (
+                                f"Marketplace {metrics['workflow.marketplace']} · "
+                                f"Farm visits {metrics['workflow.return']} · "
+                                f"Land {metrics['workflow.land_expansion']} · "
+                                f"Bubbles {metrics['workflow.storage_bubble']}"
+                            ),
+                            "inline": False,
+                        },
+                        {
+                            "name": "Recorded spending",
+                            "value": (
+                                f"Coins {metrics['spent.coins']} · "
+                                f"Gems {metrics['spent.gems']}"
+                            ),
+                            "inline": True,
+                        },
                     ],
                     "footer": {"text": "farm-merge-valet.summary"},
                 }
@@ -285,12 +360,15 @@ class DiscordStatusMixin:
         board_activity = f"Interactions {interactions} · Crates {metrics['crates']}"
         if status.remaining_crates is not None:
             board_activity += f" · Supply remaining {status.remaining_crates}"
+        mode_detail = status.mode
+        if status.wait_reason and status.mode == "Waiting":
+            mode_detail = f"Waiting — {status.wait_reason[:120]}"
         return {
             "username": "Farm Merge Valet",
             "allowed_mentions": {"parse": []},
             "embeds": [
                 {
-                    "title": f"Current status · {status.mode}",
+                    "title": f"Current status · {mode_detail}",
                     "description": f"Session uptime: **{uptime}**",
                     "color": color,
                     "timestamp": datetime.now(UTC).isoformat(),
@@ -313,6 +391,15 @@ class DiscordStatusMixin:
                             "value": (
                                 f"Started {metrics['shop.started']} / "
                                 f"Claimed {metrics['shop.claimed']}"
+                            ),
+                            "inline": True,
+                        },
+                        {
+                            "name": "Workflows",
+                            "value": (
+                                f"Marketplace {metrics['workflow.marketplace']} · "
+                                f"Visits {metrics['workflow.return']} · "
+                                f"Land {metrics['workflow.land_expansion']}"
                             ),
                             "inline": True,
                         },

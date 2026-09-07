@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Literal
 
 import httpx
 
+from farm_merge_valet.observability.discord.charts import DiscordAttachment
 from farm_merge_valet.observability.logging import log_event
 
 logger = logging.getLogger(__name__)
@@ -81,18 +83,63 @@ class DiscordWebhookTransportMixin:
             detail=detail,
         )
 
-    def _send(self, client: httpx.Client, payload: dict[str, object]) -> httpx.Response | None:
-        try:
-            response = client.post(
-                self._url,
-                params={"wait": "true"},
-                json=payload,
-            )
-            response.raise_for_status()
-            return response
-        except httpx.HTTPError as exc:
-            self._log_delivery_failure(exc)
-            return None
+    def _send(
+        self,
+        client: httpx.Client,
+        payload: dict[str, object],
+        attachment: DiscordAttachment | None = None,
+    ) -> httpx.Response | None:
+        if attachment is None:
+            data = None
+            files = None
+        else:
+            embeds = payload.get("embeds")
+            if isinstance(embeds, list) and embeds and isinstance(embeds[0], dict):
+                embeds[0]["image"] = {"url": f"attachment://{attachment.filename}"}
+            data = {"payload_json": json.dumps(payload)}
+            files = {
+                "files[0]": (
+                    attachment.filename,
+                    attachment.content,
+                    attachment.content_type,
+                )
+            }
+        last_error: httpx.HTTPError | None = None
+        for attempt in range(3):
+            try:
+                if attachment is None:
+                    response = client.post(
+                        self._url, params={"wait": "true"}, json=payload
+                    )
+                else:
+                    response = client.post(
+                        self._url,
+                        params={"wait": "true"},
+                        data=data,
+                        files=files,
+                    )
+                response.raise_for_status()
+                return response
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                if exc.response.status_code == 429:
+                    try:
+                        retry_after = float(exc.response.json().get("retry_after", 1.0))
+                    except (AttributeError, TypeError, ValueError):
+                        retry_after = 1.0
+                elif exc.response.status_code >= 500:
+                    retry_after = 0.25 * (2**attempt)
+                else:
+                    break
+                if attempt < 2:
+                    time.sleep(min(retry_after, 5.0))
+            except httpx.HTTPError as exc:
+                last_error = exc
+                if attempt < 2:
+                    time.sleep(0.25 * (2**attempt))
+        if last_error is not None:
+            self._log_delivery_failure(last_error)
+        return None
 
     def _status_message_url(self) -> str | None:
         if self._status_message_id is None:

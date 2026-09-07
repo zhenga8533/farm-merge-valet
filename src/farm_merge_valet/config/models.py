@@ -137,6 +137,8 @@ class AppConfig(BaseModel):
     discord_webhook_url: SecretStr | None = None
     webhook_summary_interval: float = Field(default=3600.0, ge=60.0, le=86400.0)
     webhook_status_interval: float = Field(default=60.0, ge=0.0, le=3600.0)
+    webhook_notification_profile: Literal["minimal", "balanced", "detailed"] = "balanced"
+    webhook_include_charts: bool = True
 
     theme: Literal["system", "dark", "light"] = "system"
     start_minimized: bool = False

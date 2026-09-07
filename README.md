@@ -324,18 +324,19 @@ plain UTF-8 text without terminal color codes.
 
 Enter an HTTPS Discord webhook in Settings to enable the asynchronous sink.
 Browser, runtime, pause/resume, quit, and stop events are sent immediately, as are
-warnings and errors; duplicate warning messages are rate-limited. Messages use
-compact embeds with severity colors, readable titles, timestamps, and stable
-event identifiers. Routine actions are not sent individually. Instead, the
-hourly summary reports move, swap, merge, board-interaction, crate, warning, and error
-totals. A final partial summary is sent during a clean shutdown. The webhook
-also maintains one current-status embed. It is edited every 60 seconds by
-default and immediately on major state changes. After an alert or summary is posted, the previous status is
-deleted and recreated so the refreshed status remains the channel's latest
-message; ordinary interval updates edit it in place. Its message ID is stored
+errors. The notification profile controls whether rate-limited warnings and important
+workflow completions are also sent. Messages use compact embeds with severity colors,
+readable titles, timestamps, and stable event identifiers. Routine actions are not sent
+individually. Instead, the configurable periodic summary reports item, board, shop,
+marketplace, farm-visit, land-expansion, storage-bubble, warning, and error totals. An
+optional PNG timeline visualizes the same structured activity without capturing the
+game screen. A final partial summary is sent during a clean shutdown. The webhook also
+maintains one current-status embed, edited in place on its configured interval and after
+major state changes. Its message ID is stored
 under the per-user application-data directory and reused across runs. Set the
 status interval to `0` to disable periodic edits without disabling event-driven
-updates. Webhook failures are logged locally and never block the bot loop.
+updates. Transient failures and Discord rate limits are retried; terminal failures are
+logged locally and never block the bot loop.
 Browser-management commands continue writing their requested results directly
 to the terminal.
 
