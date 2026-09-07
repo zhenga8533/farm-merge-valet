@@ -231,6 +231,16 @@ _BOARD_ARMED_EXPRESSION = r"""
 })()
 """
 
+_RUNTIME_BOOTSTRAP_EXPRESSION = r"""
+(() => {
+  const canvas = document.querySelector('canvas');
+  return document.readyState === 'complete' &&
+    Array.isArray(window.webpackChunkfarm_merge_game) &&
+    window.webpackChunkfarm_merge_game.length > 0 &&
+    canvas instanceof HTMLCanvasElement && canvas.width > 0 && canvas.height > 0;
+})()
+"""
+
 _DISCOVERY_DIAGNOSTICS_EXPRESSION = r"""
 (() => window.__fmvRuntimeDiscovery || {
   strategy: 'not-run', services: false, pickSubscribers: 0,

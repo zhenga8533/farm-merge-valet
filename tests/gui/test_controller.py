@@ -102,7 +102,7 @@ def test_browser_refresh_runs_off_the_gui_thread(tmp_path, monkeypatch) -> None:
 
     assert worker_threads and worker_threads[0] != threading.get_ident()
     assert busy_states == [True, False]
-    assert statuses[-1] == "chrome ready · game loaded"
+    assert statuses[-1] == "chrome ready · game frame available"
     controller.shutdown()
     app.processEvents()
 

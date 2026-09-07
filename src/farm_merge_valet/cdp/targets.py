@@ -54,6 +54,8 @@ REQUIRED_BACKGROUND_FLAGS = (
     "--disable-renderer-backgrounding",
     "--disable-backgrounding-occluded-windows",
 )
+_VERSION_PAGE_TIMEOUT = 2.0
+_VERSION_PAGE_POLL_INTERVAL = 0.1
 
 
 def is_game_frame_url(value: object) -> bool:
@@ -145,13 +147,21 @@ def _parse_version_page(text: str) -> dict[str, str]:
     return values
 
 
-def _version_page_metadata(browser_ws: str) -> dict[str, str]:
+def _version_page_metadata(
+    browser_ws: str, *, cancel_event: Event | None = None
+) -> dict[str, str]:
     for url in ("chrome://version/", "edge://version/", "brave://version/"):
-        created = _command_target(
-            browser_ws,
-            "Target.createTarget",
-            {"url": url, "background": True, "hidden": True},
-        )
+        try:
+            created = _command_target(
+                browser_ws,
+                "Target.createTarget",
+                {"url": url, "background": True, "hidden": True},
+                cancel_event=cancel_event,
+            )
+        except CdpCancelledError:
+            raise
+        except CdpConnectionError:
+            continue
         target_id = created.get("targetId")
         if not isinstance(target_id, str):
             continue
@@ -160,18 +170,38 @@ def _version_page_metadata(browser_ws: str) -> dict[str, str]:
             ws_url = urlunsplit(
                 (browser_parts.scheme, browser_parts.netloc, f"/devtools/page/{target_id}", "", "")
             )
-            time.sleep(0.1)
-            result = _command_target(
-                ws_url,
-                "Runtime.evaluate",
-                {"expression": "document.body?.innerText || ''", "returnByValue": True},
-            )
-            value = result.get("result", {}).get("value")
-            if isinstance(value, str) and (metadata := _parse_version_page(value)):
-                return metadata
+            deadline = time.monotonic() + _VERSION_PAGE_TIMEOUT
+            while time.monotonic() < deadline:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise CdpCancelledError("Browser metadata inspection was cancelled.")
+                try:
+                    result = _command_target(
+                        ws_url,
+                        "Runtime.evaluate",
+                        {
+                            "expression": "document.body?.innerText || ''",
+                            "returnByValue": True,
+                        },
+                        cancel_event=cancel_event,
+                    )
+                except CdpCancelledError:
+                    raise
+                except CdpConnectionError:
+                    result = {}
+                value = result.get("result", {}).get("value")
+                if isinstance(value, str) and (metadata := _parse_version_page(value)):
+                    return metadata
+                time.sleep(_VERSION_PAGE_POLL_INTERVAL)
         finally:
             try:
-                _command_target(browser_ws, "Target.closeTarget", {"targetId": target_id})
+                _command_target(
+                    browser_ws,
+                    "Target.closeTarget",
+                    {"targetId": target_id},
+                    cancel_event=cancel_event,
+                )
+            except CdpCancelledError:
+                raise
             except CdpConnectionError:
                 pass
     raise CdpConnectionError("Could not inspect the browser's internal version page.")
@@ -203,7 +233,7 @@ def read_browser_metadata(port: int, *, cancel_event: Event | None = None) -> di
 
     page_metadata: dict[str, str] = {}
     if arguments is None:
-        page_metadata = _version_page_metadata(browser_ws)
+        page_metadata = _version_page_metadata(browser_ws, cancel_event=cancel_event)
     command_line = (
         subprocess.list2cmdline(arguments)
         if arguments is not None

@@ -875,6 +875,7 @@ def test_discovery_rearms_a_stale_cached_board(monkeypatch) -> None:
     responses = iter(
         [
             False,
+            True,
             False,
             True,
             {"status": "found", "sceneId": 5, "detail": None},
@@ -895,6 +896,7 @@ def test_discovery_rearms_a_stale_cached_board(monkeypatch) -> None:
     monkeypatch.setattr(
         "farm_merge_valet.cdp.runtime.apply_background_overrides", lambda *_, **__: None
     )
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime._RUNTIME_BOOTSTRAP_SETTLE_SECONDS", 0)
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", lambda *_, **__: next(responses))
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.time.sleep", lambda *_: None)
     monkeypatch.setattr(
@@ -908,10 +910,42 @@ def test_discovery_rearms_a_stale_cached_board(monkeypatch) -> None:
     assert health.available
 
 
+def test_discovery_defers_heap_recovery_until_runtime_bootstrap_settles(monkeypatch) -> None:
+    responses = iter(
+        [
+            False,
+            True,
+            {"frame": 1, "ageMs": 0},
+            {
+                "sceneId": None,
+                "board": False,
+                "heartbeat": 2,
+                "heartbeatAgeMs": 1,
+                "heartbeatInstalled": True,
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.apply_background_overrides", lambda *_, **__: None
+    )
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", lambda *_, **__: next(responses))
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.time.sleep", lambda *_: None)
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.arm_board_store",
+        lambda *_, **__: (_ for _ in ()).throw(AssertionError("heap scan started too early")),
+    )
+
+    health = GameRuntimeAdapter(9222, "Farm").discover()
+
+    assert not health.available
+    assert health.detail == "game-runtime-initializing"
+
+
 def test_failed_board_recovery_preserves_the_specific_status(monkeypatch) -> None:
     responses = iter(
         [
             False,
+            True,
             False,
             True,
             {"frame": 20, "ageMs": 0},
@@ -927,6 +961,7 @@ def test_failed_board_recovery_preserves_the_specific_status(monkeypatch) -> Non
     monkeypatch.setattr(
         "farm_merge_valet.cdp.runtime.apply_background_overrides", lambda *_, **__: None
     )
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime._RUNTIME_BOOTSTRAP_SETTLE_SECONDS", 0)
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", lambda *_, **__: next(responses))
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.time.sleep", lambda *_: None)
     monkeypatch.setattr(

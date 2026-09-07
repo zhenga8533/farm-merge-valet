@@ -124,7 +124,7 @@ class CatalogSyncService:
                     browser_status.detail
                     or "The managed browser is not compatible with catalog synchronization."
                 )
-            if browser_status.game_loaded:
+            if browser_status.game_frame_available:
                 if not discovery_announced:
                     self._callbacks.status_changed("Discovering items, shops, and recipes…")
                     discovery_announced = True

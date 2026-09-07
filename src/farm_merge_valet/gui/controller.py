@@ -213,7 +213,7 @@ class ApplicationController(QObject):
                 raise BrowserManagerError(
                     browser_status.detail or "A compatible managed browser is not running."
                 )
-            if config.browser_auto_launch and not browser_status.game_loaded:
+            if config.browser_auto_launch and not browser_status.game_frame_available:
                 browser_status = manager.ensure_game_open()
             self.browser_status_changed.emit(self._browser_status_text(browser_status))
             self.browser_state_changed.emit(browser_status)
@@ -222,11 +222,11 @@ class ApplicationController(QObject):
                 logger,
                 logging.INFO,
                 "browser.ready",
-                "Managed browser ready: %s (game_loaded=%s).",
+                "Managed browser ready: %s (game_frame_available=%s).",
                 browser_name,
-                browser_status.game_loaded,
+                browser_status.game_frame_available,
                 browser=browser_name,
-                game_loaded=browser_status.game_loaded,
+                game_frame_available=browser_status.game_frame_available,
                 managed=browser_status.managed,
             )
             if self._stopping:
@@ -348,7 +348,7 @@ class ApplicationController(QObject):
     def _browser_status_text(status: BrowserStatus) -> str:
         if not status.running:
             return status.detail or "Managed browser is not running"
-        loaded = "game loaded" if status.game_loaded else "waiting for game"
+        loaded = "game frame available" if status.game_frame_available else "waiting for game"
         return f"{status.kind.value if status.kind else 'Browser'} ready · {loaded}"
 
     def refresh_browser(self) -> None:

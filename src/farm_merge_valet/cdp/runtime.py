@@ -45,6 +45,7 @@ from farm_merge_valet.cdp.scripts import (
     _READ_SHOP_ORDERS_EXPRESSION,
     _READ_STORAGE_BUBBLES_EXPRESSION,
     _READ_WORKERS_EXPRESSION,
+    _RUNTIME_BOOTSTRAP_EXPRESSION,
     _crate_expression,
     _dismiss_overlay_expression,
     _drop_expression,
@@ -83,6 +84,7 @@ new Promise((resolve) => {
 """
 _RECOVERY_COOLDOWNS = (5.0, 15.0, 60.0, 300.0)
 _MAX_HEARTBEAT_AGE_MS = 1500.0
+_RUNTIME_BOOTSTRAP_SETTLE_SECONDS = 2.0
 
 
 class GameRuntimeAdapter:
@@ -112,6 +114,7 @@ class GameRuntimeAdapter:
         self._snapshot_metrics: deque[RuntimeReadMetrics] = deque(maxlen=240)
         self._last_snapshot_summary_at = time.monotonic()
         self._heartbeat_stalled = False
+        self._runtime_bootstrap_ready_at: float | None = None
 
     def set_cancel_event(self, cancel_event: Event) -> None:
         self._cancel_event = cancel_event
@@ -228,8 +231,13 @@ class GameRuntimeAdapter:
         raw: object = None
         discovery_attempted = False
         if not cached_board_is_current and not is_cancelled():
-            self._discovery_detail = "board-recovery-pending"
-            recovered = self._recover_board_from_heap(force=False)
+            bootstrap_ready = self._runtime_bootstrap_ready()
+            recovered = False
+            if bootstrap_ready:
+                self._discovery_detail = "board-recovery-pending"
+                recovered = self._recover_board_from_heap(force=False)
+            else:
+                self._discovery_detail = "game-runtime-initializing"
             self._reload_recovery_pending = False
             if recovered and not is_cancelled():
                 refresh_started = time.monotonic()
@@ -287,6 +295,16 @@ class GameRuntimeAdapter:
             scene_id=health.scene_id,
         )
         return health
+
+    def _runtime_bootstrap_ready(self) -> bool:
+        if self._evaluate(_RUNTIME_BOOTSTRAP_EXPRESSION) is not True:
+            self._runtime_bootstrap_ready_at = None
+            return False
+        now = time.monotonic()
+        if self._runtime_bootstrap_ready_at is None:
+            self._runtime_bootstrap_ready_at = now
+            return _RUNTIME_BOOTSTRAP_SETTLE_SECONDS <= 0
+        return now - self._runtime_bootstrap_ready_at >= _RUNTIME_BOOTSTRAP_SETTLE_SECONDS
 
     def _recover_board_from_heap(self, *, force: bool) -> bool:
         key = (self.port, self.page_title)

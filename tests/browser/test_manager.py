@@ -94,6 +94,7 @@ def test_status_verifies_profile_flags_and_ownership(tmp_path, monkeypatch) -> N
     assert status.compatible
     assert status.managed
     assert status.game_loaded
+    assert status.game_frame_available
     assert status.missing_switches == ()
 
 

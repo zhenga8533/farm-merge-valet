@@ -117,7 +117,7 @@ def test_try_start_game_clicks_launcher_for_matching_page(monkeypatch) -> None:
     )
     commands: list[tuple[str, str, dict[str, object] | None]] = []
 
-    def command(ws_url, method, params=None):
+    def command(ws_url, method, params=None, **_kwargs):
         commands.append((ws_url, method, params))
         if method != "Runtime.evaluate":
             return {}
@@ -152,7 +152,7 @@ def test_try_start_game_clicks_launcher_for_matching_page(monkeypatch) -> None:
 def test_version_page_metadata_uses_hidden_target(monkeypatch) -> None:
     commands: list[tuple[str, str, dict[str, object] | None]] = []
 
-    def command(ws_url, method, params=None):
+    def command(ws_url, method, params=None, **_kwargs):
         commands.append((ws_url, method, params))
         if method == "Target.createTarget":
             return {"targetId": "version-target"}
@@ -302,7 +302,7 @@ def test_browser_metadata_uses_version_page_without_enable_automation(monkeypatc
     )
     monkeypatch.setattr(
         "farm_merge_valet.cdp.targets._version_page_metadata",
-        lambda _ws: {
+        lambda _ws, **_kwargs: {
             "Command Line": '"C:\\Chrome\\chrome.exe" --remote-debugging-port=9222',
             "Executable Path": "C:\\Chrome\\chrome.exe",
             "Profile Path": "C:\\Profile\\Default",
@@ -314,6 +314,49 @@ def test_browser_metadata_uses_version_page_without_enable_automation(monkeypatc
     assert metadata["browser"] == "Chrome/151"
     assert metadata["executable_path"] == "C:\\Chrome\\chrome.exe"
     assert metadata["profile_path"] == "C:\\Profile\\Default"
+
+
+def test_version_page_metadata_waits_for_page_content(monkeypatch) -> None:
+    evaluations = iter(("", "Command Line\tchrome.exe --remote-debugging-port=9222"))
+    closed_targets: list[str] = []
+
+    def command(_ws_url, method, params=None, **_kwargs):
+        if method == "Target.createTarget":
+            return {"targetId": "version-page"}
+        if method == "Runtime.evaluate":
+            return {"result": {"value": next(evaluations)}}
+        if method == "Target.closeTarget":
+            closed_targets.append(params["targetId"])
+        return {}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.targets._command_target", command)
+    monkeypatch.setattr("farm_merge_valet.cdp.targets.time.sleep", lambda _seconds: None)
+
+    metadata = _version_page_metadata("ws://127.0.0.1:9222/devtools/browser/id")
+
+    assert metadata["Command Line"] == "chrome.exe --remote-debugging-port=9222"
+    assert closed_targets == ["version-page"]
+
+
+def test_version_page_metadata_tries_next_browser_url(monkeypatch) -> None:
+    created_urls: list[str] = []
+
+    def command(_ws_url, method, params=None, **_kwargs):
+        if method == "Target.createTarget":
+            created_urls.append(params["url"])
+            if params["url"].startswith("chrome:"):
+                raise CdpConnectionError("unsupported URL")
+            return {"targetId": "version-page"}
+        if method == "Runtime.evaluate":
+            return {"result": {"value": "Executable Path\tC:\\Edge\\msedge.exe"}}
+        return {}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.targets._command_target", command)
+
+    metadata = _version_page_metadata("ws://127.0.0.1:9222/devtools/browser/id")
+
+    assert metadata["Executable Path"] == "C:\\Edge\\msedge.exe"
+    assert created_urls == ["chrome://version/", "edge://version/"]
 
 
 def test_cdp_session_reuses_one_connection(monkeypatch) -> None:

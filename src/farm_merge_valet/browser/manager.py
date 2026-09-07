@@ -73,6 +73,11 @@ class BrowserStatus:
     game_loaded: bool = False
     detail: str | None = None
 
+    @property
+    def game_frame_available(self) -> bool:
+        """Whether a matching game iframe exists, independent of runtime readiness."""
+        return self.game_loaded
+
 
 class BrowserManagerError(RuntimeError):
     """Raised when a managed browser operation cannot be completed safely."""
@@ -430,7 +435,7 @@ class BrowserManager:
     def ensure_game_open(self) -> BrowserStatus:
         """Ensure a managed browser has a page for the configured game URL."""
         status = self.ensure_running()
-        if status.game_loaded or not self.settings.game_url:
+        if status.game_frame_available or not self.settings.game_url:
             return status
         if not status.managed:
             raise BrowserManagerError(
@@ -449,7 +454,7 @@ class BrowserManager:
         next_start_attempt_at = 0.0
         while time.monotonic() < deadline:
             status = self.status()
-            if status.game_loaded:
+            if status.game_frame_available:
                 return status
             now = time.monotonic()
             if now >= next_start_attempt_at:
@@ -478,7 +483,7 @@ class BrowserManager:
                     start_attempted = True
             time.sleep(0.25)
         status = self.status()
-        if status.game_loaded:
+        if status.game_frame_available:
             return status
         raise BrowserManagerError(
             "The game did not finish loading after the Play request. "
@@ -492,7 +497,7 @@ class BrowserManager:
             raise BrowserManagerError(
                 "Refusing to recover the game in an unowned browser."
             )
-        if status.game_loaded:
+        if status.game_frame_available:
             reload_game_page(self.settings.cdp_port, self.settings.window_title)
             log_event(
                 logger,
@@ -541,5 +546,6 @@ class BrowserManager:
             "profile_dir": str(status.profile_dir) if status.profile_dir else None,
             "missing_switches": list(status.missing_switches),
             "game_loaded": status.game_loaded,
+            "game_frame_available": status.game_frame_available,
             "detail": status.detail,
         }
