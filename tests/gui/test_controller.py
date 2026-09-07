@@ -121,7 +121,8 @@ def test_game_sync_refreshes_assets_and_upgrade_progress_in_background(
     progress = UpgradeProgress((UpgradeTargetProgress("milk", "cow_4", 2),))
     progress_updates: list[object] = []
 
-    def refresh() -> None:
+    def refresh(*, force: bool = False) -> None:
+        assert force
         worker_threads.append(threading.get_ident())
         release.wait(2)
 
@@ -206,7 +207,7 @@ def test_bot_start_refreshes_upgrade_progress_without_synchronizing_assets(
     )
     monkeypatch.setattr(
         "farm_merge_valet.composition.create_catalog_synchronizer",
-        lambda _config: SimpleNamespace(sync=lambda: asset_syncs.append(True)),
+        lambda _config: SimpleNamespace(sync=lambda **_kwargs: asset_syncs.append(True)),
     )
     controller.upgrade_progress_changed.connect(progress_updates.append)
 
@@ -320,7 +321,7 @@ def test_catalog_setup_launches_game_and_publishes_catalog_before_icons(
     )
     monkeypatch.setattr(
         "farm_merge_valet.composition.create_catalog_synchronizer",
-        lambda _config: SimpleNamespace(sync=lambda: release_icons.wait(2)),
+        lambda _config: SimpleNamespace(sync=lambda **_kwargs: release_icons.wait(2)),
     )
     monkeypatch.setattr(
         "farm_merge_valet.composition.load_item_catalog",
@@ -399,7 +400,7 @@ def test_catalog_setup_keeps_catalog_available_when_icon_sync_fails(tmp_path, mo
         lambda _config: SimpleNamespace(load=lambda: catalog),
     )
 
-    def fail_icon_sync() -> None:
+    def fail_icon_sync(**_kwargs: object) -> None:
         raise RuntimeError("game atlases are unavailable")
 
     monkeypatch.setattr(

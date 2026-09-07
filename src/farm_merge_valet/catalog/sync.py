@@ -22,6 +22,7 @@ from farm_merge_valet.catalog.store import write_item_catalog
 
 _ATLAS_PAGE_SUFFIX = re.compile(r"^(?P<base>.+)-(?P<index>[0-9]+)$")
 _QUALITY_SEGMENTS = ("/low/", "/medium/")
+_SOURCE_INDEX_NAME = ".atlas-sources.json"
 
 
 @dataclass(frozen=True)
@@ -91,12 +92,15 @@ class CatalogSynchronizer:
         self._compile_assets(atlases)
 
     def _fetch_runtime_atlases(self, png_urls: list[str], *, force: bool) -> Atlases:
+        source_index = self._load_source_index()
         pending = [
             url
             for url in png_urls
             if force
             or not _cache_path_for(self.atlas_cache_dir, url, ".png").is_file()
             or not _cache_path_for(self.atlas_cache_dir, _manifest_url(url), ".json").is_file()
+            or source_index.get(_cache_path_for(self.atlas_cache_dir, url, ".png").name)
+            != url
         ]
         self.atlas_cache_dir.mkdir(parents=True, exist_ok=True)
         for offset in range(0, len(pending), 20):
@@ -115,14 +119,38 @@ class CatalogSynchronizer:
                 _cache_path_for(self.atlas_cache_dir, manifest_url, ".json").write_text(
                     manifest, encoding="utf-8"
                 )
+                source_index[_cache_path_for(self.atlas_cache_dir, png_url, ".png").name] = png_url
             print(f"Cached {min(offset + len(batch), len(pending))}/{len(pending)} atlas sheets.")
+        self._write_source_index(source_index)
         return load_cached_atlases(self.atlas_cache_dir)
+
+    def _load_source_index(self) -> dict[str, str]:
+        path = self.atlas_cache_dir / _SOURCE_INDEX_NAME
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(value, dict):
+            return {}
+        return {
+            key: source
+            for key, source in value.items()
+            if isinstance(key, str) and isinstance(source, str)
+        }
+
+    def _write_source_index(self, source_index: dict[str, str]) -> None:
+        if not source_index:
+            return
+        path = self.atlas_cache_dir / _SOURCE_INDEX_NAME
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(source_index, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(path)
 
     def _compile_assets(self, atlases: Atlases) -> None:
         catalog = attach_catalog_variants(atlases, self.catalog_loader())
         _report_uncategorized(catalog)
-        write_item_catalog(self.catalog_dir / "catalog.json", catalog)
         written = compile_catalog_assets(atlases, catalog, self.catalog_dir)
+        write_item_catalog(self.catalog_dir / "catalog.json", catalog)
         print(
             f"Cataloged {len(catalog.items)} game items and recipes and compiled "
             f"{written} atlas frames into {self.catalog_dir}."

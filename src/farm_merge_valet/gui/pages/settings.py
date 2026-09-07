@@ -55,7 +55,7 @@ class SettingsPage(ConfigFormPage):
 
         sections = scrollable_sections(self.page_layout)
 
-        automation, automation_form = settings_section("Automation")
+        automation, automation_form = settings_section("Automation behavior")
         self._add_int(
             automation_form,
             "Merge-space reserve",
@@ -85,8 +85,11 @@ class SettingsPage(ConfigFormPage):
             "Automatically claim supply crates",
             "auto_claim_supply_crates",
         )
+        sections.addWidget(automation)
+
+        safeguards, safeguards_form = settings_section("Resource safeguards")
         self._add_toggle(
-            automation_form,
+            safeguards_form,
             "Allow obstacle energy spending",
             "allow_obstacle_stage_starts",
         )
@@ -95,48 +98,65 @@ class SettingsPage(ConfigFormPage):
             ("Minimum train-ticket reserve", "minimum_ticket_reserve"),
             ("Minimum coin reserve", "minimum_coin_reserve"),
             ("Minimum crystal reserve", "minimum_gem_reserve"),
-            ("Default shop-ingredient reserve", "shop_ingredient_reserve_default"),
         ):
-            self._add_int(automation_form, label, field, 0, 1_000_000_000)
+            self._add_int(safeguards_form, label, field, 0, 1_000_000_000)
+        sections.addWidget(safeguards)
+
+        workflows, workflows_form = settings_section("Optional workflows")
         self._add_toggle(
-            automation_form,
+            workflows_form,
             "Visit other farms automatically",
             "farm_visit_automation_enabled",
         )
-        self._add_toggle(
-            automation_form,
+        self.land_expansion_toggle = self._add_toggle(
+            workflows_form,
             "Expand farm land automatically",
             "land_expansion_automation_enabled",
         )
         self._add_int(
-            automation_form,
+            workflows_form,
             "Maximum coins per expansion",
             "land_expansion_max_coin_cost",
             0,
             1_000_000_000,
         )
         self._add_int(
-            automation_form,
+            workflows_form,
             "Maximum crystals per expansion",
             "land_expansion_max_gem_cost",
             0,
             1_000_000_000,
         )
-        automation_advanced, form = disclosure_section("Advanced timing")
-        self._add_float(form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)
-        self._add_float(form, "Loop interval (seconds)", "loop_interval", 0.25, 60, 0.1)
-        self._add_float(form, "Item delay minimum", "item_action_delay_min", 0, 60, 0.1)
-        self._add_float(form, "Item delay maximum", "item_action_delay_max", 0, 60, 0.1)
-        self._add_float(form, "Crate delay minimum", "crate_delay_min", 0, 5, 0.05)
-        self._add_float(form, "Crate delay maximum", "crate_delay_max", 0, 5, 0.05)
-        self.automation_advanced_section = automation_advanced
-        automation_form.addRow(automation_advanced)
-        sections.addWidget(automation)
+        sections.addWidget(workflows)
 
-        controls, form = settings_section("Controls and startup")
+        timing, timing_form = settings_section("Timing")
+        self._add_float(
+            timing_form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1
+        )
+        self._add_float(
+            timing_form, "Loop interval (seconds)", "loop_interval", 0.01, 60, 0.1
+        )
+        self._add_float(
+            timing_form, "Item delay minimum (seconds)", "item_action_delay_min", 0, 60, 0.1
+        )
+        self._add_float(
+            timing_form, "Item delay maximum (seconds)", "item_action_delay_max", 0, 60, 0.1
+        )
+        self._add_float(
+            timing_form, "Crate delay minimum (seconds)", "crate_delay_min", 0, 5, 0.05
+        )
+        self._add_float(
+            timing_form, "Crate delay maximum (seconds)", "crate_delay_max", 0, 5, 0.05
+        )
+        sections.addWidget(timing)
+
+        controls, form = settings_section("Keyboard shortcuts")
         self._add_hotkey(form, "Start / stop", "start_stop_hotkey")
         self._add_hotkey(form, "Pause / resume", "pause_hotkey")
         self._add_hotkey(form, "Quit application", "quit_hotkey")
+        sections.addWidget(controls)
+
+        lifecycle, form = settings_section("Startup and shutdown")
         for field, label in (
             ("start_paused", "Start each bot run paused"),
             ("start_minimized", "Start minimized to tray"),
@@ -145,7 +165,7 @@ class SettingsPage(ConfigFormPage):
             ("close_managed_browser_on_exit", "Close managed browser when quitting"),
         ):
             self._add_toggle(form, label, field)
-        sections.addWidget(controls)
+        sections.addWidget(lifecycle)
 
         notifications, notifications_form = settings_section("Notifications")
         webhook = QLineEdit()
@@ -168,7 +188,7 @@ class SettingsPage(ConfigFormPage):
         )
         self._add_form_row(notifications_form, "Discord webhook", webhook)
 
-        notifications_advanced, form = disclosure_section("Advanced timing")
+        notifications_advanced, form = disclosure_section("Advanced notification options")
         profile = FocusAwareComboBox()
         profile.set_choices(
             (("Balanced", "balanced"), ("Minimal", "minimal"), ("Detailed", "detailed"))
@@ -183,8 +203,22 @@ class SettingsPage(ConfigFormPage):
         )
         self._add_form_row(form, "Notification detail", profile)
         self._add_toggle(form, "Include activity charts", "webhook_include_charts")
-        self._add_float(form, "Webhook status interval", "webhook_status_interval", 0, 3600, 1)
-        self._add_float(form, "Webhook summary interval", "webhook_summary_interval", 60, 86400, 1)
+        self._add_float(
+            form,
+            "Status update interval (seconds)",
+            "webhook_status_interval",
+            0,
+            3600,
+            1,
+        )
+        self._add_float(
+            form,
+            "Summary interval (seconds)",
+            "webhook_summary_interval",
+            60,
+            86400,
+            1,
+        )
         self.notifications_advanced_section = notifications_advanced
         notifications_form.addRow(notifications_advanced)
         sections.addWidget(notifications)
@@ -215,13 +249,31 @@ class SettingsPage(ConfigFormPage):
         appearance_form.addRow(appearance_advanced)
         sections.addWidget(appearance)
 
-        application, form = settings_section("Application")
+        application, form = settings_section("About")
         version = QLabel(__version__)
         version.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         version.setAccessibleName("Application version")
         self._add_form_row(form, "Version", version)
         sections.addWidget(application)
         sections.addStretch()
+        self.land_expansion_toggle.toggled.connect(self._sync_dependent_controls)
+        webhook.textChanged.connect(self._sync_dependent_controls)
+        self._notification_controls = (
+            profile,
+            self.controls["webhook_include_charts"],
+            self.controls["webhook_status_interval"],
+            self.controls["webhook_summary_interval"],
+        )
+        self._sync_dependent_controls()
+
+    def _sync_dependent_controls(self, *_args: object) -> None:
+        land_enabled = self.land_expansion_toggle.isChecked()
+        self.controls["land_expansion_max_coin_cost"].setEnabled(land_enabled)
+        self.controls["land_expansion_max_gem_cost"].setEnabled(land_enabled)
+        webhook = self.controls["discord_webhook_url"]
+        notifications_enabled = isinstance(webhook, QLineEdit) and bool(webhook.text().strip())
+        for control in getattr(self, "_notification_controls", ()):
+            control.setEnabled(notifications_enabled)
 
     def _request(self, field: str, value: object) -> None:
         changes = {field: value}
@@ -334,6 +386,7 @@ class SettingsPage(ConfigFormPage):
 
     def apply_config(self, config: AppConfig) -> None:
         self._apply_registered_controls(config)
+        self._sync_dependent_controls()
         for control in self.controls.values():
             if isinstance(control, HotkeyEdit):
                 control.show_error("")

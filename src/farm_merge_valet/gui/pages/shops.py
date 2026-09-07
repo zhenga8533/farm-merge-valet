@@ -9,14 +9,25 @@ from functools import partial
 from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSize, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QHBoxLayout,
     QHeaderView,
+    QLabel,
+    QScrollArea,
+    QSpinBox,
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 from farm_merge_valet.catalog.models import (
     CatalogItem,
+    ItemCatalog,
 )
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
@@ -52,6 +63,93 @@ _SHOP_ICON_SIZE = QSize(100, 54)
 _SHOP_SORT_COLUMNS = {"item": 0, "type": 1, "enabled": 2}
 
 
+class IngredientReservesDialog(QDialog):
+    def __init__(self, config: AppConfig, catalog: ItemCatalog, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Shop ingredient reserves")
+        self.setMinimumWidth(520)
+        self._existing_reserves = dict(config.shop_ingredient_reserves)
+        layout = QVBoxLayout(self)
+        description = QLabel(
+            "Keep at least this many of each ingredient after starting a shop order."
+        )
+        description.setWordWrap(True)
+        layout.addWidget(description)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        form = QFormLayout(content)
+        self.default_control = self._spin_box(config.shop_ingredient_reserve_default)
+        form.addRow("Default reserve", self.default_control)
+        self.controls: dict[str, tuple[QCheckBox, QSpinBox]] = {}
+        ingredient_ids = sorted(
+            {
+                ingredient.item_id
+                for item in catalog.items.values()
+                if item.recipe is not None
+                for ingredient in item.recipe.ingredients
+            },
+            key=lambda item_id: (
+                catalog.items[item_id].display_name.casefold()
+                if item_id in catalog.items
+                else item_id.casefold()
+            ),
+        )
+        for item_id in ingredient_ids:
+            item = catalog.items.get(item_id)
+            label = item.display_name if item is not None else item_id
+            use_default = QCheckBox("Use default")
+            use_default.setAccessibleName(f"{label}: use default reserve")
+            reserve = self._spin_box(
+                config.shop_ingredient_reserves.get(
+                    item_id, config.shop_ingredient_reserve_default
+                )
+            )
+            reserve.setAccessibleName(f"{label}: ingredient reserve")
+            inherited = item_id not in config.shop_ingredient_reserves
+            use_default.setChecked(inherited)
+            reserve.setEnabled(not inherited)
+            use_default.toggled.connect(reserve.setDisabled)
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.addWidget(use_default)
+            row_layout.addWidget(reserve)
+            form.addRow(label, row)
+            self.controls[item_id] = (use_default, reserve)
+        if not ingredient_ids:
+            form.addRow(QLabel("No recipe ingredients have been discovered."))
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    @staticmethod
+    def _spin_box(value: int) -> QSpinBox:
+        control = QSpinBox()
+        control.setRange(0, 1_000_000_000)
+        control.setValue(value)
+        control.setKeyboardTracking(False)
+        return control
+
+    def values(self) -> tuple[int, dict[str, int]]:
+        reserves = {
+            item_id: value
+            for item_id, value in self._existing_reserves.items()
+            if item_id not in self.controls
+        }
+        reserves.update(
+            {
+                item_id: reserve.value()
+                for item_id, (use_default, reserve) in self.controls.items()
+                if not use_default.isChecked()
+            }
+        )
+        return self.default_control.value(), reserves
+
+
 class _ShopIconDelegate(QStyledItemDelegate):
     def initStyleOption(
         self,
@@ -85,6 +183,8 @@ class ShopsPage(AppPage):
         self.configuration_header = ConfigurationHeader("Reset shop policies")
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
+        self.reserves_button = self.configuration_header.add_action("Ingredient reserves…")
+        self.reserves_button.clicked.connect(self._edit_ingredient_reserves)
         self.page_layout.addWidget(self.configuration_header)
         master_control = SettingsToggleRow(
             "Enable shop automation",
@@ -446,6 +546,22 @@ class ShopsPage(AppPage):
 
     def _set_master_enabled(self, enabled: bool) -> None:
         self._emit(shop_automation_enabled=enabled)
+
+    def _edit_ingredient_reserves(self) -> None:
+        catalog = load_gui_catalog(self._config)
+        if catalog is None:
+            return
+        dialog = IngredientReservesDialog(self._config, catalog, self)
+        dialog.exec()
+        default, reserves = dialog.values()
+        if (
+            default != self._config.shop_ingredient_reserve_default
+            or reserves != self._config.shop_ingredient_reserves
+        ):
+            self._emit(
+                shop_ingredient_reserve_default=default,
+                shop_ingredient_reserves=reserves,
+            )
 
     def _set_all(self, _column: int, value: bool) -> None:
         shop_overrides = dict(self._config.shop_overrides)

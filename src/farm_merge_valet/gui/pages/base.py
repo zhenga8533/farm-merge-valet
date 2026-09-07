@@ -117,7 +117,7 @@ class ConfigFormPage(AppPage):
             label.setBuddy(field)
         form.addRow(label, field)
 
-    def _add_toggle(self, form: QFormLayout, label: str, field: str) -> None:
+    def _add_toggle(self, form: QFormLayout, label: str, field: str) -> SettingsToggle:
         control = SettingsToggle()
         control.setChecked(bool(getattr(self._config, field)))
         control.setAccessibleName(label)
@@ -128,6 +128,7 @@ class ConfigFormPage(AppPage):
 
         self._register_control(field, control, set_value)
         self._add_form_row(form, label, control)
+        return control
 
     def _add_int(
         self,

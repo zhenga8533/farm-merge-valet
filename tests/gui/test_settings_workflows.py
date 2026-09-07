@@ -185,11 +185,15 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     labels = {label.text() for label in settings_page.findChildren(QLabel)}
 
     assert section_titles == {
-        "Automation",
-        "Controls and startup",
+        "Automation behavior",
+        "Resource safeguards",
+        "Optional workflows",
+        "Timing",
+        "Keyboard shortcuts",
+        "Startup and shutdown",
         "Notifications",
         "Appearance",
-        "Application",
+        "About",
     }
     assert "Version" in labels
     assert "Start each bot run paused" in labels
@@ -205,11 +209,9 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         button.text() for button in window.settings_page.findChildren(QPushButton)
     }
     assert all("_" not in title and "&" not in title for title in section_titles)
-    assert not window.settings_page.automation_advanced_section.expanded
     assert not window.settings_page.notifications_advanced_section.expanded
     assert not window.settings_page.appearance_advanced_section.expanded
     for section in (
-        window.settings_page.automation_advanced_section,
         window.settings_page.notifications_advanced_section,
         window.settings_page.appearance_advanced_section,
     ):
@@ -219,8 +221,11 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         section.toggle.click()
         assert section.expanded
         assert not section.content.isHidden()
-    assert section_groups["Automation"].isAncestorOf(
-        window.settings_page.automation_advanced_section
+    assert section_groups["Optional workflows"].isAncestorOf(
+        window.settings_page.controls["land_expansion_max_coin_cost"]
+    )
+    assert section_groups["Optional workflows"].isAncestorOf(
+        window.settings_page.controls["land_expansion_max_gem_cost"]
     )
     assert section_groups["Notifications"].isAncestorOf(
         window.settings_page.notifications_advanced_section
@@ -255,6 +260,8 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
             shop_default_enabled=False,
             recipe_default_enabled=False,
             shop_overrides={"bakery": True},
+            shop_ingredient_reserve_default=4,
+            shop_ingredient_reserves={"wheat": 8},
         )
     )
     window = MainWindow(ApplicationController(store))
@@ -275,6 +282,8 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
     assert after_shops.shop_default_enabled
     assert after_shops.recipe_default_enabled
     assert after_shops.shop_overrides == {}
+    assert after_shops.shop_ingredient_reserve_default == 0
+    assert after_shops.shop_ingredient_reserves == {}
     assert after_shops.theme == "dark"
     assert window.shops_page.saved_label.text() == "Defaults restored"
     assert window.shops_page.saved_label.property("status") == "success"
@@ -481,6 +490,29 @@ def test_decimal_setting_accepts_fractional_keyboard_input(tmp_path) -> None:
 
     assert control.value() == 0.25
     assert ConfigStore(store.path).load().loop_interval == 0.25
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_settings_controls_match_model_range_and_parent_feature_state(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False, loop_interval=0.01))
+    window = MainWindow(ApplicationController(store))
+    page = window.settings_page
+
+    assert page.controls["loop_interval"].minimum() == 0.01
+    assert page.controls["loop_interval"].value() == 0.01
+    assert not page.controls["land_expansion_max_coin_cost"].isEnabled()
+    assert not page.controls["land_expansion_max_gem_cost"].isEnabled()
+    assert not page.controls["webhook_summary_interval"].isEnabled()
+
+    page.land_expansion_toggle.click()
+    assert page.controls["land_expansion_max_coin_cost"].isEnabled()
+    webhook = page.controls["discord_webhook_url"]
+    webhook.setText("https://example.test/webhook")
+    assert page.controls["webhook_summary_interval"].isEnabled()
 
     window.quit_application()
     app.processEvents()

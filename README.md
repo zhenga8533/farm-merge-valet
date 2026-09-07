@@ -221,7 +221,9 @@ disabled independently from loot collection.
 Shop automation reads each active shop's fixed current recipe, live ingredient
 inventory, production timer, and rewards. It can start affordable orders and
 claim completed rewards without opening shop UI or moving the camera. Ingredient
-spending policy uses global shop and recipe defaults, both enabled by default.
+spending policy uses global shop and recipe defaults, both enabled by default. The
+Shops page provides a default ingredient reserve and optional per-ingredient
+overrides for users who want orders to preserve specific inventory floors.
 Per-ID GUI overrides take precedence, so one shop or recipe can be disabled
 without hardcoding the discovered catalog. Completed rewards reserve one empty
 cell per reward object and ask the merge planner to create space before claiming
@@ -263,6 +265,12 @@ New free marketplace offers are accepted directly from validated live metadata,
 even before the static catalog knows their identity. Unknown paid offers remain
 disabled until their exact candidate and price are known.
 
+The initial policy is automation-forward but requires the user to start the bot:
+shop orders and obstacle stages are enabled, with resource reserves initially at
+zero. Paid marketplace purchases and land expansion remain disabled until they
+are explicitly enabled. Configure resource and ingredient reserves before the
+first run when preserving a balance is important.
+
 ## Configuration
 
 All end-user configuration lives in the desktop application. Changes validate
@@ -286,6 +294,10 @@ appearance; scoped reset controls preserve unrelated policy sections.
 The Browser page also controls default-enabled automatic recovery for a frozen
 game. Automatic page opening and reload are restricted to the verified managed
 browser profile; an unowned browser is never modified.
+Manual game-data synchronization refreshes atlas files even when their CDN paths
+are unchanged. The atlas cache also records complete versioned source URLs so
+normal CLI synchronization refreshes entries when the game version changes. A
+new catalog is published only after all referenced assets compile successfully.
 
 On a fresh installation, the Items and Shops pages present a shared catalog
 onboarding state instead of empty tables. “Open game and synchronize” prepares

@@ -253,7 +253,11 @@ def compile_catalog_assets(atlases: Atlases, catalog: ItemCatalog, output_dir: P
     if missing:
         preview = ", ".join(missing[:8])
         suffix = f" (and {len(missing) - 8} more)" if len(missing) > 8 else ""
-        raise RuntimeError(f"Catalog assets are missing from the atlas cache: {preview}{suffix}")
+        raise RuntimeError(
+            "The current catalog references assets that were not available in the loaded "
+            f"game atlases: {preview}{suffix}. Reload the game and retry synchronization; "
+            "some event or feature assets may only load after opening their game screen."
+        )
     desired: dict[Path, str] = {}
     for item in catalog.items.values():
         if item.asset_alias is None or item.asset_path is None:

@@ -70,7 +70,7 @@ class CatalogSyncService:
         self._callbacks.raise_if_cancelled()
         target_count = self.refresh_upgrade_progress(source="manual synchronization")
         self._callbacks.raise_if_cancelled()
-        self._dependencies.catalog_synchronizer_factory(self._config).sync()
+        self._dependencies.catalog_synchronizer_factory(self._config).sync(force=True)
         self._callbacks.raise_if_cancelled()
         catalog = self._dependencies.catalog_loader(self._config.catalog_dir / "catalog.json")
         progress = (
@@ -100,7 +100,7 @@ class CatalogSyncService:
         self.refresh_upgrade_progress(source="initial synchronization")
         self._callbacks.raise_if_cancelled()
         try:
-            self._dependencies.catalog_synchronizer_factory(self._config).sync()
+            self._dependencies.catalog_synchronizer_factory(self._config).sync(force=True)
         except (RuntimeConnectionError, OSError, RuntimeError, ValueError) as exc:
             return f"Catalog ready · Icons were not synchronized: {exc}"
         self._callbacks.raise_if_cancelled()

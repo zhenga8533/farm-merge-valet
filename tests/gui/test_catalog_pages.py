@@ -13,16 +13,23 @@ from PySide6.QtWidgets import (
     QApplication,
     QLabel,
     QStyleOptionViewItem,
+    QWidget,
 )
 
 from farm_merge_valet.catalog.marketplace import MARKETPLACE_ICON_ASSETS, marketplace_catalog
-from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog, RecipeMetadata
+from farm_merge_valet.catalog.models import (
+    CatalogItem,
+    ItemCatalog,
+    RecipeIngredient,
+    RecipeMetadata,
+)
 from farm_merge_valet.catalog.store import write_item_catalog
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.gui.controller import (
     ApplicationController,
 )
 from farm_merge_valet.gui.main_window import MainWindow
+from farm_merge_valet.gui.pages.shops import IngredientReservesDialog
 
 
 def _catalog() -> ItemCatalog:
@@ -118,6 +125,7 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
         page._toggles[offer.policy_key].isChecked() == (offer.payment_type == "free")
         for offer in marketplace_catalog()
     )
+
     assert all(
         not page.tree.topLevelItem(row).isExpanded()
         for row in range(page.tree.topLevelItemCount())
@@ -181,6 +189,45 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
     assert page._config.marketplace_policy_overrides == selected_offers
 
     window.quit_application()
+    app.processEvents()
+
+
+def test_ingredient_reserves_editor_uses_catalog_names_and_preserves_unknown_overrides() -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog = _catalog()
+    recipe = CatalogItem(
+        "bread",
+        "bread",
+        "products/bread",
+        "products",
+        "Bread",
+        None,
+        False,
+        None,
+        None,
+        None,
+        frozenset(),
+        recipe=RecipeMetadata("bakery", 60, (RecipeIngredient("milk", 2),), ("bread",)),
+    )
+    catalog = ItemCatalog({**catalog.items, "bread": recipe})
+    parent = QWidget()
+    dialog = IngredientReservesDialog(
+        AppConfig(
+            shop_ingredient_reserve_default=3,
+            shop_ingredient_reserves={"milk": 7, "seasonal_item": 9},
+        ),
+        catalog,
+        parent,
+    )
+
+    use_default, reserve = dialog.controls["milk"]
+    assert not use_default.isChecked()
+    assert reserve.value() == 7
+    use_default.setChecked(True)
+    dialog.default_control.setValue(5)
+
+    assert dialog.values() == (5, {"seasonal_item": 9})
+    dialog.close()
     app.processEvents()
 
 def test_catalog_pages_populate_lazily_and_ignore_hidden_refreshes(tmp_path, monkeypatch) -> None:

@@ -31,6 +31,8 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "recipe_default_enabled",
         "shop_overrides",
         "recipe_overrides",
+        "shop_ingredient_reserve_default",
+        "shop_ingredient_reserves",
     ),
     ConfigSection.MARKETPLACE: (
         "marketplace_automation_enabled",
@@ -59,8 +61,6 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "minimum_ticket_reserve",
         "minimum_coin_reserve",
         "minimum_gem_reserve",
-        "shop_ingredient_reserve_default",
-        "shop_ingredient_reserves",
         "farm_visit_automation_enabled",
         "land_expansion_automation_enabled",
         "land_expansion_max_coin_cost",

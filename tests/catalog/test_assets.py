@@ -213,6 +213,64 @@ def test_runtime_asset_sync_uses_cdp_resources_and_local_cache(monkeypatch, tmp_
     assert compiled == [(atlases, catalog_dir)]
 
 
+def test_runtime_asset_cache_refreshes_when_the_source_version_changes(tmp_path: Path) -> None:
+    atlas_cache = tmp_path / "atlases"
+    atlas_cache.mkdir()
+    image_ok, encoded = cv2.imencode(".png", np.zeros((1, 1, 4), dtype=np.uint8))
+    assert image_ok
+    reads: list[list[str]] = []
+    current_url = "https://cdn.test/atlases/low/map.png?v=2"
+    synchronizer = CatalogSynchronizer(
+        atlas_cache_dir=atlas_cache,
+        catalog_dir=tmp_path / "catalog",
+        atlas_url_reader=lambda: [],
+        binary_resource_reader=lambda urls: reads.append(urls) or {urls[0]: encoded.tobytes()},
+        text_resource_reader=lambda urls: {urls[0]: '{"frames": {}}'},
+        catalog_loader=lambda: ItemCatalog({}),
+    )
+    cached_png = atlas_cache / "atlases_low_map.png"
+    cached_json = atlas_cache / "atlases_low_map.json"
+    cached_png.write_bytes(encoded.tobytes())
+    cached_json.write_text('{"frames": {}}', encoding="utf-8")
+    (atlas_cache / ".atlas-sources.json").write_text(
+        json.dumps({cached_png.name: "https://cdn.test/atlases/low/map.png?v=1"}),
+        encoding="utf-8",
+    )
+
+    synchronizer._fetch_runtime_atlases([current_url], force=False)
+    synchronizer._fetch_runtime_atlases([current_url], force=False)
+
+    assert reads == [[current_url]]
+    source_index = json.loads((atlas_cache / ".atlas-sources.json").read_text(encoding="utf-8"))
+    assert source_index[cached_png.name] == current_url
+
+
+def test_failed_asset_compile_does_not_publish_the_new_catalog(
+    monkeypatch, tmp_path: Path
+) -> None:
+    catalog_dir = tmp_path / "catalog"
+    catalog_dir.mkdir()
+    catalog_path = catalog_dir / "catalog.json"
+    catalog_path.write_text("existing catalog", encoding="utf-8")
+    synchronizer = CatalogSynchronizer(
+        atlas_cache_dir=tmp_path / "atlases",
+        catalog_dir=catalog_dir,
+        atlas_url_reader=lambda: [],
+        binary_resource_reader=lambda _urls: {},
+        text_resource_reader=lambda _urls: {},
+        catalog_loader=lambda: ItemCatalog({}),
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.catalog.sync.compile_catalog_assets",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("missing assets")),
+    )
+
+    with pytest.raises(RuntimeError, match="missing assets"):
+        synchronizer._compile_assets({})
+
+    assert catalog_path.read_text(encoding="utf-8") == "existing catalog"
+
+
 def test_manifest_url_preserves_the_game_version_query() -> None:
     assert _manifest_url("https://cdn.test/atlases/map.png?v=42") == (
         "https://cdn.test/atlases/map.json?v=42"
