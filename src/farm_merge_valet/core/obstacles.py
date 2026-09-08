@@ -27,6 +27,7 @@ class ObstacleCandidate:
     blueprint_id: str
     object_id: int | None
     state: ObstacleState
+    output_ids: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)

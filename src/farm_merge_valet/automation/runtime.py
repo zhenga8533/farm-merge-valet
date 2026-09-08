@@ -180,6 +180,28 @@ class RewardRequirement:
 
 
 @dataclass(frozen=True)
+class BuildingRequirement:
+    blueprint_id: str
+    amount: int
+    available: int
+
+    @property
+    def missing(self) -> int:
+        return max(0, self.amount - self.available)
+
+
+@dataclass(frozen=True)
+class BuildingRepairState:
+    building_id: str
+    level: int
+    workshop: bool
+    placed: bool
+    active: bool
+    upgrading: bool
+    requirements: tuple[BuildingRequirement, ...]
+
+
+@dataclass(frozen=True)
 class StorageBubbleState:
     object_id: int
     content_ids: tuple[str, ...]
@@ -195,6 +217,7 @@ class SnapshotOptions:
     include_marketplace: bool = False
     include_farm_visit: bool = False
     include_land_expansion: bool = False
+    include_building_repairs: bool = False
 
 
 @dataclass(frozen=True)
@@ -218,6 +241,7 @@ class RuntimeSnapshot:
     metrics: RuntimeReadMetrics | None = None
     farm_visit: FarmVisitState | None = None
     land_expansions: tuple[LandExpansionCandidate, ...] | None = None
+    building_repairs: tuple[BuildingRepairState, ...] | None = None
 
 
 @dataclass(frozen=True)

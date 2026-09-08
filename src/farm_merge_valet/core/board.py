@@ -86,6 +86,9 @@ class BoardGrid:
         without having to guess which items to even look for."""
         return {cell.item for cell in self._cells.values() if cell.item is not None}
 
+    def item_count(self, item: ItemRef) -> int:
+        return sum(cell.item == item for cell in self._cells.values())
+
     def find_clusters(self, item: ItemRef) -> list[set[GridCoord]]:
         """All connected clusters of cells holding exactly `item`.
 

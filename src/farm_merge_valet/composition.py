@@ -10,6 +10,7 @@ from farm_merge_valet.catalog.models import ItemCatalog, load_item_catalog
 from farm_merge_valet.catalog.provider import CatalogProvider, RefreshingCatalogProvider
 from farm_merge_valet.catalog.store import CatalogUnavailableError
 from farm_merge_valet.catalog.sync import CatalogSynchronizer
+from farm_merge_valet.cdp.buildings import read_building_repairs
 from farm_merge_valet.cdp.item_catalog import (
     read_runtime_atlas_urls,
     read_runtime_catalog_fingerprint,
@@ -110,6 +111,7 @@ def create_catalog_sync_service(
             catalog_provider_factory=create_catalog_provider,
             catalog_synchronizer_factory=create_catalog_synchronizer,
             upgrade_progress_reader=read_catalog_upgrade_progress,
+            building_repairs_reader=read_building_repairs,
             catalog_loader=load_item_catalog,
         ),
     )

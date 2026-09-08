@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Protocol
 
 from farm_merge_valet.automation import RuntimeConnectionError
+from farm_merge_valet.automation.runtime import BuildingRepairState
 from farm_merge_valet.browser import BrowserManagerError, BrowserStatus
 from farm_merge_valet.catalog.models import ItemCatalog
 from farm_merge_valet.catalog.provider import CatalogProvider
@@ -33,6 +34,9 @@ class CatalogSyncCallbacks:
     browser_changed: Callable[[BrowserStatus], None]
     catalog_refreshed: Callable[[int], None]
     upgrade_progress_changed: Callable[[UpgradeProgress | None], None]
+    building_repairs_changed: Callable[[tuple[BuildingRepairState, ...] | None], None] = (
+        lambda _states: None
+    )
 
 
 class BrowserCatalogSession(Protocol):
@@ -53,6 +57,9 @@ class CatalogSyncDependencies:
     catalog_synchronizer_factory: Callable[[AppConfig], CatalogSynchronizer]
     upgrade_progress_reader: Callable[[int, str], UpgradeProgress | None]
     catalog_loader: Callable[[Path], ItemCatalog]
+    building_repairs_reader: Callable[
+        [int, str], tuple[BuildingRepairState, ...] | None
+    ] | None = None
 
 
 class CatalogSyncService:
@@ -69,6 +76,7 @@ class CatalogSyncService:
     def synchronize(self) -> str:
         self._callbacks.raise_if_cancelled()
         target_count = self.refresh_upgrade_progress(source="manual synchronization")
+        self.refresh_building_repairs(source="manual synchronization")
         self._callbacks.raise_if_cancelled()
         self._dependencies.catalog_synchronizer_factory(self._config).sync(force=True)
         self._callbacks.raise_if_cancelled()
@@ -98,6 +106,7 @@ class CatalogSyncService:
             f"Catalog ready · {len(catalog.items)} entries · Synchronizing icons…"
         )
         self.refresh_upgrade_progress(source="initial synchronization")
+        self.refresh_building_repairs(source="initial synchronization")
         self._callbacks.raise_if_cancelled()
         try:
             self._dependencies.catalog_synchronizer_factory(self._config).sync(force=True)
@@ -193,3 +202,43 @@ class CatalogSyncService:
             elapsed_seconds=time.monotonic() - started,
         )
         return target_count
+
+    def refresh_building_repairs(self, *, source: str) -> int | None:
+        reader = self._dependencies.building_repairs_reader
+        if reader is None:
+            return None
+        started = time.monotonic()
+        try:
+            states = reader(self._config.cdp_port, self._config.window_title)
+            if states is None:
+                self._dependencies.runtime_factory(self._config).discover()
+                states = reader(self._config.cdp_port, self._config.window_title)
+        except RuntimeConnectionError as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "building_repairs.unavailable",
+                "Building repair state unavailable during %s: %s",
+                source,
+                exc,
+                source=source,
+                detail=str(exc),
+                elapsed_seconds=time.monotonic() - started,
+            )
+            self._callbacks.building_repairs_changed(None)
+            return None
+        self._callbacks.building_repairs_changed(states)
+        if states is None:
+            return None
+        log_event(
+            logger,
+            logging.INFO,
+            "building_repairs.refreshed",
+            "Building repair state refreshed during %s (%d buildings).",
+            source,
+            len(states),
+            source=source,
+            building_count=len(states),
+            elapsed_seconds=time.monotonic() - started,
+        )
+        return len(states)

@@ -8,6 +8,8 @@ from farm_merge_valet.automation.bot import Bot, Phase
 from farm_merge_valet.automation.runtime import (
     ActionResult,
     ActionStatus,
+    BuildingRepairState,
+    BuildingRequirement,
     CrateSpawnResult,
     LiveCellState,
     RuntimeHealth,
@@ -155,6 +157,47 @@ def bare_bot() -> Bot:
     bot._capability_retry_at = 0.0
     bot._capability_retry_delay = 1.0
     return bot
+
+
+def test_repair_reservation_protects_exact_items_for_best_placed_shop() -> None:
+    bot = bare_bot()
+    wood = ItemRef("resources", "wood", 2)
+    bot._blueprint_items = {"wood_2": wood}
+    bot._building_repairs = (
+        BuildingRepairState(
+            "barn", 0, False, True, False, False,
+            (BuildingRequirement("wood_2", 2, 3),),
+        ),
+        BuildingRepairState(
+            "bakery", 0, True, True, False, False,
+            (BuildingRequirement("wood_2", 3, 3),),
+        ),
+    )
+    for coord in ((0, 0), (1, 0), (2, 0)):
+        bot.board.set_cell(coord, Cell(CellKind.ITEM, wood))
+    action = MergeAction(
+        MergeActionKind.TRIGGER, wood, (0, 0), (1, 0),
+        frozenset({(0, 0), (1, 0), (2, 0)}), 3, MoveEffect.MERGE,
+    )
+
+    assert bot._repair_target() is not None
+    assert bot._repair_target().building_id == "bakery"
+    assert bot._merge_consumes_reserved_repair_item(action)
+
+
+def test_absent_buildings_never_reserve_resources() -> None:
+    bot = bare_bot()
+    wood = ItemRef("resources", "wood", 2)
+    bot._blueprint_items = {"wood_2": wood}
+    bot._building_repairs = (
+        BuildingRepairState(
+            "future_shop", 0, True, False, False, False,
+            (BuildingRequirement("wood_2", 99, 3),),
+        ),
+    )
+
+    assert bot._repair_target() is None
+    assert bot._repair_reserves() == {}
 
 
 def test_live_sync_uses_one_atomic_snapshot_and_suppresses_disabled_sections() -> None:

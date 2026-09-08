@@ -90,6 +90,7 @@ class ApplicationController(QObject):
     catalog_refreshed = Signal(int)
     assets_refreshed = Signal()
     upgrade_progress_changed = Signal(object)
+    building_repairs_changed = Signal(object)
     shutdown_complete = Signal()
     _utility_operation_finished = Signal(str, object)
     _bot_finished = Signal(object)
@@ -108,6 +109,7 @@ class ApplicationController(QObject):
         self._shutdown_browser_worker: threading.Thread | None = None
         self._shutdown_browser_error: str | None = None
         self._shutdown_browser_complete = False
+        self._last_building_repairs: object = None
         self.hotkeys = HotkeyManager()
         self.hotkeys.setParent(self)
         self.hotkeys.start_stop_requested.connect(self.toggle_running)
@@ -238,7 +240,9 @@ class ApplicationController(QObject):
             )
 
             def refresh_startup_data() -> None:
-                self._catalog_sync_service(config).refresh_upgrade_progress(source="bot startup")
+                service = self._catalog_sync_service(config)
+                service.refresh_upgrade_progress(source="bot startup")
+                service.refresh_building_repairs(source="bot startup")
 
             with discord_webhook_sink(
                 webhook,
@@ -415,8 +419,13 @@ class ApplicationController(QObject):
                 browser_changed=self._catalog_browser_changed,
                 catalog_refreshed=self.catalog_refreshed.emit,
                 upgrade_progress_changed=self.upgrade_progress_changed.emit,
+                building_repairs_changed=self._building_repairs_updated,
             ),
         )
+
+    def _building_repairs_updated(self, repairs: object) -> None:
+        self._last_building_repairs = repairs
+        self.building_repairs_changed.emit(repairs)
 
     def _catalog_browser_changed(self, status: BrowserStatus) -> None:
         self.browser_status_changed.emit(self._browser_status_text(status))
@@ -511,6 +520,9 @@ class ApplicationController(QObject):
     def _poll_workers(self) -> None:
         bot = self._bot
         if bot is not None and not self._stopping:
+            repairs = bot.building_repairs
+            if repairs != self._last_building_repairs:
+                self._building_repairs_updated(repairs)
             if bot.paused and self.status.state not in {
                 ApplicationState.PAUSED,
                 ApplicationState.RESUMING,

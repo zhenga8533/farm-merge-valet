@@ -10,6 +10,7 @@ from farm_merge_valet.config import AppConfig
 class ConfigSection(StrEnum):
     ITEMS = "items"
     SHOPS = "shops"
+    BUILDINGS = "buildings"
     MARKETPLACE = "marketplace"
     BROWSER = "browser"
     SETTINGS = "settings"
@@ -33,6 +34,14 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "recipe_overrides",
         "shop_ingredient_reserve_default",
         "shop_ingredient_reserves",
+    ),
+    ConfigSection.BUILDINGS: (
+        "preserve_building_repair_resources",
+        "building_repair_default_enabled",
+        "building_repair_overrides",
+        "prioritize_repair_shops",
+        "prioritize_cheaper_repairs",
+        "prioritize_obstacle_repair_resources",
     ),
     ConfigSection.MARKETPLACE: (
         "marketplace_automation_enabled",
@@ -100,6 +109,8 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "items_sort_descending",
         "shops_sort_column",
         "shops_sort_descending",
+        "buildings_sort_column",
+        "buildings_sort_descending",
         "marketplace_sort_column",
         "marketplace_sort_descending",
     ),

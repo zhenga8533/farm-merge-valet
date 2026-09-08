@@ -35,6 +35,14 @@ def test_shop_ingredient_reserves_validate_ids_and_amounts() -> None:
         AppConfig(shop_ingredient_reserves={"wheat": -1})
 
 
+def test_building_repair_policies_default_enabled_and_support_overrides() -> None:
+    config = AppConfig(building_repair_overrides={"bakery": False})
+
+    assert config.preserve_building_repair_resources
+    assert config.building_repair_enabled("barn")
+    assert not config.building_repair_enabled("bakery")
+
+
 def test_marketplace_policies_default_free_claims_enabled_and_validate_semantic_keys() -> None:
     config = AppConfig()
     assert config.marketplace_policy_enabled("free:gems_5_no_ads")

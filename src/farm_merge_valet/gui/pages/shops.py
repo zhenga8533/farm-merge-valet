@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Iterator
 from functools import partial
 
-from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -18,18 +18,21 @@ from PySide6.QtWidgets import (
     QLabel,
     QScrollArea,
     QSpinBox,
-    QStyledItemDelegate,
-    QStyleOptionViewItem,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from farm_merge_valet.automation.runtime import BuildingRepairState
 from farm_merge_valet.catalog.models import (
     CatalogItem,
     ItemCatalog,
 )
 from farm_merge_valet.config import AppConfig
+from farm_merge_valet.gui.components.catalog_icon_delegate import (
+    STRUCTURE_ICON_SIZE,
+    CatalogIconDelegate,
+)
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.incremental_work import IncrementalWorkRunner
@@ -37,7 +40,6 @@ from farm_merge_valet.gui.components.input_controls import SettingsToggleRow
 from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_ROW_HEIGHT,
-    POLICY_ICON_SIZE,
     POLICY_MEDIA_BADGE_COLUMN_WIDTH,
     POLICY_MEDIA_ROW_HEIGHT,
 )
@@ -59,8 +61,7 @@ from farm_merge_valet.gui.pages.base import AppPage, ConfigEdit
 from farm_merge_valet.gui.services.assets import CatalogIconLoader
 from farm_merge_valet.gui.services.catalog import load_gui_catalog
 
-_SHOP_ICON_SIZE = QSize(100, 54)
-_SHOP_SORT_COLUMNS = {"item": 0, "type": 1, "enabled": 2}
+_SHOP_SORT_COLUMNS = {"item": 0, "type": 1, "repair": 2, "enabled": 3}
 
 
 class IngredientReservesDialog(QDialog):
@@ -150,21 +151,6 @@ class IngredientReservesDialog(QDialog):
         return self.default_control.value(), reserves
 
 
-class _ShopIconDelegate(QStyledItemDelegate):
-    def initStyleOption(
-        self,
-        option: QStyleOptionViewItem,
-        index: QModelIndex | QPersistentModelIndex,
-    ) -> None:
-        super().initStyleOption(option, index)
-        identity = index.data(Qt.ItemDataRole.UserRole)
-        option.decorationSize = (
-            _SHOP_ICON_SIZE
-            if isinstance(identity, tuple) and identity and identity[0] == "shop"
-            else POLICY_ICON_SIZE
-        )
-
-
 class ShopsPage(AppPage):
     config_edited = Signal(object)
     reset_requested = Signal()
@@ -214,23 +200,26 @@ class ShopsPage(AppPage):
             Qt.AlignmentFlag.AlignCenter,
         )
         scaffold = create_policy_tree(
-            header_labels=("Shop / recipe", "Type", ""),
-            bulk_labels={2: "Enabled"},
+            header_labels=("Shop / recipe", "Type", "Repair", ""),
+            bulk_labels={3: "Enabled"},
             accessible_name="Shop and recipe policies",
             search_placeholder="Search shops and recipes\u2026",
             search_accessible_name="Search shops and recipes",
             scope="shop and recipe groups",
-            icon_size=_SHOP_ICON_SIZE,
+            icon_size=STRUCTURE_ICON_SIZE,
             minimum_section_size=96,
         )
         self.tree = scaffold.tree
         self.bulk_header = scaffold.header
         self.bulk_header.toggled.connect(self._set_all)
-        self.tree.setItemDelegate(_ShopIconDelegate(self.tree))
+        self.tree.setItemDelegate(CatalogIconDelegate(self.tree))
         self.bulk_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.bulk_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self.bulk_header.resizeSection(1, 124)
-        self.bulk_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.bulk_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.bulk_header.resizeSection(2, 150)
+        self.bulk_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self._building_repairs: dict[str, BuildingRepairState] = {}
         self._apply_sort_preference()
 
         self.toolbar = scaffold.toolbar
@@ -371,7 +360,7 @@ class ShopsPage(AppPage):
         for shop_id in sorted(recipes):
             shop = catalog.items.get(shop_id)
             shop_name = shop.display_name if shop else shop_id
-            parent = PolicyTreeItem((shop_name, "", ""))
+            parent = PolicyTreeItem((shop_name, "", "", ""))
             parent.setIcon(0, self._icons.icon_for(shop))
             parent.setData(0, Qt.ItemDataRole.UserRole, ("shop", shop_id))
             parent.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
@@ -388,6 +377,7 @@ class ShopsPage(AppPage):
                 sort_value="Shop",
                 search_text="Shop",
             )
+            self._set_repair_status(parent, shop_id)
             shop_toggle = PolicyCheckBox()
             configure_policy_toggle(shop_toggle)
             shop_toggle.setChecked(
@@ -400,7 +390,7 @@ class ShopsPage(AppPage):
             set_policy_widget(
                 self.tree,
                 parent,
-                2,
+                3,
                 policy_cell(shop_toggle),
                 sort_value=shop_toggle.isChecked(),
             )
@@ -462,7 +452,7 @@ class ShopsPage(AppPage):
         recipes: tuple[CatalogItem, ...],
     ) -> None:
         for recipe in recipes:
-            child = PolicyTreeItem((recipe.display_name, "", ""))
+            child = PolicyTreeItem((recipe.display_name, "", "", ""))
             child.setIcon(0, self._icons.icon_for(recipe))
             child.setData(0, Qt.ItemDataRole.UserRole, ("recipe", recipe.game_id))
             child.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
@@ -492,7 +482,7 @@ class ShopsPage(AppPage):
             set_policy_widget(
                 self.tree,
                 child,
-                2,
+                3,
                 policy_cell(recipe_toggle),
                 sort_value=recipe_toggle.isChecked(),
             )
@@ -512,16 +502,16 @@ class ShopsPage(AppPage):
             control.setChecked(value)
             control.blockSignals(False)
             item = self._tree_items[identity]
-            set_policy_value(item, 2, value)
+            set_policy_value(item, 3, value)
         self._sync_bulk_header()
 
     def _show_empty(self, message: str) -> None:
-        item = QTreeWidgetItem((message, "", ""))
+        item = QTreeWidgetItem((message, "", "", ""))
         item.setFlags(Qt.ItemFlag.NoItemFlags)
         item.setSizeHint(0, QSize(0, POLICY_COMPACT_ROW_HEIGHT))
         self.tree.addTopLevelItem(item)
         item.setFirstColumnSpanned(True)
-        self.bulk_header.set_state(2, Qt.CheckState.Unchecked, enabled=False)
+        self.bulk_header.set_state(3, Qt.CheckState.Unchecked, enabled=False)
 
     def _show_catalog_onboarding(self) -> None:
         self.loading_state.setVisible(False)
@@ -606,4 +596,35 @@ class ShopsPage(AppPage):
             for kind, key in self._bulk_catalog_keys()
         ]
         state = aggregate_check_state(values)
-        self.bulk_header.set_state(2, state, enabled=bool(values))
+        self.bulk_header.set_state(3, state, enabled=bool(values))
+
+    def set_building_repairs(self, states: object) -> None:
+        if not isinstance(states, tuple):
+            return
+        self._building_repairs = {
+            state.building_id: state
+            for state in states
+            if isinstance(state, BuildingRepairState)
+        }
+        for (kind, shop_id), item in self._tree_items.items():
+            if kind == "shop":
+                self._set_repair_status(item, shop_id)
+
+    def _set_repair_status(self, item: QTreeWidgetItem, shop_id: str) -> None:
+        state = self._building_repairs.get(shop_id)
+        if state is None:
+            status = "Unknown"
+        elif state.active:
+            status = "Repaired"
+        elif state.upgrading:
+            status = "Repairing"
+        elif not state.placed:
+            status = "Not on board"
+        elif not state.requirements:
+            status = "Unavailable"
+        elif all(requirement.missing == 0 for requirement in state.requirements):
+            status = "Ready to repair"
+        else:
+            status = f"Needs {sum(requirement.missing for requirement in state.requirements)} items"
+        item.setText(2, status)
+        item.setData(2, Qt.ItemDataRole.UserRole, status)

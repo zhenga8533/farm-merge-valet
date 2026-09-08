@@ -6,6 +6,7 @@ import json
 
 from farm_merge_valet.automation.runtime import SnapshotOptions
 from farm_merge_valet.cdp.board_store import _READ_EXPRESSION
+from farm_merge_valet.cdp.buildings import _READ_BUILDING_REPAIRS_EXPRESSION
 from farm_merge_valet.cdp.inventory_store import _READ_ENERGY_EXPRESSION
 from farm_merge_valet.cdp.land_expansion import _READ_LAND_EXPANSION_EXPRESSION
 from farm_merge_valet.cdp.marketplace import _READ_MARKETPLACE_EXPRESSION
@@ -25,6 +26,7 @@ def snapshot_expression(options: SnapshotOptions) -> str:
     marketplace = json.dumps(options.include_marketplace)
     farm_visit = json.dumps(options.include_farm_visit)
     land_expansion = json.dumps(options.include_land_expansion)
+    building_repairs = json.dumps(options.include_building_repairs)
     return f"""
 (() => {{
   const startedAt = performance.now();
@@ -37,6 +39,7 @@ def snapshot_expression(options: SnapshotOptions) -> str:
   const storageBubbles = {bubbles} ? ({_READ_STORAGE_BUBBLES_EXPRESSION}) : null;
   const shopOrders = {shops} ? ({_READ_SHOP_ORDERS_EXPRESSION}) : null;
   const marketplace = {marketplace} ? ({_READ_MARKETPLACE_EXPRESSION}) : null;
+  const buildingRepairs = {building_repairs} ? ({_READ_BUILDING_REPAIRS_EXPRESSION}) : null;
   const rendererDurationMs = performance.now() - startedAt;
   return {{
     health,
@@ -48,6 +51,7 @@ def snapshot_expression(options: SnapshotOptions) -> str:
     marketplace,
     farmVisit,
     landExpansions,
+    buildingRepairs,
     rendererDurationMs,
     cellCount: Array.isArray(cells) ? cells.length : 0,
     occupiedCellCount: Array.isArray(cells)

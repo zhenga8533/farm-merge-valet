@@ -372,7 +372,7 @@ def test_shop_bulk_toggle_updates_all_shops_and_recipes(tmp_path) -> None:
     window.shops_page.search.clear()
     assert not bakery.isHidden()
     assert bakery.isExpanded()
-    recipe_cell = window.shops_page.tree.itemWidget(bakery.child(0), 2)
+    recipe_cell = window.shops_page.tree.itemWidget(bakery.child(0), 3)
     recipe_toggle = recipe_cell.findChild(QCheckBox) if recipe_cell is not None else None
     assert recipe_toggle is not None
     recipe_toggle.setChecked(False)
@@ -398,7 +398,7 @@ def test_shop_bulk_toggle_updates_all_shops_and_recipes(tmp_path) -> None:
     assert not saved.shop_overrides["bakery"]
     assert not saved.recipe_overrides["bread"]
     assert window.shops_page.saved_label.text() == "Saved"
-    assert window.shops_page.tree.columnCount() == 3
+    assert window.shops_page.tree.columnCount() == 4
     assert window.shops_page.tree.isSortingEnabled()
     selected_shops = dict(window.shops_page._config.shop_overrides)
     selected_recipes = dict(window.shops_page._config.recipe_overrides)
@@ -434,7 +434,7 @@ def test_policy_sort_preferences_are_loaded_and_persisted(tmp_path) -> None:
     assert window.items_page.bulk_header.sortIndicatorSection() == 1
     assert not window.items_page.bulk_header.isSortIndicatorShown()
     assert window.items_page.bulk_header.sortIndicatorOrder() is Qt.SortOrder.DescendingOrder
-    assert window.shops_page.bulk_header.sortIndicatorSection() == 2
+    assert window.shops_page.bulk_header.sortIndicatorSection() == 3
     assert not window.shops_page.bulk_header.isSortIndicatorShown()
     assert window.shops_page.bulk_header.sortIndicatorOrder() is Qt.SortOrder.DescendingOrder
 

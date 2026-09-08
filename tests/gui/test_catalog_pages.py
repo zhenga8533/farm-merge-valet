@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from farm_merge_valet.automation.runtime import BuildingRepairState, BuildingRequirement
 from farm_merge_valet.catalog.marketplace import MARKETPLACE_ICON_ASSETS, marketplace_catalog
 from farm_merge_valet.catalog.models import (
     CatalogItem,
@@ -25,6 +26,10 @@ from farm_merge_valet.catalog.models import (
 )
 from farm_merge_valet.catalog.store import write_item_catalog
 from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.gui.components.catalog_icon_delegate import (
+    STRUCTURE_ICON_SIZE,
+    CatalogIconDelegate,
+)
 from farm_merge_valet.gui.controller import (
     ApplicationController,
 )
@@ -88,8 +93,10 @@ def test_missing_catalog_shows_shared_onboarding_and_refreshes_when_discovered(t
 
     assert not window.items_page.catalog_onboarding.isHidden()
     assert not window.shops_page.catalog_onboarding.isHidden()
+    assert not window.buildings_page.catalog_onboarding.isHidden()
     assert window.items_page.table.isHidden()
     assert window.shops_page.tree.isHidden()
+    assert window.buildings_page.tree.isHidden()
     assert window.items_page.catalog_onboarding.setup_button.text() == ("Open game and synchronize")
 
     write_item_catalog(catalog_dir / "catalog.json", _catalog())
@@ -98,6 +105,7 @@ def test_missing_catalog_shows_shared_onboarding_and_refreshes_when_discovered(t
 
     assert window.items_page.catalog_onboarding.isHidden()
     assert window.shops_page.catalog_onboarding.isHidden()
+    assert window.buildings_page.catalog_onboarding.isHidden()
     assert not window.items_page.table.isHidden()
     assert not window.shops_page.tree.isHidden()
     assert window.items_page.table.topLevelItemCount() == 3
@@ -105,6 +113,51 @@ def test_missing_catalog_shows_shared_onboarding_and_refreshes_when_discovered(t
     window.quit_application()
     app.processEvents()
 
+
+def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    catalog = ItemCatalog(
+        {
+            "bakery": CatalogItem(
+                "bakery", "bakery", "shops/bakery", "shops", "Bakery", None,
+                False, None, None, None, frozenset({"shop"}),
+            ),
+            "wood_2": CatalogItem(
+                "wood_2", "wood", "resources/wood", "resources", "Wood", 2,
+                True, "wood_3", None, None, frozenset({"mergeable"}),
+            ),
+        }
+    )
+    write_item_catalog(catalog_dir / "catalog.json", catalog)
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+
+    window.buildings_page.set_building_repairs((
+        BuildingRepairState(
+            "bakery", 0, True, True, False, False,
+            (BuildingRequirement("wood_2", 3, 1),),
+        ),
+    ))
+
+    bakery = window.buildings_page.tree.topLevelItem(0)
+    assert bakery is not None
+    assert bakery.text(0) == "Bakery"
+    assert bakery.childCount() == 1
+    assert window.buildings_page.tree.iconSize() == STRUCTURE_ICON_SIZE
+    assert isinstance(window.buildings_page.tree.itemDelegate(), CatalogIconDelegate)
+    requirement = bakery.child(0)
+    assert requirement.text(0) == "Wood"
+    assert requirement.icon(0).isNull() is False or requirement.toolTip(0) == "wood_2"
+    type_cell = window.buildings_page.tree.itemWidget(requirement, 1)
+    assert type_cell is not None
+    assert "Tier 2" in type_cell.findChild(QLabel).text()
+
+    window.buildings_page._set_enabled("bakery", False)
+    assert not window.buildings_page._config.building_repair_enabled("bakery")
+    window.quit_application()
+    app.processEvents()
 
 def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])

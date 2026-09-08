@@ -31,6 +31,7 @@ from farm_merge_valet.gui.controller import (
 from farm_merge_valet.gui.overlay import CompactOverlay
 from farm_merge_valet.gui.pages import (
     BrowserPage,
+    BuildingsPage,
     DashboardPage,
     ItemsPage,
     LogsPage,
@@ -63,6 +64,14 @@ _ITEM_FIELDS = set(SECTION_FIELDS[ConfigSection.ITEMS]) | _ITEM_VIEW_FIELDS | {"
 _ITEM_POLICY_FIELDS = _ITEM_FIELDS - {"items_sort_column", "items_sort_descending"}
 _SHOP_FIELDS = set(SECTION_FIELDS[ConfigSection.SHOPS]) | _SHOP_VIEW_FIELDS | {"catalog_dir"}
 _SHOP_POLICY_FIELDS = _SHOP_FIELDS - {"shops_sort_column", "shops_sort_descending"}
+_BUILDING_VIEW_FIELDS = {field for field in _VIEW_FIELDS if field.startswith("buildings_")}
+_BUILDING_FIELDS = (
+    set(SECTION_FIELDS[ConfigSection.BUILDINGS]) | _BUILDING_VIEW_FIELDS | {"catalog_dir"}
+)
+_BUILDING_POLICY_FIELDS = _BUILDING_FIELDS - {
+    "buildings_sort_column",
+    "buildings_sort_descending",
+}
 _MARKETPLACE_VIEW_FIELDS = {
     field for field in _VIEW_FIELDS if field.startswith("marketplace_")
 }
@@ -81,7 +90,7 @@ def _menu_action_text(label: str, hotkey: str | None) -> str:
 
 class MainWindow(QMainWindow):
     _NAVIGATION = (
-        "Dashboard", "Items", "Shops", "Marketplace", "Browser", "Settings", "Logs"
+        "Dashboard", "Items", "Shops", "Buildings", "Marketplace", "Browser", "Settings", "Logs"
     )
 
     def __init__(
@@ -140,6 +149,7 @@ class MainWindow(QMainWindow):
             icons=self._catalog_icons,
             populate_immediately=eager_catalog_pages,
         )
+        self.buildings_page = BuildingsPage(self._draft, icons=self._catalog_icons)
         self.marketplace_page = MarketplacePage(self._draft, icons=self._catalog_icons)
         self.browser_page = BrowserPage(self._draft)
         self.settings_page = SettingsPage(self._draft)
@@ -148,6 +158,7 @@ class MainWindow(QMainWindow):
             self.dashboard_page,
             self.items_page,
             self.shops_page,
+            self.buildings_page,
             self.marketplace_page,
             self.browser_page,
             self.settings_page,
@@ -173,6 +184,8 @@ class MainWindow(QMainWindow):
         controller.catalog_refreshed.connect(self._catalog_metadata_refreshed)
         controller.assets_refreshed.connect(self._catalog_assets_refreshed)
         controller.upgrade_progress_changed.connect(self.items_page.set_upgrade_progress)
+        controller.building_repairs_changed.connect(self.shops_page.set_building_repairs)
+        controller.building_repairs_changed.connect(self.buildings_page.set_building_repairs)
         controller.shutdown_complete.connect(self._finish_quit)
         self._status_changed(controller.status)
         self.dashboard_page.set_overlay_visible(self._draft.overlay_visible)
@@ -209,6 +222,9 @@ class MainWindow(QMainWindow):
         self.shops_page.config_edited.connect(self._queue_edit)
         self.shops_page.catalog_setup_requested.connect(self.controller.setup_catalog)
         self.shops_page.reset_requested.connect(self._reset_shop_policies)
+        self.buildings_page.config_edited.connect(self._queue_edit)
+        self.buildings_page.catalog_setup_requested.connect(self.controller.setup_catalog)
+        self.buildings_page.reset_requested.connect(self._reset_building_policies)
         self.marketplace_page.config_edited.connect(self._queue_edit)
         self.marketplace_page.reset_requested.connect(self._reset_marketplace_policies)
         self.browser_page.config_edited.connect(self._queue_edit)
@@ -284,6 +300,13 @@ class MainWindow(QMainWindow):
             "Disable every marketplace auto-purchase policy?",
         )
 
+    def _reset_building_policies(self) -> None:
+        self._reset_section(
+            ConfigSection.BUILDINGS,
+            "Reset building policies?",
+            "Restore recommended repair priorities and enable every building?",
+        )
+
     def _reset_browser_configuration(self) -> None:
         self._reset_section(
             ConfigSection.BROWSER,
@@ -306,6 +329,7 @@ class MainWindow(QMainWindow):
             headers = {
                 ConfigSection.ITEMS: self.items_page.configuration_header,
                 ConfigSection.SHOPS: self.shops_page.configuration_header,
+                ConfigSection.BUILDINGS: self.buildings_page.configuration_header,
                 ConfigSection.MARKETPLACE: self.marketplace_page.configuration_header,
                 ConfigSection.BROWSER: self.browser_page.configuration_header,
                 ConfigSection.SETTINGS: self.settings_page.configuration_header,
@@ -315,8 +339,8 @@ class MainWindow(QMainWindow):
     def _reset_all_settings(self) -> None:
         if self._confirm_reset(
             "Reset everything?",
-            "Restore every Farm Merge Valet setting and remove all item, shop, and recipe "
-            "overrides?",
+            "Restore every Farm Merge Valet setting and remove all item, shop, building, "
+            "and recipe overrides?",
         ):
             if self._replace_config(AppConfig()):
                 self.settings_page.configuration_header.mark_reset()
@@ -331,11 +355,20 @@ class MainWindow(QMainWindow):
         return True
 
     def _queue_edit(self, edit: ConfigEdit) -> None:
-        editor: ItemsPage | ShopsPage | MarketplacePage | BrowserPage | SettingsPage
+        editor: (
+            ItemsPage
+            | ShopsPage
+            | BuildingsPage
+            | MarketplacePage
+            | BrowserPage
+            | SettingsPage
+        )
         if edit.source == "items":
             editor = self.items_page
         elif edit.source == "shops":
             editor = self.shops_page
+        elif edit.source == "buildings":
+            editor = self.buildings_page
         elif edit.source == "marketplace":
             editor = self.marketplace_page
         elif edit.source == "browser":
@@ -382,6 +415,7 @@ class MainWindow(QMainWindow):
         headers = {
             "items": self.items_page.configuration_header,
             "shops": self.shops_page.configuration_header,
+            "buildings": self.buildings_page.configuration_header,
             "marketplace": self.marketplace_page.configuration_header,
             "browser": self.browser_page.configuration_header,
             "settings": self.settings_page.configuration_header,
@@ -397,6 +431,7 @@ class MainWindow(QMainWindow):
         headers = {
             "items": self.items_page.configuration_header,
             "shops": self.shops_page.configuration_header,
+            "buildings": self.buildings_page.configuration_header,
             "marketplace": self.marketplace_page.configuration_header,
             "browser": self.browser_page.configuration_header,
             "settings": self.settings_page.configuration_header,
@@ -426,6 +461,11 @@ class MainWindow(QMainWindow):
             self.shops_page.apply_config(
                 config,
                 refresh=bool(changed_fields & _SHOP_POLICY_FIELDS),
+            )
+        if changed_fields & _BUILDING_FIELDS:
+            self.buildings_page.apply_config(
+                config,
+                refresh=bool(changed_fields & _BUILDING_POLICY_FIELDS),
             )
         if changed_fields & _MARKETPLACE_FIELDS:
             self.marketplace_page.apply_config(config)
@@ -564,8 +604,8 @@ class MainWindow(QMainWindow):
         for page in self._catalog_pages():
             page.set_catalog_setup_status(message, error=True)
 
-    def _catalog_pages(self) -> tuple[ItemsPage, ShopsPage]:
-        return self.items_page, self.shops_page
+    def _catalog_pages(self) -> tuple[ItemsPage, ShopsPage, BuildingsPage]:
+        return self.items_page, self.shops_page, self.buildings_page
 
     def _catalog_metadata_refreshed(self, *_args: object) -> None:
         self._catalog_icons.clear()

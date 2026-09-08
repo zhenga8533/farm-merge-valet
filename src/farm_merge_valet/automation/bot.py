@@ -20,6 +20,7 @@ from farm_merge_valet.automation.perception import build_perceived_state
 from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.automation.runtime import (
     ActionStatus,
+    BuildingRepairState,
     FarmSceneKind,
     GameRuntime,
     LiveCellState,
@@ -132,6 +133,7 @@ class Bot:
         self._shop_orders: tuple[ShopOrder, ...] | None = None
         self._marketplace_offers: tuple[MarketplaceLiveOffer, ...] | None = None
         self._land_expansions: tuple[LandExpansionCandidate, ...] | None = None
+        self._building_repairs: tuple[BuildingRepairState, ...] | None = None
         self._obstacle_focus: tuple[GridCoord, int | None] | None = None
         self._merge_workflow = MergeWorkflow()
         self._interaction_workflow = InteractionWorkflow()
@@ -475,6 +477,7 @@ class Bot:
                 self.config.land_expansion_automation_enabled
                 or self._land_expansion_workflow.pending is not None
             ),
+            include_building_repairs=True,
         )
 
     def _apply_runtime_snapshot(self, snapshot: RuntimeSnapshot) -> None:
@@ -493,12 +496,18 @@ class Bot:
         self._shop_orders = perceived.shop_orders
         self._marketplace_offers = snapshot.marketplace_offers
         self._land_expansions = snapshot.land_expansions
+        self._building_repairs = snapshot.building_repairs
         if snapshot.metrics is not None:
             self._scheduler.record_snapshot(snapshot.metrics.wall_duration_ms / 1000.0)
 
     def sync_board_from_live_state(self) -> bool:
         """Synchronize the local board model from the live game state."""
         return self._sync_board_from_live_state()
+
+    @property
+    def building_repairs(self) -> tuple[BuildingRepairState, ...] | None:
+        """Latest immutable building repair state from the live snapshot."""
+        return self._building_repairs
 
     _MERGE_ACTION_PRIORITY = {
         MergeActionKind.TRIGGER: 0,
@@ -584,7 +593,48 @@ class Bot:
                     pair[1], pair[0], prefer_smallest_trigger=prefer_smallest_trigger
                 ),
             )
+            if not self._merge_consumes_reserved_repair_item(action)
         ]
+
+    def _repair_target(self) -> BuildingRepairState | None:
+        candidates = [
+            state for state in (self._building_repairs or ())
+            if state.placed
+            and not state.active
+            and not state.upgrading
+            and state.requirements
+            and self.config.building_repair_enabled(state.building_id)
+        ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda state: (
+            not state.workshop if self.config.prioritize_repair_shops else False,
+            sum(requirement.amount for requirement in state.requirements)
+            if self.config.prioritize_cheaper_repairs else 0,
+            state.building_id,
+        ))
+
+    def _repair_reserves(self) -> dict[ItemRef, int]:
+        if not self.config.preserve_building_repair_resources:
+            return {}
+        target = self._repair_target()
+        if target is None:
+            return {}
+        reserves: dict[ItemRef, int] = {}
+        for requirement in target.requirements:
+            item = self._blueprint_items.get(requirement.blueprint_id)
+            if item is not None:
+                reserves[item] = reserves.get(item, 0) + requirement.amount
+        return reserves
+
+    def _merge_consumes_reserved_repair_item(self, action: MergeAction) -> bool:
+        if action.kind is not MergeActionKind.TRIGGER:
+            return False
+        reserve = self._repair_reserves().get(action.item, 0)
+        if reserve <= 0:
+            return False
+        available = self.board.item_count(action.item)
+        return available - len(action.cluster) < reserve
 
     def _merge_actions_for_policy(self) -> list[MergeAction]:
         actions = self._plan_merge_actions(5, prefer_merge_five=True)
@@ -733,7 +783,26 @@ class Bot:
     def _obstacle_to_clear(self, candidates: list[ObstacleCandidate]) -> ObstacleCandidate | None:
         if not self.config.allow_obstacle_stage_starts:
             return None
-        focused = self._focused_obstacle(candidates)
+        repair_target = self._repair_target()
+        missing_ids = (
+            {
+                requirement.blueprint_id
+                for requirement in repair_target.requirements
+                if requirement.missing > 0
+            }
+            if repair_target is not None
+            else set()
+        )
+        prioritized = candidates
+        if (
+            self.config.prioritize_obstacle_repair_resources
+            and missing_ids
+            and self._obstacle_focus is None
+        ):
+            matching = [candidate for candidate in candidates if candidate.output_ids & missing_ids]
+            if matching:
+                prioritized = matching
+        focused = self._focused_obstacle(prioritized)
         if focused is None:
             return None
 
@@ -829,6 +898,7 @@ class Bot:
                         state.blueprint_id,
                         state.object_id,
                         state.obstacle,
+                        state.claim_output_ids,
                     )
                 )
                 continue

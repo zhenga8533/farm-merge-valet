@@ -90,6 +90,12 @@ class AppConfig(BaseModel):
     auto_pop_storage_bubbles: bool = True
     auto_claim_supply_crates: bool = True
     allow_obstacle_stage_starts: bool = True
+    preserve_building_repair_resources: bool = True
+    building_repair_default_enabled: bool = True
+    building_repair_overrides: dict[str, bool] = Field(default_factory=dict)
+    prioritize_repair_shops: bool = True
+    prioritize_cheaper_repairs: bool = True
+    prioritize_obstacle_repair_resources: bool = True
     minimum_energy_reserve: int = Field(default=0, ge=0, le=1_000_000_000)
     minimum_ticket_reserve: int = Field(default=0, ge=0, le=1_000_000_000)
     minimum_coin_reserve: int = Field(default=0, ge=0, le=1_000_000_000)
@@ -117,8 +123,12 @@ class AppConfig(BaseModel):
         "item", "category", "enabled", "merge", "merge_five", "interact", "remove"
     ] = "item"
     items_sort_descending: bool = False
-    shops_sort_column: Literal["item", "type", "enabled"] = "item"
+    shops_sort_column: Literal["item", "type", "repair", "enabled"] = "item"
     shops_sort_descending: bool = False
+    buildings_sort_column: Literal["building", "type", "availability", "repair", "enabled"] = (
+        "building"
+    )
+    buildings_sort_descending: bool = False
     marketplace_sort_column: Literal["offer", "cost", "enabled"] = "offer"
     marketplace_sort_descending: bool = False
 
@@ -180,7 +190,7 @@ class AppConfig(BaseModel):
             raise ValueError("Discord webhook URL must use HTTPS")
         return value
 
-    @field_validator("shop_overrides", "recipe_overrides")
+    @field_validator("shop_overrides", "recipe_overrides", "building_repair_overrides")
     @classmethod
     def validate_game_ids(cls, value: dict[str, bool]) -> dict[str, bool]:
         if any(not game_id.strip() or game_id != game_id.strip() for game_id in value):
@@ -231,6 +241,11 @@ class AppConfig(BaseModel):
     @staticmethod
     def marketplace_policy_default_enabled(policy_key: str) -> bool:
         return policy_key.startswith("free:")
+
+    def building_repair_enabled(self, building_id: str) -> bool:
+        return self.building_repair_overrides.get(
+            building_id, self.building_repair_default_enabled
+        )
 
     @field_validator("item_default_overrides", "item_policy_overrides")
     @classmethod
