@@ -194,11 +194,8 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         "Notifications",
         "Appearance",
     }
-    assert (
-        window.settings_page.findChild(QLabel, "settingsVersion")
-        .text()
-        .startswith("Farm Merge Valet ")
-    )
+    assert window.settings_page.findChild(QLabel, "settingsVersion") is None
+    assert window.dashboard_page.version_label.text().startswith("Farm Merge Valet ")
     assert "Start each bot run paused" in labels
     assert "Automatically dismiss reward overlays" in labels
     assert "Automatically pop stored items" in labels
@@ -573,10 +570,14 @@ def test_settings_controls_match_model_range_and_parent_feature_state(tmp_path) 
     assert not page.controls["land_expansion_max_coin_cost"].isEnabled()
     assert not page.controls["land_expansion_max_gem_cost"].isEnabled()
     assert not page.controls["webhook_summary_interval"].isEnabled()
+    assert not page._control_labels["land_expansion_max_coin_cost"].isEnabled()
+    assert not page._control_labels["webhook_notification_profile"].isEnabled()
+    assert not page.notifications_hint.isHidden()
     assert page.controls["prioritize_repair_shops"].isEnabled()
 
     page.land_expansion_toggle.click()
     assert page.controls["land_expansion_max_coin_cost"].isEnabled()
+    assert page._control_labels["land_expansion_max_coin_cost"].isEnabled()
     page.building_repairs_toggle.click()
     assert not page.controls["prioritize_repair_shops"].isEnabled()
     assert not page.controls["prioritize_cheaper_repairs"].isEnabled()
@@ -584,6 +585,8 @@ def test_settings_controls_match_model_range_and_parent_feature_state(tmp_path) 
     webhook = page.controls["discord_webhook_url"]
     webhook.setText("https://example.test/webhook")
     assert page.controls["webhook_summary_interval"].isEnabled()
+    assert page._control_labels["webhook_notification_profile"].isEnabled()
+    assert page.notifications_hint.isHidden()
 
     window.quit_application()
     app.processEvents()

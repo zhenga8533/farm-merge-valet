@@ -157,8 +157,16 @@ class MainWindow(QMainWindow):
             icons=self._catalog_icons,
             populate_immediately=eager_catalog_pages,
         )
-        self.buildings_page = BuildingsPage(self._draft, icons=self._catalog_icons)
-        self.marketplace_page = MarketplacePage(self._draft, icons=self._catalog_icons)
+        self.buildings_page = BuildingsPage(
+            self._draft,
+            icons=self._catalog_icons,
+            populate_immediately=eager_catalog_pages,
+        )
+        self.marketplace_page = MarketplacePage(
+            self._draft,
+            icons=self._catalog_icons,
+            populate_immediately=eager_catalog_pages,
+        )
         self.browser_page = BrowserPage(self._draft)
         self.settings_page = SettingsPage(self._draft)
         self.logs_page = LogsPage(self._draft.log_level)
@@ -208,6 +216,10 @@ class MainWindow(QMainWindow):
             self.items_page.ensure_populated(deferred=True)
         elif page is self.shops_page:
             self.shops_page.ensure_populated(deferred=True)
+        elif page is self.buildings_page:
+            self.buildings_page.ensure_populated(deferred=True)
+        elif page is self.marketplace_page:
+            self.marketplace_page.ensure_populated(deferred=True)
         if page is self.browser_page and not self.browser_page.browser_status_known:
             self.controller.refresh_browser()
         app = QApplication.instance()

@@ -243,6 +243,9 @@ def test_runtime_state_updates_dashboard_overlay_and_tray_controls(tmp_path) -> 
     window._status_changed(ApplicationStatus(state=ApplicationState.PAUSED))
 
     assert window.dashboard_page.mode_value.text() == "Paused"
+    assert window.dashboard_page.mode_value.property("state") == "paused"
+    assert not window.dashboard_page.guidance_value.isHidden()
+    assert window.dashboard_page.version_label.text().startswith("Farm Merge Valet ")
     assert window.dashboard_page.run_button.action_text == "Stop"
     assert window.dashboard_page.run_button.shortcut_label.text() == "F8"
     assert window.dashboard_page.run_button.property("danger") is True
@@ -258,6 +261,9 @@ def test_runtime_state_updates_dashboard_overlay_and_tray_controls(tmp_path) -> 
     assert window.run_action.isEnabled()
     assert window.run_action.text() == "Stop bot\tF8"
     assert not window.browser_page.restart_button.isEnabled()
+
+    window._status_changed(ApplicationStatus(state=ApplicationState.RUNNING))
+    assert not window.dashboard_page.guidance_value.isHidden()
 
     window.quit_application()
     app.processEvents()

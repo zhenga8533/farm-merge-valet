@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -13,8 +13,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from farm_merge_valet import __version__
 from farm_merge_valet.gui.components.action_button import ActionButton
-from farm_merge_valet.gui.components.widgets import secondary_button
+from farm_merge_valet.gui.components.widgets import secondary_button, set_styled_property
 from farm_merge_valet.gui.controller import ApplicationState, ApplicationStatus
 from farm_merge_valet.gui.pages.base import AppPage
 
@@ -28,6 +29,7 @@ class DashboardPage(AppPage):
 
     def __init__(self) -> None:
         super().__init__("Dashboard", "Control automation and review live state.")
+
         metrics = QGridLayout()
         metrics.setSpacing(10)
         self.mode_value = self._metric(metrics, 0, 0, "Mode", "Stopped")
@@ -65,12 +67,17 @@ class DashboardPage(AppPage):
         self.run_button.clicked.connect(self.run_requested)
         self.pause_button.clicked.connect(self.pause_requested)
         self.overlay_button.clicked.connect(self.overlay_requested)
-        for button in (self.run_button, self.pause_button):
-            controls.addWidget(button)
+        controls.addWidget(self.run_button)
+        controls.addWidget(self.pause_button)
         controls.addStretch()
         controls.addWidget(self.overlay_button)
         self.page_layout.addLayout(controls)
         self.page_layout.addStretch()
+        self.version_label = QLabel(f"Farm Merge Valet {__version__}")
+        self.version_label.setObjectName("dashboardVersion")
+        self.version_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.version_label.setAccessibleName("Application version")
+        self.page_layout.addWidget(self.version_label)
         self._start_stop_hotkey: str | None = None
         self._pause_hotkey: str | None = None
         self._status = ApplicationStatus()
@@ -99,6 +106,7 @@ class DashboardPage(AppPage):
         self.phase_value.setText(status.phase)
         self.activity_value.setText(status.last_activity)
         self.guidance_value.setText(self._guidance(status))
+        set_styled_property(self.mode_value, "state", status.state.value.casefold())
         active = status.state.active
         self.run_button.setEnabled(status.state is not ApplicationState.STOPPING)
         self.pause_button.setEnabled(active and status.state is not ApplicationState.STOPPING)

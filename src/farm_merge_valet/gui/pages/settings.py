@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from farm_merge_valet import __version__
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.hotkey_edit import HotkeyEdit
@@ -160,9 +159,7 @@ class SettingsPage(ConfigFormPage):
             self._add_toggle(form, label, field)
         self.repairs_advanced_section = repairs_advanced
         repairs_form.addRow(repairs_advanced)
-        self._building_repair_controls = tuple(
-            self.controls[field] for _label, field in repair_priority_fields
-        )
+        self._building_repair_fields = tuple(field for _label, field in repair_priority_fields)
         sections.addWidget(repairs)
 
         timing, timing_form = disclosure_section("Advanced automation timing")
@@ -216,7 +213,12 @@ class SettingsPage(ConfigFormPage):
                 else ""
             ),
         )
-        self._add_form_row(notifications_form, "Discord webhook", webhook)
+        self._add_control_row(
+            notifications_form,
+            "Discord webhook",
+            "discord_webhook_url",
+            webhook,
+        )
 
         profile = FocusAwareComboBox()
         profile.set_choices(
@@ -228,8 +230,19 @@ class SettingsPage(ConfigFormPage):
             lambda _index: self._request("webhook_notification_profile", profile.current_value())
         )
         self._register_control("webhook_notification_profile", profile, profile.set_current_value)
-        self._add_form_row(notifications_form, "Notification detail", profile)
+        self._add_control_row(
+            notifications_form,
+            "Notification detail",
+            "webhook_notification_profile",
+            profile,
+        )
         self._add_toggle(notifications_form, "Include activity charts", "webhook_include_charts")
+        self.notifications_hint = QLabel(
+            "Add a Discord webhook to configure notification delivery."
+        )
+        self.notifications_hint.setObjectName("settingsHint")
+        self.notifications_hint.setWordWrap(True)
+        notifications_form.addRow(self.notifications_hint)
         notifications_advanced, form = disclosure_section("Advanced notification timing")
         self._add_float(
             form,
@@ -260,7 +273,7 @@ class SettingsPage(ConfigFormPage):
             lambda _index: self._request("theme", str(theme.current_value()))
         )
         self._register_control("theme", theme, theme.set_current_value)
-        self._add_form_row(appearance_form, "Theme", theme)
+        self._add_control_row(appearance_form, "Theme", "theme", theme)
 
         for field, label in (
             ("main_always_on_top", "Dashboard always on top"),
@@ -277,34 +290,30 @@ class SettingsPage(ConfigFormPage):
         appearance_form.addRow(appearance_advanced)
         sections.addWidget(appearance)
 
-        version = QLabel(f"Farm Merge Valet {__version__}")
-        version.setObjectName("settingsVersion")
-        version.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        version.setAccessibleName("Application version")
-        sections.addWidget(version)
         sections.addStretch()
         self.land_expansion_toggle.toggled.connect(self._sync_dependent_controls)
         self.building_repairs_toggle.toggled.connect(self._sync_dependent_controls)
         webhook.textChanged.connect(self._sync_dependent_controls)
-        self._notification_controls = (
-            profile,
-            self.controls["webhook_include_charts"],
-            self.controls["webhook_status_interval"],
-            self.controls["webhook_summary_interval"],
+        self._notification_fields = (
+            "webhook_notification_profile",
+            "webhook_include_charts",
+            "webhook_status_interval",
+            "webhook_summary_interval",
         )
         self._sync_dependent_controls()
 
     def _sync_dependent_controls(self, *_args: object) -> None:
         land_enabled = self.land_expansion_toggle.isChecked()
-        self.controls["land_expansion_max_coin_cost"].setEnabled(land_enabled)
-        self.controls["land_expansion_max_gem_cost"].setEnabled(land_enabled)
+        self._set_control_enabled("land_expansion_max_coin_cost", land_enabled)
+        self._set_control_enabled("land_expansion_max_gem_cost", land_enabled)
         repairs_enabled = self.building_repairs_toggle.isChecked()
-        for control in self._building_repair_controls:
-            control.setEnabled(repairs_enabled)
+        for field in self._building_repair_fields:
+            self._set_control_enabled(field, repairs_enabled)
         webhook = self.controls["discord_webhook_url"]
         notifications_enabled = isinstance(webhook, QLineEdit) and bool(webhook.text().strip())
-        for control in getattr(self, "_notification_controls", ()):
-            control.setEnabled(notifications_enabled)
+        for field in getattr(self, "_notification_fields", ()):
+            self._set_control_enabled(field, notifications_enabled)
+        self.notifications_hint.setVisible(not notifications_enabled)
 
     def _request(self, field: str, value: object) -> None:
         changes = {field: value}
@@ -343,7 +352,7 @@ class SettingsPage(ConfigFormPage):
             control.setValue(float(str(value)))
 
         self._register_control(field, control, set_value)
-        self._add_form_row(form, label, control)
+        self._add_control_row(form, label, field, control)
 
     def _add_hotkey(self, form: QFormLayout, label: str, field: str) -> None:
         value = getattr(self._config, field)
@@ -355,7 +364,7 @@ class SettingsPage(ConfigFormPage):
             control.set_value(value if isinstance(value, str) else None)
 
         self._register_control(field, control, set_value)
-        self._add_form_row(form, label, control)
+        self._add_control_row(form, label, field, control)
 
     def _add_opacity(self, form: QFormLayout, label: str, field: str) -> None:
         control = FocusAwareSlider(Qt.Orientation.Horizontal)
@@ -384,7 +393,7 @@ class SettingsPage(ConfigFormPage):
 
         self._register_control(field, control, set_opacity)
         self.opacity_labels[field] = value_label
-        self._add_form_row(form, label, row)
+        self._add_control_row(form, label, field, row)
 
     def show_validation_error(self, field: str | None, message: str, config: AppConfig) -> None:
         self.configuration_header.mark_error(f"Invalid: {message}")

@@ -554,6 +554,8 @@ def test_catalog_pages_populate_lazily_and_ignore_hidden_refreshes(tmp_path, mon
 
     assert window.items_page.table.topLevelItemCount() == 0
     assert window.shops_page.tree.topLevelItemCount() == 0
+    assert not window.buildings_page._populated
+    assert not window.marketplace_page._populated
     controller.catalog_refreshed.emit(3)
     app.processEvents()
     assert window.items_page.table.topLevelItemCount() == 0
@@ -574,6 +576,23 @@ def test_catalog_pages_populate_lazily_and_ignore_hidden_refreshes(tmp_path, mon
     while not window.shops_page.loading_state.isHidden() and time.monotonic() < deadline:
         QTest.qWait(10)
     assert window.shops_page.loading_state.isHidden()
+
+    window.navigation.setCurrentRow(3)
+    assert not window.buildings_page.loading_state.isHidden()
+    deadline = time.monotonic() + 1
+    while not window.buildings_page.loading_state.isHidden() and time.monotonic() < deadline:
+        QTest.qWait(10)
+    assert window.buildings_page._populated
+    assert window.buildings_page.loading_state.isHidden()
+
+    window.navigation.setCurrentRow(4)
+    assert not window.marketplace_page.loading_state.isHidden()
+    deadline = time.monotonic() + 1
+    while not window.marketplace_page.loading_state.isHidden() and time.monotonic() < deadline:
+        QTest.qWait(10)
+    assert window.marketplace_page._populated
+    assert window.marketplace_page._has_populated_catalog
+    assert window.marketplace_page.loading_state.isHidden()
 
     window.quit_application()
     app.processEvents()

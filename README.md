@@ -63,7 +63,10 @@ farm-merge-valet assets sync
 The command without a subcommand opens the desktop dashboard. Start launches or
 reuses the managed browser and begins automation; Start/Stop and Pause/Resume
 remain available from the dashboard, compact overlay, tray, and global
-shortcuts.
+shortcuts. The dashboard summarizes automation, browser, runtime, phase, recent
+activity, next-step guidance, compact-overlay access, and the installed version.
+Catalog-backed policy pages populate on first use so a large synchronized cache
+does not delay the initial window.
 The browser manager refuses
 an occupied endpoint with the wrong profile, executable, or switches.
 An ordinary resume validates and reuses the cached scene; heap discovery runs

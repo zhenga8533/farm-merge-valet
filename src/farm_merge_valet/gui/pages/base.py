@@ -98,6 +98,7 @@ class ConfigFormPage(AppPage):
         self._config = config
         self._form_label_width = form_label_width
         self.controls: dict[str, QWidget] = {}
+        self._control_labels: dict[str, QLabel] = {}
         self._control_setters: dict[str, Callable[[object], None]] = {}
 
     def _request(self, field: str, value: object) -> None:
@@ -108,7 +109,7 @@ class ConfigFormPage(AppPage):
         form: QFormLayout,
         text: str,
         field: QWidget | QLayout,
-    ) -> None:
+    ) -> QLabel:
         label = QLabel(text)
         label.setFixedWidth(self._form_label_width)
         label.setWordWrap(True)
@@ -116,6 +117,20 @@ class ConfigFormPage(AppPage):
         if isinstance(field, QWidget):
             label.setBuddy(field)
         form.addRow(label, field)
+        return label
+
+    def _add_control_row(
+        self,
+        form: QFormLayout,
+        text: str,
+        field: str,
+        control: QWidget | QLayout,
+    ) -> None:
+        self._control_labels[field] = self._add_form_row(form, text, control)
+
+    def _set_control_enabled(self, field: str, enabled: bool) -> None:
+        self.controls[field].setEnabled(enabled)
+        self._control_labels[field].setEnabled(enabled)
 
     def _add_toggle(self, form: QFormLayout, label: str, field: str) -> SettingsToggle:
         control = SettingsToggle()
@@ -127,7 +142,7 @@ class ConfigFormPage(AppPage):
             control.setChecked(bool(value))
 
         self._register_control(field, control, set_value)
-        self._add_form_row(form, label, control)
+        self._add_control_row(form, label, field, control)
         return control
 
     def _add_int(
@@ -150,7 +165,7 @@ class ConfigFormPage(AppPage):
             control.setValue(int(str(value)))
 
         self._register_control(field, control, set_value)
-        self._add_form_row(form, label, control)
+        self._add_control_row(form, label, field, control)
 
     def _register_control(
         self,

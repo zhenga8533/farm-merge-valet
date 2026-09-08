@@ -147,8 +147,16 @@ def _stylesheet(colors: _Colors) -> str:
 QWidget {{ color: {colors.text}; font-size: 10pt; }}
 QMainWindow, QDialog {{ background: {colors.window}; }}
 QLabel#pageTitle {{ font-size: 17pt; font-weight: 600; }}
-QLabel#pageSubtitle, QLabel#metricLabel {{ color: {colors.muted}; }}
+QLabel#pageSubtitle, QLabel#metricLabel, QLabel#settingsHint,
+QLabel#dashboardVersion {{ color: {colors.muted}; }}
 QLabel#metricValue, QLabel#overlayStatus {{ font-size: 12pt; font-weight: 600; }}
+QLabel#metricValue[state="running"], QLabel#metricValue[state="idle"] {{
+    color: {colors.primary};
+}}
+QLabel#metricValue[state="starting"], QLabel#metricValue[state="resuming"],
+QLabel#metricValue[state="paused"] {{ color: {colors.selected}; }}
+QLabel#metricValue[state="error"] {{ color: {colors.danger}; }}
+QLabel#metricValue[state="stopping"] {{ color: {colors.muted}; }}
 QFrame#card, QFrame#metricCard, QFrame#catalogOnboarding {{
     background: {colors.surface}; border: 1px solid {colors.border}; border-radius: 10px;
 }}
@@ -204,6 +212,10 @@ QPushButton QLabel#shortcutKeycap:disabled {{
 }}
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
     background: {colors.input}; border: 1px solid {colors.control_border}; border-radius: 6px; padding: 6px;
+}}
+QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
+    background: {colors.surface_subtle}; color: {colors.disabled_text};
+    border-color: {colors.disabled};
 }}
 QComboBox {{ padding-right: 38px; }}
 QComboBox::drop-down {{

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterator
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
@@ -17,6 +18,8 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
 )
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
+from farm_merge_valet.gui.components.incremental_work import IncrementalWorkRunner
+from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_ICON_SIZE,
     POLICY_MEDIA_BADGE_COLUMN_WIDTH,
@@ -53,6 +56,7 @@ class MarketplacePage(AppPage):
         config: AppConfig,
         *,
         icons: CatalogIconLoader | None = None,
+        populate_immediately: bool = True,
     ) -> None:
         super().__init__(
             "Marketplace",
@@ -69,7 +73,10 @@ class MarketplacePage(AppPage):
         self._family_toggles: dict[tuple[str, str], PolicyCheckBox] = {}
         self._family_policy_keys: dict[tuple[str, str], tuple[str, ...]] = {}
         self._family_items: dict[tuple[str, str], QTreeWidgetItem] = {}
+        self._populated = False
         self._has_populated_catalog = False
+        self._population_pending = False
+        self._population_runner = IncrementalWorkRunner(self)
         self.configuration_header = ConfigurationHeader("Reset marketplace policies")
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
@@ -77,6 +84,12 @@ class MarketplacePage(AppPage):
         self.catalog_onboarding = CatalogOnboarding()
         self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
         self.page_layout.addWidget(self.catalog_onboarding, 1, Qt.AlignmentFlag.AlignCenter)
+        self.loading_state = LoadingState(
+            "Loading marketplace…",
+            "Preparing locally cached offers, item families, and controls.",
+        )
+        self.loading_state.setVisible(False)
+        self.page_layout.addWidget(self.loading_state, 1, Qt.AlignmentFlag.AlignCenter)
         scaffold = create_policy_tree(
             header_labels=("Offer", "Cost", ""),
             bulk_labels={2: "Auto-purchase"},
@@ -96,9 +109,23 @@ class MarketplacePage(AppPage):
         self.toolbar.filter_requested.connect(self._filter)
         self.page_layout.addWidget(self.toolbar)
         self.page_layout.addWidget(self.tree, 1)
-        self.populate()
+        if populate_immediately:
+            self.populate()
         self._apply_sort_preference()
         self.bulk_header.sortIndicatorChanged.connect(self._sort_changed)
+
+    def ensure_populated(self, *, deferred: bool = False) -> None:
+        if self._populated or self._population_pending:
+            return
+        if not deferred:
+            self.populate()
+            return
+        self._population_pending = True
+        self._show_loading()
+        self._population_runner.start(self._populate_steps(), self._finish_deferred_population)
+
+    def _finish_deferred_population(self) -> None:
+        self._population_pending = False
 
     def apply_config(self, config: AppConfig, *, refresh: bool = True) -> None:
         catalog_changed = config.catalog_dir != self._config.catalog_dir
@@ -110,7 +137,7 @@ class MarketplacePage(AppPage):
         self._icons.set_catalog_dir(config.catalog_dir)
         if sort_changed:
             self._apply_sort_preference()
-        if refresh or catalog_changed:
+        if (refresh or catalog_changed) and self._populated:
             self.populate()
         self.configuration_header.mark_saved()
 
@@ -121,10 +148,11 @@ class MarketplacePage(AppPage):
         self.configuration_header.mark_error(message)
 
     def reload_catalog(self) -> None:
-        self.populate()
+        if self._populated:
+            self.populate()
 
     def reload_catalog_if_missing(self) -> None:
-        if self._catalog is None or not self._catalog.marketplace_offers:
+        if self._populated and (self._catalog is None or not self._catalog.marketplace_offers):
             self.populate()
 
     def set_catalog_setup_busy(self, busy: bool) -> None:
@@ -134,6 +162,13 @@ class MarketplacePage(AppPage):
         self.catalog_onboarding.set_status(message, error=error)
 
     def populate(self) -> None:
+        self._population_runner.cancel()
+        self._population_pending = False
+        for _step in self._populate_steps():
+            pass
+
+    def _populate_steps(self) -> Iterator[None]:
+        self._populated = True
         expanded = expanded_policy_keys(self.tree)
         expand_groups_by_default = not self._has_populated_catalog
         self.tree.setSortingEnabled(False)
@@ -149,13 +184,8 @@ class MarketplacePage(AppPage):
         self._catalog = load_gui_catalog(self._config)
         grouped: dict[str, list[MarketplaceOffer]] = defaultdict(list)
         if self._catalog is None or not self._catalog.marketplace_offers:
-            self.catalog_onboarding.setVisible(True)
-            self.toolbar.setVisible(False)
-            self.tree.setVisible(False)
+            self._show_catalog_onboarding()
             return
-        self.catalog_onboarding.setVisible(False)
-        self.toolbar.setVisible(True)
-        self.tree.setVisible(True)
         for offer in self._catalog.marketplace_offers:
             grouped[offer.group].append(offer)
         for group, offers in grouped.items():
@@ -220,6 +250,7 @@ class MarketplacePage(AppPage):
             self._group_policy_keys[group] = policy_keys
             self._group_items[group] = parent
             parent.setExpanded(expand_groups_by_default or ("group", group) in expanded)
+            yield
         self.tree.setSortingEnabled(True)
         fit_policy_widget_column(
             self.tree,
@@ -234,6 +265,25 @@ class MarketplacePage(AppPage):
         )
         self._filter(self.toolbar.search.text())
         self._has_populated_catalog = True
+        self._show_catalog_content()
+
+    def _show_catalog_onboarding(self) -> None:
+        self.loading_state.setVisible(False)
+        self.catalog_onboarding.setVisible(True)
+        self.toolbar.setVisible(False)
+        self.tree.setVisible(False)
+
+    def _show_catalog_content(self) -> None:
+        self.loading_state.setVisible(False)
+        self.catalog_onboarding.setVisible(False)
+        self.toolbar.setVisible(True)
+        self.tree.setVisible(True)
+
+    def _show_loading(self) -> None:
+        self.catalog_onboarding.setVisible(False)
+        self.toolbar.setVisible(False)
+        self.tree.setVisible(False)
+        self.loading_state.setVisible(True)
 
     def _add_family(
         self,

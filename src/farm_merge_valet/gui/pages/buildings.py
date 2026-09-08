@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QHeaderView, QTreeWidgetItem
@@ -17,6 +19,8 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
 )
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
+from farm_merge_valet.gui.components.incremental_work import IncrementalWorkRunner
+from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_ROW_HEIGHT,
     POLICY_MEDIA_ROW_HEIGHT,
@@ -49,6 +53,7 @@ class BuildingsPage(AppPage):
         config: AppConfig,
         *,
         icons: CatalogIconLoader | None = None,
+        populate_immediately: bool = True,
     ) -> None:
         super().__init__(
             "Building policies",
@@ -56,7 +61,10 @@ class BuildingsPage(AppPage):
         )
         self._config = config
         self._icons = icons or CatalogIconLoader(config.catalog_dir)
-        self._catalog: ItemCatalog | None = load_gui_catalog(config)
+        self._catalog: ItemCatalog | None = None
+        self._populated = False
+        self._population_pending = False
+        self._population_runner = IncrementalWorkRunner(self)
         self._states: tuple[BuildingRepairState, ...] | None = None
         self._toggles: dict[str, PolicyCheckBox] = {}
         self._items: dict[str, QTreeWidgetItem] = {}
@@ -69,6 +77,12 @@ class BuildingsPage(AppPage):
         self.catalog_onboarding = CatalogOnboarding()
         self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
         self.page_layout.addWidget(self.catalog_onboarding, 1, Qt.AlignmentFlag.AlignCenter)
+        self.loading_state = LoadingState(
+            "Loading buildings…",
+            "Preparing locally cached buildings, repair requirements, and controls.",
+        )
+        self.loading_state.setVisible(False)
+        self.page_layout.addWidget(self.loading_state, 1, Qt.AlignmentFlag.AlignCenter)
         scaffold = create_policy_tree(
             header_labels=("Building / requirement", "Type", "Availability", "Repair", ""),
             bulk_labels={4: "Preserve"},
@@ -91,10 +105,21 @@ class BuildingsPage(AppPage):
         self.page_layout.addWidget(self.tree, 1)
         self._apply_sort_preference()
         self.bulk_header.sortIndicatorChanged.connect(self._sort_changed)
-        if self._catalog is None:
-            self._show_catalog_onboarding()
-        else:
+        if populate_immediately:
             self._populate()
+
+    def ensure_populated(self, *, deferred: bool = False) -> None:
+        if self._populated or self._population_pending:
+            return
+        if not deferred:
+            self._populate()
+            return
+        self._population_pending = True
+        self._show_loading()
+        self._population_runner.start(self._populate_steps(), self._finish_deferred_population)
+
+    def _finish_deferred_population(self) -> None:
+        self._population_pending = False
 
     def apply_config(self, config: AppConfig, *, refresh: bool = True) -> None:
         catalog_changed = config.catalog_dir != self._config.catalog_dir
@@ -108,19 +133,16 @@ class BuildingsPage(AppPage):
             self._catalog = None
         if sort_changed:
             self._apply_sort_preference()
-        if refresh:
+        if refresh and self._populated:
             self._populate()
         self.configuration_header.mark_saved()
 
     def reload_catalog(self) -> None:
-        self._catalog = load_gui_catalog(self._config)
-        self._populate()
+        if self._populated:
+            self._populate()
 
     def reload_catalog_if_missing(self) -> None:
-        if self._catalog is not None:
-            return
-        self._catalog = load_gui_catalog(self._config)
-        if self._catalog is None:
+        if not self._populated or self._catalog is not None:
             return
         self._populate()
 
@@ -134,9 +156,17 @@ class BuildingsPage(AppPage):
         if states is not None and not isinstance(states, tuple):
             return
         self._states = states
-        self._populate()
+        if self._populated:
+            self._populate()
 
     def _populate(self) -> None:
+        self._population_runner.cancel()
+        self._population_pending = False
+        for _step in self._populate_steps():
+            pass
+
+    def _populate_steps(self) -> Iterator[None]:
+        self._populated = True
         self._catalog = load_gui_catalog(self._config)
         if self._catalog is None:
             self._show_catalog_onboarding()
@@ -159,9 +189,11 @@ class BuildingsPage(AppPage):
                 catalog_item,
                 states_by_catalog_id.get(catalog_item.game_id),
             )
+            yield
         for state in live_states:
             if self._catalog_item(state.building_id) is None:
                 self._add_building(state.building_id, None, state)
+                yield
         if not catalog_buildings and not live_states:
             self._show_empty("No buildings were discovered in the cached catalog")
         self.tree.setSortingEnabled(True)
@@ -391,14 +423,22 @@ class BuildingsPage(AppPage):
         self.bulk_header.set_state(4, Qt.CheckState.Unchecked, enabled=False)
 
     def _show_catalog_onboarding(self) -> None:
+        self.loading_state.setVisible(False)
         self.catalog_onboarding.setVisible(True)
         self.toolbar.setVisible(False)
         self.tree.setVisible(False)
 
     def _show_catalog_content(self) -> None:
+        self.loading_state.setVisible(False)
         self.catalog_onboarding.setVisible(False)
         self.toolbar.setVisible(True)
         self.tree.setVisible(True)
+
+    def _show_loading(self) -> None:
+        self.catalog_onboarding.setVisible(False)
+        self.toolbar.setVisible(False)
+        self.tree.setVisible(False)
+        self.loading_state.setVisible(True)
 
     @staticmethod
     def _repair_status(state: BuildingRepairState) -> str:
