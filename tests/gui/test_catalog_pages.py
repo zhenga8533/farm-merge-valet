@@ -167,11 +167,17 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
     store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
     window = MainWindow(ApplicationController(store))
 
-    cached_names = {
-        window.buildings_page.tree.topLevelItem(index).text(0)
+    groups = {
+        window.buildings_page.tree.topLevelItem(index).text(
+            0
+        ): window.buildings_page.tree.topLevelItem(index)
         for index in range(window.buildings_page.tree.topLevelItemCount())
     }
-    assert cached_names == {"Bakery", "Greenhouse"}
+    assert set(groups) == {"Structures", "Workshops"}
+    assert groups["Structures"].isExpanded()
+    assert groups["Workshops"].isExpanded()
+    assert groups["Structures"].child(0).text(0) == "Greenhouse"
+    assert groups["Workshops"].child(0).text(0) == "Bakery"
     assert not window.buildings_page.tree.isHidden()
     assert window.buildings_page.loading_state.isHidden()
 
@@ -186,10 +192,29 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
                 False,
                 (BuildingRequirement("wood_2", 3, 1),),
             ),
+            BuildingRepairState(
+                "decorative_barn",
+                1,
+                False,
+                False,
+                False,
+                False,
+                (),
+            ),
         )
     )
 
-    bakery = window.buildings_page.tree.topLevelItem(0)
+    groups = {
+        window.buildings_page.tree.topLevelItem(index).text(
+            0
+        ): window.buildings_page.tree.topLevelItem(index)
+        for index in range(window.buildings_page.tree.topLevelItemCount())
+    }
+    assert set(groups) == {"Decorative Buildings", "Structures", "Workshops"}
+    assert all(group.icon(0).isNull() for group in groups.values())
+    assert groups["Decorative Buildings"].isExpanded()
+    assert groups["Decorative Buildings"].child(0).text(0) == "Decorative Barn"
+    bakery = groups["Workshops"].child(0)
     assert bakery is not None
     assert bakery.text(0) == "Bakery"
     assert bakery.childCount() == 1

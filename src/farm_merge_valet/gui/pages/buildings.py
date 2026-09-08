@@ -59,6 +59,7 @@ class BuildingsPage(AppPage):
         self._states: tuple[BuildingRepairState, ...] | None = None
         self._toggles: dict[str, PolicyCheckBox] = {}
         self._items: dict[str, QTreeWidgetItem] = {}
+        self._groups: dict[str, QTreeWidgetItem] = {}
 
         self.configuration_header = ConfigurationHeader("Reset building policies")
         self.configuration_header.reset_requested.connect(self.reset_requested)
@@ -149,6 +150,7 @@ class BuildingsPage(AppPage):
         self.tree.clear()
         self._toggles = {}
         self._items = {}
+        self._groups = {}
         live_states = self._states or ()
         states_by_catalog_id = {
             catalog_item.game_id: state
@@ -181,6 +183,8 @@ class BuildingsPage(AppPage):
         if state is not None:
             building_id = state.building_id
         name = catalog_item.display_name if catalog_item else self._fallback_name(building_id)
+        is_workshop = state.workshop if state is not None else catalog_item.category == "shops"
+        group = self._building_group(building_id, is_workshop)
         parent = PolicyTreeItem((name, "", "", "", ""))
         parent.setData(0, Qt.ItemDataRole.UserRole, ("building", building_id))
         parent.setIcon(0, self._icons.icon_for(catalog_item))
@@ -189,8 +193,7 @@ class BuildingsPage(AppPage):
         font = parent.font(0)
         font.setWeight(QFont.Weight.DemiBold)
         parent.setFont(0, font)
-        self.tree.addTopLevelItem(parent)
-        is_workshop = state.workshop if state is not None else catalog_item.category == "shops"
+        group.addChild(parent)
         building_type = "Shop" if is_workshop else "Building"
         availability = (
             "On board"
@@ -222,6 +225,26 @@ class BuildingsPage(AppPage):
             )
         parent.setExpanded(state is not None and state.placed and not state.active)
 
+    def _building_group(self, building_id: str, is_workshop: bool) -> QTreeWidgetItem:
+        if is_workshop:
+            label = "Workshops"
+        elif building_id.startswith("decorative_"):
+            label = "Decorative Buildings"
+        else:
+            label = "Structures"
+        group = self._groups.get(label)
+        if group is None:
+            group = PolicyTreeItem((label, "", "", "", ""))
+            group.setData(0, Qt.ItemDataRole.UserRole, ("building_group", label.casefold()))
+            group.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
+            font = group.font(0)
+            font.setWeight(QFont.Weight.DemiBold)
+            group.setFont(0, font)
+            self.tree.addTopLevelItem(group)
+            group.setExpanded(True)
+            self._groups[label] = group
+        return group
+
     def _catalog_buildings(self) -> tuple[CatalogItem, ...]:
         if self._catalog is None:
             return ()
@@ -239,7 +262,7 @@ class BuildingsPage(AppPage):
 
     @staticmethod
     def _building_id(catalog_item: CatalogItem) -> str:
-        if catalog_item.category == "structures":
+        if catalog_item.game_id in {"gazebo", "greenhouse"}:
             return f"{catalog_item.game_id}_building"
         return catalog_item.game_id
 
