@@ -23,6 +23,10 @@ from farm_merge_valet.gui.services.background_operation import (
     BackgroundOperationCancelled,
     BackgroundOperationRunner,
 )
+from farm_merge_valet.gui.services.catalog_freshness import (
+    CatalogFreshnessState,
+    inspect_catalog_freshness,
+)
 from farm_merge_valet.gui.services.catalog_sync import CatalogSyncCallbacks, CatalogSyncService
 from farm_merge_valet.gui.services.hotkeys import HotkeyManager
 from farm_merge_valet.observability.discord import discord_webhook_sink
@@ -93,6 +97,7 @@ class ApplicationController(QObject):
     assets_refreshed = Signal()
     upgrade_progress_changed = Signal(object)
     building_repairs_changed = Signal(object)
+    catalog_freshness_changed = Signal(object)
     shutdown_complete = Signal()
     _utility_operation_finished = Signal(str, object)
     _bot_finished = Signal(object)
@@ -207,6 +212,7 @@ class ApplicationController(QObject):
 
     def _run_bot(self) -> None:
         config = self.store.current
+        cached_freshness = inspect_catalog_freshness(config.catalog_dir / "catalog.json")
         failure: str | None = None
         try:
             manager = BrowserManager(config)
@@ -243,6 +249,7 @@ class ApplicationController(QObject):
 
             def refresh_startup_data() -> None:
                 service = self._catalog_sync_service(config)
+                service.check_catalog_freshness(cached_freshness)
                 service.refresh_upgrade_progress(source="bot startup")
                 service.refresh_building_repairs(source="bot startup")
 
@@ -384,15 +391,18 @@ class ApplicationController(QObject):
         self.browser_status_changed.emit(messages[operation])
 
         def work() -> BrowserStatus:
-            manager = BrowserManager(self.store.current)
+            config = self.store.current
+            manager = BrowserManager(config)
             if operation == "launch":
-                return manager.launch()
-            if operation == "restart":
-                return manager.restart()
-            if operation == "stop":
+                status = manager.launch()
+            elif operation == "restart":
+                status = manager.restart()
+            elif operation == "stop":
                 manager.stop()
-                return manager.status()
-            return manager.status()
+                status = manager.status()
+            else:
+                status = manager.status()
+            return status
 
         self._start_utility_operation(f"browser:{operation}", work)
 
@@ -450,6 +460,7 @@ class ApplicationController(QObject):
                 browser_changed=self._catalog_browser_changed,
                 catalog_refreshed=self.catalog_refreshed.emit,
                 upgrade_progress_changed=self.upgrade_progress_changed.emit,
+                catalog_freshness_changed=self.catalog_freshness_changed.emit,
                 building_repairs_changed=self._building_repairs_updated,
             ),
         )
@@ -520,9 +531,24 @@ class ApplicationController(QObject):
                     "stop": "Managed browser stopped",
                 }[action]
                 self._set_status(browser=message, last_activity=activity)
+            if result.game_frame_available:
+                self._check_catalog_freshness()
         elif category == "game-sync":
             self.game_sync_status_changed.emit(str(result))
             self.assets_refreshed.emit()
+
+    def _check_catalog_freshness(self) -> None:
+        config = self.store.current
+        cached = inspect_catalog_freshness(config.catalog_dir / "catalog.json")
+        if cached.state in {CatalogFreshnessState.MISSING, CatalogFreshnessState.INVALID}:
+            self.catalog_freshness_changed.emit(cached)
+            return
+        service = self._catalog_sync_service(config)
+        self._start_utility_operation(
+            "catalog:freshness",
+            lambda: service.check_catalog_freshness(cached),
+            report_busy_error=False,
+        )
 
     def _on_record(self, record: logging.LogRecord) -> None:
         formatter = self.log_handler.formatter or logging.Formatter()

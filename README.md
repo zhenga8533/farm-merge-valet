@@ -307,7 +307,12 @@ browser profile; an unowned browser is never modified.
 Its Game data section can permanently clear the compiled catalog,
 extracted icons, and downloaded atlas cache after confirmation. This preserves
 configuration, the managed-browser profile, logs, and other runtime state; run
-Use Synchronize afterward to rebuild the cache.
+Synchronize afterward to rebuild the cache. When an already-running game is
+checked from the Browser page or the bot starts, the application compares the
+cached and live catalog fingerprints. A mismatch changes Synchronize to Update,
+reports the update in Game data, and shows at most one tray notification per
+application session. The application does not launch a browser solely to perform
+this check.
 Manual game-data synchronization refreshes atlas files even when their CDN paths
 are unchanged. The atlas cache also records complete versioned source URLs so
 normal CLI synchronization refreshes entries when the game version changes. A

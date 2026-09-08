@@ -117,5 +117,6 @@ def create_catalog_sync_service(
             upgrade_progress_reader=read_catalog_upgrade_progress,
             building_repairs_reader=read_building_repairs,
             catalog_loader=load_item_catalog,
+            catalog_fingerprint_reader=read_runtime_catalog_fingerprint,
         ),
     )

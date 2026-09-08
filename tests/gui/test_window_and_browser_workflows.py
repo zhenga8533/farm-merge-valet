@@ -20,6 +20,10 @@ from farm_merge_valet.gui.controller import (
     ApplicationStatus,
 )
 from farm_merge_valet.gui.main_window import MainWindow
+from farm_merge_valet.gui.services.catalog_freshness import (
+    CatalogFreshness,
+    CatalogFreshnessState,
+)
 
 
 def _catalog() -> ItemCatalog:
@@ -156,6 +160,20 @@ def test_browser_actions_follow_managed_browser_and_runtime_state(tmp_path) -> N
     assert not page.restart_button.isEnabled()
     assert not page.game_sync_button.isEnabled()
     assert not page.cache_clear_button.isEnabled()
+
+    page.set_catalog_freshness(
+        CatalogFreshness(
+            CatalogFreshnessState.OUTDATED,
+            "Game data update available · Synchronize to refresh assets",
+        )
+    )
+    assert page.game_sync_button.text() == "Update"
+    assert "update available" in page.game_sync_status_label.text().casefold()
+
+    page.set_catalog_freshness(
+        CatalogFreshness(CatalogFreshnessState.CURRENT, "Catalog is current")
+    )
+    assert page.game_sync_button.text() == "Synchronize"
 
     window.quit_application()
     app.processEvents()

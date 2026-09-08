@@ -41,6 +41,10 @@ from farm_merge_valet.gui.pages import (
 )
 from farm_merge_valet.gui.pages.base import ConfigEdit
 from farm_merge_valet.gui.services.assets import CatalogIconLoader
+from farm_merge_valet.gui.services.catalog_freshness import (
+    CatalogFreshness,
+    CatalogFreshnessState,
+)
 from farm_merge_valet.gui.services.config_saver import ConfigSaver
 from farm_merge_valet.gui.services.log_export import save_visible_log
 from farm_merge_valet.gui.theme import apply_theme, refresh_widget_theme
@@ -112,6 +116,7 @@ class MainWindow(QMainWindow):
             if app.property("fmvTheme") != self._draft.theme:
                 apply_theme(app, self._draft.theme)
         self._really_quit = False
+        self._freshness_notification_shown = False
         self._pending_save_sections: set[str] = set()
         self._configured_log_level = controller.config.log_level
         self._config_saver = ConfigSaver(controller.store, self)
@@ -183,6 +188,7 @@ class MainWindow(QMainWindow):
         controller.browser_state_changed.connect(self.browser_page.set_browser_status)
         controller.game_sync_operation_changed.connect(self._game_sync_operation_changed)
         controller.game_sync_status_changed.connect(self._game_sync_status_changed)
+        controller.catalog_freshness_changed.connect(self._catalog_freshness_changed)
         controller.catalog_setup_failed.connect(self._catalog_setup_failed)
         controller.catalog_refreshed.connect(self._catalog_metadata_refreshed)
         controller.assets_refreshed.connect(self._catalog_assets_refreshed)
@@ -609,6 +615,21 @@ class MainWindow(QMainWindow):
         self.browser_page.set_game_sync_status(message)
         for page in self._catalog_pages():
             page.set_catalog_setup_status(message)
+
+    def _catalog_freshness_changed(self, freshness: CatalogFreshness) -> None:
+        self.browser_page.set_catalog_freshness(freshness)
+        if (
+            freshness.state is CatalogFreshnessState.OUTDATED
+            and not self._freshness_notification_shown
+        ):
+            self._freshness_notification_shown = True
+            if self.tray.isVisible():
+                self.tray.showMessage(
+                    "Game data update available",
+                    "Open Browser and select Update to refresh cached game data and assets.",
+                    QSystemTrayIcon.MessageIcon.Warning,
+                    8000,
+                )
 
     def _catalog_setup_failed(self, message: str) -> None:
         for page in self._catalog_pages():

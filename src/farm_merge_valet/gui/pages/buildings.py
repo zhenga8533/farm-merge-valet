@@ -185,7 +185,11 @@ class BuildingsPage(AppPage):
         if state is not None:
             building_id = state.building_id
         name = catalog_item.display_name if catalog_item else self._fallback_name(building_id)
-        is_workshop = state.workshop if state is not None else catalog_item.category == "shops"
+        is_workshop = (
+            state.workshop
+            if state is not None
+            else catalog_item is not None and catalog_item.category == "shops"
+        )
         group = self._building_group(building_id, is_workshop, catalog_item)
         parent = PolicyTreeItem((name, "", "", "", ""))
         parent.setData(0, Qt.ItemDataRole.UserRole, ("building", building_id))

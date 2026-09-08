@@ -92,6 +92,9 @@ rows.
 The Browser page can clear both generated catalog and atlas directories after
 confirmation without removing application settings, browser-profile data, logs,
 or runtime state.
+It also compares the catalog's source fingerprint with the running game during
+browser status checks and bot startup. A confirmed mismatch is presented as an
+available update; cache age by itself is never treated as evidence of staleness.
 
 Categories are derived from runtime capabilities before falling back to an
 explicit `uncategorized` bucket. A small centralized compatibility table covers

@@ -34,6 +34,11 @@ from farm_merge_valet.gui.pages.base import (
     scrollable_sections,
     settings_section,
 )
+from farm_merge_valet.gui.services.catalog_freshness import (
+    CatalogFreshness,
+    CatalogFreshnessState,
+    inspect_catalog_freshness,
+)
 
 
 class BrowserPage(ConfigFormPage):
@@ -113,7 +118,8 @@ class BrowserPage(ConfigFormPage):
         sections.addWidget(managed)
 
         assets, assets_form = settings_section("Game data")
-        self.game_sync_status_label = StatusLabel(self._game_sync_status(config))
+        freshness = inspect_catalog_freshness(config.catalog_dir / "catalog.json")
+        self.game_sync_status_label = StatusLabel(freshness.message)
         self.game_sync_status_label.setWordWrap(True)
         self.game_sync_status_label.setAccessibleName("Game data and asset status")
         self._add_form_row(assets_form, "Status", self.game_sync_status_label)
@@ -145,13 +151,6 @@ class BrowserPage(ConfigFormPage):
         self._browser_status: BrowserStatus | None = None
         self._sync_action_states()
 
-    @staticmethod
-    def _game_sync_status(config: AppConfig) -> str:
-        catalog = config.catalog_dir / "catalog.json"
-        if not catalog.is_file():
-            return "No compiled catalog found"
-        return "Compiled catalog available"
-
     def _request_browser_action(self) -> None:
         if self._browser_status is not None and self._browser_status.running:
             self.stop_requested.emit()
@@ -168,6 +167,12 @@ class BrowserPage(ConfigFormPage):
 
     def set_game_sync_status(self, status: str) -> None:
         self.game_sync_status_label.set_status(status)
+
+    def set_catalog_freshness(self, freshness: CatalogFreshness) -> None:
+        self.game_sync_status_label.set_status(freshness.message)
+        self.game_sync_button.setText(
+            "Update" if freshness.state is CatalogFreshnessState.OUTDATED else "Synchronize"
+        )
 
     def set_game_sync_busy(self, busy: bool) -> None:
         self._game_sync_busy = busy
@@ -264,7 +269,8 @@ class BrowserPage(ConfigFormPage):
         self._apply_registered_controls(config)
         for control in self.controls.values():
             set_validation_state(control)
-        self.game_sync_status_label.set_status(self._game_sync_status(config))
+        freshness = inspect_catalog_freshness(config.catalog_dir / "catalog.json")
+        self.set_catalog_freshness(freshness)
         self.configuration_header.mark_saved()
 
     def mark_saving(self, field: str | None = None) -> None:

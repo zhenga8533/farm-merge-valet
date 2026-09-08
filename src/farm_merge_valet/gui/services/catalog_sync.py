@@ -18,6 +18,12 @@ from farm_merge_valet.catalog.store import CatalogUnavailableError
 from farm_merge_valet.catalog.sync import CatalogSynchronizer
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.core.upgrade_progress import UpgradeProgress
+from farm_merge_valet.gui.services.catalog_freshness import (
+    CatalogFreshness,
+    CatalogFreshnessState,
+    compare_catalog_freshness,
+    inspect_catalog_freshness,
+)
 from farm_merge_valet.observability.logging import log_event
 
 logger = logging.getLogger(__name__)
@@ -34,6 +40,7 @@ class CatalogSyncCallbacks:
     browser_changed: Callable[[BrowserStatus], None]
     catalog_refreshed: Callable[[int], None]
     upgrade_progress_changed: Callable[[UpgradeProgress | None], None]
+    catalog_freshness_changed: Callable[[CatalogFreshness], None] = lambda _freshness: None
     building_repairs_changed: Callable[[tuple[BuildingRepairState, ...] | None], None] = (
         lambda _states: None
     )
@@ -60,6 +67,7 @@ class CatalogSyncDependencies:
     building_repairs_reader: Callable[[int, str], tuple[BuildingRepairState, ...] | None] | None = (
         None
     )
+    catalog_fingerprint_reader: Callable[[int, str], str | None] | None = None
 
 
 class CatalogSyncService:
@@ -81,6 +89,7 @@ class CatalogSyncService:
         self._dependencies.catalog_synchronizer_factory(self._config).sync(force=True)
         self._callbacks.raise_if_cancelled()
         catalog = self._dependencies.catalog_loader(self._config.catalog_dir / "catalog.json")
+        self._publish_current_freshness(catalog)
         progress = (
             f"Upgrade targets: {target_count}"
             if target_count is not None
@@ -114,7 +123,38 @@ class CatalogSyncService:
             return f"Catalog ready · Icons were not synchronized: {exc}"
         self._callbacks.raise_if_cancelled()
         refreshed = self._dependencies.catalog_loader(self._config.catalog_dir / "catalog.json")
+        self._publish_current_freshness(refreshed)
         return f"Game catalog ready · Entries: {len(refreshed.items)} · Icons synchronized"
+
+    def check_catalog_freshness(self, cached: CatalogFreshness | None = None) -> CatalogFreshness:
+        catalog_path = self._config.catalog_dir / "catalog.json"
+        snapshot = cached or inspect_catalog_freshness(catalog_path)
+        reader = self._dependencies.catalog_fingerprint_reader
+        live_fingerprint: str | None = None
+        if reader is not None:
+            try:
+                live_fingerprint = reader(self._config.cdp_port, self._config.window_title)
+            except RuntimeConnectionError:
+                pass
+        result = compare_catalog_freshness(snapshot, live_fingerprint)
+        self._callbacks.catalog_freshness_changed(result)
+        return result
+
+    def _publish_current_freshness(self, catalog: ItemCatalog) -> None:
+        fingerprint = getattr(catalog, "source_fingerprint", None)
+        state = (
+            CatalogFreshnessState.CURRENT
+            if fingerprint is not None
+            else CatalogFreshnessState.UNKNOWN
+        )
+        message = (
+            "Catalog is current"
+            if fingerprint is not None
+            else "Catalog synchronized · Update status unknown"
+        )
+        self._callbacks.catalog_freshness_changed(
+            CatalogFreshness(state, message, fingerprint, fingerprint)
+        )
 
     def _wait_for_catalog(self, manager: BrowserCatalogSession) -> ItemCatalog:
         deadline = time.monotonic() + _SETUP_TIMEOUT_SECONDS
