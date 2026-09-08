@@ -184,7 +184,7 @@ class BuildingsPage(AppPage):
             building_id = state.building_id
         name = catalog_item.display_name if catalog_item else self._fallback_name(building_id)
         is_workshop = state.workshop if state is not None else catalog_item.category == "shops"
-        group = self._building_group(building_id, is_workshop)
+        group = self._building_group(building_id, is_workshop, catalog_item)
         parent = PolicyTreeItem((name, "", "", "", ""))
         parent.setData(0, Qt.ItemDataRole.UserRole, ("building", building_id))
         parent.setIcon(0, self._icons.icon_for(catalog_item))
@@ -225,9 +225,18 @@ class BuildingsPage(AppPage):
             )
         parent.setExpanded(state is not None and state.placed and not state.active)
 
-    def _building_group(self, building_id: str, is_workshop: bool) -> QTreeWidgetItem:
+    def _building_group(
+        self,
+        building_id: str,
+        is_workshop: bool,
+        catalog_item: CatalogItem | None,
+    ) -> QTreeWidgetItem:
         if is_workshop:
             label = "Workshops"
+        elif catalog_item is not None and catalog_item.display_name.casefold().startswith(
+            "decorative "
+        ):
+            label = "Event Buildings"
         elif building_id.startswith("decorative_"):
             label = "Decorative Buildings"
         else:
@@ -270,17 +279,24 @@ class BuildingsPage(AppPage):
         self, parent: QTreeWidgetItem, blueprint_id: str, available: int, amount: int
     ) -> None:
         catalog_item = self._catalog_item(blueprint_id)
-        name = catalog_item.display_name if catalog_item else self._fallback_name(blueprint_id)
-        tier = f"Tier {catalog_item.tier}" if catalog_item and catalog_item.tier else "Material"
+        base_name = catalog_item.display_name if catalog_item else self._fallback_name(blueprint_id)
+        tier = catalog_item.tier if catalog_item is not None else None
+        name = f"{base_name} (T{tier})" if tier is not None else base_name
         child = PolicyTreeItem((name, "", "", "", ""))
         child.setData(0, Qt.ItemDataRole.UserRole, blueprint_id)
+        child.setData(
+            0,
+            Qt.ItemDataRole.AccessibleTextRole,
+            f"{base_name}, Tier {tier}" if tier is not None else base_name,
+        )
         child.setIcon(0, self._icons.icon_for(catalog_item))
-        child.setToolTip(0, blueprint_id)
+        child.setToolTip(
+            0,
+            f"{base_name}, Tier {tier}\n{blueprint_id}" if tier is not None else blueprint_id,
+        )
         child.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
         parent.addChild(child)
-        self._badge(child, 1, tier)
         self._badge(child, 2, f"{available} / {amount}")
-        self._badge(child, 3, "Ready" if available >= amount else f"Missing {amount - available}")
 
     def _catalog_item(self, game_id: str) -> CatalogItem | None:
         if self._catalog is None:

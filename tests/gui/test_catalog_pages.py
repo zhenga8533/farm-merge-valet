@@ -159,6 +159,45 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
                 None,
                 frozenset({"building"}),
             ),
+            "decorative_barn": CatalogItem(
+                "decorative_barn",
+                "decorative_barn",
+                "structures/decorative_barn",
+                "structures",
+                "Barn",
+                None,
+                False,
+                None,
+                None,
+                None,
+                frozenset({"building"}),
+            ),
+            "decorative_festival_hall": CatalogItem(
+                "decorative_festival_hall",
+                "decorative_festival_hall",
+                "structures/decorative_festival_hall",
+                "structures",
+                "Decorative Festival Hall",
+                None,
+                False,
+                None,
+                None,
+                None,
+                frozenset({"building"}),
+            ),
+            "museum": CatalogItem(
+                "museum",
+                "museum",
+                "structures/museum",
+                "structures",
+                "Museum",
+                None,
+                False,
+                None,
+                None,
+                None,
+                frozenset({"building"}),
+            ),
         },
         marketplace_offers=marketplace_catalog(),
     )
@@ -173,7 +212,18 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
         ): window.buildings_page.tree.topLevelItem(index)
         for index in range(window.buildings_page.tree.topLevelItemCount())
     }
-    assert set(groups) == {"Structures", "Workshops"}
+    assert set(groups) == {
+        "Decorative Buildings",
+        "Event Buildings",
+        "Structures",
+        "Workshops",
+    }
+    assert groups["Decorative Buildings"].child(0).text(0) == "Barn"
+    assert groups["Event Buildings"].child(0).text(0) == "Decorative Festival Hall"
+    assert [
+        groups["Structures"].child(index).text(0)
+        for index in range(groups["Structures"].childCount())
+    ] == ["Greenhouse", "Museum"]
     assert groups["Structures"].isExpanded()
     assert groups["Workshops"].isExpanded()
     assert groups["Structures"].child(0).text(0) == "Greenhouse"
@@ -201,6 +251,15 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
                 False,
                 (),
             ),
+            BuildingRepairState(
+                "decorative_lamppost",
+                1,
+                False,
+                False,
+                False,
+                False,
+                (),
+            ),
         )
     )
 
@@ -210,10 +269,18 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
         ): window.buildings_page.tree.topLevelItem(index)
         for index in range(window.buildings_page.tree.topLevelItemCount())
     }
-    assert set(groups) == {"Decorative Buildings", "Structures", "Workshops"}
+    assert set(groups) == {
+        "Decorative Buildings",
+        "Event Buildings",
+        "Structures",
+        "Workshops",
+    }
     assert all(group.icon(0).isNull() for group in groups.values())
     assert groups["Decorative Buildings"].isExpanded()
-    assert groups["Decorative Buildings"].child(0).text(0) == "Decorative Barn"
+    assert [
+        groups["Decorative Buildings"].child(index).text(0)
+        for index in range(groups["Decorative Buildings"].childCount())
+    ] == ["Barn", "Decorative Lamppost"]
     bakery = groups["Workshops"].child(0)
     assert bakery is not None
     assert bakery.text(0) == "Bakery"
@@ -221,11 +288,14 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
     assert window.buildings_page.tree.iconSize() == STRUCTURE_ICON_SIZE
     assert isinstance(window.buildings_page.tree.itemDelegate(), CatalogIconDelegate)
     requirement = bakery.child(0)
-    assert requirement.text(0) == "Wood"
-    assert requirement.icon(0).isNull() is False or requirement.toolTip(0) == "wood_2"
-    type_cell = window.buildings_page.tree.itemWidget(requirement, 1)
-    assert type_cell is not None
-    assert "Tier 2" in type_cell.findChild(QLabel).text()
+    assert requirement.text(0) == "Wood (T2)"
+    assert requirement.data(0, Qt.ItemDataRole.AccessibleTextRole) == "Wood, Tier 2"
+    assert requirement.icon(0).isNull() is False or "wood_2" in requirement.toolTip(0)
+    assert window.buildings_page.tree.itemWidget(requirement, 1) is None
+    assert window.buildings_page.tree.itemWidget(requirement, 3) is None
+    availability = window.buildings_page.tree.itemWidget(requirement, 2)
+    assert availability is not None
+    assert availability.findChild(QLabel).text() == "1 / 3"
     resolved_building = window.buildings_page._catalog_item("greenhouse_building")
     assert resolved_building is not None
     assert resolved_building.game_id == "greenhouse"
