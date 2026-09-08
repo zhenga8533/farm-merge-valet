@@ -240,10 +240,11 @@ affordability, balance, reserve, and runtime scene are revalidated immediately
 before the native unlock call.
 
 The Marketplace page uses the same synchronized, game-derived catalog as the
-item and shop pages. It contains the flash candidates and literal free claims
-exposed by the game during the most recent successful synchronization; it has no
-built-in legacy offer list. Flash purchases are disabled by default, free claims
-are enabled by default, and every discovered offer can be overridden individually.
+item and shop pages. It discovers every candidate in the active flash-deal
+configuration plus literal free claims exposed by the game during the most
+recent successful synchronization; it has no built-in legacy offer list. Flash
+purchases are disabled by default, free claims are enabled by default, and every
+discovered offer can be overridden individually.
 Selections use stable slot-plus-candidate identities, so a rotating flash slot
 cannot cause a different item to be bought. Enabled finite stock is drained one
 verified unit per bot iteration; the bot never buys ordinary marketplace offers

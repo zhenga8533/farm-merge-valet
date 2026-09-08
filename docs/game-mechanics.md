@@ -118,8 +118,9 @@ before claiming.
 ## Marketplace
 
 Marketplace configuration is discovered from the running game and cached during
-synchronization. Flash policies use the exact slot and current candidate identity;
-free policies include only offers whose live payment type is literally `free`.
+synchronization. All candidates in each active flash-deal configuration are
+retained as policies using the exact slot and candidate identity; free policies
+include only offers whose live payment type is literally `free`.
 Parallel ad and premium variants are therefore not treated as free. Stock is
 finite and may renew when the marketplace rotates. Event-specific offers appear
 only when the game exposes their shop.

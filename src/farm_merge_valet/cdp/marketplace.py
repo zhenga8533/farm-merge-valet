@@ -29,7 +29,7 @@ _READ_MARKETPLACE_EXPRESSION = r"""
     : value && typeof value === 'object' ? Object.values(value) : [];
   const scalar = (value) => Number.isFinite(value) ? value
     : Number.isFinite(value?.amount) ? value.amount : null;
-  const normalize = (item, slotId = null) => {
+  const normalize = (item, slotId = null, configured = false) => {
     const payment = item?.payment || item?.price || item?._payment;
     const reward = item?.reward || item?.rewards?.[0] || item?._reward;
     const rewardData = reward?.data;
@@ -47,7 +47,7 @@ _READ_MARKETPLACE_EXPRESSION = r"""
       (Array.isArray(rewardData) ? rewardData[0] : rewardData?.key) || item?.rewardKey;
     const rewardAmount = Array.isArray(rewardData) ? rewardData.length
       : scalar(rewardData?.amount ?? reward?.amount ?? reward?.value ?? item?.rewardAmount);
-    const stockItem = typeof service.getStockItem === 'function'
+    const stockItem = !configured && typeof service.getStockItem === 'function'
       ? service.getStockItem(offerId) : null;
     const stock = scalar(stockItem?.amount ?? stockItem?._amount ?? stockItem?.stock ??
       item?.renewableStock?.amount ?? item?.stock ?? item?.limit);
@@ -66,6 +66,9 @@ _READ_MARKETPLACE_EXPRESSION = r"""
     };
   };
   const offers = [];
+  const catalogOffers = [];
+  const jsonResources = window.__fmvGameplayServices?.ordersService?._recipes?._services
+    ?.resource?._jsonResources || [];
   for (const shop of shopValues) {
     const shopId = typeof shop === 'string' ? shop
       : shop?.name || shop?.id || shop?.key || shop?._key;
@@ -77,22 +80,47 @@ _READ_MARKETPLACE_EXPRESSION = r"""
         const selected = flash?.getFlashDealItem?.(id);
         const normalized = normalize(selected, id);
         if (normalized) offers.push(normalized);
+        const selectedKey = normalized?.candidateKey;
+        const candidateTables = jsonResources.filter((resource) =>
+          Array.isArray(resource?.data) && resource.data.length > 0 &&
+          resource.data.every((candidate) =>
+            typeof candidate?.weightedData?.key === 'string' &&
+            candidate?.payment?.type === 'inventory' &&
+            ['coins', 'gems'].includes(candidate.payment.key) &&
+            Array.isArray(candidate?.reward?.data) &&
+            Number.isInteger(candidate?.renewableStock?.amount)) &&
+          resource.data.some((candidate) => candidate.weightedData.key === selectedKey));
+        if (candidateTables.length === 1) {
+          for (const candidate of candidateTables[0].data) {
+            const configuredOffer = normalize(candidate, id, true);
+            if (configuredOffer) catalogOffers.push(configuredOffer);
+          }
+        } else if (normalized) {
+          catalogOffers.push(normalized);
+        }
       } else if ((item?.payment || item?.price || item?._payment)?.type === 'free') {
         const normalized = normalize(item);
-        if (normalized) offers.push(normalized);
+        if (normalized) {
+          offers.push(normalized);
+          catalogOffers.push(normalized);
+        }
       }
     }
   }
-  return {offers};
+  return {offers, catalogOffers};
 })()
 """
 
 
 def parse_marketplace_offers(raw: object) -> tuple[MarketplaceLiveOffer, ...] | None:
-    if not isinstance(raw, dict) or not isinstance(raw.get("offers"), list):
+    return _parse_marketplace_offers(raw, "offers")
+
+
+def _parse_marketplace_offers(raw: object, field: str) -> tuple[MarketplaceLiveOffer, ...] | None:
+    if not isinstance(raw, dict) or not isinstance(raw.get(field), list):
         return None
     parsed: list[MarketplaceLiveOffer] = []
-    for value in raw["offers"]:
+    for value in raw[field]:
         if not isinstance(value, dict):
             continue
         try:
@@ -124,7 +152,10 @@ def parse_marketplace_offers(raw: object) -> tuple[MarketplaceLiveOffer, ...] | 
 def read_marketplace_catalog(
     port: int, page_title: str | None = None
 ) -> tuple[MarketplaceOffer, ...] | None:
-    live = parse_marketplace_offers(evaluate(port, _READ_MARKETPLACE_EXPRESSION, page_title))
+    raw = evaluate(port, _READ_MARKETPLACE_EXPRESSION, page_title)
+    live = _parse_marketplace_offers(raw, "catalogOffers")
+    if live is None:
+        live = parse_marketplace_offers(raw)
     if live is None:
         return None
     offers: dict[str, MarketplaceOffer] = {}

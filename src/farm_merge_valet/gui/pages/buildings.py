@@ -223,7 +223,14 @@ class BuildingsPage(AppPage):
         self._badge(child, 3, "Ready" if available >= amount else f"Missing {amount - available}")
 
     def _catalog_item(self, game_id: str) -> CatalogItem | None:
-        return self._catalog.items.get(game_id) if self._catalog else None
+        if self._catalog is None:
+            return None
+        exact = self._catalog.items.get(game_id)
+        if exact is not None:
+            return exact
+        if game_id.endswith("_building"):
+            return self._catalog.items.get(game_id.removesuffix("_building"))
+        return None
 
     def _badge(self, item: QTreeWidgetItem, column: int, text: str) -> None:
         set_policy_widget(

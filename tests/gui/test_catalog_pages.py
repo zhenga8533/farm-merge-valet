@@ -146,6 +146,19 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
                 None,
                 frozenset({"mergeable"}),
             ),
+            "greenhouse": CatalogItem(
+                "greenhouse",
+                "greenhouse",
+                "structures/greenhouse",
+                "structures",
+                "Greenhouse",
+                None,
+                False,
+                None,
+                None,
+                None,
+                frozenset({"building"}),
+            ),
         },
         marketplace_offers=marketplace_catalog(),
     )
@@ -180,6 +193,9 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
     type_cell = window.buildings_page.tree.itemWidget(requirement, 1)
     assert type_cell is not None
     assert "Tier 2" in type_cell.findChild(QLabel).text()
+    resolved_building = window.buildings_page._catalog_item("greenhouse_building")
+    assert resolved_building is not None
+    assert resolved_building.game_id == "greenhouse"
 
     window.buildings_page._set_enabled("bakery", False)
     assert not window.buildings_page._config.building_repair_enabled("bakery")

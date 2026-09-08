@@ -89,6 +89,38 @@ def test_marketplace_catalog_deduplicates_identical_live_entries(monkeypatch) ->
     assert catalog is not None and len(catalog) == 1
 
 
+def test_marketplace_catalog_uses_all_configured_flash_candidates(monkeypatch) -> None:
+    current = {
+        "policyKey": "flash:flash_deal_ingredient:wheat",
+        "offerId": "flash_deal_ingredient",
+        "slotId": "flash_deal_ingredient",
+        "candidateKey": "wheat",
+        "rewardKey": "wheat",
+        "rewardAmount": 9,
+        "paymentType": "inventory",
+        "paymentKey": "gems",
+        "paymentAmount": 9,
+        "remainingStock": 5,
+        "balance": 100,
+    }
+    configured = dict(
+        current,
+        policyKey="flash:flash_deal_ingredient:egg",
+        candidateKey="egg",
+        rewardKey="egg",
+        paymentAmount=18,
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.marketplace.evaluate",
+        lambda *_args: {"offers": [current], "catalogOffers": [current, configured]},
+    )
+
+    catalog = read_marketplace_catalog(9222)
+
+    assert catalog is not None
+    assert [offer.candidate_key for offer in catalog] == ["egg", "wheat"]
+
+
 def test_purchase_expression_guards_exact_offer_and_never_refreshes() -> None:
     action = MarketplaceAction(
         "flash:flash_deal_ingredient:wheat",
