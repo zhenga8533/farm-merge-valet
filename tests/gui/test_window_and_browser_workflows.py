@@ -105,15 +105,15 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
         assert section.content.objectName() == "advancedSectionContent"
         section.toggle.click()
         assert section.expanded
-    assert browser_groups["Managed browser"].isAncestorOf(
+    assert browser_groups["Browser connection"].isAncestorOf(
         window.browser_page.browser_advanced_section
     )
-    assert browser_groups["Game data and assets"].isAncestorOf(
-        window.browser_page.assets_advanced_section
-    )
-    assert browser_groups["Game data and assets"].isAncestorOf(
+    assert browser_groups["Game data"].isAncestorOf(window.browser_page.assets_advanced_section)
+    assert window.browser_page.assets_advanced_section.isAncestorOf(
         window.browser_page.cache_clear_button
     )
+    assert window.browser_page.game_sync_button.text() == "Synchronize"
+    assert window.browser_page.cache_clear_button.text() == "Clear cache"
     assert window.browser_page.cache_clear_button.property("danger") is True
 
     window.browser_page._request("cdp_port", 9333)
@@ -132,7 +132,9 @@ def test_browser_actions_follow_managed_browser_and_runtime_state(tmp_path) -> N
     window = MainWindow(ApplicationController(store))
     page = window.browser_page
 
-    assert page.browser_action_button.text() == "Launch managed browser"
+    assert page.browser_action_button.text() == "Launch browser"
+    assert page.restart_button.text() == "Restart"
+    assert page.refresh_button.text() == "Refresh"
     assert page.browser_action_button.isEnabled()
     assert not page.restart_button.isEnabled()
 
@@ -145,7 +147,7 @@ def test_browser_actions_follow_managed_browser_and_runtime_state(tmp_path) -> N
         )
     )
 
-    assert page.browser_action_button.text() == "Stop managed browser"
+    assert page.browser_action_button.text() == "Stop browser"
     assert page.browser_action_button.property("danger") is True
     assert page.restart_button.isEnabled()
 

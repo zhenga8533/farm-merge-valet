@@ -48,7 +48,7 @@ class BrowserPage(ConfigFormPage):
 
     def __init__(self, config: AppConfig) -> None:
         super().__init__(
-            "Managed browser",
+            "Browser",
             "Manage the dedicated browser, game connection, and local asset cache.",
             config,
         )
@@ -59,7 +59,7 @@ class BrowserPage(ConfigFormPage):
 
         sections = scrollable_sections(self.page_layout)
 
-        managed, managed_form = settings_section("Managed browser")
+        managed, managed_form = settings_section("Browser connection")
         self.status_label = StatusLabel("Not checked")
         self.status_label.setWordWrap(True)
         self.status_label.setAccessibleName("Managed browser status")
@@ -88,15 +88,18 @@ class BrowserPage(ConfigFormPage):
         self._add_toggle(managed_form, "Launch automatically when needed", "browser_auto_launch")
         self._add_toggle(managed_form, "Reload frozen game automatically", "auto_recover_game")
         buttons = QHBoxLayout()
-        self.refresh_button = secondary_button("Refresh status")
-        self.browser_action_button = QPushButton("Launch managed browser")
-        self.restart_button = secondary_button("Restart managed browser")
+        self.browser_action_button = QPushButton("Launch browser")
+        self.restart_button = secondary_button("Restart")
+        self.refresh_button = secondary_button("Refresh")
+        self.browser_action_button.setAccessibleName("Launch managed browser")
+        self.restart_button.setAccessibleName("Restart managed browser")
+        self.refresh_button.setAccessibleName("Refresh managed browser status")
         self.refresh_button.clicked.connect(self.refresh_requested)
         self.browser_action_button.clicked.connect(self._request_browser_action)
         self.restart_button.clicked.connect(self.restart_requested)
-        buttons.addWidget(self.refresh_button)
         buttons.addWidget(self.browser_action_button)
         buttons.addWidget(self.restart_button)
+        buttons.addWidget(self.refresh_button)
         buttons.addStretch()
         self._add_form_row(managed_form, "Actions", buttons)
         browser_advanced, form = disclosure_section("Advanced connection")
@@ -109,25 +112,29 @@ class BrowserPage(ConfigFormPage):
         managed_form.addRow(browser_advanced)
         sections.addWidget(managed)
 
-        assets, assets_form = settings_section("Game data and assets")
+        assets, assets_form = settings_section("Game data")
         self.game_sync_status_label = StatusLabel(self._game_sync_status(config))
         self.game_sync_status_label.setWordWrap(True)
         self.game_sync_status_label.setAccessibleName("Game data and asset status")
         self._add_form_row(assets_form, "Status", self.game_sync_status_label)
-        self.game_sync_button = QPushButton("Synchronize game data and assets")
+        self.game_sync_button = QPushButton("Synchronize")
+        self.game_sync_button.setAccessibleName("Synchronize game data and assets")
         self.game_sync_button.clicked.connect(self.game_sync_requested)
-        self.cache_clear_button = secondary_button("Clear local cache")
-        self.cache_clear_button.setAccessibleName("Clear cached game data and assets")
-        set_styled_property(self.cache_clear_button, "danger", True)
-        self.cache_clear_button.clicked.connect(self.cache_clear_requested)
         game_sync_actions = QHBoxLayout()
         game_sync_actions.addWidget(self.game_sync_button)
-        game_sync_actions.addWidget(self.cache_clear_button)
         game_sync_actions.addStretch()
         self._add_form_row(assets_form, "Actions", game_sync_actions)
         assets_advanced, form = disclosure_section("Advanced storage")
         self._add_path(form, "Catalog directory", "catalog_dir", optional=False)
         self._add_path(form, "Atlas cache directory", "atlas_cache_dir", optional=False)
+        self.cache_clear_button = secondary_button("Clear cache")
+        self.cache_clear_button.setAccessibleName("Clear cached game data and assets")
+        set_styled_property(self.cache_clear_button, "danger", True)
+        self.cache_clear_button.clicked.connect(self.cache_clear_requested)
+        cache_actions = QHBoxLayout()
+        cache_actions.addWidget(self.cache_clear_button)
+        cache_actions.addStretch()
+        self._add_form_row(form, "Cache maintenance", cache_actions)
         self.assets_advanced_section = assets_advanced
         assets_form.addRow(assets_advanced)
         sections.addWidget(assets)
@@ -183,6 +190,9 @@ class BrowserPage(ConfigFormPage):
             }:
                 focused.clearFocus()
         self.browser_action_button.setText(
+            "Stop browser" if running and managed else "Launch browser"
+        )
+        self.browser_action_button.setAccessibleName(
             "Stop managed browser" if running and managed else "Launch managed browser"
         )
         danger = running and managed
