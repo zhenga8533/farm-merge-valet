@@ -286,7 +286,18 @@ def test_marketplace_page_prompts_for_sync_when_catalog_has_no_offers(tmp_path) 
     store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
     window = MainWindow(ApplicationController(store))
 
-    assert not window.marketplace_page.catalog_onboarding.isHidden()
+    onboarding = window.marketplace_page.catalog_onboarding
+    items_onboarding = window.items_page.catalog_onboarding
+    assert not onboarding.isHidden()
+    assert onboarding.title_label.text() == items_onboarding.title_label.text()
+    assert onboarding.description_label.text() == items_onboarding.description_label.text()
+    assert onboarding.description_label.text() == (
+        "Items, tiers, shops, buildings, recipes, and marketplace offers are discovered "
+        "from your running game. Open the managed game and synchronize once to configure "
+        "them here."
+    )
+    assert onboarding.status_label.text() == items_onboarding.status_label.text()
+    assert onboarding.setup_button.text() == items_onboarding.setup_button.text()
     assert window.marketplace_page.tree.isHidden()
     assert window.marketplace_page.tree.topLevelItemCount() == 0
 

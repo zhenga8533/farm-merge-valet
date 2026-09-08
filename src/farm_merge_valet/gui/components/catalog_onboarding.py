@@ -16,8 +16,9 @@ class CatalogOnboarding(StatePanel):
     def __init__(self) -> None:
         super().__init__(
             "Connect your game catalog",
-            "Items, tiers, shops, and recipes are discovered from your running game. "
-            "Open the managed game and synchronize once to configure them here.",
+            "Items, tiers, shops, buildings, recipes, and marketplace offers are discovered "
+            "from your running game. Open the managed game and synchronize once to configure "
+            "them here.",
             object_name="catalogOnboarding",
             maximum_width=720,
         )

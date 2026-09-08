@@ -67,13 +67,6 @@ class MarketplacePage(AppPage):
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
         self.catalog_onboarding = CatalogOnboarding()
-        self.catalog_onboarding.description_label.setText(
-            "Marketplace offers are discovered from your running game. Open the managed "
-            "game and synchronize to configure the offers currently exposed by it."
-        )
-        self.catalog_onboarding.status_label.setText(
-            "No game-derived marketplace offers have been synchronized yet."
-        )
         self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
         self.page_layout.addWidget(self.catalog_onboarding, 1, Qt.AlignmentFlag.AlignCenter)
         scaffold = create_policy_tree(
