@@ -306,11 +306,12 @@ new catalog generation replaces the previous catalog and assets only after all
 referenced assets compile successfully; a failed build leaves the previous
 generation intact.
 
-On a fresh installation, the Items and Shops pages present a shared catalog
-onboarding state instead of empty tables. “Open game and synchronize” prepares
-the managed browser, waits for the game, discovers item/shop/recipe metadata,
-and populates both pages as soon as the semantic catalog is ready. Atlas icon
-synchronization continues afterward and reports its progress independently.
+On a fresh installation, the Items, Shops, Buildings, and Marketplace pages
+present a shared catalog onboarding state instead of empty tables. “Open game
+and synchronize” prepares the managed browser, waits for the game, and discovers
+items, tiers, shops, buildings, recipes, and marketplace offers. The catalog
+pages populate as their data becomes available. Atlas icon synchronization
+continues afterward and reports its progress independently.
 
 ## Logging
 

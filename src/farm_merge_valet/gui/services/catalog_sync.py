@@ -135,7 +135,7 @@ class CatalogSyncService:
                 )
             if browser_status.game_frame_available:
                 if not discovery_announced:
-                    self._callbacks.status_changed("Discovering items, shops, and recipes…")
+                    self._callbacks.status_changed("Discovering game catalog…")
                     discovery_announced = True
                 try:
                     runtime.discover()

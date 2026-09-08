@@ -347,7 +347,7 @@ def test_catalog_setup_launches_game_and_publishes_catalog_before_icons(
 
     assert busy_states == [True]
     assert catalog_counts == [2]
-    assert any("Discovering items, shops, and recipes" in status for status in statuses)
+    assert "Discovering game catalog…" in statuses
     assert statuses[-1] == "Catalog ready · 2 entries · Synchronizing icons…"
 
     release_icons.set()
