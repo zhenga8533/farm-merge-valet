@@ -25,6 +25,10 @@ from farm_merge_valet.core.upgrade_progress import (
     UpgradeTargetProgress,
     UpgradeTierState,
 )
+from farm_merge_valet.gui.components.catalog_icon_delegate import (
+    CatalogRowRole,
+    set_catalog_row_icon,
+)
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.incremental_work import IncrementalWorkRunner
@@ -546,7 +550,7 @@ class ItemsPage(AppPage):
             (name, "", "", "", "", "", ""),
             tier=tier,
         )
-        item.setIcon(0, icons.icon_for(catalog_item))
+        set_catalog_row_icon(item, icons.icon_for(catalog_item), CatalogRowRole.ITEM)
         item.setSizeHint(0, QSize(0, POLICY_COMPACT_ROW_HEIGHT))
         item.setToolTip(0, f"{name}\nGame ID: {catalog_item.game_id}")
         font = item.font(0)

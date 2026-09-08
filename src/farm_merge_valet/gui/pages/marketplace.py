@@ -11,6 +11,10 @@ from PySide6.QtWidgets import QHeaderView, QTreeWidgetItem
 from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.core.marketplace import MarketplaceOffer
+from farm_merge_valet.gui.components.catalog_icon_delegate import (
+    CatalogRowRole,
+    set_catalog_row_icon,
+)
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.metrics import (
@@ -166,6 +170,7 @@ class MarketplacePage(AppPage):
             parent_font.setWeight(QFont.Weight.DemiBold)
             parent.setFont(0, parent_font)
             parent.setData(0, Qt.ItemDataRole.UserRole, ("group", group))
+            set_catalog_row_icon(parent, None, CatalogRowRole.GROUP)
             self.tree.addTopLevelItem(parent)
             set_policy_widget(
                 self.tree,
@@ -251,7 +256,7 @@ class MarketplacePage(AppPage):
             key=lambda item: (item.tier is None, item.tier or 0, item.game_id),
             default=None,
         )
-        family.setIcon(0, self._icons.icon_for(representative))
+        set_catalog_row_icon(family, self._icons.icon_for(representative), CatalogRowRole.ITEM)
         if representative is not None:
             family.setToolTip(0, f"{family_name}\nRepresentative: {representative.game_id}")
         parent.addChild(family)
@@ -305,7 +310,7 @@ class MarketplacePage(AppPage):
             )
         item = PolicyTreeItem((f"{label}{quantity}", "", ""))
         item.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
-        item.setIcon(0, self._icons.icon_for(catalog_item))
+        set_catalog_row_icon(item, self._icons.icon_for(catalog_item), CatalogRowRole.ITEM)
         item.setData(0, Qt.ItemDataRole.UserRole, offer.policy_key)
         item.setToolTip(0, offer.policy_key)
         parent.addChild(item)

@@ -32,6 +32,8 @@ from farm_merge_valet.config import AppConfig
 from farm_merge_valet.gui.components.catalog_icon_delegate import (
     STRUCTURE_ICON_SIZE,
     CatalogIconDelegate,
+    CatalogRowRole,
+    set_catalog_row_icon,
 )
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
@@ -345,7 +347,7 @@ class ShopsPage(AppPage):
             shop = catalog.items.get(shop_id)
             shop_name = shop.display_name if shop else shop_id
             parent = PolicyTreeItem((shop_name, "", "", ""))
-            parent.setIcon(0, self._icons.icon_for(shop))
+            set_catalog_row_icon(parent, self._icons.icon_for(shop), CatalogRowRole.STRUCTURE)
             parent.setData(0, Qt.ItemDataRole.UserRole, ("shop", shop_id))
             parent.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
             parent_font = parent.font(0)
@@ -437,7 +439,7 @@ class ShopsPage(AppPage):
     ) -> None:
         for recipe in recipes:
             child = PolicyTreeItem((recipe.display_name, "", "", ""))
-            child.setIcon(0, self._icons.icon_for(recipe))
+            set_catalog_row_icon(child, self._icons.icon_for(recipe), CatalogRowRole.ITEM)
             child.setData(0, Qt.ItemDataRole.UserRole, ("recipe", recipe.game_id))
             child.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
             child.setToolTip(0, recipe.display_name)

@@ -26,8 +26,10 @@ from farm_merge_valet.catalog.models import (
 from farm_merge_valet.catalog.store import write_item_catalog
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.gui.components.catalog_icon_delegate import (
+    CATALOG_ROW_ROLE,
     STRUCTURE_ICON_SIZE,
     CatalogIconDelegate,
+    CatalogRowRole,
 )
 from farm_merge_valet.gui.controller import (
     ApplicationController,
@@ -720,11 +722,14 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
         if window.items_page.table.topLevelItem(row).text(0) == "Wheat"
     )
     bakery = window.shops_page.tree.topLevelItem(0)
-    assert wheat_item.icon(0).isNull()
-    assert bakery is not None and bakery.icon(0).isNull()
+    assert not wheat_item.icon(0).isNull()
+    assert wheat_item.data(0, CATALOG_ROW_ROLE) == CatalogRowRole.ITEM.value
+    assert bakery is not None and not bakery.icon(0).isNull()
+    assert bakery.data(0, CATALOG_ROW_ROLE) == CatalogRowRole.STRUCTURE.value
     assert bakery.childCount() == 0
     bakery.setExpanded(True)
-    assert bakery.childCount() == 1 and bakery.child(0).icon(0).isNull()
+    assert bakery.childCount() == 1 and not bakery.child(0).icon(0).isNull()
+    assert bakery.child(0).data(0, CATALOG_ROW_ROLE) == CatalogRowRole.ITEM.value
 
     for relative_path in (
         wheat.asset_path,

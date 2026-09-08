@@ -12,6 +12,8 @@ from farm_merge_valet.config import AppConfig
 from farm_merge_valet.gui.components.catalog_icon_delegate import (
     STRUCTURE_ICON_SIZE,
     CatalogIconDelegate,
+    CatalogRowRole,
+    set_catalog_row_icon,
 )
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
@@ -187,7 +189,7 @@ class BuildingsPage(AppPage):
         group = self._building_group(building_id, is_workshop, catalog_item)
         parent = PolicyTreeItem((name, "", "", "", ""))
         parent.setData(0, Qt.ItemDataRole.UserRole, ("building", building_id))
-        parent.setIcon(0, self._icons.icon_for(catalog_item))
+        set_catalog_row_icon(parent, self._icons.icon_for(catalog_item), CatalogRowRole.STRUCTURE)
         parent.setToolTip(0, building_id)
         parent.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
         font = parent.font(0)
@@ -245,6 +247,7 @@ class BuildingsPage(AppPage):
         if group is None:
             group = PolicyTreeItem((label, "", "", "", ""))
             group.setData(0, Qt.ItemDataRole.UserRole, ("building_group", label.casefold()))
+            set_catalog_row_icon(group, None, CatalogRowRole.GROUP)
             group.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
             font = group.font(0)
             font.setWeight(QFont.Weight.DemiBold)
@@ -289,7 +292,7 @@ class BuildingsPage(AppPage):
             Qt.ItemDataRole.AccessibleTextRole,
             f"{base_name}, Tier {tier}" if tier is not None else base_name,
         )
-        child.setIcon(0, self._icons.icon_for(catalog_item))
+        set_catalog_row_icon(child, self._icons.icon_for(catalog_item), CatalogRowRole.ITEM)
         child.setToolTip(
             0,
             f"{base_name}, Tier {tier}\n{blueprint_id}" if tier is not None else blueprint_id,
