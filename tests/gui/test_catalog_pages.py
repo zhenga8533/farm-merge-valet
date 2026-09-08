@@ -167,6 +167,14 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
     store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
     window = MainWindow(ApplicationController(store))
 
+    cached_names = {
+        window.buildings_page.tree.topLevelItem(index).text(0)
+        for index in range(window.buildings_page.tree.topLevelItemCount())
+    }
+    assert cached_names == {"Bakery", "Greenhouse"}
+    assert not window.buildings_page.tree.isHidden()
+    assert window.buildings_page.loading_state.isHidden()
+
     window.buildings_page.set_building_repairs(
         (
             BuildingRepairState(

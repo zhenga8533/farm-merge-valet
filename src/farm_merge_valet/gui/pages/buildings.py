@@ -57,7 +57,6 @@ class BuildingsPage(AppPage):
         self._icons = icons or CatalogIconLoader(config.catalog_dir)
         self._catalog: ItemCatalog | None = load_gui_catalog(config)
         self._states: tuple[BuildingRepairState, ...] | None = None
-        self._loaded_once = False
         self._toggles: dict[str, PolicyCheckBox] = {}
         self._items: dict[str, QTreeWidgetItem] = {}
 
@@ -99,7 +98,7 @@ class BuildingsPage(AppPage):
         if self._catalog is None:
             self._show_catalog_onboarding()
         else:
-            self._show_loading()
+            self._populate()
 
     def apply_config(self, config: AppConfig, *, refresh: bool = True) -> None:
         catalog_changed = config.catalog_dir != self._config.catalog_dir
@@ -113,16 +112,13 @@ class BuildingsPage(AppPage):
             self._catalog = None
         if sort_changed:
             self._apply_sort_preference()
-        if refresh and self._loaded_once:
+        if refresh:
             self._populate()
         self.configuration_header.mark_saved()
 
     def reload_catalog(self) -> None:
         self._catalog = load_gui_catalog(self._config)
-        if self._loaded_once:
-            self._populate()
-        elif self._catalog is not None:
-            self._show_loading()
+        self._populate()
 
     def reload_catalog_if_missing(self) -> None:
         if self._catalog is not None:
@@ -130,10 +126,7 @@ class BuildingsPage(AppPage):
         self._catalog = load_gui_catalog(self._config)
         if self._catalog is None:
             return
-        if self._loaded_once:
-            self._populate()
-        else:
-            self._show_loading()
+        self._populate()
 
     def set_catalog_setup_busy(self, busy: bool) -> None:
         self.catalog_onboarding.set_busy(busy)
@@ -145,7 +138,6 @@ class BuildingsPage(AppPage):
         if states is not None and not isinstance(states, tuple):
             return
         self._states = states
-        self._loaded_once = True
         self._populate()
 
     def _populate(self) -> None:
@@ -157,54 +149,99 @@ class BuildingsPage(AppPage):
         self.tree.clear()
         self._toggles = {}
         self._items = {}
-        if self._states is None:
-            self._show_empty("Live building state is unavailable; open the game and try again")
-        elif not self._states:
-            self._show_empty("No buildings were discovered in the current game")
-        else:
-            for state in self._states:
-                self._add_building(state)
+        live_states = self._states or ()
+        states_by_catalog_id = {
+            catalog_item.game_id: state
+            for state in live_states
+            if (catalog_item := self._catalog_item(state.building_id)) is not None
+        }
+        catalog_buildings = self._catalog_buildings()
+        for catalog_item in catalog_buildings:
+            self._add_building(
+                self._building_id(catalog_item),
+                catalog_item,
+                states_by_catalog_id.get(catalog_item.game_id),
+            )
+        for state in live_states:
+            if self._catalog_item(state.building_id) is None:
+                self._add_building(state.building_id, None, state)
+        if not catalog_buildings and not live_states:
+            self._show_empty("No buildings were discovered in the cached catalog")
         self.tree.setSortingEnabled(True)
         self._apply_sort_preference()
         self._filter(self.toolbar.search.text())
         self._show_catalog_content()
 
-    def _add_building(self, state: BuildingRepairState) -> None:
-        catalog_item = self._catalog_item(state.building_id)
-        name = catalog_item.display_name if catalog_item else self._fallback_name(state.building_id)
+    def _add_building(
+        self,
+        building_id: str,
+        catalog_item: CatalogItem | None,
+        state: BuildingRepairState | None,
+    ) -> None:
+        if state is not None:
+            building_id = state.building_id
+        name = catalog_item.display_name if catalog_item else self._fallback_name(building_id)
         parent = PolicyTreeItem((name, "", "", "", ""))
-        parent.setData(0, Qt.ItemDataRole.UserRole, ("building", state.building_id))
+        parent.setData(0, Qt.ItemDataRole.UserRole, ("building", building_id))
         parent.setIcon(0, self._icons.icon_for(catalog_item))
-        parent.setToolTip(0, state.building_id)
+        parent.setToolTip(0, building_id)
         parent.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
         font = parent.font(0)
         font.setWeight(QFont.Weight.DemiBold)
         parent.setFont(0, font)
         self.tree.addTopLevelItem(parent)
-        building_type = "Shop" if state.workshop else "Building"
-        availability = "On board" if state.placed else "Not on board"
-        repair = self._repair_status(state)
+        is_workshop = state.workshop if state is not None else catalog_item.category == "shops"
+        building_type = "Shop" if is_workshop else "Building"
+        availability = (
+            "On board"
+            if state is not None and state.placed
+            else "Not on board"
+            if state is not None
+            else "Live status unavailable"
+        )
+        repair = self._repair_status(state) if state is not None else "Unavailable"
         self._badge(parent, 1, building_type)
         self._badge(parent, 2, availability)
         self._badge(parent, 3, repair)
         toggle = PolicyCheckBox()
         configure_policy_toggle(toggle)
-        toggle.setChecked(self._config.building_repair_enabled(state.building_id))
+        toggle.setChecked(self._config.building_repair_enabled(building_id))
         toggle.setAccessibleName(f"{name}: preserve repair materials")
         toggle.toggled.connect(
-            lambda enabled, building_id=state.building_id: self._set_enabled(building_id, enabled)
+            lambda enabled, building_id=building_id: self._set_enabled(building_id, enabled)
         )
         set_policy_widget(self.tree, parent, 4, policy_cell(toggle), sort_value=toggle.isChecked())
-        self._toggles[state.building_id] = toggle
-        self._items[state.building_id] = parent
-        for requirement in state.requirements:
+        self._toggles[building_id] = toggle
+        self._items[building_id] = parent
+        for requirement in state.requirements if state is not None else ():
             self._add_requirement(
                 parent,
                 requirement.blueprint_id,
                 requirement.available,
                 requirement.amount,
             )
-        parent.setExpanded(state.placed and not state.active)
+        parent.setExpanded(state is not None and state.placed and not state.active)
+
+    def _catalog_buildings(self) -> tuple[CatalogItem, ...]:
+        if self._catalog is None:
+            return ()
+        return tuple(
+            sorted(
+                (
+                    item
+                    for item in self._catalog.items.values()
+                    if item.tier is None
+                    and (item.category == "shops" or "building" in item.capabilities)
+                ),
+                key=lambda item: (item.display_name.casefold(), item.game_id),
+            )
+        )
+
+    @staticmethod
+    def _building_id(catalog_item: CatalogItem) -> str:
+        if catalog_item.category == "structures":
+            return f"{catalog_item.game_id}_building"
+        return catalog_item.game_id
 
     def _add_requirement(
         self, parent: QTreeWidgetItem, blueprint_id: str, available: int, amount: int
