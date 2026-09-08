@@ -8,7 +8,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
-from farm_merge_valet.gui.components.incremental_work import IncrementalWorkRunner
+from farm_merge_valet.gui.components.incremental_work import (
+    IncrementalPopulation,
+    IncrementalWorkRunner,
+)
 
 
 def test_incremental_work_keeps_processing_gui_events() -> None:
@@ -33,3 +36,41 @@ def test_incremental_work_keeps_processing_gui_events() -> None:
 
     assert not runner.active
     assert len(heartbeats) >= 2
+
+
+def test_incremental_population_coordinates_deferred_and_immediate_work() -> None:
+    _app = QApplication.instance() or QApplication([])
+    event_loop = QEventLoop()
+    population = IncrementalPopulation()
+    events: list[str] = []
+
+    def steps():
+        events.append("started")
+        yield
+        events.append("finished")
+
+    population.ensure(
+        populated=False,
+        deferred=True,
+        steps=steps,
+        show_loading=lambda: events.append("loading"),
+    )
+    assert population.pending
+    assert events == ["loading"]
+
+    QTimer.singleShot(100, event_loop.quit)
+    event_loop.exec()
+
+    assert not population.pending
+    assert events == ["loading", "started", "finished"]
+
+    population.ensure(
+        populated=True,
+        deferred=False,
+        steps=steps,
+        show_loading=lambda: events.append("unexpected"),
+    )
+    assert events == ["loading", "started", "finished"]
+
+    population.run_now(steps)
+    assert events[-2:] == ["started", "finished"]

@@ -19,7 +19,7 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
 )
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
-from farm_merge_valet.gui.components.incremental_work import IncrementalWorkRunner
+from farm_merge_valet.gui.components.incremental_work import IncrementalPopulation
 from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_ROW_HEIGHT,
@@ -63,8 +63,7 @@ class BuildingsPage(AppPage):
         self._icons = icons or CatalogIconLoader(config.catalog_dir)
         self._catalog: ItemCatalog | None = None
         self._populated = False
-        self._population_pending = False
-        self._population_runner = IncrementalWorkRunner(self)
+        self._population = IncrementalPopulation(self)
         self._states: tuple[BuildingRepairState, ...] | None = None
         self._toggles: dict[str, PolicyCheckBox] = {}
         self._items: dict[str, QTreeWidgetItem] = {}
@@ -109,17 +108,12 @@ class BuildingsPage(AppPage):
             self._populate()
 
     def ensure_populated(self, *, deferred: bool = False) -> None:
-        if self._populated or self._population_pending:
-            return
-        if not deferred:
-            self._populate()
-            return
-        self._population_pending = True
-        self._show_loading()
-        self._population_runner.start(self._populate_steps(), self._finish_deferred_population)
-
-    def _finish_deferred_population(self) -> None:
-        self._population_pending = False
+        self._population.ensure(
+            populated=self._populated,
+            deferred=deferred,
+            steps=self._populate_steps,
+            show_loading=self._show_loading,
+        )
 
     def apply_config(self, config: AppConfig, *, refresh: bool = True) -> None:
         catalog_changed = config.catalog_dir != self._config.catalog_dir
@@ -160,10 +154,7 @@ class BuildingsPage(AppPage):
             self._populate()
 
     def _populate(self) -> None:
-        self._population_runner.cancel()
-        self._population_pending = False
-        for _step in self._populate_steps():
-            pass
+        self._population.run_now(self._populate_steps)
 
     def _populate_steps(self) -> Iterator[None]:
         self._populated = True

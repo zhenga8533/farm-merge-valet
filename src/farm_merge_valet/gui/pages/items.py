@@ -31,7 +31,7 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
 )
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
-from farm_merge_valet.gui.components.incremental_work import IncrementalWorkRunner
+from farm_merge_valet.gui.components.incremental_work import IncrementalPopulation
 from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_BADGE_COLUMN_WIDTH,
@@ -166,8 +166,7 @@ class ItemsPage(AppPage):
         self._upgrade_targets: dict[str, UpgradeTargetProgress] = {}
         self._catalog_loaded = False
         self._populated = False
-        self._population_pending = False
-        self._population_runner = IncrementalWorkRunner(self)
+        self._population = IncrementalPopulation(self)
         self._row_definitions: list[_ItemPolicyRow] = []
         self._search_text_by_policy_key: dict[str, str] = {}
         self._policy_controls: list[
@@ -204,17 +203,12 @@ class ItemsPage(AppPage):
             self.populate()
 
     def ensure_populated(self, *, deferred: bool = False) -> None:
-        if self._populated or self._population_pending:
-            return
-        if not deferred:
-            self.populate()
-            return
-        self._population_pending = True
-        self._show_loading()
-        self._population_runner.start(self._populate_steps(), self._finish_deferred_population)
-
-    def _finish_deferred_population(self) -> None:
-        self._population_pending = False
+        self._population.ensure(
+            populated=self._populated,
+            deferred=deferred,
+            steps=self._populate_steps,
+            show_loading=self._show_loading,
+        )
 
     def set_upgrade_progress(self, progress: UpgradeProgress | None) -> None:
         if progress == self._upgrade_progress:
@@ -265,10 +259,7 @@ class ItemsPage(AppPage):
         self.configuration_header.mark_error(message)
 
     def populate(self) -> None:
-        self._population_runner.cancel()
-        self._population_pending = False
-        for _step in self._populate_steps():
-            pass
+        self._population.run_now(self._populate_steps)
 
     def _populate_steps(self) -> Iterator[None]:
         self._populated = True

@@ -44,7 +44,9 @@ GUI / CLI -> automation and catalog services -> core
 - `gui` owns Qt pages, reusable components, services, windows, and the
   controller mediator. Qt-neutral services own cancellable background work,
   catalog onboarding and synchronization, configuration saving, hotkeys,
-  native-window integration, and log export.
+  native-window integration, and log export. Catalog-backed policy pages defer
+  first population until selected and share one incremental-population lifecycle
+  so large caches do not block initial window creation or Qt event processing.
 - `observability` owns logging and Discord event delivery. Discord queue
   orchestration, status reduction/payloads, and webhook transport/persisted
   message identity are separate modules.

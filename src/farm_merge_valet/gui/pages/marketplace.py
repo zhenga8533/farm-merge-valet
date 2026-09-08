@@ -18,7 +18,7 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
 )
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
-from farm_merge_valet.gui.components.incremental_work import IncrementalWorkRunner
+from farm_merge_valet.gui.components.incremental_work import IncrementalPopulation
 from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_ICON_SIZE,
@@ -75,8 +75,7 @@ class MarketplacePage(AppPage):
         self._family_items: dict[tuple[str, str], QTreeWidgetItem] = {}
         self._populated = False
         self._has_populated_catalog = False
-        self._population_pending = False
-        self._population_runner = IncrementalWorkRunner(self)
+        self._population = IncrementalPopulation(self)
         self.configuration_header = ConfigurationHeader("Reset marketplace policies")
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
@@ -115,17 +114,12 @@ class MarketplacePage(AppPage):
         self.bulk_header.sortIndicatorChanged.connect(self._sort_changed)
 
     def ensure_populated(self, *, deferred: bool = False) -> None:
-        if self._populated or self._population_pending:
-            return
-        if not deferred:
-            self.populate()
-            return
-        self._population_pending = True
-        self._show_loading()
-        self._population_runner.start(self._populate_steps(), self._finish_deferred_population)
-
-    def _finish_deferred_population(self) -> None:
-        self._population_pending = False
+        self._population.ensure(
+            populated=self._populated,
+            deferred=deferred,
+            steps=self._populate_steps,
+            show_loading=self._show_loading,
+        )
 
     def apply_config(self, config: AppConfig, *, refresh: bool = True) -> None:
         catalog_changed = config.catalog_dir != self._config.catalog_dir
@@ -162,10 +156,7 @@ class MarketplacePage(AppPage):
         self.catalog_onboarding.set_status(message, error=error)
 
     def populate(self) -> None:
-        self._population_runner.cancel()
-        self._population_pending = False
-        for _step in self._populate_steps():
-            pass
+        self._population.run_now(self._populate_steps)
 
     def _populate_steps(self) -> Iterator[None]:
         self._populated = True

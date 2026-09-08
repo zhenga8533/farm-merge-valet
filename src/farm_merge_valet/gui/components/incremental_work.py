@@ -58,3 +58,36 @@ class IncrementalWorkRunner(QObject):
             if finished is not None:
                 finished()
             raise
+
+
+class IncrementalPopulation(QObject):
+    """Coordinate immediate and deferred population through one page-owned runner."""
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._runner = IncrementalWorkRunner(self)
+
+    @property
+    def pending(self) -> bool:
+        return self._runner.active
+
+    def ensure(
+        self,
+        *,
+        populated: bool,
+        deferred: bool,
+        steps: Callable[[], Iterable[object]],
+        show_loading: Callable[[], None],
+    ) -> None:
+        if populated or self.pending:
+            return
+        if deferred:
+            show_loading()
+            self._runner.start(steps(), lambda: None)
+        else:
+            self.run_now(steps)
+
+    def run_now(self, steps: Callable[[], Iterable[object]]) -> None:
+        self._runner.cancel()
+        for _step in steps():
+            pass
