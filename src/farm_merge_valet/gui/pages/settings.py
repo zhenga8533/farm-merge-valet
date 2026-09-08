@@ -55,75 +55,7 @@ class SettingsPage(ConfigFormPage):
 
         sections = scrollable_sections(self.page_layout)
 
-        automation, automation_form = settings_section("Automation behavior")
-        self._add_int(
-            automation_form,
-            "Merge-space reserve",
-            "merge_empty_cell_reserve",
-            0,
-            50,
-        )
-        self._add_int(
-            automation_form,
-            "Fallback producer open cells",
-            "producer_interact_min_empty_cells",
-            1,
-            50,
-        )
-        self._add_toggle(
-            automation_form,
-            "Automatically dismiss reward overlays",
-            "auto_dismiss_overlays",
-        )
-        self._add_toggle(
-            automation_form,
-            "Automatically pop stored items",
-            "auto_pop_storage_bubbles",
-        )
-        self._add_toggle(
-            automation_form,
-            "Automatically claim supply crates",
-            "auto_claim_supply_crates",
-        )
-        sections.addWidget(automation)
-
-        safeguards, safeguards_form = settings_section("Resource safeguards")
-        self._add_toggle(
-            safeguards_form,
-            "Allow obstacle energy spending",
-            "allow_obstacle_stage_starts",
-        )
-        for label, field in (
-            ("Minimum energy reserve", "minimum_energy_reserve"),
-            ("Minimum train-ticket reserve", "minimum_ticket_reserve"),
-            ("Minimum coin reserve", "minimum_coin_reserve"),
-            ("Minimum crystal reserve", "minimum_gem_reserve"),
-        ):
-            self._add_int(safeguards_form, label, field, 0, 1_000_000_000)
-        sections.addWidget(safeguards)
-
-        repairs, repairs_form = settings_section("Building repairs")
-        self.building_repairs_toggle = self._add_toggle(
-            repairs_form,
-            "Preserve resources for building repairs",
-            "preserve_building_repair_resources",
-        )
-        repair_priority_fields = (
-            ("Prioritize shops over other repairs", "prioritize_repair_shops"),
-            ("Prioritize cheaper repairs", "prioritize_cheaper_repairs"),
-            (
-                "Prioritize obstacles with needed repair materials",
-                "prioritize_obstacle_repair_resources",
-            ),
-        )
-        for label, field in repair_priority_fields:
-            self._add_toggle(repairs_form, label, field)
-        self._building_repair_controls = tuple(
-            self.controls[field] for _label, field in repair_priority_fields
-        )
-        sections.addWidget(repairs)
-
-        workflows, workflows_form = settings_section("Workflow automation")
+        workflows, workflows_form = settings_section("Automation")
         self._add_toggle(
             workflows_form,
             "Automate item actions",
@@ -165,7 +97,75 @@ class SettingsPage(ConfigFormPage):
         )
         sections.addWidget(workflows)
 
-        timing, timing_form = settings_section("Timing")
+        automation, automation_form = settings_section("Board behavior")
+        self._add_toggle(
+            automation_form,
+            "Automatically dismiss reward overlays",
+            "auto_dismiss_overlays",
+        )
+        self._add_toggle(
+            automation_form,
+            "Automatically pop stored items",
+            "auto_pop_storage_bubbles",
+        )
+        self._add_toggle(
+            automation_form,
+            "Automatically claim supply crates",
+            "auto_claim_supply_crates",
+        )
+        planning_advanced, form = disclosure_section("Advanced board planning")
+        self._add_int(form, "Merge-space reserve", "merge_empty_cell_reserve", 0, 50)
+        self._add_int(
+            form,
+            "Fallback producer open cells",
+            "producer_interact_min_empty_cells",
+            1,
+            50,
+        )
+        self.planning_advanced_section = planning_advanced
+        automation_form.addRow(planning_advanced)
+        sections.addWidget(automation)
+
+        safeguards, safeguards_form = settings_section("Resource safeguards")
+        self._add_toggle(
+            safeguards_form,
+            "Allow obstacle energy spending",
+            "allow_obstacle_stage_starts",
+        )
+        for label, field in (
+            ("Minimum energy reserve", "minimum_energy_reserve"),
+            ("Minimum train-ticket reserve", "minimum_ticket_reserve"),
+            ("Minimum coin reserve", "minimum_coin_reserve"),
+            ("Minimum crystal reserve", "minimum_gem_reserve"),
+        ):
+            self._add_int(safeguards_form, label, field, 0, 1_000_000_000)
+        sections.addWidget(safeguards)
+
+        repairs, repairs_form = settings_section("Building repairs")
+        self.building_repairs_toggle = self._add_toggle(
+            repairs_form,
+            "Preserve resources for building repairs",
+            "preserve_building_repair_resources",
+        )
+        repair_priority_fields = (
+            ("Prioritize shops over other repairs", "prioritize_repair_shops"),
+            ("Prioritize cheaper repairs", "prioritize_cheaper_repairs"),
+            (
+                "Prioritize obstacles with needed repair materials",
+                "prioritize_obstacle_repair_resources",
+            ),
+        )
+        repairs_advanced, form = disclosure_section("Advanced repair priorities")
+        for label, field in repair_priority_fields:
+            self._add_toggle(form, label, field)
+        self.repairs_advanced_section = repairs_advanced
+        repairs_form.addRow(repairs_advanced)
+        self._building_repair_controls = tuple(
+            self.controls[field] for _label, field in repair_priority_fields
+        )
+        sections.addWidget(repairs)
+
+        timing, timing_form = disclosure_section("Advanced automation timing")
         self._add_float(timing_form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)
         self._add_float(timing_form, "Loop interval (seconds)", "loop_interval", 0.01, 60, 0.1)
         self._add_float(
@@ -176,6 +176,7 @@ class SettingsPage(ConfigFormPage):
         )
         self._add_float(timing_form, "Crate delay minimum (seconds)", "crate_delay_min", 0, 5, 0.05)
         self._add_float(timing_form, "Crate delay maximum (seconds)", "crate_delay_max", 0, 5, 0.05)
+        self.timing_advanced_section = timing
         sections.addWidget(timing)
 
         controls, form = settings_section("Keyboard shortcuts")
@@ -190,7 +191,6 @@ class SettingsPage(ConfigFormPage):
             ("start_minimized", "Start minimized to tray"),
             ("bot_autostart", "Start bot with application"),
             ("close_to_tray", "Close window to tray"),
-            ("close_managed_browser_on_exit", "Close managed browser when quitting"),
         ):
             self._add_toggle(form, label, field)
         sections.addWidget(lifecycle)
@@ -218,7 +218,6 @@ class SettingsPage(ConfigFormPage):
         )
         self._add_form_row(notifications_form, "Discord webhook", webhook)
 
-        notifications_advanced, form = disclosure_section("Advanced notification options")
         profile = FocusAwareComboBox()
         profile.set_choices(
             (("Balanced", "balanced"), ("Minimal", "minimal"), ("Detailed", "detailed"))
@@ -229,8 +228,9 @@ class SettingsPage(ConfigFormPage):
             lambda _index: self._request("webhook_notification_profile", profile.current_value())
         )
         self._register_control("webhook_notification_profile", profile, profile.set_current_value)
-        self._add_form_row(form, "Notification detail", profile)
-        self._add_toggle(form, "Include activity charts", "webhook_include_charts")
+        self._add_form_row(notifications_form, "Notification detail", profile)
+        self._add_toggle(notifications_form, "Include activity charts", "webhook_include_charts")
+        notifications_advanced, form = disclosure_section("Advanced notification timing")
         self._add_float(
             form,
             "Status update interval (seconds)",
@@ -262,13 +262,13 @@ class SettingsPage(ConfigFormPage):
         self._register_control("theme", theme, theme.set_current_value)
         self._add_form_row(appearance_form, "Theme", theme)
 
-        appearance_advanced, form = disclosure_section("Advanced window behavior")
         for field, label in (
             ("main_always_on_top", "Dashboard always on top"),
             ("overlay_always_on_top", "Overlay always on top"),
-            ("overlay_click_through", "Overlay click-through while inactive"),
         ):
-            self._add_toggle(form, label, field)
+            self._add_toggle(appearance_form, label, field)
+        appearance_advanced, form = disclosure_section("Advanced window behavior")
+        self._add_toggle(form, "Overlay click-through while inactive", "overlay_click_through")
         self._add_opacity(form, "Dashboard inactive opacity", "main_unfocused_opacity")
         self._add_opacity(form, "Dashboard focused opacity", "main_focused_opacity")
         self._add_opacity(form, "Overlay inactive opacity", "overlay_unfocused_opacity")
@@ -277,12 +277,11 @@ class SettingsPage(ConfigFormPage):
         appearance_form.addRow(appearance_advanced)
         sections.addWidget(appearance)
 
-        application, form = settings_section("About")
-        version = QLabel(__version__)
+        version = QLabel(f"Farm Merge Valet {__version__}")
+        version.setObjectName("settingsVersion")
         version.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         version.setAccessibleName("Application version")
-        self._add_form_row(form, "Version", version)
-        sections.addWidget(application)
+        sections.addWidget(version)
         sections.addStretch()
         self.land_expansion_toggle.toggled.connect(self._sync_dependent_controls)
         self.building_repairs_toggle.toggled.connect(self._sync_dependent_controls)

@@ -302,8 +302,12 @@ combines status and restart actions with browser, game-connection, and asset-cac
 configuration. Settings groups automation, startup controls, notifications, and
 appearance; scoped reset controls preserve unrelated policy sections.
 The Browser page also controls default-enabled automatic recovery for a frozen
-game. Automatic page opening and reload are restricted to the verified managed
-browser profile; an unowned browser is never modified.
+game and whether the verified managed browser closes with the application.
+Automatic page opening, reload, and shutdown are restricted to the verified
+managed browser profile; an unowned browser is never modified. Settings keeps
+workflow choices and safeguards visible while placing planning thresholds,
+automation timing, notification intervals, and detailed window behavior behind
+clearly labeled advanced sections.
 Its Game data section can permanently clear the compiled catalog,
 extracted icons, and downloaded atlas cache after confirmation. This preserves
 configuration, the managed-browser profile, logs, and other runtime state; run

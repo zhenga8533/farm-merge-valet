@@ -185,18 +185,20 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     labels = {label.text() for label in settings_page.findChildren(QLabel)}
 
     assert section_titles == {
-        "Automation behavior",
+        "Automation",
+        "Board behavior",
         "Resource safeguards",
         "Building repairs",
-        "Workflow automation",
-        "Timing",
         "Keyboard shortcuts",
         "Startup and shutdown",
         "Notifications",
         "Appearance",
-        "About",
     }
-    assert "Version" in labels
+    assert (
+        window.settings_page.findChild(QLabel, "settingsVersion")
+        .text()
+        .startswith("Farm Merge Valet ")
+    )
     assert "Start each bot run paused" in labels
     assert "Automatically dismiss reward overlays" in labels
     assert "Automatically pop stored items" in labels
@@ -212,27 +214,29 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     assert "Expand farm land automatically" in labels
     assert "Maximum coins per expansion" in labels
     assert "Maximum crystals per expansion" in labels
-    assert "Close managed browser when quitting" in labels
+    assert "Close managed browser when quitting" not in labels
     assert "Reset all" in {
         button.text() for button in window.settings_page.findChildren(QPushButton)
     }
     assert all("_" not in title and "&" not in title for title in section_titles)
-    assert not window.settings_page.notifications_advanced_section.expanded
-    assert not window.settings_page.appearance_advanced_section.expanded
     for section in (
+        window.settings_page.planning_advanced_section,
+        window.settings_page.repairs_advanced_section,
+        window.settings_page.timing_advanced_section,
         window.settings_page.notifications_advanced_section,
         window.settings_page.appearance_advanced_section,
     ):
+        assert not section.expanded
         assert section.objectName() == "advancedSection"
         assert section.content.objectName() == "advancedSectionContent"
         assert section.toggle.accessibleName()
         section.toggle.click()
         assert section.expanded
         assert not section.content.isHidden()
-    assert section_groups["Workflow automation"].isAncestorOf(
+    assert section_groups["Automation"].isAncestorOf(
         window.settings_page.controls["land_expansion_max_coin_cost"]
     )
-    assert section_groups["Workflow automation"].isAncestorOf(
+    assert section_groups["Automation"].isAncestorOf(
         window.settings_page.controls["land_expansion_max_gem_cost"]
     )
     for field in (
@@ -242,7 +246,9 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         "farm_visit_automation_enabled",
         "land_expansion_automation_enabled",
     ):
-        assert section_groups["Workflow automation"].isAncestorOf(
+        assert section_groups["Automation"].isAncestorOf(window.settings_page.controls[field])
+    for field in ("merge_empty_cell_reserve", "producer_interact_min_empty_cells"):
+        assert window.settings_page.planning_advanced_section.isAncestorOf(
             window.settings_page.controls[field]
         )
     for field in (
@@ -254,6 +260,12 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         assert section_groups["Building repairs"].isAncestorOf(window.settings_page.controls[field])
     assert section_groups["Notifications"].isAncestorOf(
         window.settings_page.notifications_advanced_section
+    )
+    assert not window.settings_page.notifications_advanced_section.isAncestorOf(
+        window.settings_page.controls["webhook_notification_profile"]
+    )
+    assert not window.settings_page.notifications_advanced_section.isAncestorOf(
+        window.settings_page.controls["webhook_include_charts"]
     )
     assert section_groups["Appearance"].isAncestorOf(
         window.settings_page.appearance_advanced_section
@@ -284,6 +296,9 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
             shop_automation_enabled=False,
             marketplace_automation_enabled=False,
             preserve_building_repair_resources=False,
+            close_managed_browser_on_exit=True,
+            log_level="DEBUG",
+            overlay_visible=True,
             item_policy_defaults={"interact": True},
             item_policy_overrides={"ingredients/milk": {"interact": False}},
             shop_default_enabled=False,
@@ -330,6 +345,9 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
     assert after_settings.shop_default_enabled
     assert after_settings.browser == "edge"
     assert after_settings.cdp_port == 9333
+    assert after_settings.close_managed_browser_on_exit
+    assert after_settings.log_level == "DEBUG"
+    assert after_settings.overlay_visible
     assert window.settings_page.saved_label.text() == "Defaults restored"
     assert window.settings_page.saved_label.property("status") == "success"
 
@@ -339,6 +357,7 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
     after_browser = ConfigStore(store.path).load()
     assert after_browser.browser == AppConfig().browser
     assert after_browser.cdp_port == AppConfig().cdp_port
+    assert not after_browser.close_managed_browser_on_exit
     assert after_browser.theme == "dark"
     assert after_browser.item_category_defaults == AppConfig().item_category_defaults
     assert after_browser.shop_default_enabled

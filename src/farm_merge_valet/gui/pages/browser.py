@@ -113,6 +113,11 @@ class BrowserPage(ConfigFormPage):
         self._add_text(form, "Game URL", "game_url")
         self._add_text(form, "Page target", "window_title")
         self._add_int(form, "CDP port", "cdp_port", 1, 65535)
+        self._add_toggle(
+            form,
+            "Close managed browser when quitting",
+            "close_managed_browser_on_exit",
+        )
         self.browser_advanced_section = browser_advanced
         managed_form.addRow(browser_advanced)
         sections.addWidget(managed)

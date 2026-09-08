@@ -88,6 +88,7 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
         "game_url",
         "window_title",
         "cdp_port",
+        "close_managed_browser_on_exit",
         "catalog_dir",
         "atlas_cache_dir",
     }
@@ -115,6 +116,9 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
     assert browser_groups["Game data"].isAncestorOf(window.browser_page.assets_advanced_section)
     assert window.browser_page.assets_advanced_section.isAncestorOf(
         window.browser_page.cache_clear_button
+    )
+    assert window.browser_page.browser_advanced_section.isAncestorOf(
+        window.browser_page.controls["close_managed_browser_on_exit"]
     )
     assert window.browser_page.game_sync_button.text() == "Synchronize"
     assert window.browser_page.cache_clear_button.text() == "Clear cache"

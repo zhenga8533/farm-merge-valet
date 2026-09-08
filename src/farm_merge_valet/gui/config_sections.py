@@ -49,6 +49,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "cdp_port",
         "catalog_dir",
         "atlas_cache_dir",
+        "close_managed_browser_on_exit",
     ),
     ConfigSection.SETTINGS: (
         "merge_empty_cell_reserve",
@@ -92,7 +93,6 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "start_minimized",
         "bot_autostart",
         "close_to_tray",
-        "close_managed_browser_on_exit",
         "main_always_on_top",
         "main_focused_opacity",
         "main_unfocused_opacity",
@@ -117,7 +117,10 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
 
 def reset_config_section(config: AppConfig, section: ConfigSection) -> AppConfig:
     defaults = AppConfig()
-    changes = {field: getattr(defaults, field) for field in SECTION_FIELDS[section]}
+    fields = SECTION_FIELDS[section]
+    if section is ConfigSection.SETTINGS:
+        fields = tuple(field for field in fields if field not in {"log_level", "overlay_visible"})
+    changes = {field: getattr(defaults, field) for field in fields}
     candidate = config.model_copy(update=changes)
     return AppConfig.model_validate(candidate.model_dump())
 
