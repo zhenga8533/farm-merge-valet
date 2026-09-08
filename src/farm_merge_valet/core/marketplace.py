@@ -36,7 +36,7 @@ class MarketplaceOffer:
         required = (self.offer_id, self.group, self.display_name, self.reward_key)
         if any(not value.strip() or value != value.strip() for value in required):
             raise ValueError("marketplace identifiers and labels must be non-empty and trimmed")
-        if self.reward_amount <= 0 or self.payment_amount < 0 or self.stock <= 0:
+        if self.reward_amount <= 0 or self.payment_amount < 0 or self.stock < 0:
             raise ValueError("marketplace reward, payment, and stock amounts are invalid")
         if self.kind is MarketplaceOfferKind.FLASH:
             if not self.slot_id or not self.candidate_key:
@@ -59,6 +59,44 @@ class MarketplaceOffer:
         if self.kind is MarketplaceOfferKind.FLASH:
             return f"flash:{self.slot_id}:{self.candidate_key}"
         return f"free:{self.offer_id}"
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "kind": self.kind.value,
+            "offer_id": self.offer_id,
+            "group": self.group,
+            "display_name": self.display_name,
+            "reward_key": self.reward_key,
+            "reward_amount": self.reward_amount,
+            "payment_type": self.payment_type.value,
+            "payment_key": self.payment_key,
+            "payment_amount": self.payment_amount,
+            "stock": self.stock,
+            "slot_id": self.slot_id,
+            "candidate_key": self.candidate_key,
+        }
+
+    @classmethod
+    def from_json(cls, value: object) -> MarketplaceOffer:
+        if not isinstance(value, dict):
+            raise ValueError("invalid marketplace offer")
+        try:
+            return cls(
+                kind=MarketplaceOfferKind(value["kind"]),
+                offer_id=value["offer_id"],
+                group=value["group"],
+                display_name=value["display_name"],
+                reward_key=value["reward_key"],
+                reward_amount=value["reward_amount"],
+                payment_type=MarketplacePaymentType(value["payment_type"]),
+                payment_key=value.get("payment_key"),
+                payment_amount=value["payment_amount"],
+                stock=value["stock"],
+                slot_id=value.get("slot_id"),
+                candidate_key=value.get("candidate_key"),
+            )
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise ValueError("invalid marketplace offer") from exc
 
 
 @dataclass(frozen=True)

@@ -13,13 +13,13 @@ from farm_merge_valet.catalog.assets import (
     compile_catalog_assets,
     load_cached_atlases,
 )
-from farm_merge_valet.catalog.marketplace import MARKETPLACE_ICON_ASSETS
-from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog
+from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog, load_item_catalog
 from farm_merge_valet.catalog.sync import (
     CatalogSynchronizer,
     _high_quality_atlas_candidates,
     _manifest_url,
 )
+from tests.marketplace_fixtures import marketplace_catalog
 
 
 def test_asset_compiler_preserves_atlas_aliases_and_related_states(tmp_path: Path) -> None:
@@ -59,21 +59,6 @@ def test_asset_compiler_preserves_atlas_aliases_and_related_states(tmp_path: Pat
     assert (building_dir / "variants" / "obj_prod_bakery.png").exists()
     assert catalog.variants["shops/bakery"][0].state == "active"
     assert not (tmp_path / "unrelated.png").exists()
-
-
-def test_asset_compiler_exports_marketplace_icons_when_available(tmp_path: Path) -> None:
-    alias, relative_path = MARKETPLACE_ICON_ASSETS["event_energy_5_no_ads"]
-    manifest = {"frames": {alias: {"frame": {"x": 0, "y": 0, "w": 1, "h": 1}}}}
-    image = np.full((1, 1, 4), 200, dtype=np.uint8)
-
-    written = compile_catalog_assets(
-        {"marketplace": (manifest, image)},
-        ItemCatalog({}),
-        tmp_path,
-    )
-
-    assert written == 1
-    assert tmp_path.joinpath(*Path(relative_path).parts).exists()
 
 
 def test_cached_atlases_prefer_high_quality_frames() -> None:
@@ -269,6 +254,58 @@ def test_failed_asset_compile_does_not_publish_the_new_catalog(
         synchronizer._compile_assets({})
 
     assert catalog_path.read_text(encoding="utf-8") == "existing catalog"
+
+
+def test_asset_compile_persists_game_derived_marketplace_offers(
+    monkeypatch, tmp_path: Path
+) -> None:
+    catalog_dir = tmp_path / "catalog"
+    synchronizer = CatalogSynchronizer(
+        atlas_cache_dir=tmp_path / "atlases",
+        catalog_dir=catalog_dir,
+        atlas_url_reader=lambda: [],
+        binary_resource_reader=lambda _urls: {},
+        text_resource_reader=lambda _urls: {},
+        catalog_loader=lambda: ItemCatalog({}),
+        marketplace_catalog_reader=marketplace_catalog,
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.catalog.sync.compile_catalog_assets",
+        lambda *_args: 0,
+    )
+
+    synchronizer._compile_assets({})
+
+    assert load_item_catalog(catalog_dir / "catalog.json").marketplace_offers == (
+        marketplace_catalog()
+    )
+
+
+def test_asset_compile_preserves_cached_offers_when_live_read_is_unavailable(
+    monkeypatch, tmp_path: Path
+) -> None:
+    catalog_dir = tmp_path / "catalog"
+    synchronizer = CatalogSynchronizer(
+        atlas_cache_dir=tmp_path / "atlases",
+        catalog_dir=catalog_dir,
+        atlas_url_reader=lambda: [],
+        binary_resource_reader=lambda _urls: {},
+        text_resource_reader=lambda _urls: {},
+        catalog_loader=lambda: ItemCatalog(
+            items={}, marketplace_offers=marketplace_catalog()
+        ),
+        marketplace_catalog_reader=lambda: None,
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.catalog.sync.compile_catalog_assets",
+        lambda *_args: 0,
+    )
+
+    synchronizer._compile_assets({})
+
+    assert load_item_catalog(catalog_dir / "catalog.json").marketplace_offers == (
+        marketplace_catalog()
+    )
 
 
 def test_manifest_url_preserves_the_game_version_query() -> None:

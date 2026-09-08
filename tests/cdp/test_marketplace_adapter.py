@@ -1,7 +1,7 @@
-from farm_merge_valet.catalog.marketplace import marketplace_catalog
 from farm_merge_valet.cdp.marketplace import (
     marketplace_purchase_expression,
     parse_marketplace_offers,
+    read_marketplace_catalog,
 )
 from farm_merge_valet.core.marketplace import MarketplaceAction
 
@@ -35,19 +35,72 @@ def test_marketplace_parser_skips_malformed_or_negative_stock() -> None:
     assert parse_marketplace_offers(None) is None
 
 
+def test_marketplace_catalog_is_derived_from_the_live_adapter(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.marketplace.evaluate",
+        lambda *_args: {
+            "offers": [
+                {
+                    "policyKey": "free:gems_5_no_ads",
+                    "offerId": "gems_5_no_ads",
+                    "slotId": None,
+                    "candidateKey": None,
+                    "rewardKey": "gems",
+                    "rewardAmount": 5,
+                    "paymentType": "free",
+                    "paymentKey": None,
+                    "paymentAmount": 0,
+                    "remainingStock": 0,
+                    "balance": None,
+                }
+            ]
+        },
+    )
+
+    catalog = read_marketplace_catalog(9222)
+
+    assert catalog is not None
+    assert len(catalog) == 1
+    assert catalog[0].policy_key == "free:gems_5_no_ads"
+    assert catalog[0].stock == 0
+
+
+def test_marketplace_catalog_deduplicates_identical_live_entries(monkeypatch) -> None:
+    offer = {
+        "policyKey": "free:gems_5_no_ads",
+        "offerId": "gems_5_no_ads",
+        "slotId": None,
+        "candidateKey": None,
+        "rewardKey": "gems",
+        "rewardAmount": 5,
+        "paymentType": "free",
+        "paymentKey": None,
+        "paymentAmount": 0,
+        "remainingStock": 1,
+        "balance": None,
+    }
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.marketplace.evaluate",
+        lambda *_args: {"offers": [offer, dict(offer)]},
+    )
+
+    catalog = read_marketplace_catalog(9222)
+
+    assert catalog is not None and len(catalog) == 1
+
+
 def test_purchase_expression_guards_exact_offer_and_never_refreshes() -> None:
-    offer = marketplace_catalog()[0]
     action = MarketplaceAction(
-        offer.policy_key,
-        offer.offer_id,
-        offer.reward_key,
-        offer.reward_amount,
-        offer.payment_type,
-        offer.payment_key,
-        offer.payment_amount,
-        offer.stock,
-        offer.slot_id,
-        offer.candidate_key,
+        "flash:flash_deal_ingredient:wheat",
+        "flash_deal_ingredient",
+        "wheat",
+        9,
+        "inventory",
+        "gems",
+        9,
+        5,
+        "flash_deal_ingredient",
+        "wheat",
     )
     expression = marketplace_purchase_expression(action, 7)
     assert "service.purchaseItem(configured)" not in expression

@@ -15,7 +15,6 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
 )
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
-from farm_merge_valet.gui.components.input_controls import SettingsToggleRow
 from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_ROW_HEIGHT,
@@ -66,39 +65,6 @@ class BuildingsPage(AppPage):
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
-        master = SettingsToggleRow(
-            "Preserve resources for building repairs",
-            checked=config.preserve_building_repair_resources,
-            tooltip="Pause repair reservations without changing individual building choices.",
-        )
-        self.master_toggle = master.toggle
-        self.master_toggle.toggled.connect(self._set_master_enabled)
-        self.page_layout.addWidget(master)
-        self.priority_toggles = {}
-        for label, field, tooltip in (
-            (
-                "Prioritize shops over other buildings",
-                "prioritize_repair_shops",
-                "Choose an eligible shop before a non-shop repair.",
-            ),
-            (
-                "Prioritize cheaper repairs",
-                "prioritize_cheaper_repairs",
-                "Choose the repair with the lowest total material requirement first.",
-            ),
-            (
-                "Prioritize obstacles with needed materials",
-                "prioritize_obstacle_repair_resources",
-                "Prefer obstacles known to reward a missing material.",
-            ),
-        ):
-            row = SettingsToggleRow(label, checked=getattr(config, field), tooltip=tooltip)
-            row.toggle.toggled.connect(
-                lambda enabled, name=field: self._emit(**{name: enabled})
-            )
-            self.priority_toggles[field] = row.toggle
-            self.page_layout.addWidget(row)
-
         self.catalog_onboarding = CatalogOnboarding()
         self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
         self.page_layout.addWidget(self.catalog_onboarding, 1, Qt.AlignmentFlag.AlignCenter)
@@ -142,13 +108,6 @@ class BuildingsPage(AppPage):
             or config.buildings_sort_descending != self._config.buildings_sort_descending
         )
         self._config = config
-        self.master_toggle.blockSignals(True)
-        self.master_toggle.setChecked(config.preserve_building_repair_resources)
-        self.master_toggle.blockSignals(False)
-        for field, toggle in self.priority_toggles.items():
-            toggle.blockSignals(True)
-            toggle.setChecked(getattr(config, field))
-            toggle.blockSignals(False)
         if catalog_changed:
             self._icons.set_catalog_dir(config.catalog_dir)
             self._catalog = None
@@ -279,9 +238,6 @@ class BuildingsPage(AppPage):
             sort_value=text,
             search_text=text,
         )
-
-    def _set_master_enabled(self, enabled: bool) -> None:
-        self._emit(preserve_building_repair_resources=enabled)
 
     def _set_enabled(self, building_id: str, enabled: bool) -> None:
         overrides = dict(self._config.building_repair_overrides)

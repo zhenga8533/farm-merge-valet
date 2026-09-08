@@ -226,6 +226,7 @@ class MainWindow(QMainWindow):
         self.buildings_page.catalog_setup_requested.connect(self.controller.setup_catalog)
         self.buildings_page.reset_requested.connect(self._reset_building_policies)
         self.marketplace_page.config_edited.connect(self._queue_edit)
+        self.marketplace_page.catalog_setup_requested.connect(self.controller.setup_catalog)
         self.marketplace_page.reset_requested.connect(self._reset_marketplace_policies)
         self.browser_page.config_edited.connect(self._queue_edit)
         self.browser_page.refresh_requested.connect(self.controller.refresh_browser)
@@ -297,14 +298,14 @@ class MainWindow(QMainWindow):
         self._reset_section(
             ConfigSection.MARKETPLACE,
             "Reset marketplace policies?",
-            "Disable every marketplace auto-purchase policy?",
+            "Restore the recommended free-claim and paid-offer choices?",
         )
 
     def _reset_building_policies(self) -> None:
         self._reset_section(
             ConfigSection.BUILDINGS,
             "Reset building policies?",
-            "Restore recommended repair priorities and enable every building?",
+            "Restore the recommended choice for every repairable building?",
         )
 
     def _reset_browser_configuration(self) -> None:
@@ -318,8 +319,9 @@ class MainWindow(QMainWindow):
         self._reset_section(
             ConfigSection.SETTINGS,
             "Reset settings?",
-            "Restore automation, shortcut, startup, notification, and appearance settings? "
-            "Browser, item, and shop configuration will be preserved.",
+            "Restore workflow, safeguard, timing, shortcut, startup, notification, and "
+            "appearance settings? Browser configuration and individual feature policies "
+            "will be preserved.",
         )
 
     def _reset_section(self, section: ConfigSection, title: str, message: str) -> None:
@@ -604,20 +606,25 @@ class MainWindow(QMainWindow):
         for page in self._catalog_pages():
             page.set_catalog_setup_status(message, error=True)
 
-    def _catalog_pages(self) -> tuple[ItemsPage, ShopsPage, BuildingsPage]:
-        return self.items_page, self.shops_page, self.buildings_page
+    def _catalog_pages(
+        self,
+    ) -> tuple[ItemsPage, ShopsPage, BuildingsPage, MarketplacePage]:
+        return (
+            self.items_page,
+            self.shops_page,
+            self.buildings_page,
+            self.marketplace_page,
+        )
 
     def _catalog_metadata_refreshed(self, *_args: object) -> None:
         self._catalog_icons.clear()
         for page in self._catalog_pages():
             page.reload_catalog_if_missing()
-        self.marketplace_page.reload_catalog_if_missing()
 
     def _catalog_assets_refreshed(self, *_args: object) -> None:
         self._catalog_icons.clear()
         for page in self._catalog_pages():
             page.reload_catalog()
-        self.marketplace_page.reload_catalog()
 
     def _save_logs(self) -> None:
         output, _filter = QFileDialog.getSaveFileName(

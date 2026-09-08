@@ -1,11 +1,11 @@
 from dataclasses import replace
 
-from farm_merge_valet.catalog.marketplace import marketplace_catalog
 from farm_merge_valet.core.marketplace import (
     MarketplaceLiveOffer,
     MarketplaceOfferKind,
     plan_marketplace_purchase,
 )
+from tests.marketplace_fixtures import marketplace_catalog
 
 
 def _live_for(index: int = 0) -> MarketplaceLiveOffer:
@@ -25,14 +25,11 @@ def _live_for(index: int = 0) -> MarketplaceLiveOffer:
     )
 
 
-def test_versioned_catalog_contains_50_flash_and_four_free_offers() -> None:
+def test_discovered_catalog_has_stable_unique_policy_keys() -> None:
     catalog = marketplace_catalog()
-    assert len(catalog) == 54
-    assert sum(offer.kind is MarketplaceOfferKind.FLASH for offer in catalog) == 50
-    assert sum(offer.kind is MarketplaceOfferKind.FREE for offer in catalog) == 4
-    assert len({offer.policy_key for offer in catalog}) == 54
-    event_energy = next(offer for offer in catalog if offer.offer_id == "event_energy_5_no_ads")
-    assert event_energy.reward_key == "time_limited_event_energy"
+    assert sum(offer.kind is MarketplaceOfferKind.FLASH for offer in catalog) == 1
+    assert sum(offer.kind is MarketplaceOfferKind.FREE for offer in catalog) == 1
+    assert len({offer.policy_key for offer in catalog}) == len(catalog)
 
 
 def test_flash_policy_identity_includes_slot_and_candidate() -> None:

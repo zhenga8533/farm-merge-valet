@@ -19,6 +19,7 @@ from farm_merge_valet.catalog.assets import (
 )
 from farm_merge_valet.catalog.models import ItemCatalog
 from farm_merge_valet.catalog.store import write_item_catalog
+from farm_merge_valet.core.marketplace import MarketplaceOffer
 
 _ATLAS_PAGE_SUFFIX = re.compile(r"^(?P<base>.+)-(?P<index>[0-9]+)$")
 _QUALITY_SEGMENTS = ("/low/", "/medium/")
@@ -33,6 +34,7 @@ class CatalogSynchronizer:
     binary_resource_reader: Callable[[list[str]], dict[str, bytes]]
     text_resource_reader: Callable[[list[str]], dict[str, str]]
     catalog_loader: Callable[[], ItemCatalog]
+    marketplace_catalog_reader: Callable[[], tuple[MarketplaceOffer, ...] | None] | None = None
 
     def sync(self, *, force: bool = False) -> None:
         """Discover current game atlases and refresh the local catalog cache."""
@@ -148,6 +150,16 @@ class CatalogSynchronizer:
 
     def _compile_assets(self, atlases: Atlases) -> None:
         catalog = attach_catalog_variants(atlases, self.catalog_loader())
+        if self.marketplace_catalog_reader is not None:
+            offers = self.marketplace_catalog_reader()
+            catalog = ItemCatalog(
+                items=catalog.items,
+                variants=catalog.variants,
+                source_fingerprint=catalog.source_fingerprint,
+                marketplace_offers=(
+                    offers if offers is not None else catalog.marketplace_offers
+                ),
+            )
         _report_uncategorized(catalog)
         written = compile_catalog_assets(atlases, catalog, self.catalog_dir)
         write_item_catalog(self.catalog_dir / "catalog.json", catalog)

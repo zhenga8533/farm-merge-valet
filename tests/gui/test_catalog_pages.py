@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
 )
 
 from farm_merge_valet.automation.runtime import BuildingRepairState, BuildingRequirement
-from farm_merge_valet.catalog.marketplace import MARKETPLACE_ICON_ASSETS, marketplace_catalog
 from farm_merge_valet.catalog.models import (
     CatalogItem,
     ItemCatalog,
@@ -35,6 +34,7 @@ from farm_merge_valet.gui.controller import (
 )
 from farm_merge_valet.gui.main_window import MainWindow
 from farm_merge_valet.gui.pages.shops import IngredientReservesDialog
+from tests.marketplace_fixtures import marketplace_catalog
 
 
 def _catalog() -> ItemCatalog:
@@ -79,7 +79,8 @@ def _catalog() -> ItemCatalog:
                 None,
                 frozenset({"collectable"}),
             ),
-        }
+        },
+        marketplace_offers=marketplace_catalog(),
     )
 
 
@@ -127,7 +128,8 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
                 "wood_2", "wood", "resources/wood", "resources", "Wood", 2,
                 True, "wood_3", None, None, frozenset({"mergeable"}),
             ),
-        }
+        },
+        marketplace_offers=marketplace_catalog(),
     )
     write_item_catalog(catalog_dir / "catalog.json", catalog)
     store = ConfigStore(tmp_path / "config.json")
@@ -161,19 +163,24 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
 
 def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    write_item_catalog(catalog_dir / "catalog.json", _catalog())
     store = ConfigStore(tmp_path / "config.json")
-    store.replace(AppConfig(close_to_tray=False))
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
     window = MainWindow(ApplicationController(store))
 
     page = window.marketplace_page
-    assert page.master_toggle.isChecked()
-    assert page.tree.topLevelItemCount() == 7
+    marketplace_automation_toggle = window.settings_page.controls[
+        "marketplace_automation_enabled"
+    ]
+    assert marketplace_automation_toggle.isChecked()
+    assert page.tree.topLevelItemCount() == 2
     assert page.tree.columnCount() == 3
     assert not hasattr(page, "refresh_requested")
     assert not hasattr(page, "_live")
-    assert len(page._toggles) == 54
-    assert sum(toggle.isChecked() for toggle in page._toggles.values()) == 4
-    assert len(page._group_toggles) == 7
+    assert len(page._toggles) == 2
+    assert sum(toggle.isChecked() for toggle in page._toggles.values()) == 1
+    assert len(page._group_toggles) == 2
     assert all(
         page._toggles[offer.policy_key].isChecked() == (offer.payment_type == "free")
         for offer in marketplace_catalog()
@@ -202,13 +209,6 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
     gem_label = cost_badge.findChild(QLabel)
     assert gem_label.text() == "9 Gems"
     assert gem_label.property("tone") == "gems"
-    generators = next(
-        page.tree.topLevelItem(row)
-        for row in range(page.tree.topLevelItemCount())
-        if page.tree.topLevelItem(row).text(0) == "Generators"
-    )
-    coin_label = page.tree.itemWidget(generators.child(0), 1).findChild(QLabel)
-    assert coin_label.property("tone") == "coins"
     free_claims = next(
         page.tree.topLevelItem(row)
         for row in range(page.tree.topLevelItemCount())
@@ -226,7 +226,7 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
     assert page._group_toggles["Ingredients"].checkState() == Qt.CheckState.Checked
     ingredient_key = page._group_policy_keys["Ingredients"][0]
     page._toggles[ingredient_key].click()
-    assert page._group_toggles["Ingredients"].checkState() == Qt.CheckState.PartiallyChecked
+    assert page._group_toggles["Ingredients"].checkState() == Qt.CheckState.Unchecked
     page._group_toggles["Free Claims"].click()
     assert all(
         not page._toggles[key].isChecked()
@@ -237,9 +237,25 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
         for key in page._group_policy_keys["Free Claims"]
     )
     selected_offers = dict(page._config.marketplace_policy_overrides)
-    page.master_toggle.click()
-    assert not page._config.marketplace_automation_enabled
+    marketplace_automation_toggle.click()
+    assert not window._draft.marketplace_automation_enabled
     assert page._config.marketplace_policy_overrides == selected_offers
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_marketplace_page_prompts_for_sync_when_catalog_has_no_offers(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    write_item_catalog(catalog_dir / "catalog.json", ItemCatalog({}))
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+
+    assert not window.marketplace_page.catalog_onboarding.isHidden()
+    assert window.marketplace_page.tree.isHidden()
+    assert window.marketplace_page.tree.topLevelItemCount() == 0
 
     window.quit_application()
     app.processEvents()
@@ -247,8 +263,10 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
 
 def test_marketplace_bulk_toggle_targets_only_filtered_offers(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    write_item_catalog(catalog_dir / "catalog.json", _catalog())
     store = ConfigStore(tmp_path / "config.json")
-    store.replace(AppConfig(close_to_tray=False))
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
     window = MainWindow(ApplicationController(store))
     page = window.marketplace_page
 
@@ -257,9 +275,6 @@ def test_marketplace_bulk_toggle_targets_only_filtered_offers(tmp_path) -> None:
 
     assert page._config.marketplace_policy_enabled(
         "flash:flash_deal_ingredient:wheat"
-    )
-    assert not page._config.marketplace_policy_enabled(
-        "flash:flash_deal_ingredient:milk"
     )
     assert page._config.marketplace_policy_enabled("free:gems_5_no_ads")
 
@@ -472,7 +487,8 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
             "time_limited_event_energy_1": event_energy,
             "bakery": shop,
             "bread": recipe,
-        }
+        },
+        marketplace_offers=marketplace_catalog(),
     )
     write_item_catalog(catalog_dir / "catalog.json", catalog)
 
@@ -501,7 +517,6 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
         event_energy.asset_path,
         shop.asset_path,
         recipe.asset_path,
-        *(path for _alias, path in MARKETPLACE_ICON_ASSETS.values()),
     ):
         assert relative_path is not None
         path = catalog_dir / relative_path

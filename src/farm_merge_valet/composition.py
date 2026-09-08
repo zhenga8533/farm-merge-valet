@@ -16,6 +16,7 @@ from farm_merge_valet.cdp.item_catalog import (
     read_runtime_catalog_fingerprint,
     read_runtime_item_metadata,
 )
+from farm_merge_valet.cdp.marketplace import read_marketplace_catalog
 from farm_merge_valet.cdp.resources import (
     read_game_frame_resources,
     read_game_frame_text_resources,
@@ -77,6 +78,9 @@ def create_catalog_synchronizer(config: AppConfig) -> CatalogSynchronizer:
             config.cdp_port, urls, config.window_title
         ),
         catalog_loader=load_catalog,
+        marketplace_catalog_reader=lambda: read_marketplace_catalog(
+            config.cdp_port, config.window_title
+        ),
     )
 
 

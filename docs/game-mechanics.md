@@ -117,16 +117,12 @@ before claiming.
 
 ## Marketplace
 
-The marketplace rotates six flash-deal slots on a four-hour cycle. The observed
-1.78.2-4.reddit configuration has 50 possible flash candidates across
-ingredients, generators, materials, reward crates, keys, and greenhouse/gazebo
-parts. A slot's current candidate determines its real reward and price; the
-static 99,999-gem slot placeholder is not a purchasable offer.
-
-Four configured claims use the literal payment type `free`: five gems, five
-energy, ten crates, and 25 event energy. Parallel ad and premium variants are
-different offer types. Stock is finite and renews on the marketplace cycle;
-event energy is exposed only while its event shop is active.
+Marketplace configuration is discovered from the running game and cached during
+synchronization. Flash policies use the exact slot and current candidate identity;
+free policies include only offers whose live payment type is literally `free`.
+Parallel ad and premium variants are therefore not treated as free. Stock is
+finite and may renew when the marketplace rotates. Event-specific offers appear
+only when the game exposes their shop.
 
 ## Tier-4 Producers
 

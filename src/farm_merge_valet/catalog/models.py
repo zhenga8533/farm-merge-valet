@@ -9,9 +9,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from farm_merge_valet.core.items import ItemRef, item_tier_policy_key
+from farm_merge_valet.core.marketplace import MarketplaceOffer
 
-CATALOG_SCHEMA_VERSION = 7
-SUPPORTED_CATALOG_SCHEMA_VERSIONS = frozenset({6, CATALOG_SCHEMA_VERSION})
+CATALOG_SCHEMA_VERSION = 8
+SUPPORTED_CATALOG_SCHEMA_VERSIONS = frozenset({6, 7, CATALOG_SCHEMA_VERSION})
 
 
 class TileInteractionMode(StrEnum):
@@ -118,6 +119,7 @@ class ItemCatalog:
     items: dict[str, CatalogItem]
     variants: dict[str, tuple[CatalogVariant, ...]] = field(default_factory=dict)
     source_fingerprint: str | None = None
+    marketplace_offers: tuple[MarketplaceOffer, ...] = ()
 
     @property
     def automation_items(self) -> dict[str, ItemRef]:
@@ -233,6 +235,7 @@ class ItemCatalog:
                 ]
                 for policy_key, variants in sorted(self.variants.items())
             },
+            "marketplace_offers": [offer.to_json() for offer in self.marketplace_offers],
         }
 
 
@@ -265,10 +268,19 @@ def load_item_catalog(path: Path) -> ItemCatalog:
             _parse_catalog_variant(policy_key, value, path) for value in values
         )
     fingerprint = raw.get("source_fingerprint")
+    raw_offers = raw.get("marketplace_offers", [])
+    if not isinstance(raw_offers, list):
+        raise ValueError(f"Invalid marketplace offers in {path}")
+    marketplace_offers = tuple(MarketplaceOffer.from_json(value) for value in raw_offers)
+    if len({offer.policy_key for offer in marketplace_offers}) != len(marketplace_offers):
+        raise ValueError(f"Duplicate marketplace offer policy key in {path}")
     return ItemCatalog(
-        items,
-        variants,
-        fingerprint if isinstance(fingerprint, str) and fingerprint else None,
+        items=items,
+        variants=variants,
+        source_fingerprint=(
+            fingerprint if isinstance(fingerprint, str) and fingerprint else None
+        ),
+        marketplace_offers=marketplace_offers,
     )
 
 

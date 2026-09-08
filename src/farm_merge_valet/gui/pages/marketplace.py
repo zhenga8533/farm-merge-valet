@@ -8,12 +8,11 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QHeaderView, QTreeWidgetItem
 
-from farm_merge_valet.catalog.marketplace import MARKETPLACE_ICON_ASSETS, marketplace_catalog
 from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.core.marketplace import MarketplaceOffer
+from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
-from farm_merge_valet.gui.components.input_controls import SettingsToggleRow
 from farm_merge_valet.gui.components.metrics import (
     POLICY_ICON_SIZE,
     POLICY_MEDIA_BADGE_COLUMN_WIDTH,
@@ -43,6 +42,7 @@ _SORT_COLUMNS = {"offer": 0, "cost": 1, "enabled": 2}
 class MarketplacePage(AppPage):
     config_edited = Signal(object)
     reset_requested = Signal()
+    catalog_setup_requested = Signal()
 
     def __init__(
         self,
@@ -66,16 +66,18 @@ class MarketplacePage(AppPage):
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
-        master_control = SettingsToggleRow(
-            "Enable marketplace automation",
-            checked=config.marketplace_automation_enabled,
-            tooltip=(
-                "Pause all marketplace purchases without changing individual offer selections."
-            ),
+        self.catalog_onboarding = CatalogOnboarding()
+        self.catalog_onboarding.description_label.setText(
+            "Marketplace offers are discovered from your running game. Open the managed "
+            "game and synchronize to configure the offers currently exposed by it."
         )
-        self.master_toggle = master_control.toggle
-        self.master_toggle.toggled.connect(self._set_master_enabled)
-        self.page_layout.addWidget(master_control)
+        self.catalog_onboarding.status_label.setText(
+            "No game-derived marketplace offers have been synchronized yet."
+        )
+        self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
+        self.page_layout.addWidget(
+            self.catalog_onboarding, 1, Qt.AlignmentFlag.AlignCenter
+        )
         scaffold = create_policy_tree(
             header_labels=("Offer", "Cost", ""),
             bulk_labels={2: "Auto-purchase"},
@@ -106,9 +108,6 @@ class MarketplacePage(AppPage):
             or config.marketplace_sort_descending != self._config.marketplace_sort_descending
         )
         self._config = config
-        self.master_toggle.blockSignals(True)
-        self.master_toggle.setChecked(config.marketplace_automation_enabled)
-        self.master_toggle.blockSignals(False)
         self._icons.set_catalog_dir(config.catalog_dir)
         if sort_changed:
             self._apply_sort_preference()
@@ -126,8 +125,14 @@ class MarketplacePage(AppPage):
         self.populate()
 
     def reload_catalog_if_missing(self) -> None:
-        if self._catalog is None:
+        if self._catalog is None or not self._catalog.marketplace_offers:
             self.populate()
+
+    def set_catalog_setup_busy(self, busy: bool) -> None:
+        self.catalog_onboarding.set_busy(busy)
+
+    def set_catalog_setup_status(self, message: str, *, error: bool = False) -> None:
+        self.catalog_onboarding.set_status(message, error=error)
 
     def populate(self) -> None:
         expanded = expanded_policy_keys(self.tree)
@@ -140,7 +145,15 @@ class MarketplacePage(AppPage):
         self._group_items = {}
         self._catalog = load_gui_catalog(self._config)
         grouped: dict[str, list[MarketplaceOffer]] = defaultdict(list)
-        for offer in marketplace_catalog():
+        if self._catalog is None or not self._catalog.marketplace_offers:
+            self.catalog_onboarding.setVisible(True)
+            self.toolbar.setVisible(False)
+            self.tree.setVisible(False)
+            return
+        self.catalog_onboarding.setVisible(False)
+        self.toolbar.setVisible(True)
+        self.tree.setVisible(True)
+        for offer in self._catalog.marketplace_offers:
             grouped[offer.group].append(offer)
         for group, offers in grouped.items():
             parent = PolicyTreeItem((group, "", ""))
@@ -208,11 +221,10 @@ class MarketplacePage(AppPage):
         quantity = f" \u00d7{offer.reward_amount}" if offer.reward_amount > 1 else ""
         item = PolicyTreeItem((f"{offer.display_name}{quantity}", "", ""))
         item.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
-        marketplace_icon = MARKETPLACE_ICON_ASSETS.get(offer.offer_id)
-        if marketplace_icon is not None:
-            item.setIcon(0, self._icons.icon_for_path(marketplace_icon[1]))
-        else:
-            item.setIcon(0, self._icons.icon_for(self._catalog_item(offer.reward_key)))
+        catalog_item = self._catalog_item(offer.reward_key)
+        item.setIcon(0, self._icons.icon_for(catalog_item))
+        if catalog_item is not None:
+            item.setText(0, f"{catalog_item.display_name}{quantity}")
         item.setData(0, Qt.ItemDataRole.UserRole, offer.policy_key)
         item.setToolTip(0, offer.policy_key)
         parent.addChild(item)
@@ -239,7 +251,12 @@ class MarketplacePage(AppPage):
         exact = self._catalog.items.get(reward_key)
         if exact is not None:
             return exact
-        candidates = [item for item in self._catalog.items.values() if item.family_id == reward_key]
+        family_ids = {reward_key}
+        if reward_key.endswith("s"):
+            family_ids.add(reward_key[:-1])
+        candidates = [
+            item for item in self._catalog.items.values() if item.family_id in family_ids
+        ]
         return min(
             {item.game_id: item for item in candidates}.values(),
             key=lambda item: (item.tier is None, item.tier or 0, item.game_id),
@@ -260,9 +277,6 @@ class MarketplacePage(AppPage):
             values[key] = enabled
         self._emit(marketplace_policy_overrides=values)
         self._sync_controls()
-
-    def _set_master_enabled(self, enabled: bool) -> None:
-        self._emit(marketplace_automation_enabled=enabled)
 
     def _filter(self, text: str) -> None:
         filter_policy_tree(self.tree, text)

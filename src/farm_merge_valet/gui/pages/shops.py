@@ -36,7 +36,6 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.incremental_work import IncrementalWorkRunner
-from farm_merge_valet.gui.components.input_controls import SettingsToggleRow
 from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_ROW_HEIGHT,
@@ -172,16 +171,6 @@ class ShopsPage(AppPage):
         self.reserves_button = self.configuration_header.add_action("Ingredient reserves…")
         self.reserves_button.clicked.connect(self._edit_ingredient_reserves)
         self.page_layout.addWidget(self.configuration_header)
-        master_control = SettingsToggleRow(
-            "Enable shop automation",
-            checked=config.shop_automation_enabled,
-            tooltip=(
-                "Pause all shop starts and claims without changing shop or recipe selections."
-            ),
-        )
-        self.master_toggle = master_control.toggle
-        self.master_toggle.toggled.connect(self._set_master_enabled)
-        self.page_layout.addWidget(master_control)
         self.catalog_onboarding = CatalogOnboarding()
         self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
         self.page_layout.addWidget(
@@ -248,9 +237,6 @@ class ShopsPage(AppPage):
             or config.shops_sort_descending != self._config.shops_sort_descending
         )
         self._config = config
-        self.master_toggle.blockSignals(True)
-        self.master_toggle.setChecked(config.shop_automation_enabled)
-        self.master_toggle.blockSignals(False)
         self._icons.set_catalog_dir(config.catalog_dir)
         if sort_changed:
             self._apply_sort_preference()
@@ -551,9 +537,6 @@ class ShopsPage(AppPage):
             values[key] = enabled
         self._emit(**{field: values})
         self._sync_bulk_header()
-
-    def _set_master_enabled(self, enabled: bool) -> None:
-        self._emit(shop_automation_enabled=enabled)
 
     def _edit_ingredient_reserves(self) -> None:
         catalog = load_gui_catalog(self._config)

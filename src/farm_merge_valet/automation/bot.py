@@ -47,7 +47,6 @@ from farm_merge_valet.automation.workflows import (
     ShopWorkflow,
     StorageBubbleWorkflow,
 )
-from farm_merge_valet.catalog.marketplace import marketplace_catalog
 from farm_merge_valet.catalog.provider import CatalogProvider
 from farm_merge_valet.catalog.store import CatalogUnavailableError
 from farm_merge_valet.config import AppConfig
@@ -64,7 +63,7 @@ from farm_merge_valet.core.items import (
     ProducerState,
 )
 from farm_merge_valet.core.land_expansion import LandExpansionCandidate
-from farm_merge_valet.core.marketplace import MarketplaceLiveOffer
+from farm_merge_valet.core.marketplace import MarketplaceLiveOffer, MarketplaceOffer
 from farm_merge_valet.core.merge_planner import (
     MergeAction,
     MergeActionKind,
@@ -89,12 +88,6 @@ logger = logging.getLogger(__name__)
 _ACTION_FAILURE_LIMIT = 3
 _RUNTIME_STARTUP_GRACE_SECONDS = 30.0
 
-
-def _marketplace_policy_enabled(config: AppConfig) -> bool:
-    return config.marketplace_automation_enabled and any(
-        config.marketplace_policy_enabled(offer.policy_key)
-        for offer in marketplace_catalog()
-    )
 
 class Bot:
     def __init__(
@@ -132,6 +125,7 @@ class Bot:
         self._storage_bubbles: tuple[StorageBubbleState, ...] | None = None
         self._shop_orders: tuple[ShopOrder, ...] | None = None
         self._marketplace_offers: tuple[MarketplaceLiveOffer, ...] | None = None
+        self._marketplace_catalog: tuple[MarketplaceOffer, ...] = ()
         self._land_expansions: tuple[LandExpansionCandidate, ...] | None = None
         self._building_repairs: tuple[BuildingRepairState, ...] | None = None
         self._obstacle_focus: tuple[GridCoord, int | None] | None = None
@@ -346,6 +340,7 @@ class Bot:
             self._upgrade_interaction_ids = catalog.upgrade_interaction_ids
             self._clearable_ids = catalog.clearable_ids
             self._shovelable_ids = catalog.shovelable_ids
+            self._marketplace_catalog = catalog.marketplace_offers
         except (CatalogUnavailableError, OSError, ValueError) as exc:
             log_event(
                 logger,
@@ -462,7 +457,7 @@ class Bot:
                 self._shop_policy().may_enable_orders or self._shop_workflow.pending is not None
             ),
             include_marketplace=(
-                _marketplace_policy_enabled(self.config)
+                self.config.marketplace_automation_enabled
                 or self._marketplace_workflow.pending is not None
             ),
             include_farm_visit=(
@@ -1343,7 +1338,14 @@ class Bot:
             self._set_phase(Phase.FARM_VISITS)
             farm_visit_workflow.step(self, health, farm_visit_state)
             return
-        marketplace_enabled = _marketplace_policy_enabled(self.config)
+        marketplace_policy_keys = {offer.policy_key for offer in self._marketplace_catalog}
+        marketplace_policy_keys.update(
+            offer.policy_key for offer in self._marketplace_offers or ()
+        )
+        marketplace_enabled = self.config.marketplace_automation_enabled and any(
+            self.config.marketplace_policy_enabled(policy_key)
+            for policy_key in marketplace_policy_keys
+        )
         marketplace_workflow = self._marketplace_workflow
         marketplace_offers = self._marketplace_offers
         if not marketplace_workflow.verify_pending(

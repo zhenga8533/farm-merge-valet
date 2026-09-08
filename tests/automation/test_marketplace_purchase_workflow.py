@@ -4,9 +4,9 @@ from types import SimpleNamespace
 from farm_merge_valet.automation.action_control import ActionCoordinator
 from farm_merge_valet.automation.runtime import ActionResult, ActionStatus, RuntimeHealth
 from farm_merge_valet.automation.workflows.marketplace import MarketplaceWorkflow
-from farm_merge_valet.catalog.marketplace import marketplace_catalog
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.core.marketplace import MarketplaceLiveOffer
+from tests.marketplace_fixtures import marketplace_catalog
 
 
 def _live(index: int = 0) -> MarketplaceLiveOffer:
@@ -51,6 +51,7 @@ def _bot(now: list[float], live: MarketplaceLiveOffer):
         _shop_workflow=SimpleNamespace(pending=None),
         _last_wait_reason=None,
         _actions=lambda: action_control,
+        _marketplace_catalog=marketplace_catalog(),
         _record_action_no_progress=lambda *_args, **_kwargs: action_control.record_no_progress(),
     )
 
@@ -80,8 +81,14 @@ def test_workflow_submits_one_unit_then_requires_stock_and_balance_verification(
 
 def test_ambiguous_timeout_blocks_only_the_affected_offer() -> None:
     now = [10.0]
-    first = _live(-4)
-    second = _live(-3)
+    first = _live(1)
+    second = replace(
+        first,
+        policy_key="free:coins_25_no_ads",
+        offer_id="coins_25_no_ads",
+        reward_key="coins",
+        reward_amount=25,
+    )
     bot = _bot(now, first)
     bot.config = AppConfig()
     workflow = MarketplaceWorkflow()
@@ -98,7 +105,7 @@ def test_ambiguous_timeout_blocks_only_the_affected_offer() -> None:
 
 def test_free_claims_are_enabled_by_default_and_can_be_disabled() -> None:
     now = [10.0]
-    live = _live(-4)
+    live = _live(1)
     bot = _bot(now, live)
     workflow = MarketplaceWorkflow()
     bot.config = AppConfig()
@@ -112,7 +119,7 @@ def test_free_claims_are_enabled_by_default_and_can_be_disabled() -> None:
 
 def test_marketplace_master_switch_preserves_offer_policy_without_purchasing() -> None:
     now = [10.0]
-    live = _live(-4)
+    live = _live(1)
     bot = _bot(now, live)
     bot.config = AppConfig(marketplace_automation_enabled=False)
 

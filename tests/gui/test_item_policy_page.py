@@ -79,7 +79,8 @@ def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
     controller = ApplicationController(store)
     window = MainWindow(controller)
 
-    assert window.items_page.master_toggle.isChecked()
+    item_automation_toggle = window.settings_page.controls["item_automation_enabled"]
+    assert item_automation_toggle.isChecked()
     assert window.items_page.table.topLevelItemCount() == 3
     assert window.items_page.table.columnCount() == 7
     assert "Use default" not in {
@@ -101,8 +102,8 @@ def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
     assert milk_interact is not None and milk_interact.isEnabled() and milk_interact.isChecked()
     assert coin_interact is not None and coin_interact.isEnabled() and not coin_interact.isChecked()
     selected_policies = dict(window.items_page._config.item_policy_overrides)
-    window.items_page.master_toggle.click()
-    assert not window.items_page._config.item_automation_enabled
+    item_automation_toggle.click()
+    assert not window._draft.item_automation_enabled
     assert window.items_page._config.item_policy_overrides == selected_policies
     assert window.items_page.table.itemWidget(rows["Wheat"], 5).findChild(QLabel).text() == "—"
     window.items_page.table.setCurrentItem(rows["Wheat"])

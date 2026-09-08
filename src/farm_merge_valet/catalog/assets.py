@@ -11,7 +11,6 @@ import cv2
 import httpx
 import numpy as np
 
-from farm_merge_valet.catalog.marketplace import MARKETPLACE_ICON_ASSETS
 from farm_merge_valet.catalog.models import (
     CatalogItem,
     CatalogVariant,
@@ -159,7 +158,12 @@ def attach_catalog_variants(atlases: Atlases, catalog: ItemCatalog) -> ItemCatal
             variants[policy_key] = tuple(
                 sorted(discovered.values(), key=lambda variant: variant.asset_alias)
             )
-    return ItemCatalog(catalog.items, variants, catalog.source_fingerprint)
+    return ItemCatalog(
+        items=catalog.items,
+        variants=variants,
+        source_fingerprint=catalog.source_fingerprint,
+        marketplace_offers=catalog.marketplace_offers,
+    )
 
 
 def _attach_numbered_variants(
@@ -268,10 +272,6 @@ def compile_catalog_assets(atlases: Atlases, catalog: ItemCatalog, output_dir: P
         for variant in variants:
             variant_path = output_dir.joinpath(*PurePosixPath(variant.asset_path).parts)
             desired[variant_path] = variant.asset_alias
-    for alias, relative_path in MARKETPLACE_ICON_ASSETS.values():
-        if alias in all_frames:
-            desired[output_dir.joinpath(*PurePosixPath(relative_path).parts)] = alias
-
     output_dir.mkdir(parents=True, exist_ok=True)
     written = 0
     for output_path, alias in sorted(desired.items(), key=lambda value: str(value[0])):

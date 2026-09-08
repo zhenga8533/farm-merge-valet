@@ -187,7 +187,8 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     assert section_titles == {
         "Automation behavior",
         "Resource safeguards",
-        "Optional workflows",
+        "Building repairs",
+        "Workflow automation",
         "Timing",
         "Keyboard shortcuts",
         "Startup and shutdown",
@@ -201,6 +202,13 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     assert "Automatically pop stored items" in labels
     assert "Automatically claim supply crates" in labels
     assert "Allow obstacle energy spending" in labels
+    assert "Preserve resources for building repairs" in labels
+    assert "Prioritize shops over other repairs" in labels
+    assert "Prioritize cheaper repairs" in labels
+    assert "Prioritize obstacles with needed repair materials" in labels
+    assert "Automate item actions" in labels
+    assert "Automate shops" in labels
+    assert "Automate marketplace purchases" in labels
     assert "Expand farm land automatically" in labels
     assert "Maximum coins per expansion" in labels
     assert "Maximum crystals per expansion" in labels
@@ -221,12 +229,31 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         section.toggle.click()
         assert section.expanded
         assert not section.content.isHidden()
-    assert section_groups["Optional workflows"].isAncestorOf(
+    assert section_groups["Workflow automation"].isAncestorOf(
         window.settings_page.controls["land_expansion_max_coin_cost"]
     )
-    assert section_groups["Optional workflows"].isAncestorOf(
+    assert section_groups["Workflow automation"].isAncestorOf(
         window.settings_page.controls["land_expansion_max_gem_cost"]
     )
+    for field in (
+        "item_automation_enabled",
+        "shop_automation_enabled",
+        "marketplace_automation_enabled",
+        "farm_visit_automation_enabled",
+        "land_expansion_automation_enabled",
+    ):
+        assert section_groups["Workflow automation"].isAncestorOf(
+            window.settings_page.controls[field]
+        )
+    for field in (
+        "preserve_building_repair_resources",
+        "prioritize_repair_shops",
+        "prioritize_cheaper_repairs",
+        "prioritize_obstacle_repair_resources",
+    ):
+        assert section_groups["Building repairs"].isAncestorOf(
+            window.settings_page.controls[field]
+        )
     assert section_groups["Notifications"].isAncestorOf(
         window.settings_page.notifications_advanced_section
     )
@@ -255,6 +282,10 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
             theme="dark",
             browser="edge",
             cdp_port=9333,
+            item_automation_enabled=False,
+            shop_automation_enabled=False,
+            marketplace_automation_enabled=False,
+            preserve_building_repair_resources=False,
             item_policy_defaults={"interact": True},
             item_policy_overrides={"ingredients/milk": {"interact": False}},
             shop_default_enabled=False,
@@ -272,6 +303,7 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
     assert after_items.item_policy_defaults == AppConfig().item_policy_defaults
     assert after_items.item_category_defaults == AppConfig().item_category_defaults
     assert after_items.item_policy_overrides == {}
+    assert not after_items.item_automation_enabled
     assert not after_items.shop_default_enabled
     assert after_items.theme == "dark"
     assert window.items_page.saved_label.text() == "Defaults restored"
@@ -284,6 +316,7 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
     assert after_shops.shop_overrides == {}
     assert after_shops.shop_ingredient_reserve_default == 0
     assert after_shops.shop_ingredient_reserves == {}
+    assert not after_shops.shop_automation_enabled
     assert after_shops.theme == "dark"
     assert window.shops_page.saved_label.text() == "Defaults restored"
     assert window.shops_page.saved_label.property("status") == "success"
@@ -291,6 +324,10 @@ def test_scoped_resets_preserve_other_policy_sections(tmp_path, monkeypatch) -> 
     window.settings_page.configuration_header.reset_button.click()
     after_settings = ConfigStore(store.path).load()
     assert after_settings.theme == AppConfig().theme
+    assert after_settings.item_automation_enabled
+    assert after_settings.shop_automation_enabled
+    assert after_settings.marketplace_automation_enabled
+    assert after_settings.preserve_building_repair_resources
     assert after_settings.item_category_defaults == AppConfig().item_category_defaults
     assert after_settings.shop_default_enabled
     assert after_settings.browser == "edge"
@@ -353,7 +390,8 @@ def test_shop_bulk_toggle_updates_all_shops_and_recipes(tmp_path) -> None:
     store = ConfigStore(tmp_path / "config.json")
     store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
     window = MainWindow(ApplicationController(store))
-    assert window.shops_page.master_toggle.isChecked()
+    shop_automation_toggle = window.settings_page.controls["shop_automation_enabled"]
+    assert shop_automation_toggle.isChecked()
 
     bakery = window.shops_page.tree.topLevelItem(0)
     assert bakery is not None and bakery.childCount() == 0
@@ -402,8 +440,8 @@ def test_shop_bulk_toggle_updates_all_shops_and_recipes(tmp_path) -> None:
     assert window.shops_page.tree.isSortingEnabled()
     selected_shops = dict(window.shops_page._config.shop_overrides)
     selected_recipes = dict(window.shops_page._config.recipe_overrides)
-    window.shops_page.master_toggle.click()
-    assert not window.shops_page._config.shop_automation_enabled
+    shop_automation_toggle.click()
+    assert not window._draft.shop_automation_enabled
     assert window.shops_page._config.shop_overrides == selected_shops
     assert window.shops_page._config.recipe_overrides == selected_recipes
     bakery = window.shops_page.tree.topLevelItem(0)
@@ -518,9 +556,14 @@ def test_settings_controls_match_model_range_and_parent_feature_state(tmp_path) 
     assert not page.controls["land_expansion_max_coin_cost"].isEnabled()
     assert not page.controls["land_expansion_max_gem_cost"].isEnabled()
     assert not page.controls["webhook_summary_interval"].isEnabled()
+    assert page.controls["prioritize_repair_shops"].isEnabled()
 
     page.land_expansion_toggle.click()
     assert page.controls["land_expansion_max_coin_cost"].isEnabled()
+    page.building_repairs_toggle.click()
+    assert not page.controls["prioritize_repair_shops"].isEnabled()
+    assert not page.controls["prioritize_cheaper_repairs"].isEnabled()
+    assert not page.controls["prioritize_obstacle_repair_resources"].isEnabled()
     webhook = page.controls["discord_webhook_url"]
     webhook.setText("https://example.test/webhook")
     assert page.controls["webhook_summary_interval"].isEnabled()

@@ -102,7 +102,43 @@ class SettingsPage(ConfigFormPage):
             self._add_int(safeguards_form, label, field, 0, 1_000_000_000)
         sections.addWidget(safeguards)
 
-        workflows, workflows_form = settings_section("Optional workflows")
+        repairs, repairs_form = settings_section("Building repairs")
+        self.building_repairs_toggle = self._add_toggle(
+            repairs_form,
+            "Preserve resources for building repairs",
+            "preserve_building_repair_resources",
+        )
+        repair_priority_fields = (
+            ("Prioritize shops over other repairs", "prioritize_repair_shops"),
+            ("Prioritize cheaper repairs", "prioritize_cheaper_repairs"),
+            (
+                "Prioritize obstacles with needed repair materials",
+                "prioritize_obstacle_repair_resources",
+            ),
+        )
+        for label, field in repair_priority_fields:
+            self._add_toggle(repairs_form, label, field)
+        self._building_repair_controls = tuple(
+            self.controls[field] for _label, field in repair_priority_fields
+        )
+        sections.addWidget(repairs)
+
+        workflows, workflows_form = settings_section("Workflow automation")
+        self._add_toggle(
+            workflows_form,
+            "Automate item actions",
+            "item_automation_enabled",
+        )
+        self._add_toggle(
+            workflows_form,
+            "Automate shops",
+            "shop_automation_enabled",
+        )
+        self._add_toggle(
+            workflows_form,
+            "Automate marketplace purchases",
+            "marketplace_automation_enabled",
+        )
         self._add_toggle(
             workflows_form,
             "Visit other farms automatically",
@@ -257,6 +293,7 @@ class SettingsPage(ConfigFormPage):
         sections.addWidget(application)
         sections.addStretch()
         self.land_expansion_toggle.toggled.connect(self._sync_dependent_controls)
+        self.building_repairs_toggle.toggled.connect(self._sync_dependent_controls)
         webhook.textChanged.connect(self._sync_dependent_controls)
         self._notification_controls = (
             profile,
@@ -270,6 +307,9 @@ class SettingsPage(ConfigFormPage):
         land_enabled = self.land_expansion_toggle.isChecked()
         self.controls["land_expansion_max_coin_cost"].setEnabled(land_enabled)
         self.controls["land_expansion_max_gem_cost"].setEnabled(land_enabled)
+        repairs_enabled = self.building_repairs_toggle.isChecked()
+        for control in self._building_repair_controls:
+            control.setEnabled(repairs_enabled)
         webhook = self.controls["discord_webhook_url"]
         notifications_enabled = isinstance(webhook, QLineEdit) and bool(webhook.text().strip())
         for control in getattr(self, "_notification_controls", ()):

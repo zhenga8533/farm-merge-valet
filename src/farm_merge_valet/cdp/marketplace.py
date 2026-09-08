@@ -5,7 +5,14 @@ from __future__ import annotations
 import json
 
 from farm_merge_valet.automation.runtime import ActionResult, ActionStatus
-from farm_merge_valet.core.marketplace import MarketplaceAction, MarketplaceLiveOffer
+from farm_merge_valet.cdp.evaluation import evaluate
+from farm_merge_valet.core.marketplace import (
+    MarketplaceAction,
+    MarketplaceLiveOffer,
+    MarketplaceOffer,
+    MarketplaceOfferKind,
+    MarketplacePaymentType,
+)
 
 _READ_MARKETPLACE_EXPRESSION = r"""
 (() => {
@@ -112,6 +119,46 @@ def parse_marketplace_offers(raw: object) -> tuple[MarketplaceLiveOffer, ...] | 
         except (TypeError, ValueError):
             continue
     return tuple(parsed)
+
+
+def read_marketplace_catalog(
+    port: int, page_title: str | None = None
+) -> tuple[MarketplaceOffer, ...] | None:
+    live = parse_marketplace_offers(evaluate(port, _READ_MARKETPLACE_EXPRESSION, page_title))
+    if live is None:
+        return None
+    offers: dict[str, MarketplaceOffer] = {}
+    conflicting_policy_keys: set[str] = set()
+    for entry in live:
+        try:
+            kind = MarketplaceOfferKind.FLASH if entry.slot_id else MarketplaceOfferKind.FREE
+            offer = MarketplaceOffer(
+                kind=kind,
+                offer_id=entry.offer_id,
+                slot_id=entry.slot_id,
+                candidate_key=entry.candidate_key,
+                group=(
+                    entry.slot_id.replace("flash_deal_", "").replace("_", " ").title()
+                    if entry.slot_id else "Free Claims"
+                ),
+                display_name=entry.reward_key.replace("_", " ").title(),
+                reward_key=entry.reward_key,
+                reward_amount=entry.reward_amount,
+                payment_type=MarketplacePaymentType(entry.payment_type),
+                payment_key=entry.payment_key,
+                payment_amount=entry.payment_amount,
+                stock=entry.remaining_stock,
+            )
+        except ValueError:
+            continue
+        existing = offers.get(offer.policy_key)
+        if existing is not None and existing != offer:
+            conflicting_policy_keys.add(offer.policy_key)
+        else:
+            offers[offer.policy_key] = offer
+    return tuple(
+        offers[key] for key in sorted(offers.keys() - conflicting_policy_keys)
+    )
 
 
 def marketplace_purchase_expression(action: MarketplaceAction, scene_id: int | None) -> str:

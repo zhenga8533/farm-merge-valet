@@ -237,14 +237,16 @@ per-purchase maximum. Both maxima default to zero, so enabling the master switch
 alone cannot spend currency. The exact area, requirements, affordability, and
 runtime scene are revalidated immediately before the native unlock call.
 
-The Marketplace page is a persistent catalog of all 50 known flash candidates
-and four genuine free claims. Flash purchases are disabled by default; the four
-free claims are enabled by default, and every offer can be overridden individually.
-Selections use stable slot-plus-candidate identities, so a rotating flash
-slot cannot cause a different item to be bought. Enabled finite stock is drained
-one verified unit per bot iteration; the bot never buys ordinary marketplace
-offers or refreshes flash deals. A master switch pauses all marketplace purchases
-without discarding those individual selections.
+The Marketplace page uses the same synchronized, game-derived catalog as the
+item and shop pages. It contains the flash candidates and literal free claims
+exposed by the game during the most recent successful synchronization; it has no
+built-in legacy offer list. Flash purchases are disabled by default, free claims
+are enabled by default, and every discovered offer can be overridden individually.
+Selections use stable slot-plus-candidate identities, so a rotating flash slot
+cannot cause a different item to be bought. Enabled finite stock is drained one
+verified unit per bot iteration; the bot never buys ordinary marketplace offers
+or refreshes flash deals. A master switch pauses all marketplace purchases without
+discarding those individual selections.
 
 Before each marketplace submission, the runtime rechecks the exact live reward,
 payment type, currency, price, stock, and current flash candidate. A timeout or
@@ -262,8 +264,8 @@ leaving the bot apparently silent. If any required background flag is missing,
 startup pauses without taking actions.
 
 New free marketplace offers are accepted directly from validated live metadata,
-even before the static catalog knows their identity. Unknown paid offers remain
-disabled until their exact candidate and price are known.
+even before the synchronized catalog knows their identity. Unknown paid offers
+remain disabled until synchronization records their exact candidate and price.
 
 The initial policy is automation-forward but requires the user to start the bot:
 shop orders and obstacle stages are enabled, with resource reserves initially at

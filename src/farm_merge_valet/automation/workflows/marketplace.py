@@ -12,7 +12,6 @@ from farm_merge_valet.automation.runtime import (
     RuntimeConnectionError,
     RuntimeHealth,
 )
-from farm_merge_valet.catalog.marketplace import marketplace_catalog
 from farm_merge_valet.core.marketplace import (
     MarketplaceAction,
     MarketplaceLiveOffer,
@@ -126,7 +125,7 @@ class MarketplaceWorkflow:
         if not bot.config.marketplace_automation_enabled:
             return False
         now = bot._now()
-        catalog = marketplace_catalog()
+        catalog = bot._marketplace_catalog
         policy_keys = {offer.policy_key for offer in catalog}
         policy_keys.update(offer.policy_key for offer in offers)
         enabled = {

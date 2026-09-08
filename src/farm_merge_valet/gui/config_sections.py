@@ -20,14 +20,12 @@ class ConfigSection(StrEnum):
 SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
     ConfigSection.ITEMS: (
         "prefer_merge_five",
-        "item_automation_enabled",
         "item_policy_defaults",
         "item_category_defaults",
         "item_default_overrides",
         "item_policy_overrides",
     ),
     ConfigSection.SHOPS: (
-        "shop_automation_enabled",
         "shop_default_enabled",
         "recipe_default_enabled",
         "shop_overrides",
@@ -36,15 +34,10 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "shop_ingredient_reserves",
     ),
     ConfigSection.BUILDINGS: (
-        "preserve_building_repair_resources",
         "building_repair_default_enabled",
         "building_repair_overrides",
-        "prioritize_repair_shops",
-        "prioritize_cheaper_repairs",
-        "prioritize_obstacle_repair_resources",
     ),
     ConfigSection.MARKETPLACE: (
-        "marketplace_automation_enabled",
         "marketplace_policy_overrides",
     ),
     ConfigSection.BROWSER: (
@@ -66,10 +59,17 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "auto_pop_storage_bubbles",
         "auto_claim_supply_crates",
         "allow_obstacle_stage_starts",
+        "preserve_building_repair_resources",
+        "prioritize_repair_shops",
+        "prioritize_cheaper_repairs",
+        "prioritize_obstacle_repair_resources",
         "minimum_energy_reserve",
         "minimum_ticket_reserve",
         "minimum_coin_reserve",
         "minimum_gem_reserve",
+        "item_automation_enabled",
+        "shop_automation_enabled",
+        "marketplace_automation_enabled",
         "farm_visit_automation_enabled",
         "land_expansion_automation_enabled",
         "land_expansion_max_coin_cost",

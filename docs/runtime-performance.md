@@ -5,8 +5,8 @@ snapshot contains runtime health, heartbeat state, the board, and only the
 optional resources needed by enabled or pending features. Energy and workers
 are omitted when obstacle automation cannot use them, storage bubbles are
 omitted when their automation is disabled, shop orders are omitted when shop
-policy is disabled, and marketplace offers are omitted unless a marketplace
-policy is enabled or a purchase is pending. Locked-land cloud cells are also omitted from the
+policy is disabled, and marketplace offers are omitted unless marketplace
+automation is enabled or a purchase is pending. Locked-land cloud cells are also omitted from the
 wire payload because unknown coordinates and cloud coordinates are both
 non-actionable to the planner.
 
