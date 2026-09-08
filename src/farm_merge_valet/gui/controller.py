@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
@@ -401,6 +403,35 @@ class ApplicationController(QObject):
         self.game_sync_status_changed.emit("Synchronizing game data and assets…")
         service = self._catalog_sync_service(self.store.current)
         self._start_utility_operation("game-sync:manual", service.synchronize)
+
+    def clear_game_cache(self) -> None:
+        if self.status.state.active:
+            self.error.emit("Stop the bot before clearing cached game data and assets.")
+            return
+        config = self.store.current
+        self.game_sync_status_changed.emit("Clearing cached game data and assets...")
+
+        def work() -> str:
+            targets = tuple(path.resolve() for path in (config.catalog_dir, config.atlas_cache_dir))
+            self._validate_cache_targets(targets)
+            for target in targets:
+                if target.exists():
+                    shutil.rmtree(target)
+            return "Local game data and asset cache cleared"
+
+        self._start_utility_operation("game-sync:clear-cache", work)
+
+    @staticmethod
+    def _validate_cache_targets(targets: tuple[Path, ...]) -> None:
+        home = Path.home().resolve()
+        for target in targets:
+            if target == home or target == Path(target.anchor) or len(target.parts) < 3:
+                raise ValueError(f"Refusing to clear unsafe cache directory: {target}")
+            if target.exists() and not target.is_dir():
+                raise ValueError(f"Cache path is not a directory: {target}")
+        first, second = targets
+        if first == second or first in second.parents or second in first.parents:
+            raise ValueError("Catalog and atlas cache directories must not overlap.")
 
     def setup_catalog(self) -> None:
         if self.status.state.active:

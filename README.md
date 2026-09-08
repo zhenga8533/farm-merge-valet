@@ -304,6 +304,10 @@ appearance; scoped reset controls preserve unrelated policy sections.
 The Browser page also controls default-enabled automatic recovery for a frozen
 game. Automatic page opening and reload are restricted to the verified managed
 browser profile; an unowned browser is never modified.
+Its Game data and assets section can permanently clear the compiled catalog,
+extracted icons, and downloaded atlas cache after confirmation. This preserves
+configuration, the managed-browser profile, logs, and other runtime state; run
+Synchronize game data and assets afterward to rebuild the cache.
 Manual game-data synchronization refreshes atlas files even when their CDN paths
 are unchanged. The atlas cache also records complete versioned source URLs so
 normal CLI synchronization refreshes entries when the game version changes. A

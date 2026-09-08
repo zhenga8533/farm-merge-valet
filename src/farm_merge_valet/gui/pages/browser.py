@@ -43,6 +43,7 @@ class BrowserPage(ConfigFormPage):
     stop_requested = Signal()
     restart_requested = Signal()
     game_sync_requested = Signal()
+    cache_clear_requested = Signal()
     reset_requested = Signal()
 
     def __init__(self, config: AppConfig) -> None:
@@ -115,8 +116,13 @@ class BrowserPage(ConfigFormPage):
         self._add_form_row(assets_form, "Status", self.game_sync_status_label)
         self.game_sync_button = QPushButton("Synchronize game data and assets")
         self.game_sync_button.clicked.connect(self.game_sync_requested)
+        self.cache_clear_button = secondary_button("Clear local cache")
+        self.cache_clear_button.setAccessibleName("Clear cached game data and assets")
+        set_styled_property(self.cache_clear_button, "danger", True)
+        self.cache_clear_button.clicked.connect(self.cache_clear_requested)
         game_sync_actions = QHBoxLayout()
         game_sync_actions.addWidget(self.game_sync_button)
+        game_sync_actions.addWidget(self.cache_clear_button)
         game_sync_actions.addStretch()
         self._add_form_row(assets_form, "Actions", game_sync_actions)
         assets_advanced, form = disclosure_section("Advanced storage")
@@ -173,6 +179,7 @@ class BrowserPage(ConfigFormPage):
                 self.browser_action_button,
                 self.restart_button,
                 self.game_sync_button,
+                self.cache_clear_button,
             }:
                 focused.clearFocus()
         self.browser_action_button.setText(
@@ -188,6 +195,7 @@ class BrowserPage(ConfigFormPage):
             not operation_busy and not self._runtime_active and running and managed and compatible
         )
         self.game_sync_button.setEnabled(not operation_busy and not self._runtime_active)
+        self.cache_clear_button.setEnabled(not operation_busy and not self._runtime_active)
 
     def _request(self, field: str, value: object) -> None:
         self.config_edited.emit(ConfigEdit({field: value}, field, "browser"))

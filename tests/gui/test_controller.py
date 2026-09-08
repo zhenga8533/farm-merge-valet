@@ -362,6 +362,39 @@ def test_catalog_setup_launches_game_and_publishes_catalog_before_icons(
     app.processEvents()
 
 
+def test_clear_game_cache_removes_catalog_and_atlases_in_background(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    atlas_dir = tmp_path / "atlases"
+    catalog_dir.mkdir()
+    atlas_dir.mkdir()
+    (catalog_dir / "catalog.json").write_text("{}", encoding="utf-8")
+    (atlas_dir / "game.png").write_bytes(b"atlas")
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, atlas_cache_dir=atlas_dir))
+    controller = ApplicationController(store)
+    busy_states: list[bool] = []
+    statuses: list[str] = []
+    refreshed: list[bool] = []
+    controller.game_sync_operation_changed.connect(busy_states.append)
+    controller.game_sync_status_changed.connect(statuses.append)
+    controller.assets_refreshed.connect(lambda: refreshed.append(True))
+
+    controller.clear_game_cache()
+    deadline = time.monotonic() + 2
+    while not refreshed and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+
+    assert busy_states == [True, False]
+    assert statuses[-1] == "Local game data and asset cache cleared"
+    assert refreshed == [True]
+    assert not catalog_dir.exists()
+    assert not atlas_dir.exists()
+    controller.shutdown()
+    app.processEvents()
+
+
 def test_catalog_setup_keeps_catalog_available_when_icon_sync_fails(tmp_path, monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     store = ConfigStore(tmp_path / "config.json")

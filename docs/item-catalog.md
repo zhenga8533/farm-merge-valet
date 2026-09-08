@@ -89,6 +89,9 @@ discovery/compiler implementation and synthetic test fixtures. The desktop GUI
 resolves icons directly from each catalog entry's `asset_path` for item
 families, shops, and recipes; missing or unreadable images degrade to text-only
 rows.
+The Browser page can clear both generated catalog and atlas directories after
+confirmation without removing application settings, browser-profile data, logs,
+or runtime state.
 
 Categories are derived from runtime capabilities before falling back to an
 explicit `uncategorized` bucket. A small centralized compatibility table covers

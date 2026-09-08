@@ -237,6 +237,7 @@ class MainWindow(QMainWindow):
         self.browser_page.stop_requested.connect(self._confirm_browser_stop)
         self.browser_page.restart_requested.connect(self._confirm_browser_restart)
         self.browser_page.game_sync_requested.connect(self.controller.synchronize_game_data)
+        self.browser_page.cache_clear_requested.connect(self._confirm_cache_clear)
         self.browser_page.reset_requested.connect(self._reset_browser_configuration)
         self.settings_page.config_edited.connect(self._queue_edit)
         self.settings_page.hotkey_recording_changed.connect(self.controller.set_hotkey_recording)
@@ -270,6 +271,17 @@ class MainWindow(QMainWindow):
             == QMessageBox.StandardButton.Yes
         ):
             self.controller.restart_browser()
+
+    def _confirm_cache_clear(self) -> None:
+        catalog_dir = self._draft.catalog_dir.resolve()
+        atlas_dir = self._draft.atlas_cache_dir.resolve()
+        if self._confirm_reset(
+            "Clear local cache?",
+            "Permanently delete the compiled catalog, extracted icons, and downloaded "
+            f"game atlases?\n\nCatalog: {catalog_dir}\nAtlases: {atlas_dir}\n\n"
+            "Synchronize game data and assets afterward to rebuild them.",
+        ):
+            self.controller.clear_game_cache()
 
     def _confirm_reset(self, title: str, message: str) -> bool:
         return (

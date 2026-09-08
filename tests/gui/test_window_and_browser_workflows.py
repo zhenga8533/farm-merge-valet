@@ -111,6 +111,10 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
     assert browser_groups["Game data and assets"].isAncestorOf(
         window.browser_page.assets_advanced_section
     )
+    assert browser_groups["Game data and assets"].isAncestorOf(
+        window.browser_page.cache_clear_button
+    )
+    assert window.browser_page.cache_clear_button.property("danger") is True
 
     window.browser_page._request("cdp_port", 9333)
     window._flush_config()
@@ -149,6 +153,7 @@ def test_browser_actions_follow_managed_browser_and_runtime_state(tmp_path) -> N
     assert not page.browser_action_button.isEnabled()
     assert not page.restart_button.isEnabled()
     assert not page.game_sync_button.isEnabled()
+    assert not page.cache_clear_button.isEnabled()
 
     window.quit_application()
     app.processEvents()
