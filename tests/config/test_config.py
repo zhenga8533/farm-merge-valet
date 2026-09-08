@@ -26,9 +26,7 @@ def test_spending_reserves_default_to_non_disruptive_values() -> None:
 
 
 def test_shop_ingredient_reserves_validate_ids_and_amounts() -> None:
-    assert AppConfig(shop_ingredient_reserves={"wheat": 3}).shop_ingredient_reserves == {
-        "wheat": 3
-    }
+    assert AppConfig(shop_ingredient_reserves={"wheat": 3}).shop_ingredient_reserves == {"wheat": 3}
     with pytest.raises(ValidationError):
         AppConfig(shop_ingredient_reserves={" wheat": 3})
     with pytest.raises(ValidationError):
@@ -47,13 +45,9 @@ def test_marketplace_policies_default_free_claims_enabled_and_validate_semantic_
     config = AppConfig()
     assert config.marketplace_policy_enabled("free:gems_5_no_ads")
     assert not config.marketplace_policy_enabled("flash:flash_deal_ingredient:wheat")
-    enabled = AppConfig(
-        marketplace_policy_overrides={"flash:flash_deal_ingredient:wheat": True}
-    )
+    enabled = AppConfig(marketplace_policy_overrides={"flash:flash_deal_ingredient:wheat": True})
     assert enabled.marketplace_policy_enabled("flash:flash_deal_ingredient:wheat")
-    disabled = AppConfig(
-        marketplace_policy_overrides={"free:gems_5_no_ads": False}
-    )
+    disabled = AppConfig(marketplace_policy_overrides={"free:gems_5_no_ads": False})
     assert not disabled.marketplace_policy_enabled("free:gems_5_no_ads")
     with pytest.raises(ValidationError):
         AppConfig(marketplace_policy_overrides={"flash:slot": True})

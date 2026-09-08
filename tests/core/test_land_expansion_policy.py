@@ -15,7 +15,7 @@ def candidate(*, premium: bool, cost: int, affordable: bool = True) -> LandExpan
         "P1" if premium else "A1",
         premium,
         8,
-        (ExpansionRequirement(currency, cost),),
+        (ExpansionRequirement(currency, cost, cost),),
         affordable,
     )
 
@@ -35,3 +35,25 @@ def test_expansion_planning_preserves_runtime_service_order() -> None:
     policy = LandExpansionPolicy(True, maximum_coin_cost=500, maximum_gem_cost=50)
 
     assert plan_land_expansion((standard, premium), policy) == standard
+
+
+def test_expansion_policy_requires_a_known_balance_and_preserves_the_reserve() -> None:
+    policy = LandExpansionPolicy(
+        True,
+        maximum_coin_cost=500,
+        maximum_gem_cost=0,
+        minimum_coin_reserve=100,
+    )
+    unknown = LandExpansionCandidate(
+        "A1", False, 8, (ExpansionRequirement(ExpansionCurrency.COINS, 500),), True
+    )
+    below_reserve = LandExpansionCandidate(
+        "A1", False, 8, (ExpansionRequirement(ExpansionCurrency.COINS, 500, 599),), True
+    )
+    preserves_reserve = LandExpansionCandidate(
+        "A1", False, 8, (ExpansionRequirement(ExpansionCurrency.COINS, 500, 600),), True
+    )
+
+    assert not policy.permits(unknown)
+    assert not policy.permits(below_reserve)
+    assert policy.permits(preserves_reserve)

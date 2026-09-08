@@ -25,6 +25,7 @@ _CDP_CONNECT_TIMEOUT = 3.0
 _CDP_COMMAND_TIMEOUT = 5.0
 _CDP_POLL_INTERVAL = 0.1
 
+
 class CdpConnectionError(RuntimeConnectionError):
     """Raised when the browser DevTools Protocol endpoint isn't reachable,
     or the game's iframe target can't be found there.

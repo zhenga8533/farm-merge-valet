@@ -166,24 +166,16 @@ class SettingsPage(ConfigFormPage):
         sections.addWidget(workflows)
 
         timing, timing_form = settings_section("Timing")
-        self._add_float(
-            timing_form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1
-        )
-        self._add_float(
-            timing_form, "Loop interval (seconds)", "loop_interval", 0.01, 60, 0.1
-        )
+        self._add_float(timing_form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)
+        self._add_float(timing_form, "Loop interval (seconds)", "loop_interval", 0.01, 60, 0.1)
         self._add_float(
             timing_form, "Item delay minimum (seconds)", "item_action_delay_min", 0, 60, 0.1
         )
         self._add_float(
             timing_form, "Item delay maximum (seconds)", "item_action_delay_max", 0, 60, 0.1
         )
-        self._add_float(
-            timing_form, "Crate delay minimum (seconds)", "crate_delay_min", 0, 5, 0.05
-        )
-        self._add_float(
-            timing_form, "Crate delay maximum (seconds)", "crate_delay_max", 0, 5, 0.05
-        )
+        self._add_float(timing_form, "Crate delay minimum (seconds)", "crate_delay_min", 0, 5, 0.05)
+        self._add_float(timing_form, "Crate delay maximum (seconds)", "crate_delay_max", 0, 5, 0.05)
         sections.addWidget(timing)
 
         controls, form = settings_section("Keyboard shortcuts")
@@ -219,7 +211,9 @@ class SettingsPage(ConfigFormPage):
             lambda value: webhook.setText(
                 value.get_secret_value()
                 if isinstance(value, SecretStr)
-                else str(value) if value is not None else ""
+                else str(value)
+                if value is not None
+                else ""
             ),
         )
         self._add_form_row(notifications_form, "Discord webhook", webhook)
@@ -234,9 +228,7 @@ class SettingsPage(ConfigFormPage):
         profile.currentIndexChanged.connect(
             lambda _index: self._request("webhook_notification_profile", profile.current_value())
         )
-        self._register_control(
-            "webhook_notification_profile", profile, profile.set_current_value
-        )
+        self._register_control("webhook_notification_profile", profile, profile.set_current_value)
         self._add_form_row(form, "Notification detail", profile)
         self._add_toggle(form, "Include activity charts", "webhook_include_charts")
         self._add_float(
@@ -385,6 +377,7 @@ class SettingsPage(ConfigFormPage):
             self._request(field, value / 100)
 
         control.valueChanged.connect(update)
+
         def set_opacity(value: object) -> None:
             percent = round(float(str(value)) * 100)
             control.setValue(percent)

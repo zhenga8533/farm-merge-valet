@@ -121,12 +121,30 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
     catalog = ItemCatalog(
         {
             "bakery": CatalogItem(
-                "bakery", "bakery", "shops/bakery", "shops", "Bakery", None,
-                False, None, None, None, frozenset({"shop"}),
+                "bakery",
+                "bakery",
+                "shops/bakery",
+                "shops",
+                "Bakery",
+                None,
+                False,
+                None,
+                None,
+                None,
+                frozenset({"shop"}),
             ),
             "wood_2": CatalogItem(
-                "wood_2", "wood", "resources/wood", "resources", "Wood", 2,
-                True, "wood_3", None, None, frozenset({"mergeable"}),
+                "wood_2",
+                "wood",
+                "resources/wood",
+                "resources",
+                "Wood",
+                2,
+                True,
+                "wood_3",
+                None,
+                None,
+                frozenset({"mergeable"}),
             ),
         },
         marketplace_offers=marketplace_catalog(),
@@ -136,12 +154,19 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
     store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
     window = MainWindow(ApplicationController(store))
 
-    window.buildings_page.set_building_repairs((
-        BuildingRepairState(
-            "bakery", 0, True, True, False, False,
-            (BuildingRequirement("wood_2", 3, 1),),
-        ),
-    ))
+    window.buildings_page.set_building_repairs(
+        (
+            BuildingRepairState(
+                "bakery",
+                0,
+                True,
+                True,
+                False,
+                False,
+                (BuildingRequirement("wood_2", 3, 1),),
+            ),
+        )
+    )
 
     bakery = window.buildings_page.tree.topLevelItem(0)
     assert bakery is not None
@@ -161,6 +186,7 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
     window.quit_application()
     app.processEvents()
 
+
 def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     catalog_dir = tmp_path / "catalog"
@@ -170,9 +196,7 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
     window = MainWindow(ApplicationController(store))
 
     page = window.marketplace_page
-    marketplace_automation_toggle = window.settings_page.controls[
-        "marketplace_automation_enabled"
-    ]
+    marketplace_automation_toggle = window.settings_page.controls["marketplace_automation_enabled"]
     assert marketplace_automation_toggle.isChecked()
     assert page.tree.topLevelItemCount() == 2
     assert page.tree.columnCount() == 3
@@ -187,8 +211,7 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
     )
 
     assert all(
-        not page.tree.topLevelItem(row).isExpanded()
-        for row in range(page.tree.topLevelItemCount())
+        not page.tree.topLevelItem(row).isExpanded() for row in range(page.tree.topLevelItemCount())
     )
     assert page._group_toggles["Free Claims"].checkState() == Qt.CheckState.Checked
     assert page._group_toggles["Ingredients"].checkState() == Qt.CheckState.Unchecked
@@ -219,19 +242,13 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
     assert free_label.property("tone") == "free"
 
     page._group_toggles["Ingredients"].click()
-    assert all(
-        page._toggles[key].isChecked()
-        for key in page._group_policy_keys["Ingredients"]
-    )
+    assert all(page._toggles[key].isChecked() for key in page._group_policy_keys["Ingredients"])
     assert page._group_toggles["Ingredients"].checkState() == Qt.CheckState.Checked
     ingredient_key = page._group_policy_keys["Ingredients"][0]
     page._toggles[ingredient_key].click()
     assert page._group_toggles["Ingredients"].checkState() == Qt.CheckState.Unchecked
     page._group_toggles["Free Claims"].click()
-    assert all(
-        not page._toggles[key].isChecked()
-        for key in page._group_policy_keys["Free Claims"]
-    )
+    assert all(not page._toggles[key].isChecked() for key in page._group_policy_keys["Free Claims"])
     assert all(
         page._config.marketplace_policy_overrides[key] is False
         for key in page._group_policy_keys["Free Claims"]
@@ -273,9 +290,7 @@ def test_marketplace_bulk_toggle_targets_only_filtered_offers(tmp_path) -> None:
     page.toolbar.search.setText("Wheat")
     page._set_all(2, True)
 
-    assert page._config.marketplace_policy_enabled(
-        "flash:flash_deal_ingredient:wheat"
-    )
+    assert page._config.marketplace_policy_enabled("flash:flash_deal_ingredient:wheat")
     assert page._config.marketplace_policy_enabled("free:gems_5_no_ads")
 
     window.quit_application()
@@ -319,6 +334,7 @@ def test_ingredient_reserves_editor_uses_catalog_names_and_preserves_unknown_ove
     assert dialog.values() == (5, {"seasonal_item": 9})
     dialog.close()
     app.processEvents()
+
 
 def test_catalog_pages_populate_lazily_and_ignore_hidden_refreshes(tmp_path, monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
@@ -566,8 +582,7 @@ def test_catalog_sprites_are_shown_for_items_shops_and_recipes(tmp_path) -> None
         if window.marketplace_page.tree.topLevelItem(row).text(0) == "Free Claims"
     )
     assert all(
-        not free_claims.child(row).icon(0).isNull()
-        for row in range(free_claims.childCount())
+        not free_claims.child(row).icon(0).isNull() for row in range(free_claims.childCount())
     )
     assert (
         window.items_page.table.objectName() == window.shops_page.tree.objectName() == "policyView"

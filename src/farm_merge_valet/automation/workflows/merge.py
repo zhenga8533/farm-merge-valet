@@ -287,9 +287,7 @@ class MergeWorkflow:
         eligible_actions = [
             action
             for action in actions
-            if bot._actions().available(
-                OperationKind.MERGE, bot._action_key(action), bot._now()
-            )
+            if bot._actions().available(OperationKind.MERGE, bot._action_key(action), bot._now())
         ]
         if eligible_actions:
             self.blocked_requirement = None

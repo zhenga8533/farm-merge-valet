@@ -33,15 +33,13 @@ from farm_merge_valet.cdp.scripts import (
     (
         _HEALTH_EXPRESSION,
         _READ_LAND_EXPANSION_EXPRESSION,
-        land_expansion_action_expression("A1", False, (("coins", 10),), 7),
+        land_expansion_action_expression("A1", False, (("coins", 10),), 0, 7),
         _farm_visit_action_expression("open", 7),
         _storage_bubble_pop_expression(11, 7),
         _dismiss_overlay_expression(7),
         _drop_expression((0, 0), (1, 0), 7),
         _crate_expression(1, 7),
-        _interaction_expression(
-            (0, 0), InteractionTargetKind.IMMEDIATE, "milk", 11, 7
-        ),
+        _interaction_expression((0, 0), InteractionTargetKind.IMMEDIATE, "milk", 11, 7),
         _removal_expression((0, 0), "rock", 11, 7),
         _shop_start_expression("bakery", "bread", 7),
         _shop_claim_expression("bakery", "bread", 7),

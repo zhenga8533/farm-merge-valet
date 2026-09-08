@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from farm_merge_valet.automation.action_control import OperationKind
 from farm_merge_valet.automation.board_space import BoardSpaceAssessment
 from farm_merge_valet.automation.phases import Phase
-from farm_merge_valet.automation.runtime import ActionStatus, RuntimeHealth
+from farm_merge_valet.automation.runtime import ActionStatus, RuntimeConnectionError, RuntimeHealth
 from farm_merge_valet.observability.logging import log_event
 
 if TYPE_CHECKING:
@@ -24,9 +24,7 @@ class CrateWorkflow:
     last_claim_limit: int | None = None
     last_claim_log_at: float = 0.0
 
-    def step(
-        self, bot: Bot, health: RuntimeHealth, board_space: BoardSpaceAssessment
-    ) -> None:
+    def step(self, bot: Bot, health: RuntimeHealth, board_space: BoardSpaceAssessment) -> None:
         if not bot.config.auto_claim_supply_crates:
             if board_space.merge_actions:
                 bot._set_phase(Phase.MERGE)
@@ -58,7 +56,16 @@ class CrateWorkflow:
         operation_key = ("supply",)
         if not bot._actions().begin(OperationKind.CRATE, operation_key, now):
             return
-        result = bot.runtime.spawn_supply_crates(limit)
+        try:
+            result = bot.runtime.spawn_supply_crates(limit)
+        except RuntimeConnectionError:
+            bot._actions().defer(
+                OperationKind.CRATE,
+                operation_key,
+                now,
+                delay=3.0,
+            )
+            raise
         if (
             result.available_before is not None
             and result.available_before > 0
@@ -103,9 +110,13 @@ class CrateWorkflow:
         elif result.status is ActionStatus.UNAVAILABLE:
             bot._actions().release(OperationKind.CRATE, operation_key)
             bot._report_wait(result.detail or "crate claim capability unavailable")
-        elif result.remaining == 0 and not merge_actions_available:
+        elif result.remaining == 0:
+            bot._actions().release(OperationKind.CRATE, operation_key)
             self.last_claim_limit = None
-            bot._defer_idle()
+            if merge_actions_available:
+                bot._set_phase(Phase.MERGE)
+            else:
+                bot._defer_idle()
         elif result.status is ActionStatus.REJECTED:
             bot._actions().fail(
                 OperationKind.CRATE,
@@ -114,5 +125,3 @@ class CrateWorkflow:
                 base_delay=3.0,
             )
             bot._report_wait(result.detail or "crate spawn was not accepted")
-        if result.remaining == 0 and merge_actions_available:
-            bot._set_phase(Phase.MERGE)

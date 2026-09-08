@@ -322,8 +322,7 @@ class DiscordStatusMixin:
                         {
                             "name": "Recorded spending",
                             "value": (
-                                f"Coins {metrics['spent.coins']} · "
-                                f"Gems {metrics['spent.gems']}"
+                                f"Coins {metrics['spent.coins']} · Gems {metrics['spent.gems']}"
                             ),
                             "inline": True,
                         },

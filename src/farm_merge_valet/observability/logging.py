@@ -37,8 +37,7 @@ def _redact(value: object, key: str = "") -> object:
         return "[redacted]"
     if isinstance(value, dict):
         return {
-            str(child_key): _redact(child, str(child_key))
-            for child_key, child in value.items()
+            str(child_key): _redact(child, str(child_key)) for child_key, child in value.items()
         }
     if isinstance(value, (list, tuple, set, frozenset)):
         return [_redact(child) for child in value]

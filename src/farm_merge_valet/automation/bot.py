@@ -192,9 +192,7 @@ class Bot:
             previous.crate_delay_min != applied.crate_delay_min
             or previous.crate_delay_max != applied.crate_delay_max
         ):
-            self.runtime.configure_crate_delays(
-                applied.crate_delay_min, applied.crate_delay_max
-            )
+            self.runtime.configure_crate_delays(applied.crate_delay_min, applied.crate_delay_max)
         self.config = applied
         self._next_loop_delay = applied.loop_interval
         applied_fields = changed_fields(previous, applied)
@@ -268,12 +266,9 @@ class Bot:
             )
         self._last_health = self.runtime.discover()
         if not self._last_health.available:
-            initialization_elapsed = (
-                time.monotonic() - self._runtime_initialization_started_at
-            )
+            initialization_elapsed = time.monotonic() - self._runtime_initialization_started_at
             should_warn = (
-                self._runtime_ready_once
-                or initialization_elapsed >= _RUNTIME_STARTUP_GRACE_SECONDS
+                self._runtime_ready_once or initialization_elapsed >= _RUNTIME_STARTUP_GRACE_SECONDS
             )
             if should_warn and not self._runtime_unavailable_warned:
                 log_event(
@@ -593,7 +588,8 @@ class Bot:
 
     def _repair_target(self) -> BuildingRepairState | None:
         candidates = [
-            state for state in (self._building_repairs or ())
+            state
+            for state in (self._building_repairs or ())
             if state.placed
             and not state.active
             and not state.upgrading
@@ -602,12 +598,16 @@ class Bot:
         ]
         if not candidates:
             return None
-        return min(candidates, key=lambda state: (
-            not state.workshop if self.config.prioritize_repair_shops else False,
-            sum(requirement.amount for requirement in state.requirements)
-            if self.config.prioritize_cheaper_repairs else 0,
-            state.building_id,
-        ))
+        return min(
+            candidates,
+            key=lambda state: (
+                not state.workshop if self.config.prioritize_repair_shops else False,
+                sum(requirement.amount for requirement in state.requirements)
+                if self.config.prioritize_cheaper_repairs
+                else 0,
+                state.building_id,
+            ),
+        )
 
     def _repair_reserves(self) -> dict[ItemRef, int]:
         if not self.config.preserve_building_repair_resources:
@@ -883,10 +883,7 @@ class Bot:
                         )
                     )
                 continue
-            if (
-                state.blueprint_id in self._clearable_ids
-                and state.obstacle is not None
-            ):
+            if state.blueprint_id in self._clearable_ids and state.obstacle is not None:
                 obstacles.append(
                     ObstacleCandidate(
                         coord,
@@ -1098,9 +1095,7 @@ class Bot:
             action_key=(requested.coord, requested.kind.value),
         )
 
-    def _step_claim_crates(
-        self, health: RuntimeHealth, board_space: BoardSpaceAssessment
-    ) -> None:
+    def _step_claim_crates(self, health: RuntimeHealth, board_space: BoardSpaceAssessment) -> None:
         self._crate_workflow.step(self, health, board_space)
 
     def _request_board_space(
@@ -1151,10 +1146,7 @@ class Bot:
         ):
             self._board_space_request = None
             return False
-        if (
-            board_space.status_for(request.required_empty_cells)
-            is BoardSpaceStatus.AVAILABLE
-        ):
+        if board_space.status_for(request.required_empty_cells) is BoardSpaceStatus.AVAILABLE:
             self._board_space_request = None
             self._set_phase(request.resume_phase)
             return False
@@ -1178,9 +1170,7 @@ class Bot:
         if request.requester == "crate-reserve":
             return self.config.auto_claim_supply_crates and board_space.needs_merge
         if request.requester == "shop-claim":
-            required = required_shop_claim_empty_cells(
-                self._shop_orders or (), self._shop_policy()
-            )
+            required = required_shop_claim_empty_cells(self._shop_orders or (), self._shop_policy())
             return required is not None and board_space.empty_cells < required
         if request.requester == "storage-bubble":
             object_id = request.action_key[0] if request.action_key else None
@@ -1189,10 +1179,7 @@ class Bot:
                 for bubble in (self._storage_bubbles or ())
             )
         candidates = (*immediate, *depleted, *ready)
-        return any(
-            (action.coord, action.kind.value) == request.action_key
-            for action in candidates
-        )
+        return any((action.coord, action.kind.value) == request.action_key for action in candidates)
 
     def _step_merge(
         self,
@@ -1339,9 +1326,7 @@ class Bot:
             farm_visit_workflow.step(self, health, farm_visit_state)
             return
         marketplace_policy_keys = {offer.policy_key for offer in self._marketplace_catalog}
-        marketplace_policy_keys.update(
-            offer.policy_key for offer in self._marketplace_offers or ()
-        )
+        marketplace_policy_keys.update(offer.policy_key for offer in self._marketplace_offers or ())
         marketplace_enabled = self.config.marketplace_automation_enabled and any(
             self.config.marketplace_policy_enabled(policy_key)
             for policy_key in marketplace_policy_keys
@@ -1354,13 +1339,9 @@ class Bot:
             return
         board_space = self._assess_board_space()
         immediate, depleted, ready = self._interaction_actions()
-        if self._continue_board_space_request(
-            health, board_space, immediate, depleted, ready
-        ):
+        if self._continue_board_space_request(health, board_space, immediate, depleted, ready):
             return
-        if self._continue_output_space_request(
-            health, immediate, depleted, ready, board_space
-        ):
+        if self._continue_output_space_request(health, immediate, depleted, ready, board_space):
             return
         immediate, depleted, ready = self._interaction_workflow.available_actions(
             self, immediate, depleted, ready
@@ -1441,9 +1422,7 @@ class Bot:
             if (
                 self.config.auto_claim_supply_crates
                 and not board_space.needs_merge
-                and not self._ensure_capability(
-                    health, RuntimeCapability.CRATES
-                )
+                and not self._ensure_capability(health, RuntimeCapability.CRATES)
             ):
                 return
             self._step_claim_crates(health, board_space)
@@ -1465,9 +1444,7 @@ class Bot:
             return True
         name = label or capability.value.replace("-", " ")
         now = time.monotonic()
-        retry_at, retry_delay = retries.get(
-            capability, (0.0, self.config.loop_interval)
-        )
+        retry_at, retry_delay = retries.get(capability, (0.0, self.config.loop_interval))
         if now < retry_at:
             self._report_wait(f"{name} capability unavailable")
             return False
@@ -1539,10 +1516,7 @@ class Bot:
             )
 
     def _effective_loop_delay(self, requested_delay: float) -> float:
-        if (
-            self.config.loop_interval < MINIMUM_ACTIVE_INTERVAL
-            and not self._poll_floor_reported
-        ):
+        if self.config.loop_interval < MINIMUM_ACTIVE_INTERVAL and not self._poll_floor_reported:
             log_event(
                 logger,
                 logging.WARNING,

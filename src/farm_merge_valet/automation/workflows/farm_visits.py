@@ -68,9 +68,7 @@ class FarmVisitWorkflow:
             for candidate in state.actions
         )
 
-    def verify_pending(
-        self, bot: Bot, health: RuntimeHealth, state: FarmVisitState | None
-    ) -> bool:
+    def verify_pending(self, bot: Bot, health: RuntimeHealth, state: FarmVisitState | None) -> bool:
         pending = self.pending
         if pending is None:
             return True

@@ -42,8 +42,7 @@ def test_log_multiline_content_uses_aligned_plain_text() -> None:
     page.append("12:00:00", "ERROR", "failed\ntraceback detail", logging.ERROR)
 
     assert page.view.toPlainText() == (
-        "[12:00:00] ERROR    failed\n"
-        "                    traceback detail"
+        "[12:00:00] ERROR    failed\n                    traceback detail"
     )
 
 

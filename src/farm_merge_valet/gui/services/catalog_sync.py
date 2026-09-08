@@ -57,9 +57,9 @@ class CatalogSyncDependencies:
     catalog_synchronizer_factory: Callable[[AppConfig], CatalogSynchronizer]
     upgrade_progress_reader: Callable[[int, str], UpgradeProgress | None]
     catalog_loader: Callable[[Path], ItemCatalog]
-    building_repairs_reader: Callable[
-        [int, str], tuple[BuildingRepairState, ...] | None
-    ] | None = None
+    building_repairs_reader: Callable[[int, str], tuple[BuildingRepairState, ...] | None] | None = (
+        None
+    )
 
 
 class CatalogSyncService:

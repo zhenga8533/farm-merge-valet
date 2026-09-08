@@ -74,7 +74,9 @@ catalog extraction when game data is unchanged. Version 6 caches remain
 readable and receive a fingerprint on their next live refresh.
 Variant discovery uses exact numbered-family and building-state identities so
 similarly prefixed, unrelated game assets cannot be grouped together.
-Compilation fails if a declared alias is missing and removes stale PNGs.
+Compilation fails if a declared alias is missing. Catalog metadata and compiled
+assets are built as one staged generation and published together, removing stale
+PNGs on success while leaving the previous generation intact on failure.
 
 The desktop GUI fits catalog-item and recipe sprites inside 40-by-40 icon boxes,
 while shop building previews use a 100-by-54 box. Both preserve the source

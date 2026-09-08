@@ -15,7 +15,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[package]"
+      - run: pip install -e ".[dev,package]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy src
+      - run: pytest
       - run: python -m build
       - name: Build desktop executable
         run: pyinstaller --clean --noconfirm --onefile --windowed --name farm-merge-valet src/farm_merge_valet/__main__.py

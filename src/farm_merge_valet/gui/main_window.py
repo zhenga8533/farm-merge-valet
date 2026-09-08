@@ -72,12 +72,8 @@ _BUILDING_POLICY_FIELDS = _BUILDING_FIELDS - {
     "buildings_sort_column",
     "buildings_sort_descending",
 }
-_MARKETPLACE_VIEW_FIELDS = {
-    field for field in _VIEW_FIELDS if field.startswith("marketplace_")
-}
-_MARKETPLACE_FIELDS = (
-    set(SECTION_FIELDS[ConfigSection.MARKETPLACE]) | _MARKETPLACE_VIEW_FIELDS
-)
+_MARKETPLACE_VIEW_FIELDS = {field for field in _VIEW_FIELDS if field.startswith("marketplace_")}
+_MARKETPLACE_FIELDS = set(SECTION_FIELDS[ConfigSection.MARKETPLACE]) | _MARKETPLACE_VIEW_FIELDS
 _BROWSER_FIELDS = set(SECTION_FIELDS[ConfigSection.BROWSER])
 _SETTINGS_FIELDS = set(SECTION_FIELDS[ConfigSection.SETTINGS])
 
@@ -90,7 +86,14 @@ def _menu_action_text(label: str, hotkey: str | None) -> str:
 
 class MainWindow(QMainWindow):
     _NAVIGATION = (
-        "Dashboard", "Items", "Shops", "Buildings", "Marketplace", "Browser", "Settings", "Logs"
+        "Dashboard",
+        "Items",
+        "Shops",
+        "Buildings",
+        "Marketplace",
+        "Browser",
+        "Settings",
+        "Logs",
     )
 
     def __init__(
@@ -357,14 +360,7 @@ class MainWindow(QMainWindow):
         return True
 
     def _queue_edit(self, edit: ConfigEdit) -> None:
-        editor: (
-            ItemsPage
-            | ShopsPage
-            | BuildingsPage
-            | MarketplacePage
-            | BrowserPage
-            | SettingsPage
-        )
+        editor: ItemsPage | ShopsPage | BuildingsPage | MarketplacePage | BrowserPage | SettingsPage
         if edit.source == "items":
             editor = self.items_page
         elif edit.source == "shops":

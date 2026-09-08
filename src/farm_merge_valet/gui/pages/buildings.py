@@ -192,13 +192,9 @@ class BuildingsPage(AppPage):
         toggle.setChecked(self._config.building_repair_enabled(state.building_id))
         toggle.setAccessibleName(f"{name}: preserve repair materials")
         toggle.toggled.connect(
-            lambda enabled, building_id=state.building_id: self._set_enabled(
-                building_id, enabled
-            )
+            lambda enabled, building_id=state.building_id: self._set_enabled(building_id, enabled)
         )
-        set_policy_widget(
-            self.tree, parent, 4, policy_cell(toggle), sort_value=toggle.isChecked()
-        )
+        set_policy_widget(self.tree, parent, 4, policy_cell(toggle), sort_value=toggle.isChecked())
         self._toggles[state.building_id] = toggle
         self._items[state.building_id] = parent
         for requirement in state.requirements:
@@ -259,20 +255,14 @@ class BuildingsPage(AppPage):
         self._populate()
 
     def _visible_building_ids(self) -> list[str]:
-        return [
-            building_id
-            for building_id, item in self._items.items()
-            if not item.isHidden()
-        ]
+        return [building_id for building_id, item in self._items.items() if not item.isHidden()]
 
     def _sync_bulk_header(self) -> None:
         values = [
             self._config.building_repair_enabled(building_id)
             for building_id in self._visible_building_ids()
         ]
-        self.bulk_header.set_state(
-            4, aggregate_check_state(values), enabled=bool(values)
-        )
+        self.bulk_header.set_state(4, aggregate_check_state(values), enabled=bool(values))
 
     def _filter(self, text: str) -> None:
         filter_policy_tree(self.tree, text)

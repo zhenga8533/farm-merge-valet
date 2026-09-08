@@ -162,9 +162,7 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
                     final_summary = self._take_summary(now, final=True)
                     if final_summary is not None:
                         attachment = (
-                            self._activity_chart.render(now)
-                            if self._include_charts
-                            else None
+                            self._activity_chart.render(now) if self._include_charts else None
                         )
                         self._send(client, final_summary, attachment)
                         self._refresh_status(client, now)

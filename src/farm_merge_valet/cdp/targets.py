@@ -147,9 +147,7 @@ def _parse_version_page(text: str) -> dict[str, str]:
     return values
 
 
-def _version_page_metadata(
-    browser_ws: str, *, cancel_event: Event | None = None
-) -> dict[str, str]:
+def _version_page_metadata(browser_ws: str, *, cancel_event: Event | None = None) -> dict[str, str]:
     for url in ("chrome://version/", "edge://version/", "brave://version/"):
         try:
             created = _command_target(

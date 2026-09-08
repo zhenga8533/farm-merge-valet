@@ -31,13 +31,15 @@ def test_live_land_expansion_state_is_parsed_strictly() -> None:
 
 def test_land_expansion_expressions_use_native_revalidated_handler() -> None:
     action = land_expansion_action_expression(
-        "A19", False, (("level", 18), ("coins", 3545)), 7
+        "A19", False, (("level", 18), ("coins", 3545)), 1000, 7
     )
 
     assert "service.getNextAreaToUnlock()" in _READ_LAND_EXPANSION_EXPRESSION
     assert "service.canUnlockArea(area)" in action
     assert "service.unlockArea(area)" in action
     assert "land-expansion-cost-changed" in action
+    assert "land-expansion-reserve-not-met" in action
+    assert '"minimumBalanceAfter": 1000' in action
     assert '"sceneID": 7' in action
 
 
@@ -59,9 +61,10 @@ def test_runtime_submits_land_expansion_with_scene_and_exact_requirements(monkey
         True,
     )
 
-    result = adapter.submit_land_expansion(candidate)
+    result = adapter.submit_land_expansion(candidate, 1000)
 
     assert result.status is ActionStatus.SUBMITTED
     assert '"areaID": "A19"' in expressions[0]
     assert '"amount": 3545' in expressions[0]
+    assert '"minimumBalanceAfter": 1000' in expressions[0]
     assert '"sceneID": 7' in expressions[0]

@@ -230,13 +230,14 @@ def test_runtime_asset_cache_refreshes_when_the_source_version_changes(tmp_path:
     assert source_index[cached_png.name] == current_url
 
 
-def test_failed_asset_compile_does_not_publish_the_new_catalog(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_failed_asset_compile_does_not_publish_the_new_catalog(monkeypatch, tmp_path: Path) -> None:
     catalog_dir = tmp_path / "catalog"
     catalog_dir.mkdir()
     catalog_path = catalog_dir / "catalog.json"
     catalog_path.write_text("existing catalog", encoding="utf-8")
+    existing_asset = catalog_dir / "items" / "existing.png"
+    existing_asset.parent.mkdir()
+    existing_asset.write_bytes(b"existing asset")
     synchronizer = CatalogSynchronizer(
         atlas_cache_dir=tmp_path / "atlases",
         catalog_dir=catalog_dir,
@@ -245,15 +246,21 @@ def test_failed_asset_compile_does_not_publish_the_new_catalog(
         text_resource_reader=lambda _urls: {},
         catalog_loader=lambda: ItemCatalog({}),
     )
-    monkeypatch.setattr(
-        "farm_merge_valet.catalog.sync.compile_catalog_assets",
-        lambda *_args: (_ for _ in ()).throw(RuntimeError("missing assets")),
-    )
+
+    def fail_after_writing(_atlases, _catalog, output_dir):
+        generated = output_dir / "items" / "partial.png"
+        generated.parent.mkdir(parents=True)
+        generated.write_bytes(b"partial asset")
+        raise RuntimeError("missing assets")
+
+    monkeypatch.setattr("farm_merge_valet.catalog.sync.compile_catalog_assets", fail_after_writing)
 
     with pytest.raises(RuntimeError, match="missing assets"):
         synchronizer._compile_assets({})
 
     assert catalog_path.read_text(encoding="utf-8") == "existing catalog"
+    assert existing_asset.read_bytes() == b"existing asset"
+    assert not (catalog_dir / "items" / "partial.png").exists()
 
 
 def test_asset_compile_persists_game_derived_marketplace_offers(
@@ -291,9 +298,7 @@ def test_asset_compile_preserves_cached_offers_when_live_read_is_unavailable(
         atlas_url_reader=lambda: [],
         binary_resource_reader=lambda _urls: {},
         text_resource_reader=lambda _urls: {},
-        catalog_loader=lambda: ItemCatalog(
-            items={}, marketplace_offers=marketplace_catalog()
-        ),
+        catalog_loader=lambda: ItemCatalog(items={}, marketplace_offers=marketplace_catalog()),
         marketplace_catalog_reader=lambda: None,
     )
     monkeypatch.setattr(

@@ -187,9 +187,7 @@ class GameRuntimeAdapter:
     def read_background_flag_status(self) -> dict[str, object]:
         return read_background_flag_status(self.port, cancel_event=self._cancel_event)
 
-    def _evaluate(
-        self, expression: str, *, timeout: float = 5.0, retry: bool = True
-    ) -> object:
+    def _evaluate(self, expression: str, *, timeout: float = 5.0, retry: bool = True) -> object:
         return evaluate(
             self.port,
             expression,
@@ -326,9 +324,7 @@ class GameRuntimeAdapter:
                     failures=failures,
                 )
                 return False
-            frame_ready = self._evaluate(
-                _RECOVERY_FRAME_PROBE_EXPRESSION, timeout=1.0, retry=False
-            )
+            frame_ready = self._evaluate(_RECOVERY_FRAME_PROBE_EXPRESSION, timeout=1.0, retry=False)
             if frame_ready is not True:
                 self._discovery_detail = "game-loop-not-advancing"
                 log_event(
@@ -359,9 +355,7 @@ class GameRuntimeAdapter:
                     self._recovery_failures.pop(key, None)
                 else:
                     failures += 1
-                    cooldown = _RECOVERY_COOLDOWNS[
-                        min(failures - 1, len(_RECOVERY_COOLDOWNS) - 1)
-                    ]
+                    cooldown = _RECOVERY_COOLDOWNS[min(failures - 1, len(_RECOVERY_COOLDOWNS) - 1)]
                     self._recovery_failures[key] = (failures, time.monotonic() + cooldown)
             log_event(
                 logger,
@@ -479,9 +473,7 @@ class GameRuntimeAdapter:
             farm_scene=farm_scene,
             scene_transition_active=raw.get("sceneTransitionActive") is True,
             backend_connected=(
-                raw["backendConnected"]
-                if isinstance(raw.get("backendConnected"), bool)
-                else None
+                raw["backendConnected"] if isinstance(raw.get("backendConnected"), bool) else None
             ),
             backend_connectivity_state=(
                 raw["backendConnectivityState"]
@@ -887,20 +879,20 @@ class GameRuntimeAdapter:
         return parse_marketplace_offers(self._evaluate(_READ_MARKETPLACE_EXPRESSION, retry=False))
 
     def submit_marketplace_purchase(self, action: MarketplaceAction) -> ActionResult:
-        raw = self._evaluate(
-            marketplace_purchase_expression(action, self._scene_id), retry=False
-        )
+        raw = self._evaluate(marketplace_purchase_expression(action, self._scene_id), retry=False)
         return parse_marketplace_action_result(raw)
 
-    def submit_land_expansion(self, candidate: LandExpansionCandidate) -> ActionResult:
+    def submit_land_expansion(
+        self, candidate: LandExpansionCandidate, minimum_balance_after: int
+    ) -> ActionResult:
         raw = self._evaluate(
             land_expansion_action_expression(
                 candidate.area_id,
                 candidate.premium,
                 tuple(
-                    (requirement.key, requirement.amount)
-                    for requirement in candidate.requirements
+                    (requirement.key, requirement.amount) for requirement in candidate.requirements
                 ),
+                minimum_balance_after,
                 self._scene_id,
             ),
             retry=False,

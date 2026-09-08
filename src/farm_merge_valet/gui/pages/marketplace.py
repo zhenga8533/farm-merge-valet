@@ -75,9 +75,7 @@ class MarketplacePage(AppPage):
             "No game-derived marketplace offers have been synchronized yet."
         )
         self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
-        self.page_layout.addWidget(
-            self.catalog_onboarding, 1, Qt.AlignmentFlag.AlignCenter
-        )
+        self.page_layout.addWidget(self.catalog_onboarding, 1, Qt.AlignmentFlag.AlignCenter)
         scaffold = create_policy_tree(
             header_labels=("Offer", "Cost", ""),
             bulk_labels={2: "Auto-purchase"},
@@ -254,9 +252,7 @@ class MarketplacePage(AppPage):
         family_ids = {reward_key}
         if reward_key.endswith("s"):
             family_ids.add(reward_key[:-1])
-        candidates = [
-            item for item in self._catalog.items.values() if item.family_id in family_ids
-        ]
+        candidates = [item for item in self._catalog.items.values() if item.family_id in family_ids]
         return min(
             {item.game_id: item for item in candidates}.values(),
             key=lambda item: (item.tier is None, item.tier or 0, item.game_id),
@@ -286,9 +282,7 @@ class MarketplacePage(AppPage):
         if not self.toolbar.search.text().strip():
             return list(self._toggles)
         filter_policy_tree(self.tree, self.toolbar.search.text())
-        return [
-            key for key, item in self._tree_items.items() if not item.isHidden()
-        ]
+        return [key for key, item in self._tree_items.items() if not item.isHidden()]
 
     def _set_group(self, policy_keys: tuple[str, ...], enabled: bool) -> None:
         values = dict(self._config.marketplace_policy_overrides)

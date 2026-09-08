@@ -197,4 +197,3 @@ def test_supply_crate_is_opened_when_no_ticket_is_held() -> None:
 
     assert runtime.calls == ["open-crate"]
     assert bot.phase is Phase.CLAIM_CRATES
-

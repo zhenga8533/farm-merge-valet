@@ -251,9 +251,7 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         "prioritize_cheaper_repairs",
         "prioritize_obstacle_repair_resources",
     ):
-        assert section_groups["Building repairs"].isAncestorOf(
-            window.settings_page.controls[field]
-        )
+        assert section_groups["Building repairs"].isAncestorOf(window.settings_page.controls[field])
     assert section_groups["Notifications"].isAncestorOf(
         window.settings_page.notifications_advanced_section
     )

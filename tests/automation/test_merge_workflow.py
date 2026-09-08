@@ -417,8 +417,7 @@ def test_full_board_without_safe_recovery_keeps_polling(caplog) -> None:
     assert not bot._interrupt_event.is_set()
     assert bot._next_loop_delay == bot.config.idle_wait_seconds
     assert any(
-        getattr(record, "fmv_event", None) == "planner.board_blocked"
-        for record in caplog.records
+        getattr(record, "fmv_event", None) == "planner.board_blocked" for record in caplog.records
     )
 
 

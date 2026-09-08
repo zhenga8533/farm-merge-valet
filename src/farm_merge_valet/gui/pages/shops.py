@@ -102,9 +102,7 @@ class IngredientReservesDialog(QDialog):
             use_default = QCheckBox("Use default")
             use_default.setAccessibleName(f"{label}: use default reserve")
             reserve = self._spin_box(
-                config.shop_ingredient_reserves.get(
-                    item_id, config.shop_ingredient_reserve_default
-                )
+                config.shop_ingredient_reserves.get(item_id, config.shop_ingredient_reserve_default)
             )
             reserve.setAccessibleName(f"{label}: ingredient reserve")
             inherited = item_id not in config.shop_ingredient_reserves
@@ -585,9 +583,7 @@ class ShopsPage(AppPage):
         if not isinstance(states, tuple):
             return
         self._building_repairs = {
-            state.building_id: state
-            for state in states
-            if isinstance(state, BuildingRepairState)
+            state.building_id: state for state in states if isinstance(state, BuildingRepairState)
         }
         for (kind, shop_id), item in self._tree_items.items():
             if kind == "shop":

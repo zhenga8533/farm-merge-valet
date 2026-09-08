@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -101,8 +103,7 @@ class CatalogSynchronizer:
             if force
             or not _cache_path_for(self.atlas_cache_dir, url, ".png").is_file()
             or not _cache_path_for(self.atlas_cache_dir, _manifest_url(url), ".json").is_file()
-            or source_index.get(_cache_path_for(self.atlas_cache_dir, url, ".png").name)
-            != url
+            or source_index.get(_cache_path_for(self.atlas_cache_dir, url, ".png").name) != url
         ]
         self.atlas_cache_dir.mkdir(parents=True, exist_ok=True)
         for offset in range(0, len(pending), 20):
@@ -156,17 +157,39 @@ class CatalogSynchronizer:
                 items=catalog.items,
                 variants=catalog.variants,
                 source_fingerprint=catalog.source_fingerprint,
-                marketplace_offers=(
-                    offers if offers is not None else catalog.marketplace_offers
-                ),
+                marketplace_offers=(offers if offers is not None else catalog.marketplace_offers),
             )
         _report_uncategorized(catalog)
-        written = compile_catalog_assets(atlases, catalog, self.catalog_dir)
-        write_item_catalog(self.catalog_dir / "catalog.json", catalog)
+        written = self._publish_catalog(atlases, catalog)
         print(
             f"Cataloged {len(catalog.items)} game items and recipes and compiled "
             f"{written} atlas frames into {self.catalog_dir}."
         )
+
+    def _publish_catalog(self, atlases: Atlases, catalog: ItemCatalog) -> int:
+        parent = self.catalog_dir.parent
+        parent.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=f".{self.catalog_dir.name}-", dir=parent))
+        backup = staging.with_name(f"{staging.name}.previous")
+        published = False
+        try:
+            written = compile_catalog_assets(atlases, catalog, staging)
+            write_item_catalog(staging / "catalog.json", catalog)
+            if self.catalog_dir.exists():
+                self.catalog_dir.replace(backup)
+            try:
+                staging.replace(self.catalog_dir)
+                published = True
+            except BaseException:
+                if backup.exists() and not self.catalog_dir.exists():
+                    backup.replace(self.catalog_dir)
+                raise
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+            if published and backup.exists():
+                shutil.rmtree(backup, ignore_errors=True)
+        return written
 
 
 def _manifest_url(png_url: str) -> str:

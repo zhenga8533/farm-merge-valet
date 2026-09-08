@@ -65,9 +65,7 @@ class LandExpansionWorkflow:
             self.pending = None
             bot._actions().complete(OperationKind.LAND_EXPANSION, self._key(pending.candidate))
             currency = (
-                ExpansionCurrency.GEMS
-                if pending.candidate.premium
-                else ExpansionCurrency.COINS
+                ExpansionCurrency.GEMS if pending.candidate.premium else ExpansionCurrency.COINS
             )
             log_event(
                 logger,
@@ -118,9 +116,13 @@ class LandExpansionWorkflow:
         if not bot._actions().begin(OperationKind.LAND_EXPANSION, key, bot._now()):
             return False
         bot._set_phase(Phase.LAND_EXPANSION)
-        result = bot.runtime.submit_land_expansion(candidate)
+        submitted_at = bot._now()
+        self.pending = PendingLandExpansion(candidate, health.scene_id, submitted_at)
+        minimum_balance_after = (
+            bot.config.minimum_gem_reserve if candidate.premium else bot.config.minimum_coin_reserve
+        )
+        result = bot.runtime.submit_land_expansion(candidate, minimum_balance_after)
         if result.status is ActionStatus.SUBMITTED:
-            self.pending = PendingLandExpansion(candidate, health.scene_id, bot._now())
             currency = ExpansionCurrency.GEMS if candidate.premium else ExpansionCurrency.COINS
             log_event(
                 logger,
@@ -137,6 +139,7 @@ class LandExpansionWorkflow:
                 cost=candidate.cost(currency),
             )
             return True
+        self.pending = None
         if result.status in (ActionStatus.BUSY, ActionStatus.UNAVAILABLE):
             bot._actions().release(OperationKind.LAND_EXPANSION, key)
             bot._report_wait(result.detail or "land-expansion capability unavailable")

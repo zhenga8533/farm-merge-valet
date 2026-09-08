@@ -153,8 +153,7 @@ def test_webhook_routes_lifecycle_and_summarizes_actions(monkeypatch, tmp_path) 
     notification_index = next(
         index
         for index, request in enumerate(_FakeClient.requests)
-        if _request_payload(request).get("embeds", [{}])[0].get("title")
-        == "Game runtime ready"
+        if _request_payload(request).get("embeds", [{}])[0].get("title") == "Game runtime ready"
     )
     replacement = _FakeClient.requests[notification_index + 1]
     assert replacement["method"] == "PATCH"

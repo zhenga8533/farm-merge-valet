@@ -139,7 +139,8 @@ def read_marketplace_catalog(
                 candidate_key=entry.candidate_key,
                 group=(
                     entry.slot_id.replace("flash_deal_", "").replace("_", " ").title()
-                    if entry.slot_id else "Free Claims"
+                    if entry.slot_id
+                    else "Free Claims"
                 ),
                 display_name=entry.reward_key.replace("_", " ").title(),
                 reward_key=entry.reward_key,
@@ -156,9 +157,7 @@ def read_marketplace_catalog(
             conflicting_policy_keys.add(offer.policy_key)
         else:
             offers[offer.policy_key] = offer
-    return tuple(
-        offers[key] for key in sorted(offers.keys() - conflicting_policy_keys)
-    )
+    return tuple(offers[key] for key in sorted(offers.keys() - conflicting_policy_keys))
 
 
 def marketplace_purchase_expression(action: MarketplaceAction, scene_id: int | None) -> str:

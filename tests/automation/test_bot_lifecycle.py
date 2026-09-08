@@ -183,9 +183,7 @@ def test_bot_construction_does_not_load_catalog_eagerly() -> None:
     assert bot._blueprint_items == {}
 
 
-def test_initial_runtime_loading_warns_once_only_after_grace_period(
-    monkeypatch, caplog
-) -> None:
+def test_initial_runtime_loading_warns_once_only_after_grace_period(monkeypatch, caplog) -> None:
     class LoadingRuntime(FakeRuntime):
         def discover(self) -> RuntimeHealth:
             return RuntimeHealth(

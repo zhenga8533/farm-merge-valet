@@ -494,9 +494,7 @@ class BrowserManager:
         """Reload a frozen game page or restore its managed browser and page."""
         status = self.ensure_running()
         if not status.managed:
-            raise BrowserManagerError(
-                "Refusing to recover the game in an unowned browser."
-            )
+            raise BrowserManagerError("Refusing to recover the game in an unowned browser.")
         if status.game_frame_available:
             reload_game_page(self.settings.cdp_port, self.settings.window_title)
             log_event(

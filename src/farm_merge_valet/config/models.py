@@ -216,13 +216,8 @@ class AppConfig(BaseModel):
     def validate_marketplace_policy_keys(cls, value: dict[str, bool]) -> dict[str, bool]:
         for key in value:
             parts = key.split(":")
-            valid = (
-                len(parts) == 2 and parts[0] == "free" and bool(parts[1])
-            ) or (
-                len(parts) == 3
-                and parts[0] == "flash"
-                and bool(parts[1])
-                and bool(parts[2])
+            valid = (len(parts) == 2 and parts[0] == "free" and bool(parts[1])) or (
+                len(parts) == 3 and parts[0] == "flash" and bool(parts[1]) and bool(parts[2])
             )
             if not valid or key != key.strip():
                 raise ValueError("invalid marketplace policy key")
@@ -243,9 +238,7 @@ class AppConfig(BaseModel):
         return policy_key.startswith("free:")
 
     def building_repair_enabled(self, building_id: str) -> bool:
-        return self.building_repair_overrides.get(
-            building_id, self.building_repair_default_enabled
-        )
+        return self.building_repair_overrides.get(building_id, self.building_repair_default_enabled)
 
     @field_validator("item_default_overrides", "item_policy_overrides")
     @classmethod

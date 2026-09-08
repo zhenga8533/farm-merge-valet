@@ -2,19 +2,21 @@ from farm_merge_valet.cdp.buildings import parse_building_repairs, read_building
 
 
 def test_building_repairs_preserve_placement_status_and_requirements() -> None:
-    states = parse_building_repairs([
-        {
-            "buildingID": "bakery",
-            "level": 2,
-            "workshop": True,
-            "placed": True,
-            "active": False,
-            "upgrading": False,
-            "requirements": [
-                {"blueprintID": "wood_2", "amount": 4, "available": 1},
-            ],
-        },
-    ])
+    states = parse_building_repairs(
+        [
+            {
+                "buildingID": "bakery",
+                "level": 2,
+                "workshop": True,
+                "placed": True,
+                "active": False,
+                "upgrading": False,
+                "requirements": [
+                    {"blueprintID": "wood_2", "amount": 4, "available": 1},
+                ],
+            },
+        ]
+    )
 
     assert states is not None
     assert states[0].building_id == "bakery"
@@ -23,9 +25,11 @@ def test_building_repairs_preserve_placement_status_and_requirements() -> None:
 
 
 def test_invalid_building_requirements_fail_closed() -> None:
-    states = parse_building_repairs([
-        {"buildingID": "bakery", "requirements": [{"blueprintID": "wood", "amount": -1}]},
-    ])
+    states = parse_building_repairs(
+        [
+            {"buildingID": "bakery", "requirements": [{"blueprintID": "wood", "amount": -1}]},
+        ]
+    )
 
     assert states is not None
     assert states[0].requirements == ()

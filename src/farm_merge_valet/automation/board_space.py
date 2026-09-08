@@ -35,9 +35,7 @@ class BoardSpaceAssessment:
 
     @property
     def needs_merge(self) -> bool:
-        return self.full or (
-            self.empty_cells <= self.reserve and bool(self.merge_actions)
-        )
+        return self.full or (self.empty_cells <= self.reserve and bool(self.merge_actions))
 
     def status_for(self, required_empty_cells: int) -> BoardSpaceStatus:
         if self.empty_cells >= required_empty_cells:

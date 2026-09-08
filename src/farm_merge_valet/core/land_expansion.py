@@ -49,18 +49,16 @@ class LandExpansionPolicy:
         currency = ExpansionCurrency.GEMS if candidate.premium else ExpansionCurrency.COINS
         maximum = self.maximum_gem_cost if candidate.premium else self.maximum_coin_cost
         cost = candidate.cost(currency)
-        requirement = next(
-            (item for item in candidate.requirements if item.key == currency), None
-        )
+        requirement = next((item for item in candidate.requirements if item.key == currency), None)
         reserve = (
             self.minimum_gem_reserve
             if currency is ExpansionCurrency.GEMS
             else self.minimum_coin_reserve
         )
         preserves_reserve = (
-            requirement is None
-            or requirement.available is None
-            or requirement.available - requirement.amount >= reserve
+            requirement is not None
+            and requirement.available is not None
+            and requirement.available - requirement.amount >= reserve
         )
         return (
             self.enabled

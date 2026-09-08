@@ -273,6 +273,7 @@ _HEARTBEAT_EXPRESSION = r"""
 })()
 """
 
+
 def _overlay_context_expression() -> str:
     return r"""let stage = scene;
   while (stage?.parent) stage = stage.parent;
@@ -282,7 +283,8 @@ def _overlay_context_expression() -> str:
     child?.visible !== false && child?.renderable !== false && child?._destroyed !== true);"""
 
 
-_HEALTH_EXPRESSION = r"""
+_HEALTH_EXPRESSION = (
+    r"""
 (() => {
   const board = window.__fmvBoardCells;
   const handler = window.__fmvItemInteractionHandler;
@@ -397,7 +399,9 @@ _HEALTH_EXPRESSION = r"""
         visitorActionHandler._isActive !== false &&
         typeof visitorActionHandler._onActivityTapped === 'function' &&
         typeof visitorReturnHud?._returnButtonClicked === 'function');
-""" + _overlay_context_expression() + r"""
+"""
+    + _overlay_context_expression()
+    + r"""
   const trainPopup = activePopup?._name === 'TrainstationPopup' &&
     activePopup?._state === 4 &&
     typeof activePopup._onVisitButtonPressed === 'function' ? activePopup : null;
@@ -577,6 +581,7 @@ _HEALTH_EXPRESSION = r"""
   };
 })()
 """
+)
 
 _READ_FARM_VISIT_EXPRESSION = r"""
 (() => {
@@ -716,6 +721,7 @@ def _farm_visit_action_expression(kind: str, scene_id: int | None, **expected: o
 }})()
 """
 
+
 _READ_STORAGE_BUBBLES_EXPRESSION = r"""
 (() => {
   const board = window.__fmvBoardCells;
@@ -754,7 +760,7 @@ def _storage_bubble_pop_expression(object_id: int, scene_id: int | None) -> str:
   const services = window.__fmvGameplayServices;
   const interactionHandler = window.__fmvStorageBubbleInteractionHandler;
   const popHandler = window.__fmvStorageBubblePopHandler;
-  {_runtime_scene_identity('window.__fmvItemInteractionHandler')}
+  {_runtime_scene_identity("window.__fmvItemInteractionHandler")}
   if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
       currentSceneId !== {json.dumps(scene_id)} ||
       interactionHandler?._services !== services || popHandler?._services !== services)
@@ -786,7 +792,7 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
   const board = window.__fmvBoardCells;
   const services = window.__fmvGameplayServices;
   const scene = window.__fmvGameplayMapScreen;
-  {_runtime_scene_identity('window.__fmvItemInteractionHandler')}
+  {_runtime_scene_identity("window.__fmvItemInteractionHandler")}
   if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
       currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
@@ -1004,7 +1010,7 @@ def _drop_expression(start: GridCoord, end: GridCoord, scene_id: int | None) -> 
   const endCoord = {_coord(end)};
   const board = window.__fmvBoardCells;
   const handler = window.__fmvItemInteractionHandler;
-  {_runtime_scene_identity('handler')}
+  {_runtime_scene_identity("handler")}
   if (!board || window.__fmvRuntimeBoard !== board || !handler ||
       currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
@@ -1133,7 +1139,7 @@ def _crate_expression(limit: int, scene_id: int | None) -> str:
   const board = window.__fmvBoardCells;
   const signal = window.__fmvCrateSpawnSignal;
   const services = window.__fmvGameplayServices;
-  {_runtime_scene_identity('window.__fmvItemInteractionHandler')}
+  {_runtime_scene_identity("window.__fmvItemInteractionHandler")}
   if (!board || window.__fmvRuntimeBoard !== board || !signal ||
       currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', spawned: 0, detail: 'runtime-scene-changed'}};
@@ -1217,7 +1223,7 @@ def _interaction_expression(
   const rewardContainerHandler = window.__fmvRewardContainerHandler;
   const services = window.__fmvGameplayServices;
   const upgradeHandler = services?.upgradeCard;
-  {_runtime_scene_identity('handler')}
+  {_runtime_scene_identity("handler")}
   if (!board || window.__fmvRuntimeBoard !== board ||
       (!['reward', 'reward-container', 'clear', 'upgrade'].includes(expectedKind) && !handler) ||
       (expectedKind === 'clear' && !obstacleHandler) ||
@@ -1395,7 +1401,7 @@ def _removal_expression(
   const services = window.__fmvGameplayServices;
   const handler = window.__fmvShovelHandler;
   const itemHandler = window.__fmvItemInteractionHandler;
-  {_runtime_scene_identity('itemHandler')}
+  {_runtime_scene_identity("itemHandler")}
   if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
       handler?._services !== services ||
       handler._services?.shovelService !== services?.shovelService ||
@@ -1482,7 +1488,7 @@ def _shop_start_expression(shop_id: str, recipe_id: str, scene_id: int | None) -
   const board = window.__fmvBoardCells;
   const services = window.__fmvGameplayServices;
   const orders = window.__fmvOrdersService;
-  {_runtime_scene_identity('window.__fmvItemInteractionHandler')}
+  {_runtime_scene_identity("window.__fmvItemInteractionHandler")}
   if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
       services?.ordersService !== orders || currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
@@ -1515,7 +1521,7 @@ def _shop_claim_expression(shop_id: str, recipe_id: str, scene_id: int | None) -
   const board = window.__fmvBoardCells;
   const services = window.__fmvGameplayServices;
   const orders = window.__fmvOrdersService;
-  {_runtime_scene_identity('window.__fmvItemInteractionHandler')}
+  {_runtime_scene_identity("window.__fmvItemInteractionHandler")}
   if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
       services?.ordersService !== orders || currentSceneId !== {json.dumps(scene_id)})
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};

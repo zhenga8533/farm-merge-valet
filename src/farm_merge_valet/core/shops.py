@@ -58,10 +58,10 @@ class ShopPolicy:
     automation_enabled: bool = True
 
     def enables(self, order: ShopOrder) -> bool:
-        return self.automation_enabled and self.shop_overrides.get(
-            order.shop_id, self.shop_default_enabled
-        ) and (
-            self.recipe_overrides.get(order.recipe_id, self.recipe_default_enabled)
+        return (
+            self.automation_enabled
+            and self.shop_overrides.get(order.shop_id, self.shop_default_enabled)
+            and (self.recipe_overrides.get(order.recipe_id, self.recipe_default_enabled))
         )
 
     @property

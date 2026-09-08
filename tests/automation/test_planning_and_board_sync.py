@@ -3,6 +3,9 @@ from __future__ import annotations
 import logging
 from threading import Event, Lock
 
+import pytest
+
+from farm_merge_valet.automation.action_control import OperationKind
 from farm_merge_valet.automation.board_space import BoardSpaceRequest
 from farm_merge_valet.automation.bot import Bot, Phase
 from farm_merge_valet.automation.runtime import (
@@ -12,6 +15,7 @@ from farm_merge_valet.automation.runtime import (
     BuildingRequirement,
     CrateSpawnResult,
     LiveCellState,
+    RuntimeConnectionError,
     RuntimeHealth,
     RuntimeSnapshot,
 )
@@ -165,19 +169,34 @@ def test_repair_reservation_protects_exact_items_for_best_placed_shop() -> None:
     bot._blueprint_items = {"wood_2": wood}
     bot._building_repairs = (
         BuildingRepairState(
-            "barn", 0, False, True, False, False,
+            "barn",
+            0,
+            False,
+            True,
+            False,
+            False,
             (BuildingRequirement("wood_2", 2, 3),),
         ),
         BuildingRepairState(
-            "bakery", 0, True, True, False, False,
+            "bakery",
+            0,
+            True,
+            True,
+            False,
+            False,
             (BuildingRequirement("wood_2", 3, 3),),
         ),
     )
     for coord in ((0, 0), (1, 0), (2, 0)):
         bot.board.set_cell(coord, Cell(CellKind.ITEM, wood))
     action = MergeAction(
-        MergeActionKind.TRIGGER, wood, (0, 0), (1, 0),
-        frozenset({(0, 0), (1, 0), (2, 0)}), 3, MoveEffect.MERGE,
+        MergeActionKind.TRIGGER,
+        wood,
+        (0, 0),
+        (1, 0),
+        frozenset({(0, 0), (1, 0), (2, 0)}),
+        3,
+        MoveEffect.MERGE,
     )
 
     assert bot._repair_target() is not None
@@ -191,7 +210,12 @@ def test_absent_buildings_never_reserve_resources() -> None:
     bot._blueprint_items = {"wood_2": wood}
     bot._building_repairs = (
         BuildingRepairState(
-            "future_shop", 0, True, False, False, False,
+            "future_shop",
+            0,
+            True,
+            False,
+            False,
+            False,
             (BuildingRequirement("wood_2", 99, 3),),
         ),
     )
@@ -286,9 +310,7 @@ def test_crate_reserve_stays_in_explicit_blocked_space_request() -> None:
     assert bot.phase is Phase.MERGE
     assert bot._board_space_request is not None
     assert bot._board_space_request.requester == "crate-reserve"
-    assert bot._continue_board_space_request(
-        runtime_health, bot._assess_board_space(), [], [], []
-    )
+    assert bot._continue_board_space_request(runtime_health, bot._assess_board_space(), [], [], [])
     assert bot.phase is Phase.MERGE
     assert bot.runtime.spawn_limits == []
     assert bot._next_loop_delay == bot.config.idle_wait_seconds
@@ -297,9 +319,7 @@ def test_crate_reserve_stays_in_explicit_blocked_space_request() -> None:
 def test_stale_board_space_request_is_cancelled_from_new_snapshot() -> None:
     bot = bare_bot()
     bot._storage_bubbles = ()
-    bot._board_space_request = BoardSpaceRequest(
-        "storage-bubble", 1, Phase.CLAIM_CRATES, (41,)
-    )
+    bot._board_space_request = BoardSpaceRequest("storage-bubble", 1, Phase.CLAIM_CRATES, (41,))
 
     assert not bot._continue_board_space_request(
         health(advancing=True), bot._assess_board_space(), [], [], []
@@ -329,6 +349,23 @@ def test_exhausted_crates_use_configured_idle_delay(monkeypatch, caplog) -> None
     assert not any(
         getattr(record, "fmv_event", None) == "crate.claim_started" for record in caplog.records
     )
+    assert bot._actions().active is None
+
+
+def test_crate_connection_loss_releases_the_global_action_lease() -> None:
+    bot = bare_bot()
+    bot.board.set_cell((0, 0), Cell(CellKind.EMPTY))
+
+    def lose_response(_limit):
+        raise RuntimeConnectionError("lost response")
+
+    bot.runtime.spawn_supply_crates = lose_response
+
+    with pytest.raises(RuntimeConnectionError, match="lost response"):
+        bot._step_claim_crates(health(advancing=True), bot._assess_board_space())
+
+    assert bot._actions().active is None
+    assert bot._actions().available(OperationKind.MERGE, ("next",), float("inf"))
 
 
 def test_merge_five_policy_does_not_fall_back_while_space_remains(monkeypatch) -> None:
@@ -477,9 +514,7 @@ def test_live_sync_classifies_only_catalogued_collectable_items(monkeypatch) -> 
     bot._blueprint_items = {}
     bot._direct_interaction_ids = frozenset({"milk", "ticket", "crate_1"})
     bot.runtime.board_state = {
-        (0, 0): LiveCellState(
-            True, "milk", collectable=True, collectable_ingredient=True
-        ),
+        (0, 0): LiveCellState(True, "milk", collectable=True, collectable_ingredient=True),
         (1, 0): LiveCellState(True, "ticket", collectable=True),
         (2, 0): LiveCellState(True, "upgrade_card_1", collectable=True),
     }

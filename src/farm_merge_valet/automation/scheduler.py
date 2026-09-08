@@ -19,9 +19,7 @@ class AdaptiveScheduler:
         if self.latency_ewma is None:
             self.latency_ewma = sample
         else:
-            self.latency_ewma = (
-                _EWMA_ALPHA * sample + (1.0 - _EWMA_ALPHA) * self.latency_ewma
-            )
+            self.latency_ewma = _EWMA_ALPHA * sample + (1.0 - _EWMA_ALPHA) * self.latency_ewma
 
     def reset(self) -> None:
         self.latency_ewma = None

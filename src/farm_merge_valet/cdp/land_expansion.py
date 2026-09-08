@@ -47,6 +47,7 @@ def land_expansion_action_expression(
     area_id: str,
     premium: bool,
     requirements: tuple[tuple[str, int], ...],
+    minimum_balance_after: int,
     scene_id: int | None,
 ) -> str:
     expected = json.dumps(
@@ -54,6 +55,7 @@ def land_expansion_action_expression(
             "areaID": area_id,
             "premium": premium,
             "requirements": [{"key": key, "amount": amount} for key, amount in requirements],
+            "minimumBalanceAfter": minimum_balance_after,
             "sceneID": scene_id,
         }
     )
@@ -80,6 +82,12 @@ def land_expansion_action_expression(
     return {{status: 'stale-source', detail: 'land-expansion-cost-changed'}};
   if (service.canUnlockArea(area) !== true)
     return {{status: 'rejected', detail: 'land-expansion-requirements-not-met'}};
+  const currency = expected.premium ? 'gems' : 'coins';
+  const cost = expected.requirements.find((requirement) => requirement.key === currency)?.amount;
+  const balance = services?.ordersService?._inventory?.getInventoryItem?.(currency)?.amount;
+  if (!Number.isInteger(cost) || !Number.isInteger(balance) ||
+      balance - cost < expected.minimumBalanceAfter)
+    return {{status: 'rejected', detail: 'land-expansion-reserve-not-met'}};
   try {{
     service.unlockArea(area);
     return area.state === 2

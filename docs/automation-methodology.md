@@ -86,7 +86,7 @@ runtime update that breaks discovery fails closed with structured health and
 action diagnostics; physical input is never used as a fallback.
 
 A lightweight `requestAnimationFrame` counter measures whether the local game
-loop is advancing. Actions require a newer frame whose age is at most 500 ms.
+loop is advancing. Actions require a newer frame whose age is at most 1.5 seconds.
 The bot may continue observing while it is frozen, but sends no actions and
 queues no retries. This prevents a background-tab suspension from being
 mistaken for an action failure.
@@ -282,10 +282,12 @@ cost; premium areas independently require an allowed crystal cost.
 Planning preserves the native service order and prefers the standard candidate
 when both are permitted. Immediately before submission, the runtime revalidates
 the scene, service identity, next area, purchasable state, exact requirements,
-and native affordability check. It then calls the game's native unlock handler,
-which deducts requirements and emits normal progression events. The action
-remains single-flight until a later snapshot confirms that the area is no
-longer the current locked candidate.
+native affordability check, live currency balance, and configured post-purchase
+reserve. Missing or stale balance data fails closed. It then calls the game's
+native unlock handler, which deducts requirements and emits normal progression
+events. The intent is recorded before dispatch so a lost response remains
+single-flight until a later snapshot confirms whether the area is still the
+current locked candidate.
 
 ## Marketplace purchases
 

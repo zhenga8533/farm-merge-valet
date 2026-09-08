@@ -277,9 +277,7 @@ def load_item_catalog(path: Path) -> ItemCatalog:
     return ItemCatalog(
         items=items,
         variants=variants,
-        source_fingerprint=(
-            fingerprint if isinstance(fingerprint, str) and fingerprint else None
-        ),
+        source_fingerprint=(fingerprint if isinstance(fingerprint, str) and fingerprint else None),
         marketplace_offers=marketplace_offers,
     )
 

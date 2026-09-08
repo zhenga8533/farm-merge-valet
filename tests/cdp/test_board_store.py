@@ -211,9 +211,7 @@ def test_board_reader_derives_reward_container_capacity_and_ids(monkeypatch) -> 
                 "objectID": 55,
                 "claimOutputCapacity": 6,
                 "claimOutputIDs": ["sticker_pack", "energy_1"],
-                "rewardRequirements": [
-                    {"blueprintID": "reward_crate_key_gold", "amount": 2}
-                ],
+                "rewardRequirements": [{"blueprintID": "reward_crate_key_gold", "amount": 2}],
                 "rewardRequirementsMet": False,
                 "behaviorNames": ["crateReward", "cooldown"],
             }
@@ -225,9 +223,7 @@ def test_board_reader_derives_reward_container_capacity_and_ids(monkeypatch) -> 
     assert state is not None
     assert state[(4, 8)].claim_output_capacity == 6
     assert state[(4, 8)].claim_output_ids == frozenset({"sticker_pack", "energy_1"})
-    assert state[(4, 8)].reward_requirements == (
-        RewardRequirement("reward_crate_key_gold", 2),
-    )
+    assert state[(4, 8)].reward_requirements == (RewardRequirement("reward_crate_key_gold", 2),)
     assert state[(4, 8)].reward_requirements_met is False
 
     from farm_merge_valet.cdp.board_store import _READ_EXPRESSION

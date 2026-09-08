@@ -53,18 +53,28 @@ def parse_building_repairs(raw: object) -> tuple[BuildingRepairState, ...] | Non
             blueprint_id = requirement.get("blueprintID")
             amount = requirement.get("amount")
             available = requirement.get("available")
-            if (isinstance(blueprint_id, str) and isinstance(amount, int)
-                    and not isinstance(amount, bool) and amount > 0
-                    and isinstance(available, int) and not isinstance(available, bool)
-                    and available >= 0):
+            if (
+                isinstance(blueprint_id, str)
+                and isinstance(amount, int)
+                and not isinstance(amount, bool)
+                and amount > 0
+                and isinstance(available, int)
+                and not isinstance(available, bool)
+                and available >= 0
+            ):
                 requirements.append(BuildingRequirement(blueprint_id, amount, available))
         level = entry.get("level")
-        states.append(BuildingRepairState(
-            building_id=entry["buildingID"],
-            level=level if isinstance(level, int) and not isinstance(level, bool) else 0,
-            workshop=entry.get("workshop") is True, placed=entry.get("placed") is True,
-            active=entry.get("active") is True, upgrading=entry.get("upgrading") is True,
-            requirements=tuple(requirements)))
+        states.append(
+            BuildingRepairState(
+                building_id=entry["buildingID"],
+                level=level if isinstance(level, int) and not isinstance(level, bool) else 0,
+                workshop=entry.get("workshop") is True,
+                placed=entry.get("placed") is True,
+                active=entry.get("active") is True,
+                upgrading=entry.get("upgrading") is True,
+                requirements=tuple(requirements),
+            )
+        )
     return tuple(states)
 
 

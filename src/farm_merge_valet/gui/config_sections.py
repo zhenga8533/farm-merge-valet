@@ -37,9 +37,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "building_repair_default_enabled",
         "building_repair_overrides",
     ),
-    ConfigSection.MARKETPLACE: (
-        "marketplace_policy_overrides",
-    ),
+    ConfigSection.MARKETPLACE: ("marketplace_policy_overrides",),
     ConfigSection.BROWSER: (
         "window_title",
         "browser",

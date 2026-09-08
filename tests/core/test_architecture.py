@@ -78,6 +78,48 @@ def test_runtime_contract_is_adapter_neutral() -> None:
     assert not violations, "Forbidden runtime contract imports:\n" + "\n".join(violations)
 
 
+def test_automation_does_not_import_concrete_adapters_or_gui() -> None:
+    forbidden = (
+        "farm_merge_valet.browser",
+        "farm_merge_valet.cdp",
+        "farm_merge_valet.composition",
+        "farm_merge_valet.gui",
+    )
+    violations = _violations((SOURCE_ROOT / "automation").rglob("*.py"), forbidden)
+    assert not violations, "Forbidden automation imports:\n" + "\n".join(violations)
+
+
+def test_adapters_and_configuration_do_not_import_outer_layers() -> None:
+    cdp_forbidden = (
+        "farm_merge_valet.browser",
+        "farm_merge_valet.catalog",
+        "farm_merge_valet.composition",
+        "farm_merge_valet.config",
+        "farm_merge_valet.gui",
+    )
+    config_forbidden = (
+        "farm_merge_valet.automation",
+        "farm_merge_valet.browser",
+        "farm_merge_valet.catalog",
+        "farm_merge_valet.cdp",
+        "farm_merge_valet.composition",
+        "farm_merge_valet.gui",
+        "farm_merge_valet.observability",
+    )
+    violations = _violations((SOURCE_ROOT / "cdp").rglob("*.py"), cdp_forbidden)
+    violations.extend(_violations((SOURCE_ROOT / "config").rglob("*.py"), config_forbidden))
+    assert not violations, "Forbidden adapter/configuration imports:\n" + "\n".join(violations)
+
+
+def test_browser_and_observability_do_not_import_gui_or_composition() -> None:
+    forbidden = ("farm_merge_valet.composition", "farm_merge_valet.gui")
+    paths = tuple((SOURCE_ROOT / "browser").rglob("*.py")) + tuple(
+        (SOURCE_ROOT / "observability").rglob("*.py")
+    )
+    violations = _violations(paths, forbidden)
+    assert not violations, "Forbidden infrastructure imports:\n" + "\n".join(violations)
+
+
 def test_retired_module_paths_are_absent_and_unreferenced() -> None:
     retired_paths = (
         SOURCE_ROOT / "config.py",

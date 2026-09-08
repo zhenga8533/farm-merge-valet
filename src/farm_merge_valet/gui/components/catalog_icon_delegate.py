@@ -22,8 +22,6 @@ class CatalogIconDelegate(QStyledItemDelegate):
         identity = index.data(Qt.ItemDataRole.UserRole)
         option.decorationSize = (
             STRUCTURE_ICON_SIZE
-            if isinstance(identity, tuple)
-            and identity
-            and identity[0] in {"shop", "building"}
+            if isinstance(identity, tuple) and identity and identity[0] in {"shop", "building"}
             else POLICY_ICON_SIZE
         )

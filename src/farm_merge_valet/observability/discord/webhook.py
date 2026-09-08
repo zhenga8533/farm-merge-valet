@@ -108,9 +108,7 @@ class DiscordWebhookTransportMixin:
         for attempt in range(3):
             try:
                 if attachment is None:
-                    response = client.post(
-                        self._url, params={"wait": "true"}, json=payload
-                    )
+                    response = client.post(self._url, params={"wait": "true"}, json=payload)
                 else:
                     response = client.post(
                         self._url,

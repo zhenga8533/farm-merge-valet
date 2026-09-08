@@ -234,8 +234,10 @@ Land expansion is disabled by default. When enabled, the bot reads the next
 standard and premium plots from their separate native area services and only
 unlocks an affordable plot whose coin or crystal cost is within its configured
 per-purchase maximum. Both maxima default to zero, so enabling the master switch
-alone cannot spend currency. The exact area, requirements, affordability, and
-runtime scene are revalidated immediately before the native unlock call.
+alone cannot spend currency. Configured coin and crystal reserves must remain
+after the purchase; unknown balances fail closed. The exact area, requirements,
+affordability, balance, reserve, and runtime scene are revalidated immediately
+before the native unlock call.
 
 The Marketplace page uses the same synchronized, game-derived catalog as the
 item and shop pages. It contains the flash candidates and literal free claims
@@ -299,7 +301,9 @@ browser profile; an unowned browser is never modified.
 Manual game-data synchronization refreshes atlas files even when their CDN paths
 are unchanged. The atlas cache also records complete versioned source URLs so
 normal CLI synchronization refreshes entries when the game version changes. A
-new catalog is published only after all referenced assets compile successfully.
+new catalog generation replaces the previous catalog and assets only after all
+referenced assets compile successfully; a failed build leaves the previous
+generation intact.
 
 On a fresh installation, the Items and Shops pages present a shared catalog
 onboarding state instead of empty tables. “Open game and synchronize” prepares

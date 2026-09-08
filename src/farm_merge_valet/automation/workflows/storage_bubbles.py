@@ -121,9 +121,7 @@ class StorageBubbleWorkflow:
         )
         return True
 
-    def step(
-        self, bot: Bot, health: RuntimeHealth, board_space: BoardSpaceAssessment
-    ) -> bool:
+    def step(self, bot: Bot, health: RuntimeHealth, board_space: BoardSpaceAssessment) -> bool:
         if not bot.config.auto_pop_storage_bubbles:
             return False
         now = bot._now()

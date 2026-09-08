@@ -178,9 +178,7 @@ def plan_marketplace_purchase(
         )
         if (
             live is None
-            or (
-                offer is not None and not live_offer_matches_catalog(offer, live)
-            )
+            or (offer is not None and not live_offer_matches_catalog(offer, live))
             or (
                 offer is None
                 and not (

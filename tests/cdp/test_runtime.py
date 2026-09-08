@@ -1006,9 +1006,7 @@ def test_concurrent_heap_recovery_is_single_flight_per_target(monkeypatch) -> No
     )
     results: list[bool] = []
     first = Thread(target=lambda: results.append(adapters[0]._recover_board_from_heap()))
-    second = Thread(
-        target=lambda: results.append(adapters[1]._recover_board_from_heap())
-    )
+    second = Thread(target=lambda: results.append(adapters[1]._recover_board_from_heap()))
 
     first.start()
     assert scan_started.wait(1)

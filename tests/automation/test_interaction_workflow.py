@@ -195,9 +195,7 @@ def test_storage_bubble_pop_requires_open_board_space() -> None:
 
     bot.board.set_cell((1, 1), Cell(CellKind.EMPTY))
 
-    assert bot._step_storage_bubbles(
-        health(advancing=True), bot._assess_board_space()
-    )
+    assert bot._step_storage_bubbles(health(advancing=True), bot._assess_board_space())
     assert bot.runtime.popped_storage_bubbles == [41]
     assert bot._storage_bubble_workflow.pending is not None
 
@@ -208,9 +206,7 @@ def test_storage_bubble_pop_respects_global_toggle() -> None:
     bot.board.set_cell((1, 1), Cell(CellKind.EMPTY))
     bot._storage_bubbles = (StorageBubbleState(41, ("energy_1",)),)
 
-    assert not bot._step_storage_bubbles(
-        health(advancing=True), bot._assess_board_space()
-    )
+    assert not bot._step_storage_bubbles(health(advancing=True), bot._assess_board_space())
     assert bot.runtime.popped_storage_bubbles == []
 
 
@@ -1554,6 +1550,4 @@ def test_connection_loss_preserves_pending_interaction_and_global_lease() -> Non
 
     assert bot._interaction_workflow.pending is not None
     assert bot._actions().active is not None
-    assert not bot._submit_merge(
-        action(ItemRef("ingredients", "milk", 1)), health(advancing=True)
-    )
+    assert not bot._submit_merge(action(ItemRef("ingredients", "milk", 1)), health(advancing=True))
