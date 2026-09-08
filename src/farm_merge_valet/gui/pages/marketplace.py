@@ -62,6 +62,10 @@ class MarketplacePage(AppPage):
         self._group_toggles: dict[str, PolicyCheckBox] = {}
         self._group_policy_keys: dict[str, tuple[str, ...]] = {}
         self._group_items: dict[str, QTreeWidgetItem] = {}
+        self._family_toggles: dict[tuple[str, str], PolicyCheckBox] = {}
+        self._family_policy_keys: dict[tuple[str, str], tuple[str, ...]] = {}
+        self._family_items: dict[tuple[str, str], QTreeWidgetItem] = {}
+        self._has_populated_catalog = False
         self.configuration_header = ConfigurationHeader("Reset marketplace policies")
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
@@ -127,6 +131,7 @@ class MarketplacePage(AppPage):
 
     def populate(self) -> None:
         expanded = expanded_policy_keys(self.tree)
+        expand_groups_by_default = not self._has_populated_catalog
         self.tree.setSortingEnabled(False)
         self.tree.clear()
         self._toggles = {}
@@ -134,6 +139,9 @@ class MarketplacePage(AppPage):
         self._group_toggles = {}
         self._group_policy_keys = {}
         self._group_items = {}
+        self._family_toggles = {}
+        self._family_policy_keys = {}
+        self._family_items = {}
         self._catalog = load_gui_catalog(self._config)
         grouped: dict[str, list[MarketplaceOffer]] = defaultdict(list)
         if self._catalog is None or not self._catalog.marketplace_offers:
@@ -147,7 +155,12 @@ class MarketplacePage(AppPage):
         for offer in self._catalog.marketplace_offers:
             grouped[offer.group].append(offer)
         for group, offers in grouped.items():
-            parent = PolicyTreeItem((group, "", ""))
+            families: dict[tuple[str, str], list[MarketplaceOffer]] = defaultdict(list)
+            for offer in offers:
+                family_key, family_name = self._offer_family(offer)
+                families[(family_key, family_name)].append(offer)
+            group_label = self._group_label(group, families)
+            parent = PolicyTreeItem((group_label, "", ""))
             parent.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
             parent_font = parent.font(0)
             parent_font.setWeight(QFont.Weight.DemiBold)
@@ -162,8 +175,22 @@ class MarketplacePage(AppPage):
                 sort_value="Group",
                 search_text="Group",
             )
-            for offer in offers:
-                self._add_offer(parent, offer)
+            if group == "Free Claims":
+                for offer in offers:
+                    self._add_offer(parent, offer, nested=False)
+            else:
+                for (family_key, family_name), family_offers in families.items():
+                    if len(family_offers) == 1:
+                        self._add_offer(parent, family_offers[0], nested=False)
+                    else:
+                        self._add_family(
+                            parent,
+                            group,
+                            family_key,
+                            family_name,
+                            family_offers,
+                            expanded,
+                        )
             policy_keys = tuple(offer.policy_key for offer in offers)
             state = aggregate_check_state(
                 [self._config.marketplace_policy_enabled(key) for key in policy_keys]
@@ -172,7 +199,7 @@ class MarketplacePage(AppPage):
             configure_policy_toggle(group_toggle)
             group_toggle.setTristate(True)
             group_toggle.setCheckState(state)
-            group_toggle.setAccessibleName(f"{group}: auto-purchase for all offers")
+            group_toggle.setAccessibleName(f"{group_label}: auto-purchase for all offers")
             group_toggle.setToolTip(group_toggle.accessibleName())
             group_toggle.clicked.connect(
                 lambda checked, keys=policy_keys: self._set_group(keys, checked)
@@ -187,7 +214,7 @@ class MarketplacePage(AppPage):
             self._group_toggles[group] = group_toggle
             self._group_policy_keys[group] = policy_keys
             self._group_items[group] = parent
-            parent.setExpanded(("group", group) in expanded)
+            parent.setExpanded(expand_groups_by_default or ("group", group) in expanded)
         self.tree.setSortingEnabled(True)
         fit_policy_widget_column(
             self.tree,
@@ -201,8 +228,62 @@ class MarketplacePage(AppPage):
             else Qt.SortOrder.AscendingOrder,
         )
         self._filter(self.toolbar.search.text())
+        self._has_populated_catalog = True
 
-    def _add_offer(self, parent: QTreeWidgetItem, offer: MarketplaceOffer) -> None:
+    def _add_family(
+        self,
+        parent: QTreeWidgetItem,
+        group: str,
+        family_key: str,
+        family_name: str,
+        offers: list[MarketplaceOffer],
+        expanded: set[object],
+    ) -> None:
+        family = PolicyTreeItem((family_name, "", ""))
+        family.setData(0, Qt.ItemDataRole.UserRole, ("family", group, family_key))
+        family.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
+        representative = min(
+            (
+                item
+                for offer in offers
+                if (item := self._catalog_item(offer.reward_key)) is not None
+            ),
+            key=lambda item: (item.tier is None, item.tier or 0, item.game_id),
+            default=None,
+        )
+        family.setIcon(0, self._icons.icon_for(representative))
+        if representative is not None:
+            family.setToolTip(0, f"{family_name}\nRepresentative: {representative.game_id}")
+        parent.addChild(family)
+        set_policy_widget(
+            self.tree,
+            family,
+            1,
+            policy_badge("Family"),
+            sort_value="Family",
+            search_text=family_name,
+        )
+        for offer in offers:
+            self._add_offer(family, offer, nested=True)
+        policy_keys = tuple(offer.policy_key for offer in offers)
+        state = aggregate_check_state(
+            [self._config.marketplace_policy_enabled(key) for key in policy_keys]
+        )
+        toggle = PolicyCheckBox()
+        configure_policy_toggle(toggle)
+        toggle.setTristate(True)
+        toggle.setCheckState(state)
+        toggle.setAccessibleName(f"{family_name}: auto-purchase for all offers")
+        toggle.setToolTip(toggle.accessibleName())
+        toggle.clicked.connect(lambda checked, keys=policy_keys: self._set_group(keys, checked))
+        set_policy_widget(self.tree, family, 2, policy_cell(toggle), sort_value=state.value)
+        identity = (group, family_key)
+        self._family_toggles[identity] = toggle
+        self._family_policy_keys[identity] = policy_keys
+        self._family_items[identity] = family
+        family.setExpanded(("family", group, family_key) in expanded)
+
+    def _add_offer(self, parent: QTreeWidgetItem, offer: MarketplaceOffer, *, nested: bool) -> None:
         cost = (
             "Free"
             if offer.payment_type == "free"
@@ -210,12 +291,21 @@ class MarketplacePage(AppPage):
         )
         cost_tone = "free" if offer.payment_type == "free" else offer.payment_key
         quantity = f" \u00d7{offer.reward_amount}" if offer.reward_amount > 1 else ""
-        item = PolicyTreeItem((f"{offer.display_name}{quantity}", "", ""))
-        item.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
         catalog_item = self._catalog_item(offer.reward_key)
-        item.setIcon(0, self._icons.icon_for(catalog_item))
+        label = offer.display_name
         if catalog_item is not None:
-            item.setText(0, f"{catalog_item.display_name}{quantity}")
+            label = (
+                catalog_item.variant_label
+                if nested and catalog_item.variant_label
+                else (
+                    f"Tier {catalog_item.tier}"
+                    if nested and catalog_item.tier is not None
+                    else catalog_item.display_name
+                )
+            )
+        item = PolicyTreeItem((f"{label}{quantity}", "", ""))
+        item.setSizeHint(0, QSize(0, POLICY_MEDIA_ROW_HEIGHT))
+        item.setIcon(0, self._icons.icon_for(catalog_item))
         item.setData(0, Qt.ItemDataRole.UserRole, offer.policy_key)
         item.setToolTip(0, offer.policy_key)
         parent.addChild(item)
@@ -235,6 +325,29 @@ class MarketplacePage(AppPage):
         set_policy_widget(self.tree, item, 2, policy_cell(toggle), sort_value=toggle.isChecked())
         self._toggles[offer.policy_key] = toggle
         self._tree_items[offer.policy_key] = item
+
+    def _offer_family(self, offer: MarketplaceOffer) -> tuple[str, str]:
+        item = self._catalog_item(offer.reward_key)
+        if item is None:
+            return offer.reward_key, offer.display_name
+        return item.group_id or item.family_id, item.group_name or item.display_name
+
+    def _group_label(
+        self, group: str, families: dict[tuple[str, str], list[MarketplaceOffer]]
+    ) -> str:
+        catalog_items = [
+            item
+            for offers in families.values()
+            for offer in offers
+            if (item := self._catalog_item(offer.reward_key)) is not None
+        ]
+        if catalog_items and all(item.category == "structures" for item in catalog_items):
+            return "Buildings"
+        family_names = {family_name for _, family_name in families}
+        if group in family_names and len(family_names) > 1:
+            others = sorted(family_names - {group})
+            return " / ".join((group, *others))
+        return group
 
     def _catalog_item(self, reward_key: str) -> CatalogItem | None:
         if self._catalog is None:
@@ -315,6 +428,17 @@ class MarketplacePage(AppPage):
             toggle.setCheckState(state)
             toggle.blockSignals(False)
             set_policy_value(self._group_items[group], 2, state.value)
+        for family, toggle in self._family_toggles.items():
+            state = aggregate_check_state(
+                [
+                    self._config.marketplace_policy_enabled(key)
+                    for key in self._family_policy_keys[family]
+                ]
+            )
+            toggle.blockSignals(True)
+            toggle.setCheckState(state)
+            toggle.blockSignals(False)
+            set_policy_value(self._family_items[family], 2, state.value)
         self._sync_bulk_header()
 
     def _sync_bulk_header(self) -> None:

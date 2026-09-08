@@ -203,7 +203,7 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
     app.processEvents()
 
 
-def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path) -> None:
+def test_marketplace_page_defaults_free_claims_on_and_expands_groups(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     catalog_dir = tmp_path / "catalog"
     write_item_catalog(catalog_dir / "catalog.json", _catalog())
@@ -227,7 +227,7 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
     )
 
     assert all(
-        not page.tree.topLevelItem(row).isExpanded() for row in range(page.tree.topLevelItemCount())
+        page.tree.topLevelItem(row).isExpanded() for row in range(page.tree.topLevelItemCount())
     )
     assert page._group_toggles["Free Claims"].checkState() == Qt.CheckState.Checked
     assert page._group_toggles["Ingredients"].checkState() == Qt.CheckState.Unchecked
@@ -237,6 +237,7 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
         if page.tree.topLevelItem(row).text(0) == "Ingredients"
     )
     assert ingredients is not None
+    assert ingredients.childCount() == 1
     wheat = next(
         ingredients.child(row)
         for row in range(ingredients.childCount())
@@ -256,6 +257,16 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
     free_label = page.tree.itemWidget(free_claims.child(0), 1).findChild(QLabel)
     assert free_label.text() == "Free"
     assert free_label.property("tone") == "free"
+    assert not page._family_toggles
+
+    ingredients.setExpanded(False)
+    page.populate()
+    refreshed_ingredients = next(
+        page.tree.topLevelItem(row)
+        for row in range(page.tree.topLevelItemCount())
+        if page.tree.topLevelItem(row).text(0) == "Ingredients"
+    )
+    assert not refreshed_ingredients.isExpanded()
 
     page._group_toggles["Ingredients"].click()
     assert all(page._toggles[key].isChecked() for key in page._group_policy_keys["Ingredients"])
@@ -273,6 +284,66 @@ def test_marketplace_page_defaults_free_claims_on_and_groups_collapsed(tmp_path)
     marketplace_automation_toggle.click()
     assert not window._draft.marketplace_automation_enabled
     assert page._config.marketplace_policy_overrides == selected_offers
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_marketplace_groups_multi_tier_structure_families_with_an_icon(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    items = {
+        f"greenhouse_{tier}": CatalogItem(
+            game_id=f"greenhouse_{tier}",
+            family_id="greenhouse",
+            policy_key="structures/greenhouse",
+            category="structures",
+            display_name="Greenhouse",
+            tier=tier,
+            mergeable=True,
+            merge_target=f"greenhouse_{tier + 1}",
+            asset_alias=f"greenhouse_{tier}",
+            asset_path=f"structures/greenhouse/greenhouse_{tier}.png",
+            capabilities=frozenset({"mergeable", "building"}),
+        )
+        for tier in (3, 4)
+    }
+    base_offer = marketplace_catalog()[0]
+    offers = tuple(
+        replace(
+            base_offer,
+            group="Greenhouse",
+            display_name=f"Greenhouse {tier}",
+            reward_key=f"greenhouse_{tier}",
+            reward_amount=1,
+            candidate_key=f"greenhouse_{tier}",
+        )
+        for tier in (3, 4)
+    )
+    write_item_catalog(catalog_dir / "catalog.json", ItemCatalog(items, marketplace_offers=offers))
+    for item in items.values():
+        path = catalog_dir / item.asset_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(QColor("#238636"))
+        assert pixmap.save(str(path))
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+
+    buildings = window.marketplace_page.tree.topLevelItem(0)
+    assert buildings.text(0) == "Buildings"
+    assert buildings.childCount() == 1
+    greenhouse = buildings.child(0)
+    assert greenhouse.text(0) == "Greenhouse"
+    assert not greenhouse.icon(0).isNull()
+    assert buildings.isExpanded()
+    assert not greenhouse.isExpanded()
+    assert [greenhouse.child(index).text(0) for index in range(greenhouse.childCount())] == [
+        "Tier 3",
+        "Tier 4",
+    ]
+    assert ("Greenhouse", "greenhouse") in window.marketplace_page._family_toggles
 
     window.quit_application()
     app.processEvents()

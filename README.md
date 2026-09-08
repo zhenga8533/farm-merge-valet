@@ -249,7 +249,12 @@ Selections use stable slot-plus-candidate identities, so a rotating flash slot
 cannot cause a different item to be bought. Enabled finite stock is drained one
 verified unit per bot iteration; the bot never buys ordinary marketplace offers
 or refreshes flash deals. A master switch pauses all marketplace purchases without
-discarding those individual selections.
+discarding those individual selections. Flash offers are organized by marketplace
+slot, catalog family, and tier or variant, with tri-state controls at both grouping
+levels. Families with only one offer are shown directly to avoid redundant
+dropdowns, structure candidates are grouped under Buildings, and free claims
+remain a flat group. Slot groups initially expand to expose their icons and
+immediate choices; later refreshes preserve the user's expansion state.
 
 Before each marketplace submission, the runtime rechecks the exact live reward,
 payment type, currency, price, stock, and current flash candidate. A timeout or
