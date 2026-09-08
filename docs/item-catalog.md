@@ -1,7 +1,7 @@
 # Item Catalog and Compiled Assets
 
-The checked-in item catalog is the semantic source for board recognition and
-GUI presentation. It is generated from the running game's blueprint
+The generated local item catalog is the semantic source for board recognition
+and GUI presentation. It is generated from the running game's blueprint
 collection, blueprint graph, building configuration, recipe configuration, and
 sprite atlases.
 
@@ -23,11 +23,11 @@ Each catalog entry keeps these concepts separate:
 - shops also retain `available_recipe_ids`; recipes retain their owner shop,
   duration, ingredient IDs and amounts, and exact reward IDs.
 
-The current catalog covers all ten crop and ten animal families, fourteen
-shops and their seventy recipes, nineteen repairable buildings, greenhouse
-and Grand Gazebo chains, both mergeable and placed Park Decoration identities,
-flowers, seasonal collections, balances, building resources, obstacle
-variants, reward chests and keys, event chains, and upgrade cards.
+The catalog discovers crop and animal families, shops and recipes, repairable
+buildings, Greenhouse and Grand Gazebo chains, both mergeable and placed Park
+Decoration identities, flowers, seasonal collections, balances, building
+resources, obstacle variants, reward chests and keys, event chains, and upgrade
+cards. Counts are intentionally not fixed because game content can change.
 
 ## Mergeability
 
@@ -68,10 +68,11 @@ as producer cooldown/depleted frames and broken/repaired building frames live
 in a sibling `variants` directory and retain their exact atlas aliases. The
 top-level `variants` mapping in `catalog.json` records each variant's semantic
 state, alias, and path; consumers never need to infer states from filenames.
-Catalog schema version 7 also records a compact source fingerprint. Startup
-compares it before requesting full blueprint metadata, avoiding a complete
-catalog extraction when game data is unchanged. Version 6 caches remain
-readable and receive a fingerprint on their next live refresh.
+Catalog schema version 8 records marketplace discovery data in addition to the
+compact source fingerprint introduced by version 7. Startup compares the
+fingerprint before requesting full blueprint metadata, avoiding a complete
+catalog extraction when game data is unchanged. Version 6 and 7 caches remain
+readable and are upgraded during later synchronization.
 Variant discovery uses exact numbered-family and building-state identities so
 similarly prefixed, unrelated game assets cannot be grouped together.
 Compilation fails if a declared alias is missing. Catalog metadata and compiled
@@ -89,9 +90,11 @@ discovery/compiler implementation and synthetic test fixtures. The desktop GUI
 resolves icons directly from each catalog entry's `asset_path` for item
 families, shops, and recipes; missing or unreadable images degrade to text-only
 rows.
+
 The Browser page can clear both generated catalog and atlas directories after
 confirmation without removing application settings, browser-profile data, logs,
 or runtime state.
+
 It also compares the catalog's source fingerprint with the running game during
 browser status checks and bot startup. A confirmed mismatch is presented as an
 available update; cache age by itself is never treated as evidence of staleness.

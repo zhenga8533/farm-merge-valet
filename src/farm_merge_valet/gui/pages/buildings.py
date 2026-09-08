@@ -17,7 +17,6 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
 )
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
-from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_ROW_HEIGHT,
     POLICY_MEDIA_ROW_HEIGHT,
@@ -70,12 +69,6 @@ class BuildingsPage(AppPage):
         self.catalog_onboarding = CatalogOnboarding()
         self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
         self.page_layout.addWidget(self.catalog_onboarding, 1, Qt.AlignmentFlag.AlignCenter)
-        self.loading_state = LoadingState(
-            "Loading building policies…",
-            "Reading live repair status and material requirements from the game.",
-        )
-        self.page_layout.addWidget(self.loading_state, 1, Qt.AlignmentFlag.AlignCenter)
-
         scaffold = create_policy_tree(
             header_labels=("Building / requirement", "Type", "Availability", "Repair", ""),
             bulk_labels={4: "Preserve"},
@@ -398,22 +391,14 @@ class BuildingsPage(AppPage):
         self.bulk_header.set_state(4, Qt.CheckState.Unchecked, enabled=False)
 
     def _show_catalog_onboarding(self) -> None:
-        self.loading_state.setVisible(False)
         self.catalog_onboarding.setVisible(True)
         self.toolbar.setVisible(False)
         self.tree.setVisible(False)
 
     def _show_catalog_content(self) -> None:
-        self.loading_state.setVisible(False)
         self.catalog_onboarding.setVisible(False)
         self.toolbar.setVisible(True)
         self.tree.setVisible(True)
-
-    def _show_loading(self) -> None:
-        self.catalog_onboarding.setVisible(False)
-        self.toolbar.setVisible(False)
-        self.tree.setVisible(False)
-        self.loading_state.setVisible(True)
 
     @staticmethod
     def _repair_status(state: BuildingRepairState) -> str:

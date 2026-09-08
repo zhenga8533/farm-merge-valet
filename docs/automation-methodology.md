@@ -294,7 +294,7 @@ current locked candidate.
 Marketplace state is included in the atomic snapshot whenever the master switch
 and at least one offer policy are enabled, or whenever a purchase is pending. The catalog gives every flash candidate
 a stable slot-plus-candidate key and every genuine free claim a stable offer key.
-Flash purchases default off, while the four free claims default on; per-offer GUI
+Flash purchases default off, while discovered free claims default on; per-offer GUI
 overrides take precedence. Disabling the master switch preserves those selections.
 
 Planning considers only enabled catalog entries whose exact live identity, reward,

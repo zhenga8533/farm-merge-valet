@@ -142,6 +142,10 @@ def test_game_sync_refreshes_assets_and_upgrade_progress_in_background(
         "farm_merge_valet.composition.read_building_repairs",
         lambda *_args: (),
     )
+    monkeypatch.setattr(
+        "farm_merge_valet.composition.read_runtime_catalog_fingerprint",
+        lambda *_args: None,
+    )
     controller.game_sync_operation_changed.connect(busy_states.append)
     controller.game_sync_status_changed.connect(statuses.append)
     controller.upgrade_progress_changed.connect(progress_updates.append)
@@ -322,6 +326,10 @@ def test_catalog_setup_launches_game_and_publishes_catalog_before_icons(
     monkeypatch.setattr(
         "farm_merge_valet.composition.read_building_repairs",
         lambda *_args: (),
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.composition.read_runtime_catalog_fingerprint",
+        lambda *_args: None,
     )
     monkeypatch.setattr(
         "farm_merge_valet.composition.create_catalog_provider",

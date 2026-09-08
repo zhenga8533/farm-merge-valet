@@ -231,7 +231,6 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
     assert groups["Structures"].child(0).text(0) == "Greenhouse"
     assert groups["Workshops"].child(0).text(0) == "Bakery"
     assert not window.buildings_page.tree.isHidden()
-    assert window.buildings_page.loading_state.isHidden()
 
     window.buildings_page.set_building_repairs(
         (
