@@ -485,6 +485,10 @@ _HEALTH_EXPRESSION = (
       activePopup?._rewardService === services?.rewardService);
   const travelSummaryRewardPopup = activePopup?._name === 'TravelSummaryRewardPopup' &&
     typeof activePopup.close === 'function';
+  const pushNotificationOptInPopup =
+    activePopup?._name === 'PushNotificationOptInPopup' &&
+    typeof activePopup._onDismiss === 'function' &&
+    typeof activePopup.close === 'function';
   const promotionalPopup = activePopup && activePopup !== levelUpPopup &&
     typeof activePopup.close === 'function' && (
       [services?.specialOfferService, services?.recurringConversionService]
@@ -509,7 +513,8 @@ _HEALTH_EXPRESSION = (
   const unsupportedOverlayDetail = activePopup && activePopup !== levelUpPopup &&
       activePopup !== window.__fmvTrainPopup && activePopup !== trainPopup &&
       !dailyChallengePopup && !timedEventPopup && !dailyBonusPopup &&
-      !albumStartedPopup && !rewardPopup && !travelSummaryRewardPopup && !promotionalPopup
+      !albumStartedPopup && !rewardPopup && !travelSummaryRewardPopup &&
+      !pushNotificationOptInPopup && !promotionalPopup
     ? `popup:${activePopup._name || activePopup.name || activePopup.constructor?.name || 'unknown'}`
     : blockingLayer
       ? `layer:${blockingLayer.name || 'unknown'}`
@@ -528,6 +533,7 @@ _HEALTH_EXPRESSION = (
     : dailyBonusPopup ? 'daily-bonus-collect'
     : albumStartedPopup ? 'sticker-album-started'
     : travelSummaryRewardPopup ? 'travel-summary-reward'
+    : pushNotificationOptInPopup ? 'push-notification-opt-in'
     : rewardPopup ? 'reward-popup'
     : promotionalPopup ? 'promotional-popup'
     : stickerSkip ? 'sticker-pack-skip'
@@ -840,6 +846,22 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     typeof activePopup.awaitPopupClosed === 'function';
   const travelSummaryRewardPopup = activePopup?._name === 'TravelSummaryRewardPopup' &&
     typeof activePopup.close === 'function';
+  const pushNotificationOptInPopup =
+    activePopup?._name === 'PushNotificationOptInPopup' &&
+    typeof activePopup._onDismiss === 'function' &&
+    typeof activePopup.close === 'function';
+  if (pushNotificationOptInPopup) {{
+    const detail = 'push-notification-opt-in';
+    if (activePopup._popupLocked === true ||
+        activePopup._popupInteractionsLocked === true || popupAnimationBusy(activePopup))
+      return {{status: 'busy', detail}};
+    try {{
+      activePopup._onDismiss();
+      return {{status: 'submitted', detail}};
+    }} catch (error) {{
+      return {{status: 'rejected', detail: String(error?.message || error)}};
+    }}
+  }}
   if (dailyChallengePopup || timedEventPopup || dailyBonusPopup || albumStartedPopup ||
       travelSummaryRewardPopup) {{
     const detail = dailyChallengePopup ? 'daily-challenge'

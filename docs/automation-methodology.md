@@ -91,13 +91,15 @@ The bot may continue observing while it is frozen, but sends no actions and
 queues no retries. This prevents a background-tab suspension from being
 mistaken for an action failure.
 
-A strict, default-enabled reward-overlay
+A strict, default-enabled transient-overlay
 step runs before this gate. It handles level-up, daily bonus/challenge, timed-event,
 ordinary reward, travel-summary, promotional, sticker album/set, and sticker-pack
 transitions through their native callbacks. Sticker packs use their native Skip and
 subsequent Collect transitions. Optional
 high-rank duplicate raffle proposals are declined through their registered
-"Not now" interaction after its animation resolver is ready. A partially closed
+"Not now" interaction after its animation resolver is ready. The push-notification
+opt-in popup likewise uses its native dismiss handler, preserving the game's
+dismissal timestamp and analytics without requesting notification permission. A partially closed
 proposal left by an interrupted transition completes that resolver before pack
 collection continues. Each
 transition is handled in a separate loop iteration, and intermediate sticker

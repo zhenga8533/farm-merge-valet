@@ -48,6 +48,7 @@ class TransientOverlayKind(StrEnum):
     REWARD_POPUP = "reward-popup"
     TRAVEL_SUMMARY_REWARD = "travel-summary-reward"
     PROMOTIONAL_POPUP = "promotional-popup"
+    PUSH_NOTIFICATION_OPT_IN = "push-notification-opt-in"
     UNSUPPORTED = "unsupported"
 
 
