@@ -442,6 +442,8 @@ def test_discovery_validates_obstacle_clear_handler() -> None:
     from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 
     assert "typeof candidate._attemptPayment === 'function'" in _DISCOVER_EXPRESSION
+    assert "typeof candidate._getTotalCost === 'function'" not in _DISCOVER_EXPRESSION
+    assert "candidate._isActive !== false" in _DISCOVER_EXPRESSION
     assert "window.__fmvObstacleClearHandler" in _DISCOVER_EXPRESSION
     assert "obstacleClearHandler?._services === services" in _HEALTH_EXPRESSION
 
@@ -710,7 +712,8 @@ def test_obstacle_clear_uses_resource_gate_payment_handler(monkeypatch) -> None:
     assert result.status is ActionStatus.SUBMITTED
     assert "content.hasBehavior?.('mapSource')" in expression
     assert "content.hasBehavior?.('resourceGate')" in expression
-    assert "obstacleHandler._getTotalCost(gate)" in expression
+    assert "typeof obstacleHandler._getTotalCost === 'function'" in expression
+    assert "gate?._data?.cost" in expression
     assert "energy.amount < energyCost" in expression
     assert "gameWorkers.hasEnoughWorkers(requiredWorkers)" in expression
     assert "insufficient-workers" in expression

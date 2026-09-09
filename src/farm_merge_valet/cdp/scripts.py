@@ -75,8 +75,8 @@ _DISCOVER_EXPRESSION = r"""
     typeof candidate.onItemCollect?.fire === 'function') || null;
   const obstacleClearHandler = gameplaySystems.find((candidate) =>
     candidate?._services === services &&
+    candidate._isActive !== false &&
     typeof candidate._attemptPayment === 'function' &&
-    typeof candidate._getTotalCost === 'function' &&
     candidate._popoutStore) || null;
   const rewardContainerHandler = gameplaySystems.find((candidate) =>
     candidate?._services === services &&
@@ -329,8 +329,8 @@ _HEALTH_EXPRESSION = (
     typeof rewardInteractionHandler.onItemCollect?.fire === 'function';
   const currentObstacleClearHandler = currentBoard &&
     obstacleClearHandler?._services === services &&
+    obstacleClearHandler._isActive !== false &&
     typeof obstacleClearHandler._attemptPayment === 'function' &&
-    typeof obstacleClearHandler._getTotalCost === 'function' &&
     obstacleClearHandler._popoutStore;
   const currentRewardContainerHandler = currentBoard &&
     rewardContainerHandler?._services === services &&
@@ -1360,11 +1360,13 @@ def _interaction_expression(
           upgradeHandler._cellWithCard = previousCellWithCard;
       }}
     }} else if (expectedKind === 'clear') {{
-      if (obstacleHandler?._services !== services)
+      if (obstacleHandler?._services !== services || obstacleHandler._isActive === false ||
+          typeof obstacleHandler._attemptPayment !== 'function' || !obstacleHandler._popoutStore)
         return {{status: 'unavailable', detail: 'obstacle-clear-handler-not-found'}};
       const gate = content.getBehavior('resourceGate');
       const position = content.getBehavior('gridPosition');
-      const effectiveCost = obstacleHandler._getTotalCost(gate);
+      const effectiveCost = typeof obstacleHandler._getTotalCost === 'function'
+        ? obstacleHandler._getTotalCost(gate) : gate?._data?.cost;
       const energyCost = effectiveCost?.find((item) => item?.key === 'energy')?.amount;
       const requiredWorkers = gate?._data?.workers;
       const energy = window.__fmvEnergyInventoryItem;
