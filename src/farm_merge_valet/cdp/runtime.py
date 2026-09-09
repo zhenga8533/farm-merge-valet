@@ -102,11 +102,13 @@ class GameRuntimeAdapter:
         *,
         crate_delay_min: float = 0.05,
         crate_delay_max: float = 0.2,
+        observation_only: bool = False,
     ) -> None:
         self.port = port
         self.page_title = page_title
         self._crate_delay_min = crate_delay_min
         self._crate_delay_max = crate_delay_max
+        self.observation_only = observation_only
         self._scene_id: int | None = None
         self._last_heartbeat: int | None = None
         self._discovery_detail: str | None = "runtime-discovery-not-run"
@@ -130,10 +132,16 @@ class GameRuntimeAdapter:
             self.port,
             self.page_title,
             cancel_event=self._cancel_event,
+            allow_observation=self.observation_only,
         )
 
     def read_energy(self) -> int | None:
-        return read_energy(self.port, self.page_title, cancel_event=self._cancel_event)
+        return read_energy(
+            self.port,
+            self.page_title,
+            cancel_event=self._cancel_event,
+            allow_observation=self.observation_only,
+        )
 
     def read_workers(self) -> WorkerState | None:
         raw = self._evaluate(_READ_WORKERS_EXPRESSION)
@@ -195,7 +203,13 @@ class GameRuntimeAdapter:
             timeout=timeout,
             cancel_event=self._cancel_event,
             retry=retry,
+            allow_observation=self.observation_only,
         )
+
+    def _evaluate_action(self, expression: str) -> object:
+        if self.observation_only:
+            return {"status": ActionStatus.REJECTED.value, "detail": "observation-only-runtime"}
+        return self._evaluate(expression, retry=False)
 
     def discover(self, cancelled: Callable[[], bool] | None = None) -> RuntimeHealth:
         started = time.monotonic()
@@ -208,7 +222,12 @@ class GameRuntimeAdapter:
 
         if is_cancelled():
             return self.read_runtime_health()
-        apply_background_overrides(self.port, self.page_title, cancel_event=self._cancel_event)
+        apply_background_overrides(
+            self.port,
+            self.page_title,
+            cancel_event=self._cancel_event,
+            allow_observation=self.observation_only,
+        )
         if is_cancelled():
             return self.read_runtime_health()
         cache_started = time.monotonic()
@@ -343,7 +362,10 @@ class GameRuntimeAdapter:
             )
             scan_started = time.monotonic()
             raw_status = arm_board_store(
-                self.port, self.page_title, cancel_event=self._cancel_event
+                self.port,
+                self.page_title,
+                cancel_event=self._cancel_event,
+                allow_observation=self.observation_only,
             )
             status = raw_status if isinstance(raw_status, str) else "invalid-board-search-response"
             elapsed = time.monotonic() - scan_started
@@ -715,18 +737,18 @@ class GameRuntimeAdapter:
 
     def submit_item_drop(self, start: GridCoord, end: GridCoord) -> ActionResult:
         return self._action_result(
-            self._evaluate(_drop_expression(start, end, self._scene_id), retry=False)
+            self._evaluate_action(_drop_expression(start, end, self._scene_id))
         )
 
     def dismiss_transient_overlay(self) -> ActionResult:
         return self._action_result(
-            self._evaluate(_dismiss_overlay_expression(self._scene_id), retry=False)
+            self._evaluate_action(_dismiss_overlay_expression(self._scene_id))
         )
 
     def submit_storage_bubble_pop(self, expected_object_id: int) -> ActionResult:
         return self._action_result(
-            self._evaluate(
-                _storage_bubble_pop_expression(expected_object_id, self._scene_id), retry=False
+            self._evaluate_action(
+                _storage_bubble_pop_expression(expected_object_id, self._scene_id)
             )
         )
 
@@ -738,7 +760,7 @@ class GameRuntimeAdapter:
         expected_object_id: int | None,
     ) -> ActionResult:
         return self._action_result(
-            self._evaluate(
+            self._evaluate_action(
                 _interaction_expression(
                     coord,
                     expected_kind,
@@ -746,7 +768,6 @@ class GameRuntimeAdapter:
                     expected_object_id,
                     self._scene_id,
                 ),
-                retry=False,
             )
         )
 
@@ -757,14 +778,13 @@ class GameRuntimeAdapter:
         expected_object_id: int | None,
     ) -> ActionResult:
         return self._action_result(
-            self._evaluate(
+            self._evaluate_action(
                 _removal_expression(
                     coord,
                     expected_blueprint_id,
                     expected_object_id,
                     self._scene_id,
                 ),
-                retry=False,
             )
         )
 
@@ -776,7 +796,7 @@ class GameRuntimeAdapter:
         detail: str | None = None
         claim_limit = max(0, int(limit))
         for claim_index in range(claim_limit):
-            raw = self._evaluate(_crate_expression(1, self._scene_id), retry=False)
+            raw = self._evaluate_action(_crate_expression(1, self._scene_id))
             if not isinstance(raw, dict):
                 return CrateSpawnResult(
                     ActionStatus.UNAVAILABLE,
@@ -879,13 +899,13 @@ class GameRuntimeAdapter:
         return parse_marketplace_offers(self._evaluate(_READ_MARKETPLACE_EXPRESSION, retry=False))
 
     def submit_marketplace_purchase(self, action: MarketplaceAction) -> ActionResult:
-        raw = self._evaluate(marketplace_purchase_expression(action, self._scene_id), retry=False)
+        raw = self._evaluate_action(marketplace_purchase_expression(action, self._scene_id))
         return parse_marketplace_action_result(raw)
 
     def submit_land_expansion(
         self, candidate: LandExpansionCandidate, minimum_balance_after: int
     ) -> ActionResult:
-        raw = self._evaluate(
+        raw = self._evaluate_action(
             land_expansion_action_expression(
                 candidate.area_id,
                 candidate.premium,
@@ -895,28 +915,27 @@ class GameRuntimeAdapter:
                 minimum_balance_after,
                 self._scene_id,
             ),
-            retry=False,
         )
         return self._action_result(raw)
 
     def open_farm_visit(self) -> ActionResult:
         return self._action_result(
-            self._evaluate(_farm_visit_action_expression("open", self._scene_id), retry=False)
+            self._evaluate_action(_farm_visit_action_expression("open", self._scene_id))
         )
 
     def start_farm_visit(self) -> ActionResult:
         return self._action_result(
-            self._evaluate(_farm_visit_action_expression("start", self._scene_id), retry=False)
+            self._evaluate_action(_farm_visit_action_expression("start", self._scene_id))
         )
 
     def close_farm_visit(self) -> ActionResult:
         return self._action_result(
-            self._evaluate(_farm_visit_action_expression("close", self._scene_id), retry=False)
+            self._evaluate_action(_farm_visit_action_expression("close", self._scene_id))
         )
 
     def submit_visitor_action(self, action: VisitorActionState) -> ActionResult:
         return self._action_result(
-            self._evaluate(
+            self._evaluate_action(
                 _farm_visit_action_expression(
                     "claim",
                     self._scene_id,
@@ -926,17 +945,16 @@ class GameRuntimeAdapter:
                     objectID=action.object_id,
                     actionType=action.action_type,
                 ),
-                retry=False,
             )
         )
 
     def return_from_farm_visit(self) -> ActionResult:
         return self._action_result(
-            self._evaluate(_farm_visit_action_expression("return", self._scene_id), retry=False)
+            self._evaluate_action(_farm_visit_action_expression("return", self._scene_id))
         )
 
     def _shop_action_result(self, expression: str) -> ActionResult:
-        raw = self._evaluate(expression, retry=False)
+        raw = self._evaluate_action(expression)
         if not isinstance(raw, dict):
             return ActionResult(ActionStatus.UNAVAILABLE, "invalid-runtime-response")
         status_value = raw.get("status")

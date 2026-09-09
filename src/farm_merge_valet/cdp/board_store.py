@@ -333,7 +333,11 @@ def _arm_board_store_target(ws_url: str, cancel_event: Event | None) -> str:
 
 
 def arm_board_store(
-    port: int, page_title: str | None = None, *, cancel_event: Event | None = None
+    port: int,
+    page_title: str | None = None,
+    *,
+    cancel_event: Event | None = None,
+    allow_observation: bool = False,
 ) -> str:
     """Best-effort, idempotent: locate the board's live cell `Map` on the
     heap and stash a reference at `window.__fmvBoardCells` for
@@ -351,11 +355,16 @@ def arm_board_store(
         page_title,
         lambda ws_url: _arm_board_store_target(ws_url, cancel_event),
         retry=False,
+        allow_observation=allow_observation,
     )
 
 
 def read_board_state(
-    port: int, page_title: str | None = None, *, cancel_event: Event | None = None
+    port: int,
+    page_title: str | None = None,
+    *,
+    cancel_event: Event | None = None,
+    allow_observation: bool = False,
 ) -> dict[GridCoord, _LiveCellState] | None:
     """Every cell's current content, straight from the game's live map.
 
@@ -368,7 +377,13 @@ def read_board_state(
     Returns None if `arm_board_store` hasn't successfully captured a
     reference yet.
     """
-    raw = evaluate(port, _READ_EXPRESSION, page_title, cancel_event=cancel_event)
+    raw = evaluate(
+        port,
+        _READ_EXPRESSION,
+        page_title,
+        cancel_event=cancel_event,
+        allow_observation=allow_observation,
+    )
     return parse_board_state(raw)
 
 

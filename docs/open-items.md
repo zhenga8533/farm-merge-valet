@@ -27,8 +27,8 @@ following the game's authoritative resource pipeline.
 ## Known constraints, not scheduled work
 
 - The managed game browser must remain open. Bot startup can open the configured
-  game page and request Play, but a changed or unavailable Reddit launcher may
-  still require the user to start the game manually.
+  game page. A changed or unavailable launcher-based portal may still require
+  the user to start the game manually.
 - Minimizing the Farm Merge Valet application to the tray is supported.
   Minimizing the managed game browser and headless operation are unsupported;
   the browser may instead remain unfocused, occluded, on another virtual

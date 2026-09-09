@@ -173,10 +173,19 @@ def version() -> None:
 def profile_runtime_cmd(
     duration: float = typer.Option(120.0, min=1.0),  # noqa: B008
     output: Path = typer.Option(Path(".tmp/runtime-profile.json")),  # noqa: B008
+    observation_only: bool = typer.Option(False, help="Allow recognized non-actionable portals."),
+    page_title: str | None = typer.Option(None, help="Override the configured page target."),
 ) -> None:
-    """Profile cached live-state reads without discovery or game actions."""
-    runtime = GameRuntimeAdapter(_config().cdp_port, _config().window_title)
+    """Profile live-state reads without game actions."""
+    config = _config()
+    runtime = GameRuntimeAdapter(
+        config.cdp_port,
+        page_title or config.window_title,
+        observation_only=observation_only,
+    )
     try:
+        if observation_only:
+            runtime.discover()
         report = profile_runtime(runtime, duration_seconds=duration)
     except RuntimeError as exc:
         rprint(f"[red]{exc}[/red]")
@@ -198,13 +207,25 @@ def session_summary_cmd(
 @diagnostics_app.command("inspect-features")
 def inspect_features_cmd(
     output: Path | None = typer.Option(None),  # noqa: B008
+    observation_only: bool = typer.Option(False, help="Allow recognized non-actionable portals."),
+    page_title: str | None = typer.Option(None, help="Override the configured page target."),
 ) -> None:
     """Inspect sanitized building, event, and marketplace metadata read-only."""
     config = _config()
-    runtime = GameRuntimeAdapter(config.cdp_port, config.window_title)
+    target = page_title or config.window_title
+    runtime = GameRuntimeAdapter(
+        config.cdp_port,
+        target,
+        observation_only=observation_only,
+    )
     runtime.discover()
     serialized = json.dumps(
-        read_feature_diagnostics(config.cdp_port, config.window_title), indent=2
+        read_feature_diagnostics(
+            config.cdp_port,
+            target,
+            allow_observation=observation_only,
+        ),
+        indent=2,
     )
     if output is not None:
         write_profile(output, serialized)

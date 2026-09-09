@@ -76,5 +76,12 @@ _FEATURE_DIAGNOSTICS_EXPRESSION = r"""
 """
 
 
-def read_feature_diagnostics(port: int, page_title: str | None = None) -> object:
-    return evaluate(port, _FEATURE_DIAGNOSTICS_EXPRESSION, page_title)
+def read_feature_diagnostics(
+    port: int, page_title: str | None = None, *, allow_observation: bool = False
+) -> object:
+    return evaluate(
+        port,
+        _FEATURE_DIAGNOSTICS_EXPRESSION,
+        page_title,
+        allow_observation=allow_observation,
+    )

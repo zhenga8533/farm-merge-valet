@@ -283,7 +283,7 @@ def test_launch_retries_after_profile_handoff_exit(tmp_path, monkeypatch) -> Non
 
 
 def test_ensure_game_open_opens_configured_url_once_in_managed_browser(monkeypatch) -> None:
-    settings = AppConfig(game_url="https://reddit.example/game")
+    settings = AppConfig(game_url="https://www.reddit.com/r/FarmMergeValley/")
     manager = BrowserManager(settings)
     waiting = BrowserStatus(True, True, True, kind=BrowserKind.CHROME, game_loaded=False)
     monkeypatch.setattr(manager, "ensure_running", lambda: waiting)
@@ -298,7 +298,27 @@ def test_ensure_game_open_opens_configured_url_once_in_managed_browser(monkeypat
 
     with pytest.raises(BrowserManagerError, match="did not finish loading"):
         manager.ensure_game_open()
-    assert opened == [(9222, "https://reddit.example/game")]
+    assert opened == [(9222, "https://www.reddit.com/r/FarmMergeValley/")]
+
+
+def test_ensure_game_open_waits_for_direct_portal_without_launcher(monkeypatch) -> None:
+    settings = AppConfig(
+        game_url="https://www.crazygames.com/game/farm-merge-valley",
+        window_title="CrazyGames",
+    )
+    manager = BrowserManager(settings)
+    waiting = BrowserStatus(True, True, True, kind=BrowserKind.CHROME, game_loaded=False)
+    loaded = BrowserStatus(True, True, True, kind=BrowserKind.CHROME, game_loaded=True)
+    monkeypatch.setattr(manager, "ensure_running", lambda: waiting)
+    monkeypatch.setattr(manager, "status", lambda: loaded)
+    monkeypatch.setattr("farm_merge_valet.browser.manager.has_page_url", lambda *_args: True)
+
+    def unexpected_start(*_args):
+        raise AssertionError("direct-load portal invoked a launcher")
+
+    monkeypatch.setattr("farm_merge_valet.browser.manager.try_start_game", unexpected_start)
+
+    assert manager.ensure_game_open() is loaded
 
 
 def test_ensure_game_open_refuses_unowned_browser(monkeypatch) -> None:

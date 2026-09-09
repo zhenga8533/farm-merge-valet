@@ -15,6 +15,7 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
+from farm_merge_valet.cdp.portals import PortalStartupStrategy, portal_for_page_url
 from farm_merge_valet.cdp.targets import (
     REQUIRED_BACKGROUND_FLAGS,
     close_browser,
@@ -441,6 +442,11 @@ class BrowserManager:
             raise BrowserManagerError(
                 "Refusing to open the game automatically in an unowned browser."
             )
+        portal = portal_for_page_url(self.settings.game_url)
+        if portal is None:
+            raise BrowserManagerError(
+                "The configured game URL does not match a supported Farm Merge Valley portal."
+            )
         if not has_page_url(self.settings.cdp_port, self.settings.game_url):
             open_browser_page(self.settings.cdp_port, self.settings.game_url)
             log_event(
@@ -457,7 +463,10 @@ class BrowserManager:
             if status.game_frame_available:
                 return status
             now = time.monotonic()
-            if now >= next_start_attempt_at:
+            if (
+                portal.startup_strategy is PortalStartupStrategy.REDDIT_LAUNCHER
+                and now >= next_start_attempt_at
+            ):
                 next_start_attempt_at = now + _GAME_START_RETRY_SECONDS
                 try:
                     start_requested = try_start_game(
@@ -469,7 +478,7 @@ class BrowserManager:
                         logger,
                         logging.DEBUG,
                         "browser.game_start_retry",
-                        "The Reddit launcher target changed during Play; retrying.",
+                        "The portal launcher target changed during Play; retrying.",
                         detail=str(exc),
                     )
                 if start_requested:
@@ -478,17 +487,18 @@ class BrowserManager:
                             logger,
                             logging.INFO,
                             "browser.game_start_requested",
-                            "Requested game startup through the Reddit launcher.",
+                            "Requested game startup through the portal launcher.",
                         )
                     start_attempted = True
             time.sleep(0.25)
         status = self.status()
         if status.game_frame_available:
             return status
-        raise BrowserManagerError(
-            "The game did not finish loading after the Play request. "
-            "Open the configured Reddit page, click Play manually, and start the bot again."
-        )
+        if portal.startup_strategy is PortalStartupStrategy.REDDIT_LAUNCHER:
+            detail = "Open the configured page, click Play manually, and start the bot again."
+        else:
+            detail = "Reload the configured game page and start the bot again."
+        raise BrowserManagerError(f"The game did not finish loading. {detail}")
 
     def recover_game(self) -> BrowserStatus:
         """Reload a frozen game page or restore its managed browser and page."""

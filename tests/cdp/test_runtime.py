@@ -2,6 +2,7 @@ import logging
 from threading import Event, Thread
 
 from farm_merge_valet.automation.runtime import (
+    ActionResult,
     ActionStatus,
     GameRuntime,
     RuntimeCapability,
@@ -1044,6 +1045,25 @@ def test_failed_heap_recovery_uses_cooldown(monkeypatch) -> None:
 
 def test_cdp_adapter_satisfies_runtime_protocol() -> None:
     assert isinstance(GameRuntimeAdapter(9222), GameRuntime)
+
+
+def test_observation_runtime_rejects_actions_without_evaluation(monkeypatch) -> None:
+    adapter = GameRuntimeAdapter(9222, "CrazyGames", observation_only=True)
+
+    def fail(*_args, **_kwargs):
+        raise AssertionError("observation-only runtime evaluated an action")
+
+    monkeypatch.setattr(adapter, "_evaluate", fail)
+
+    drop = adapter.submit_item_drop((0, 0), (1, 0))
+    overlay = adapter.dismiss_transient_overlay()
+    crates = adapter.spawn_supply_crates(1)
+
+    assert drop == ActionResult(ActionStatus.REJECTED, "observation-only-runtime")
+    assert overlay == ActionResult(ActionStatus.REJECTED, "observation-only-runtime")
+    assert crates.status is ActionStatus.REJECTED
+    assert crates.spawned == 0
+    assert crates.detail == "observation-only-runtime"
 
 
 def test_atomic_snapshot_reads_requested_state_once_without_retry(monkeypatch) -> None:

@@ -67,6 +67,7 @@ def evaluate(
     timeout: float = _CDP_COMMAND_TIMEOUT,
     cancel_event: Event | None = None,
     retry: bool = True,
+    allow_observation: bool = False,
 ) -> object:
     """Evaluate `expression` in the game iframe's JS context and return its
     value (must be JSON-serializable -- CDP's `returnByValue` requirement).
@@ -78,6 +79,7 @@ def evaluate(
             ws_url, expression, timeout=timeout, cancel_event=cancel_event
         ),
         retry=retry,
+        allow_observation=allow_observation,
     )
 
 
@@ -88,6 +90,7 @@ def evaluate_top_page(
     *,
     timeout: float = _CDP_COMMAND_TIMEOUT,
     cancel_event: Event | None = None,
+    allow_observation: bool = False,
 ) -> object:
     """Evaluate an expression in the top-level portal page's JS context."""
     return _run_top_page_operation(
@@ -96,14 +99,19 @@ def evaluate_top_page(
         lambda ws_url: _evaluate_target(
             ws_url, expression, timeout=timeout, cancel_event=cancel_event
         ),
+        allow_observation=allow_observation,
     )
 
 
 def apply_background_overrides(
-    port: int, page_title: str | None = None, *, cancel_event: Event | None = None
+    port: int,
+    page_title: str | None = None,
+    *,
+    cancel_event: Event | None = None,
+    allow_observation: bool = False,
 ) -> None:
     """Apply supported lifecycle/focus overrides without activating a window."""
-    game_ws, page_ws = _target_pair(port, page_title)
+    game_ws, page_ws = _target_pair(port, page_title, allow_observation=allow_observation)
     for ws_url in (page_ws, game_ws):
         # Unsupported methods are deliberately ignored individually: protocol
         # support differs by browser version, while the launch flags remain the

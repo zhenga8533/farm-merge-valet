@@ -36,8 +36,18 @@ def read_crate_count(port: int, page_title: str | None = None) -> int | None:
 
 
 def read_energy(
-    port: int, page_title: str | None = None, *, cancel_event: Event | None = None
+    port: int,
+    page_title: str | None = None,
+    *,
+    cancel_event: Event | None = None,
+    allow_observation: bool = False,
 ) -> int | None:
     """Return the current spendable obstacle-clearing energy."""
-    value = evaluate(port, _READ_ENERGY_EXPRESSION, page_title, cancel_event=cancel_event)
+    value = evaluate(
+        port,
+        _READ_ENERGY_EXPRESSION,
+        page_title,
+        cancel_event=cancel_event,
+        allow_observation=allow_observation,
+    )
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None

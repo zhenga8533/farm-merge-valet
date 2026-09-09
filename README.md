@@ -36,15 +36,16 @@ farm-merge-valet browser status
 or `--browser chromium` to override it. `browser stop` and `browser restart`
 refuse to close a browser unless its executable, profile, debugging port, and
 Farm Merge Valet ownership marker all match. Other browser profiles are not
-targeted. The dedicated profile persists cookies and the Reddit login across
+targeted. The dedicated profile persists portal cookies and login state across
 managed-browser restarts; changing its directory or browser creates a separate
 session.
 
 With default automatic browser launch enabled, starting the bot opens the
-configured Reddit page when needed and requests Play through the game's
-launcher until the game iframe is present or the 20-second startup timeout is
-reached. If Reddit does not expose the launcher control, open the post and click
-**Play** manually. The managed browser must remain open while automation runs;
+configured portal page when needed. Reddit startup requests Play through its
+launcher; CrazyGames loads the game directly. To use CrazyGames, set the Game
+URL to `https://www.crazygames.com/game/farm-merge-valley` and the Page target
+to `CrazyGames`. If Reddit does not expose the launcher control, open the post
+and click **Play** manually. The managed browser must remain open while automation runs;
 minimized and headless operation are outside the supported scope. The window may
 be unfocused, on another virtual desktop, or showing a different tab. The bot
 does not change fullscreen state, zoom, the cursor, or the foreground
@@ -402,8 +403,13 @@ activity with:
 
 ```powershell
 farm-merge-valet diagnostics inspect-features
+farm-merge-valet diagnostics inspect-features --observation-only --page-title CrazyGames
+farm-merge-valet diagnostics profile-runtime --duration 120 --observation-only --page-title CrazyGames
 farm-merge-valet diagnostics session-summary --hours 24
 ```
+
+Observation-only diagnostics keep runtime action methods disabled even when the
+selected portal supports automation.
 
 Version tags matching `v*` build a wheel, source distribution, and standalone
 Windows desktop executable through the release workflow. The tag must exactly match

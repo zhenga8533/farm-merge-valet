@@ -48,9 +48,11 @@ used to confirm the result before another submission is allowed.
 
 CDP recognizes registered Farm Merge Valley portals and walks each iframe's
 parent chain to its owning top-level page. Target pairs are cached and
-rediscovered after a reload. Reddit is currently automation-enabled;
-CrazyGames is recognized in observation-only mode until its runtime discovery
-and action contracts have been validated. On acquisition, the bot
+rediscovered after a reload. Reddit and CrazyGames are automation-enabled and
+share the same validated game-runtime contract. Observation mode can apply browser
+lifecycle overrides and run discovery, snapshots, and sanitized diagnostics,
+but a runtime-level gate rejects every action submission before its JavaScript
+is evaluated. On acquisition, the bot
 applies each supported focus-emulation, unlocked/user-active, and
 active-lifecycle override once per browser target. Unsupported optional
 overrides are logged once at debug level. The managed browser must also be

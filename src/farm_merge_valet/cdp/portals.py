@@ -12,12 +12,23 @@ class GamePortal(StrEnum):
     CRAZY_GAMES = "crazygames"
 
 
+class PortalSupportLevel(StrEnum):
+    OBSERVATION = "observation"
+    AUTOMATION = "automation"
+
+
+class PortalStartupStrategy(StrEnum):
+    DIRECT = "direct"
+    REDDIT_LAUNCHER = "reddit-launcher"
+
+
 @dataclass(frozen=True)
 class PortalDefinition:
     kind: GamePortal
     display_name: str
     page_hosts: tuple[str, ...]
-    automation_supported: bool
+    support_level: PortalSupportLevel
+    startup_strategy: PortalStartupStrategy
 
     def matches_page_url(self, value: object) -> bool:
         host = _hostname(value)
@@ -47,16 +58,22 @@ PORTALS = (
         GamePortal.REDDIT,
         "Reddit",
         ("reddit.com",),
-        automation_supported=True,
+        PortalSupportLevel.AUTOMATION,
+        PortalStartupStrategy.REDDIT_LAUNCHER,
     ),
     PortalDefinition(
         GamePortal.CRAZY_GAMES,
         "CrazyGames",
         ("crazygames.com",),
-        automation_supported=False,
+        PortalSupportLevel.AUTOMATION,
+        PortalStartupStrategy.DIRECT,
     ),
 )
 
 
 def portal_definition(kind: GamePortal) -> PortalDefinition:
     return next(portal for portal in PORTALS if portal.kind is kind)
+
+
+def portal_for_page_url(value: object) -> PortalDefinition | None:
+    return next((portal for portal in PORTALS if portal.matches_page_url(value)), None)

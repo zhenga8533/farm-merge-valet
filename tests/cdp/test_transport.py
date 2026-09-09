@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from threading import Event
 
 import pytest
 
 from farm_merge_valet.cdp.evaluation import _evaluate_target, evaluate
-from farm_merge_valet.cdp.portals import GamePortal
+from farm_merge_valet.cdp.portals import (
+    PORTALS,
+    GamePortal,
+    PortalSupportLevel,
+    portal_definition,
+)
 from farm_merge_valet.cdp.targets import (
     _invalidate_target_pair,
     _normalize_local_ws_url,
@@ -249,14 +255,41 @@ def test_discover_game_targets_resolves_nested_crazygames_frame() -> None:
     assert target.ancestor_ids == ("wrapper", "crazy-page")
     assert target.page_target_id == "crazy-page"
     assert target.game_target_id == "game-frame"
-    assert not target.automation_supported
+    assert target.support_level is PortalSupportLevel.AUTOMATION
 
 
-def test_select_target_pair_rejects_observation_only_portal() -> None:
+def test_select_target_pair_rejects_observation_only_portal(monkeypatch) -> None:
+    observation_portal = replace(
+        portal_definition(GamePortal.CRAZY_GAMES),
+        support_level=PortalSupportLevel.OBSERVATION,
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets.PORTALS",
+        tuple(portal for portal in PORTALS if portal.kind is not GamePortal.CRAZY_GAMES)
+        + (observation_portal,),
+    )
     targets = [_crazy_page(), _crazy_game_frame("game-frame", "crazy-page")]
 
     with pytest.raises(CdpConnectionError, match="observation-only.*crazygames"):
         _select_target_pair(targets, "CrazyGames")
+
+
+def test_select_target_pair_allows_observation_only_portal_explicitly(monkeypatch) -> None:
+    observation_portal = replace(
+        portal_definition(GamePortal.CRAZY_GAMES),
+        support_level=PortalSupportLevel.OBSERVATION,
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets.PORTALS",
+        tuple(portal for portal in PORTALS if portal.kind is not GamePortal.CRAZY_GAMES)
+        + (observation_portal,),
+    )
+    targets = [_crazy_page(), _crazy_game_frame("game-frame", "crazy-page")]
+
+    assert _select_target_pair(targets, "CrazyGames", allow_observation=True) == (
+        "ws://frame/game-frame",
+        "ws://page/crazy-page",
+    )
 
 
 def test_discover_game_targets_rejects_spoofed_portal_host() -> None:

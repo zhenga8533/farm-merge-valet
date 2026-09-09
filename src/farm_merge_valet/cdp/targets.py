@@ -15,7 +15,12 @@ from urllib.error import URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import urlopen
 
-from farm_merge_valet.cdp.portals import PORTALS, GamePortal, portal_definition
+from farm_merge_valet.cdp.portals import (
+    PORTALS,
+    GamePortal,
+    PortalSupportLevel,
+    portal_definition,
+)
 from farm_merge_valet.cdp.transport import (
     CdpCancelledError,
     CdpConnectionError,
@@ -45,7 +50,7 @@ const findLauncherFrame = launcherUrl => {
 """
 _T = TypeVar("_T")
 _TargetPair = tuple[str, str]
-_TargetKey = tuple[int, str | None]
+_TargetKey = tuple[int, str | None, bool]
 _target_pairs: dict[_TargetKey, _TargetPair] = {}
 _target_pairs_lock = Lock()
 REQUIRED_BACKGROUND_FLAGS = (
@@ -65,7 +70,7 @@ class DiscoveredGameTarget:
     game_ws_url: str
     page_ws_url: str
     ancestor_ids: tuple[str, ...]
-    automation_supported: bool
+    support_level: PortalSupportLevel
     page_title: str
     page_url: str
     game_url: str
@@ -459,9 +464,7 @@ def discover_game_targets(
 ) -> tuple[DiscoveredGameTarget, ...]:
     """Recognize game clients and resolve their top-level portal pages."""
     targets_by_id = {
-        target_id: target
-        for target in targets
-        if isinstance((target_id := target.get("id")), str)
+        target_id: target for target in targets if isinstance((target_id := target.get("id")), str)
     }
     discovered: list[DiscoveredGameTarget] = []
     for frame in targets:
@@ -494,7 +497,7 @@ def discover_game_targets(
                 game_ws_url=_normalize_local_ws_url(frame_ws),
                 page_ws_url=_normalize_local_ws_url(page_ws),
                 ancestor_ids=ancestor_ids,
-                automation_supported=portal.automation_supported,
+                support_level=portal.support_level,
                 page_title=str(page.get("title", "")),
                 page_url=str(page.get("url", "")),
                 game_url=str(frame.get("url", "")),
@@ -514,14 +517,17 @@ def discover_game_targets(
 
 
 def _select_target_pair(
-    targets: list[dict[str, Any]], page_title: str | None = None
+    targets: list[dict[str, Any]],
+    page_title: str | None = None,
+    *,
+    allow_observation: bool = False,
 ) -> tuple[str, str]:
-    """Return the single automation-enabled game and owning-page target pair."""
+    """Return a single eligible game and owning-page target pair."""
     discovered = discover_game_targets(targets, page_title)
     pairs = [
         (target.game_ws_url, target.page_ws_url)
         for target in discovered
-        if target.automation_supported
+        if allow_observation or target.support_level is PortalSupportLevel.AUTOMATION
     ]
 
     if len(pairs) == 1:
@@ -554,32 +560,42 @@ def has_game_target_pair(port: int, page_title: str | None = None) -> bool:
     return True
 
 
-def _target_pair(port: int, page_title: str | None = None) -> _TargetPair:
-    key = (port, page_title)
+def _target_pair(
+    port: int, page_title: str | None = None, *, allow_observation: bool = False
+) -> _TargetPair:
+    key = (port, page_title, allow_observation)
     with _target_pairs_lock:
         cached = _target_pairs.get(key)
     if cached is not None:
         return cached
 
-    selected = _select_target_pair(_load_targets(port), page_title)
+    selected = _select_target_pair(
+        _load_targets(port), page_title, allow_observation=allow_observation
+    )
     with _target_pairs_lock:
         return _target_pairs.setdefault(key, selected)
 
 
-def _invalidate_target_pair(port: int, page_title: str | None = None) -> None:
+def _invalidate_target_pair(
+    port: int, page_title: str | None = None, *, allow_observation: bool = False
+) -> None:
     with _target_pairs_lock:
-        pair = _target_pairs.pop((port, page_title), None)
+        pair = _target_pairs.pop((port, page_title, allow_observation), None)
     if pair is not None:
         _close_sessions(pair)
 
 
-def find_game_frame_target(port: int, page_title: str | None = None) -> str:
+def find_game_frame_target(
+    port: int, page_title: str | None = None, *, allow_observation: bool = False
+) -> str:
     """Return the game iframe target paired with its owning portal page."""
-    game_ws, _ = _target_pair(port, page_title)
+    game_ws, _ = _target_pair(port, page_title, allow_observation=allow_observation)
     return game_ws
 
 
-def find_top_page_target(port: int, page_title: str | None = None) -> str:
+def find_top_page_target(
+    port: int, page_title: str | None = None, *, allow_observation: bool = False
+) -> str:
     """Returns the `webSocketDebuggerUrl` for the top-level portal page
     hosting the game -- as opposed to the game's own cross-origin
     iframe (`find_game_frame_target`).
@@ -587,7 +603,7 @@ def find_top_page_target(port: int, page_title: str | None = None) -> str:
     Used for browser-level controls that cannot run inside the cross-origin
     game frame.
     """
-    _, page_ws = _target_pair(port, page_title)
+    _, page_ws = _target_pair(port, page_title, allow_observation=allow_observation)
     return page_ws
 
 
@@ -597,16 +613,19 @@ def run_game_frame_operation(
     operation: Callable[[str], _T],
     *,
     retry: bool = True,
+    allow_observation: bool = False,
 ) -> _T:
     """Run against the cached game target, refreshing it once on failure."""
     attempts = 2 if retry else 1
     for attempt in range(attempts):
         try:
-            return operation(find_game_frame_target(port, page_title))
+            return operation(
+                find_game_frame_target(port, page_title, allow_observation=allow_observation)
+            )
         except CdpCancelledError:
             raise
         except CdpConnectionError:
-            _invalidate_target_pair(port, page_title)
+            _invalidate_target_pair(port, page_title, allow_observation=allow_observation)
             if attempt + 1 == attempts:
                 raise
             log_event(
@@ -623,14 +642,18 @@ def _run_top_page_operation(
     port: int,
     page_title: str | None,
     operation: Callable[[str], _T],
+    *,
+    allow_observation: bool = False,
 ) -> _T:
     for attempt in range(2):
         try:
-            return operation(find_top_page_target(port, page_title))
+            return operation(
+                find_top_page_target(port, page_title, allow_observation=allow_observation)
+            )
         except CdpCancelledError:
             raise
         except CdpConnectionError:
-            _invalidate_target_pair(port, page_title)
+            _invalidate_target_pair(port, page_title, allow_observation=allow_observation)
             if attempt == 1:
                 raise
             log_event(
