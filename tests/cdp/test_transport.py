@@ -98,6 +98,26 @@ def _pogo_game_frame(id_: str, parent_id: str) -> dict[str, str]:
     }
 
 
+def _msn_page(id_: str = "msn-page") -> dict[str, str]:
+    return {
+        "id": id_,
+        "type": "page",
+        "title": "Play Farm Merge Valley in your browser | Games from MSN",
+        "url": "https://www.msn.com/en-nz/play/games/farm-merge-valley/cg-9nf2hg8fnlts",
+        "webSocketDebuggerUrl": f"ws://page/{id_}",
+    }
+
+
+def _msn_game_frame(id_: str, parent_id: str) -> dict[str, str]:
+    return {
+        "id": id_,
+        "parentId": parent_id,
+        "type": "iframe",
+        "url": "https://cdn.games.mobinozer.com/ext/farm_merge_microsoft/prod/1.80.0-4/",
+        "webSocketDebuggerUrl": f"ws://frame/{id_}",
+    }
+
+
 def test_select_target_pair_uses_parent_page_and_title() -> None:
     targets = [
         _page("other", "Another post"),
@@ -322,6 +342,45 @@ def test_discover_game_targets_recognizes_pogo_as_automation_enabled() -> None:
     assert _select_target_pair(
         [_pogo_page(), _pogo_game_frame("game-frame", "pogo-page")], "Pogo"
     ) == ("ws://frame/game-frame", "ws://page/pogo-page")
+
+
+def test_discover_game_targets_resolves_nested_msn_frame() -> None:
+    wrapper = {
+        "id": "wrapper",
+        "parentId": "msn-page",
+        "type": "iframe",
+        "url": "https://www.msn.com/game-wrapper",
+        "webSocketDebuggerUrl": "ws://frame/wrapper",
+    }
+
+    discovered = discover_game_targets(
+        [_msn_page(), wrapper, _msn_game_frame("game-frame", "wrapper")]
+    )
+
+    assert len(discovered) == 1
+    assert discovered[0].portal is GamePortal.MSN
+    assert discovered[0].ancestor_ids == ("wrapper", "msn-page")
+    assert discovered[0].support_level is PortalSupportLevel.AUTOMATION
+    assert _select_target_pair([_msn_page(), _msn_game_frame("game-frame", "msn-page")], "MSN") == (
+        "ws://frame/game-frame",
+        "ws://page/msn-page",
+    )
+
+
+def test_msn_recognition_rejects_spoofed_hosts_and_unrelated_paths() -> None:
+    portal = portal_definition(GamePortal.MSN)
+    spoofed_page = {
+        **_msn_page(),
+        "url": "https://www.msn.com.example.test/en-nz/play/games/farm-merge-valley",
+    }
+
+    assert not discover_game_targets([spoofed_page, _msn_game_frame("game-frame", "msn-page")])
+    assert not portal.matches_game_frame_url(
+        "https://cdn.games.mobinozer.com.example.test/ext/farm_merge_microsoft/prod/1/"
+    )
+    assert not portal.matches_game_frame_url(
+        "https://cdn.games.mobinozer.com/ext/unrelated/prod/1/"
+    )
 
 
 def test_select_target_pair_rejects_observation_only_portal(monkeypatch) -> None:

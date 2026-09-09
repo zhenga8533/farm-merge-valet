@@ -21,6 +21,13 @@ def test_explicit_portal_uses_its_canonical_url() -> None:
     assert config.game_url == "https://www.crazygames.com/game/farm-merge-valley"
 
 
+def test_msn_selection_and_legacy_url_use_the_canonical_url() -> None:
+    canonical = "https://www.msn.com/en-nz/play/games/farm-merge-valley/cg-9nf2hg8fnlts"
+
+    assert AppConfig(game_portal=GamePortal.MSN).game_url == canonical
+    assert AppConfig.model_validate({"game_url": canonical}).game_portal is GamePortal.MSN
+
+
 def test_unregistered_legacy_game_url_is_rejected() -> None:
     with pytest.raises(ValidationError, match="registered integration"):
         AppConfig(game_url="https://example.com/game")

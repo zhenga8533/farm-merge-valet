@@ -124,11 +124,13 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
     assert window.browser_page.cache_clear_button.text() == "Clear cache"
     assert window.browser_page.cache_clear_button.property("danger") is True
 
-    window.browser_page.portal_choice.set_current_value("pogo")
+    window.browser_page.portal_choice.set_current_value("msn")
     window._flush_config()
     selected = ConfigStore(store.path).load()
-    assert selected.game_portal.value == "pogo"
-    assert selected.game_url == "https://www.pogo.com/games/farm-merge-valley/play"
+    assert selected.game_portal.value == "msn"
+    assert selected.game_url == (
+        "https://www.msn.com/en-nz/play/games/farm-merge-valley/cg-9nf2hg8fnlts"
+    )
     assert selected.window_title == ""
 
     window.browser_page._request("cdp_port", 9333)

@@ -12,6 +12,7 @@ class GamePortal(StrEnum):
     REDDIT = "reddit"
     CRAZY_GAMES = "crazygames"
     POGO = "pogo"
+    MSN = "msn"
 
 
 class PortalSupportLevel(StrEnum):
@@ -88,6 +89,17 @@ PORTALS = (
             and path.count("/") == 2
             and path.endswith("/index.html")
             and path.split("/")[1].isdigit()
+        ),
+    ),
+    PortalDefinition(
+        GamePortal.MSN,
+        "MSN",
+        ("msn.com",),
+        PortalSupportLevel.AUTOMATION,
+        PortalStartupStrategy.DIRECT,
+        "https://www.msn.com/en-nz/play/games/farm-merge-valley/cg-9nf2hg8fnlts",
+        lambda host, path: (
+            host == "cdn.games.mobinozer.com" and path.startswith("/ext/farm_merge_microsoft/prod/")
         ),
     ),
 )

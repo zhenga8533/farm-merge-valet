@@ -307,6 +307,10 @@ def test_ensure_game_open_opens_configured_url_once_in_managed_browser(monkeypat
     [
         ("https://www.crazygames.com/game/farm-merge-valley", "CrazyGames"),
         ("https://www.pogo.com/games/farm-merge-valley/play", "Pogo"),
+        (
+            "https://www.msn.com/en-nz/play/games/farm-merge-valley/cg-9nf2hg8fnlts",
+            "MSN",
+        ),
     ],
 )
 def test_ensure_game_open_waits_for_direct_portal_without_launcher(
