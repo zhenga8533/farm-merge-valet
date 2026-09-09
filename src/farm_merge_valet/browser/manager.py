@@ -15,7 +15,11 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from farm_merge_valet.cdp.portals import PortalStartupStrategy, portal_for_page_url
+from farm_merge_valet.cdp.portals import (
+    PortalStartupStrategy,
+    PortalSupportLevel,
+    portal_for_page_url,
+)
 from farm_merge_valet.cdp.targets import (
     REQUIRED_BACKGROUND_FLAGS,
     close_browser,
@@ -296,7 +300,15 @@ class BrowserManager:
             executable, self.settings.browser_executable
         )
         try:
-            game_loaded = has_game_target_pair(self.settings.cdp_port, self.settings.window_title)
+            configured_portal = portal_for_page_url(self.settings.game_url)
+            game_loaded = has_game_target_pair(
+                self.settings.cdp_port,
+                self.settings.window_title,
+                allow_observation=(
+                    configured_portal is not None
+                    and configured_portal.support_level is PortalSupportLevel.OBSERVATION
+                ),
+            )
         except CdpConnectionError:
             game_loaded = False
         managed = self._marker_matches(profile_dir, kind, executable)
@@ -464,13 +476,15 @@ class BrowserManager:
                 return status
             now = time.monotonic()
             if (
-                portal.startup_strategy is PortalStartupStrategy.REDDIT_LAUNCHER
+                portal.startup_strategy is not PortalStartupStrategy.DIRECT
                 and now >= next_start_attempt_at
             ):
                 next_start_attempt_at = now + _GAME_START_RETRY_SECONDS
                 try:
                     start_requested = try_start_game(
-                        self.settings.cdp_port, self.settings.window_title
+                        self.settings.cdp_port,
+                        self.settings.window_title,
+                        portal.kind,
                     )
                 except CdpConnectionError as exc:
                     start_requested = False
@@ -494,8 +508,8 @@ class BrowserManager:
         status = self.status()
         if status.game_frame_available:
             return status
-        if portal.startup_strategy is PortalStartupStrategy.REDDIT_LAUNCHER:
-            detail = "Open the configured page, click Play manually, and start the bot again."
+        if portal.startup_strategy is not PortalStartupStrategy.DIRECT:
+            detail = "Open the configured page, start the game manually, and run the bot again."
         else:
             detail = "Reload the configured game page and start the bot again."
         raise BrowserManagerError(f"The game did not finish loading. {detail}")

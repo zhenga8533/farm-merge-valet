@@ -58,7 +58,11 @@ from farm_merge_valet.cdp.scripts import (
     _storage_bubble_pop_expression,
 )
 from farm_merge_valet.cdp.snapshot import snapshot_expression
-from farm_merge_valet.cdp.targets import read_background_flag_status
+from farm_merge_valet.cdp.targets import (
+    dismiss_pogo_inactivity_prompt,
+    read_background_flag_status,
+)
+from farm_merge_valet.cdp.transport import CdpConnectionError
 from farm_merge_valet.core.items import GridCoord, InteractionTargetKind
 from farm_merge_valet.core.land_expansion import (
     ExpansionRequirement,
@@ -86,6 +90,7 @@ new Promise((resolve) => {
 _RECOVERY_COOLDOWNS = (5.0, 15.0, 60.0, 300.0)
 _MAX_HEARTBEAT_AGE_MS = 1500.0
 _RUNTIME_BOOTSTRAP_SETTLE_SECONDS = 2.0
+_PORTAL_MAINTENANCE_INTERVAL_SECONDS = 15.0
 
 
 class GameRuntimeAdapter:
@@ -117,6 +122,7 @@ class GameRuntimeAdapter:
         self._last_snapshot_summary_at = time.monotonic()
         self._heartbeat_stalled = False
         self._runtime_bootstrap_ready_at: float | None = None
+        self._next_portal_maintenance_at = 0.0
 
     def set_cancel_event(self, cancel_event: Event) -> None:
         self._cancel_event = cancel_event
@@ -518,6 +524,7 @@ class GameRuntimeAdapter:
         )
 
     def read_snapshot(self, options: SnapshotOptions) -> RuntimeSnapshot | None:
+        self._maintain_portal_session()
         started = time.monotonic()
         raw = self._evaluate(snapshot_expression(options), retry=False)
         wall_duration_ms = (time.monotonic() - started) * 1000.0
@@ -591,6 +598,33 @@ class GameRuntimeAdapter:
             building_repairs=parse_building_repairs(raw.get("buildingRepairs")),
             metrics=metrics,
         )
+
+    def _maintain_portal_session(self) -> None:
+        if not self.observation_only:
+            return
+        now = time.monotonic()
+        if now < self._next_portal_maintenance_at:
+            return
+        self._next_portal_maintenance_at = now + _PORTAL_MAINTENANCE_INTERVAL_SECONDS
+        try:
+            dismissed = dismiss_pogo_inactivity_prompt(self.port, self.page_title)
+        except CdpConnectionError as exc:
+            log_event(
+                logger,
+                logging.DEBUG,
+                "runtime.portal_maintenance_failed",
+                "Portal session maintenance could not inspect the page.",
+                detail=str(exc),
+            )
+            return
+        if dismissed:
+            log_event(
+                logger,
+                logging.INFO,
+                "runtime.portal_prompt_dismissed",
+                "Dismissed the Pogo inactivity prompt.",
+                portal="pogo",
+            )
 
     @staticmethod
     def _parse_land_expansions(raw: object) -> tuple[LandExpansionCandidate, ...] | None:

@@ -1264,6 +1264,9 @@ class Bot:
             return
         if health.transient_overlay is not None:
             overlay_detail = health.transient_overlay_detail or health.transient_overlay.value
+            if health.transient_overlay is TransientOverlayKind.ONBOARDING:
+                self._report_wait("game onboarding is open; complete it manually")
+                return
             if health.transient_overlay is TransientOverlayKind.UNSUPPORTED:
                 self._report_wait(f"unsupported game overlay is open ({overlay_detail})")
                 return

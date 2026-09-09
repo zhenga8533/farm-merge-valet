@@ -51,6 +51,14 @@ be unfocused, on another virtual desktop, or showing a different tab. The bot
 does not change fullscreen state, zoom, the cursor, or the foreground
 application, and it does not intentionally pan the game camera.
 
+Pogo is available for read-only observation and diagnostics using Game URL
+`https://www.pogo.com/games/farm-merge-valley/play` and Page target `Pogo`. This
+direct route loads the game without the landing page's **PLAY NOW** control. Complete
+the in-game onboarding manually; normal automation remains disabled for Pogo
+until its platform-specific runtime gaps have been validated. Observation sessions
+recognize and dismiss Pogo's exact **Still Playing?** inactivity prompt without
+submitting a game-runtime action.
+
 ## Usage
 
 ```powershell
@@ -404,12 +412,14 @@ activity with:
 ```powershell
 farm-merge-valet diagnostics inspect-features
 farm-merge-valet diagnostics inspect-features --observation-only --page-title CrazyGames
+farm-merge-valet diagnostics inspect-features --observation-only --page-title Pogo
 farm-merge-valet diagnostics profile-runtime --duration 120 --observation-only --page-title CrazyGames
 farm-merge-valet diagnostics session-summary --hours 24
 ```
 
 Observation-only diagnostics keep runtime action methods disabled even when the
-selected portal supports automation.
+selected portal supports automation. Pogo session keepalive is the sole portal-level
+exception and only presses the inactivity prompt's **CONTINUE** control.
 
 Version tags matching `v*` build a wheel, source distribution, and standalone
 Windows desktop executable through the release workflow. The tag must exactly match

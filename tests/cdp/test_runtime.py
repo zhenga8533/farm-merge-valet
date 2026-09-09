@@ -1066,6 +1066,21 @@ def test_observation_runtime_rejects_actions_without_evaluation(monkeypatch) -> 
     assert crates.detail == "observation-only-runtime"
 
 
+def test_observation_runtime_maintains_portal_session_on_bounded_interval(monkeypatch) -> None:
+    adapter = GameRuntimeAdapter(9222, "Pogo", observation_only=True)
+    calls = []
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.dismiss_pogo_inactivity_prompt",
+        lambda port, title: calls.append((port, title)) or False,
+    )
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.time.monotonic", lambda: 100.0)
+
+    adapter._maintain_portal_session()
+    adapter._maintain_portal_session()
+
+    assert calls == [(9222, "Pogo")]
+
+
 def test_atomic_snapshot_reads_requested_state_once_without_retry(monkeypatch) -> None:
     calls = []
 

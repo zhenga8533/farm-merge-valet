@@ -502,6 +502,7 @@ _HEALTH_EXPRESSION = (
   const blockingLayer = layerRoot?.children?.find((layer) =>
     ['disconnection', 'onboarding', 'fake_ad'].includes(layer?.name) &&
     activeBlockingLayer(layer));
+  const onboardingLayer = blockingLayer?.name === 'onboarding';
   const farmVisitTransitionAge = Number.isFinite(window.__fmvFarmVisitTransitionStartedAt)
     ? performance.now() - window.__fmvFarmVisitTransitionStartedAt : null;
   const sceneTransitionActive = Boolean(sceneTransitionLayer) ||
@@ -544,6 +545,7 @@ _HEALTH_EXPRESSION = (
     : stickerSetActive && stickerSetButton ? 'sticker-set-collect'
     : stickerSetActive ? 'sticker-set-transition'
     : stickerAlbumTransition ? 'sticker-album-transition'
+    : onboardingLayer ? 'onboarding'
     : unsupportedOverlayDetail ? 'unsupported'
     : null;
   const identity = currentBoard && (services.mapGrid || scene || handler || board);

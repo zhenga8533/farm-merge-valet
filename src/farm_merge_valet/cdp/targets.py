@@ -300,10 +300,30 @@ def has_page_url(port: int, url: str) -> bool:
     )
 
 
-def try_start_game(port: int, page_title: str | None = None) -> bool:
-    """Click the Reddit launcher Play control with a trusted browser input event."""
+def _dispatch_mouse_click(ws_url: str, x: float, y: float) -> None:
+    _command_target(ws_url, "Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y})
+    _command_target(
+        ws_url,
+        "Input.dispatchMouseEvent",
+        {"type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1},
+    )
+    _command_target(
+        ws_url,
+        "Input.dispatchMouseEvent",
+        {"type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": 1},
+    )
+
+
+def try_start_game(
+    port: int,
+    page_title: str | None = None,
+    portal: GamePortal = GamePortal.REDDIT,
+) -> bool:
+    """Request startup through a portal's trusted browser control."""
     title_filter = page_title.casefold() if page_title else None
     targets = _load_targets(port)
+    if portal is not GamePortal.REDDIT:
+        return False
     reddit = portal_definition(GamePortal.REDDIT)
     pages = {
         target.get("id"): target
@@ -411,21 +431,7 @@ def try_start_game(port: int, page_title: str | None = None) -> bool:
     y = click_position.get("y")
     if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
         return False
-    _command_target(
-        normalized_page_ws_url,
-        "Input.dispatchMouseEvent",
-        {"type": "mouseMoved", "x": x, "y": y},
-    )
-    _command_target(
-        normalized_page_ws_url,
-        "Input.dispatchMouseEvent",
-        {"type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1},
-    )
-    _command_target(
-        normalized_page_ws_url,
-        "Input.dispatchMouseEvent",
-        {"type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": 1},
-    )
+    _dispatch_mouse_click(normalized_page_ws_url, float(x), float(y))
     return True
 
 
@@ -516,6 +522,73 @@ def discover_game_targets(
     return tuple(matches)
 
 
+def _find_frame_by_name(frame_tree: object, name: str) -> dict[str, Any] | None:
+    if not isinstance(frame_tree, dict):
+        return None
+    frame = frame_tree.get("frame")
+    if isinstance(frame, dict) and frame.get("name") == name:
+        return frame
+    children = frame_tree.get("childFrames")
+    if not isinstance(children, list):
+        return None
+    return next(
+        (found for child in children if (found := _find_frame_by_name(child, name)) is not None),
+        None,
+    )
+
+
+def dismiss_pogo_inactivity_prompt(port: int, page_title: str | None = None) -> bool:
+    """Dismiss Pogo's exact inactivity prompt with trusted page-level input."""
+    targets = _load_targets(port)
+    matches = [
+        target
+        for target in discover_game_targets(targets, page_title)
+        if target.portal is GamePortal.POGO
+    ]
+    if len(matches) != 1:
+        return False
+    page_ws_url = matches[0].page_ws_url
+    frame_tree_result = _command_target(page_ws_url, "Page.getFrameTree")
+    sdk_frame = _find_frame_by_name(frame_tree_result.get("frameTree"), "gameBrick")
+    frame_id = sdk_frame.get("id") if sdk_frame is not None else None
+    if not isinstance(frame_id, str):
+        return False
+    world = _command_target(
+        page_ws_url,
+        "Page.createIsolatedWorld",
+        {
+            "frameId": frame_id,
+            "worldName": "farm-merge-valet-pogo-keepalive",
+            "grantUniveralAccess": False,
+        },
+    )
+    context_id = world.get("executionContextId")
+    if not isinstance(context_id, int):
+        return False
+    inner_result = _command_target(
+        page_ws_url,
+        "Runtime.evaluate",
+        {
+            "contextId": context_id,
+            "expression": r"""
+(() => {
+  const dialogs = [...document.querySelectorAll(
+    '[role="dialog"], dialog, [aria-modal="true"]')];
+  const dialog = dialogs.find((candidate) =>
+    /Still Playing\?/i.test(candidate.innerText || ''));
+  const button = dialog && [...dialog.querySelectorAll('button')].find((candidate) =>
+    candidate.innerText.trim().toUpperCase() === 'CONTINUE' && !candidate.disabled);
+  if (!button || button.offsetWidth <= 0 || button.offsetHeight <= 0) return false;
+  button.click();
+  return true;
+})()
+""",
+            "returnByValue": True,
+        },
+    )
+    return inner_result.get("result", {}).get("value") is True
+
+
 def _select_target_pair(
     targets: list[dict[str, Any]],
     page_title: str | None = None,
@@ -551,10 +624,12 @@ def _select_target_pair(
     )
 
 
-def has_game_target_pair(port: int, page_title: str | None = None) -> bool:
+def has_game_target_pair(
+    port: int, page_title: str | None = None, *, allow_observation: bool = False
+) -> bool:
     """Return whether exactly one automation-enabled game target pair is open."""
     try:
-        _select_target_pair(_load_targets(port), page_title)
+        _select_target_pair(_load_targets(port), page_title, allow_observation=allow_observation)
     except CdpConnectionError:
         return False
     return True

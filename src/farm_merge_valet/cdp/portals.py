@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 class GamePortal(StrEnum):
     REDDIT = "reddit"
     CRAZY_GAMES = "crazygames"
+    POGO = "pogo"
 
 
 class PortalSupportLevel(StrEnum):
@@ -46,6 +47,13 @@ class PortalDefinition:
                 and path.startswith("/farm-merge-valley/")
                 and path.endswith("/index.html")
             )
+        if self.kind is GamePortal.POGO:
+            return (
+                host == "cdn-h5farmvalley-prod.pogospike.com"
+                and path.count("/") == 2
+                and path.endswith("/index.html")
+                and path.split("/")[1].isdigit()
+            )
         return False
 
 
@@ -66,6 +74,13 @@ PORTALS = (
         "CrazyGames",
         ("crazygames.com",),
         PortalSupportLevel.AUTOMATION,
+        PortalStartupStrategy.DIRECT,
+    ),
+    PortalDefinition(
+        GamePortal.POGO,
+        "Pogo",
+        ("pogo.com",),
+        PortalSupportLevel.OBSERVATION,
         PortalStartupStrategy.DIRECT,
     ),
 )

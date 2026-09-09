@@ -19,6 +19,7 @@ from farm_merge_valet.cdp.targets import (
     _select_target_pair,
     _version_page_metadata,
     discover_game_targets,
+    dismiss_pogo_inactivity_prompt,
     find_game_frame_target,
     find_top_page_target,
     read_background_flag_status,
@@ -72,6 +73,26 @@ def _crazy_game_frame(id_: str, parent_id: str) -> dict[str, str]:
             "https://farm-merge-valley.game-files.crazygames.com/"
             "farm-merge-valley/175/index.html?build=175"
         ),
+        "webSocketDebuggerUrl": f"ws://frame/{id_}",
+    }
+
+
+def _pogo_page(id_: str = "pogo-page") -> dict[str, str]:
+    return {
+        "id": id_,
+        "type": "page",
+        "title": "Play Farm Merge Valley — A Free Merge-3 Game, No Download | Pogo",
+        "url": "https://www.pogo.com/games/farm-merge-valley/play",
+        "webSocketDebuggerUrl": f"ws://page/{id_}",
+    }
+
+
+def _pogo_game_frame(id_: str, parent_id: str) -> dict[str, str]:
+    return {
+        "id": id_,
+        "parentId": parent_id,
+        "type": "iframe",
+        "url": "https://cdn-h5farmvalley-prod.pogospike.com/20/index.html",
         "webSocketDebuggerUrl": f"ws://frame/{id_}",
     }
 
@@ -180,6 +201,37 @@ def test_try_start_game_clicks_launcher_for_matching_page(monkeypatch) -> None:
     }
 
 
+def test_dismiss_pogo_inactivity_prompt_uses_exact_sdk_dialog(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets._load_targets",
+        lambda _port: [_pogo_page(), _pogo_game_frame("game-frame", "pogo-page")],
+    )
+    commands: list[tuple[str, str, dict[str, object] | None]] = []
+
+    def command(ws_url, method, params=None, **_kwargs):
+        commands.append((ws_url, method, params))
+        if method == "Page.getFrameTree":
+            return {
+                "frameTree": {
+                    "frame": {"id": "pogo-page"},
+                    "childFrames": [{"frame": {"id": "sdk-frame", "name": "gameBrick"}}],
+                }
+            }
+        if method == "Page.createIsolatedWorld":
+            return {"executionContextId": 17}
+        if method == "Runtime.evaluate" and params and params.get("contextId") == 17:
+            return {"result": {"value": True}}
+        return {}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.targets._command_target", command)
+
+    assert dismiss_pogo_inactivity_prompt(9222, "Pogo")
+    assert commands[-1][1] == "Runtime.evaluate"
+    assert commands[-1][2]["contextId"] == 17
+    assert "Still Playing" in str(commands[-1][2]["expression"])
+    assert "button.click()" in str(commands[-1][2]["expression"])
+
+
 def test_version_page_metadata_uses_hidden_target(monkeypatch) -> None:
     commands: list[tuple[str, str, dict[str, object] | None]] = []
 
@@ -256,6 +308,18 @@ def test_discover_game_targets_resolves_nested_crazygames_frame() -> None:
     assert target.page_target_id == "crazy-page"
     assert target.game_target_id == "game-frame"
     assert target.support_level is PortalSupportLevel.AUTOMATION
+
+
+def test_discover_game_targets_recognizes_pogo_as_observation_only() -> None:
+    discovered = discover_game_targets(
+        [_pogo_page(), _pogo_game_frame("game-frame", "pogo-page")], "Pogo"
+    )
+
+    assert len(discovered) == 1
+    assert discovered[0].portal is GamePortal.POGO
+    assert discovered[0].support_level is PortalSupportLevel.OBSERVATION
+    with pytest.raises(CdpConnectionError, match="observation-only.*pogo"):
+        _select_target_pair([_pogo_page(), _pogo_game_frame("game-frame", "pogo-page")], "Pogo")
 
 
 def test_select_target_pair_rejects_observation_only_portal(monkeypatch) -> None:

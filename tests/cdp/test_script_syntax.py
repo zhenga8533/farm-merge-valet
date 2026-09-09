@@ -65,7 +65,7 @@ def test_health_and_dismissal_share_overlay_contract() -> None:
     assert shared_context in _HEALTH_EXPRESSION
     assert shared_context in dismissal
     for kind in TransientOverlayKind:
-        if kind is TransientOverlayKind.UNSUPPORTED:
+        if kind in {TransientOverlayKind.ONBOARDING, TransientOverlayKind.UNSUPPORTED}:
             continue
         assert kind.value in _HEALTH_EXPRESSION
         assert kind.value in dismissal

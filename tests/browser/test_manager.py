@@ -85,7 +85,7 @@ def test_status_verifies_profile_flags_and_ownership(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         "farm_merge_valet.browser.manager.has_game_target_pair",
-        lambda _port, _title: True,
+        lambda _port, _title, **_kwargs: True,
     )
 
     status = manager.status()
@@ -120,7 +120,7 @@ def test_status_does_not_treat_launcher_as_loaded_game(tmp_path, monkeypatch) ->
     )
     monkeypatch.setattr(
         "farm_merge_valet.browser.manager.has_game_target_pair",
-        lambda _port, _title: False,
+        lambda _port, _title, **_kwargs: False,
     )
 
     assert not manager.status().game_loaded
@@ -169,7 +169,7 @@ def test_status_accepts_profile_paths_with_spaces_from_argument_list(tmp_path, m
     )
     monkeypatch.setattr(
         "farm_merge_valet.browser.manager.has_game_target_pair",
-        lambda _port, _title: False,
+        lambda _port, _title, **_kwargs: False,
     )
 
     status = manager.status()
@@ -301,10 +301,19 @@ def test_ensure_game_open_opens_configured_url_once_in_managed_browser(monkeypat
     assert opened == [(9222, "https://www.reddit.com/r/FarmMergeValley/")]
 
 
-def test_ensure_game_open_waits_for_direct_portal_without_launcher(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("game_url", "window_title"),
+    [
+        ("https://www.crazygames.com/game/farm-merge-valley", "CrazyGames"),
+        ("https://www.pogo.com/games/farm-merge-valley/play", "Pogo"),
+    ],
+)
+def test_ensure_game_open_waits_for_direct_portal_without_launcher(
+    monkeypatch, game_url: str, window_title: str
+) -> None:
     settings = AppConfig(
-        game_url="https://www.crazygames.com/game/farm-merge-valley",
-        window_title="CrazyGames",
+        game_url=game_url,
+        window_title=window_title,
     )
     manager = BrowserManager(settings)
     waiting = BrowserStatus(True, True, True, kind=BrowserKind.CHROME, game_loaded=False)

@@ -693,3 +693,22 @@ def test_unsupported_overlay_pauses_without_attempting_dismissal(caplog) -> None
         "unsupported game overlay is open (popup:UnknownPopup)" in message
         for message in caplog.messages
     )
+
+
+def test_onboarding_pauses_with_manual_completion_guidance(caplog) -> None:
+    class OnboardingRuntime(FakeRuntime):
+        def read_runtime_health(self):
+            return health(
+                advancing=True,
+                transient_overlay=TransientOverlayKind.ONBOARDING,
+                transient_overlay_detail="layer:onboarding",
+            )
+
+    bot = bare_bot()
+    bot.runtime = OnboardingRuntime()
+
+    with caplog.at_level(logging.DEBUG):
+        bot.step()
+
+    assert bot.runtime.dismissed_overlays == 0
+    assert any("complete it manually" in message for message in caplog.messages)
