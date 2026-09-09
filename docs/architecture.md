@@ -40,7 +40,10 @@ GUI / CLI -> automation and catalog services -> core
   CDP readers are supplied only by the application composition root.
 - `cdp` owns browser protocol transport, target/resource access, trusted launcher
   input and page-control primitives, atomic game-state snapshots, embedded
-  scripts, profiling, and `GameRuntimeAdapter`.
+  scripts, profiling, and `GameRuntimeAdapter`. Portal definitions own URL
+  recognition and automation capability. Target discovery walks the CDP parent
+  graph from a recognized game frame to its top-level portal page, so nested
+  wrappers do not leak into runtime or workflow code.
 - `browser` owns managed browser process discovery, launch, shutdown, game-page
   startup, and bounded page recovery.
 - `config` owns stable platform paths, validated schema-version-1 models,

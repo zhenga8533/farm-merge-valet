@@ -46,8 +46,11 @@ used to confirm the result before another submission is allowed.
 
 ## Runtime acquisition
 
-CDP pairs the Farm Merge Valley iframe with its owning Reddit page. Target
-pairs are cached and rediscovered after a reload. On acquisition, the bot
+CDP recognizes registered Farm Merge Valley portals and walks each iframe's
+parent chain to its owning top-level page. Target pairs are cached and
+rediscovered after a reload. Reddit is currently automation-enabled;
+CrazyGames is recognized in observation-only mode until its runtime discovery
+and action contracts have been validated. On acquisition, the bot
 applies each supported focus-emulation, unlocked/user-active, and
 active-lifecycle override once per browser target. Unsupported optional
 overrides are logged once at debug level. The managed browser must also be

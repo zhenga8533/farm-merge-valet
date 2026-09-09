@@ -6,11 +6,13 @@ from threading import Event
 import pytest
 
 from farm_merge_valet.cdp.evaluation import _evaluate_target, evaluate
+from farm_merge_valet.cdp.portals import GamePortal
 from farm_merge_valet.cdp.targets import (
     _invalidate_target_pair,
     _normalize_local_ws_url,
     _select_target_pair,
     _version_page_metadata,
+    discover_game_targets,
     find_game_frame_target,
     find_top_page_target,
     read_background_flag_status,
@@ -41,6 +43,29 @@ def _frame(id_: str, parent_id: str) -> dict[str, str]:
         "parentId": parent_id,
         "type": "iframe",
         "url": "https://playfmv-example.devvit.net/index.html",
+        "webSocketDebuggerUrl": f"ws://frame/{id_}",
+    }
+
+
+def _crazy_page(id_: str = "crazy-page") -> dict[str, str]:
+    return {
+        "id": id_,
+        "type": "page",
+        "title": "Farm Merge Valley - CrazyGames",
+        "url": "https://www.crazygames.com/game/farm-merge-valley",
+        "webSocketDebuggerUrl": f"ws://page/{id_}",
+    }
+
+
+def _crazy_game_frame(id_: str, parent_id: str) -> dict[str, str]:
+    return {
+        "id": id_,
+        "parentId": parent_id,
+        "type": "iframe",
+        "url": (
+            "https://farm-merge-valley.game-files.crazygames.com/"
+            "farm-merge-valley/175/index.html?build=175"
+        ),
         "webSocketDebuggerUrl": f"ws://frame/{id_}",
     }
 
@@ -203,6 +228,44 @@ def test_select_target_pair_rejects_ambiguous_game_tabs() -> None:
 def test_select_target_pair_rejects_orphaned_iframe() -> None:
     with pytest.raises(CdpConnectionError, match="no Farm Merge Valley iframe"):
         _select_target_pair([_frame("game-frame", "missing")], "r/FarmMergeValley")
+
+
+def test_discover_game_targets_resolves_nested_crazygames_frame() -> None:
+    wrapper = {
+        "id": "wrapper",
+        "parentId": "crazy-page",
+        "type": "iframe",
+        "url": "https://games.crazygames.com/en_US/farm-merge-valley/index.html",
+        "webSocketDebuggerUrl": "ws://frame/wrapper",
+    }
+
+    discovered = discover_game_targets(
+        [_crazy_page(), wrapper, _crazy_game_frame("game-frame", "wrapper")]
+    )
+
+    assert len(discovered) == 1
+    target = discovered[0]
+    assert target.portal is GamePortal.CRAZY_GAMES
+    assert target.ancestor_ids == ("wrapper", "crazy-page")
+    assert target.page_target_id == "crazy-page"
+    assert target.game_target_id == "game-frame"
+    assert not target.automation_supported
+
+
+def test_select_target_pair_rejects_observation_only_portal() -> None:
+    targets = [_crazy_page(), _crazy_game_frame("game-frame", "crazy-page")]
+
+    with pytest.raises(CdpConnectionError, match="observation-only.*crazygames"):
+        _select_target_pair(targets, "CrazyGames")
+
+
+def test_discover_game_targets_rejects_spoofed_portal_host() -> None:
+    page = {
+        **_crazy_page(),
+        "url": "https://www.crazygames.com.example.test/game/farm-merge-valley",
+    }
+
+    assert not discover_game_targets([page, _crazy_game_frame("game-frame", "crazy-page")])
 
 
 def test_evaluate_target_wraps_websocket_failures(monkeypatch) -> None:

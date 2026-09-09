@@ -8,12 +8,14 @@ import re
 import subprocess
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from threading import Event, Lock
 from typing import Any, TypeVar
 from urllib.error import URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import urlopen
 
+from farm_merge_valet.cdp.portals import PORTALS, GamePortal, portal_definition
 from farm_merge_valet.cdp.transport import (
     CdpCancelledError,
     CdpConnectionError,
@@ -23,9 +25,6 @@ from farm_merge_valet.cdp.transport import (
 from farm_merge_valet.observability.logging import log_event
 
 logger = logging.getLogger(__name__)
-GAME_FRAME_URL_MARKER = "playfmv-"
-GAME_FRAME_ENTRYPOINT = "/index.html"
-_REDDIT_PAGE_URL_MARKER = "reddit.com"
 _LAUNCHER_FRAME_LOOKUP_SCRIPT = """
 const findLauncherFrame = launcherUrl => {
   const frames = [];
@@ -58,12 +57,23 @@ _VERSION_PAGE_TIMEOUT = 2.0
 _VERSION_PAGE_POLL_INTERVAL = 0.1
 
 
+@dataclass(frozen=True)
+class DiscoveredGameTarget:
+    portal: GamePortal
+    game_target_id: str
+    page_target_id: str
+    game_ws_url: str
+    page_ws_url: str
+    ancestor_ids: tuple[str, ...]
+    automation_supported: bool
+    page_title: str
+    page_url: str
+    game_url: str
+
+
 def is_game_frame_url(value: object) -> bool:
-    url = str(value)
-    parts = urlsplit(url)
-    return GAME_FRAME_URL_MARKER in parts.netloc.casefold() and parts.path.casefold().endswith(
-        GAME_FRAME_ENTRYPOINT
-    )
+    """Return whether any registered portal recognizes a game client URL."""
+    return any(portal.matches_game_frame_url(value) for portal in PORTALS)
 
 
 def _load_json_endpoint(port: int, path: str) -> object:
@@ -289,11 +299,12 @@ def try_start_game(port: int, page_title: str | None = None) -> bool:
     """Click the Reddit launcher Play control with a trusted browser input event."""
     title_filter = page_title.casefold() if page_title else None
     targets = _load_targets(port)
+    reddit = portal_definition(GamePortal.REDDIT)
     pages = {
         target.get("id"): target
         for target in targets
         if target.get("type") == "page"
-        and _REDDIT_PAGE_URL_MARKER in str(target.get("url", "")).casefold()
+        and reddit.matches_page_url(target.get("url", ""))
         and (
             title_filter is None
             or title_filter in str(target.get("title", "")).casefold()
@@ -425,42 +436,93 @@ def reload_game_page(port: int, page_title: str | None = None) -> None:
         _invalidate_target_pair(port, page_title)
 
 
+def _owning_page(
+    target: dict[str, Any], targets_by_id: dict[str, dict[str, Any]]
+) -> tuple[dict[str, Any] | None, tuple[str, ...]]:
+    ancestor_ids: list[str] = []
+    visited: set[str] = set()
+    parent_id = target.get("parentId")
+    while isinstance(parent_id, str) and parent_id not in visited:
+        visited.add(parent_id)
+        ancestor_ids.append(parent_id)
+        parent = targets_by_id.get(parent_id)
+        if parent is None:
+            return None, tuple(ancestor_ids)
+        if parent.get("type") == "page":
+            return parent, tuple(ancestor_ids)
+        parent_id = parent.get("parentId")
+    return None, tuple(ancestor_ids)
+
+
+def discover_game_targets(
+    targets: list[dict[str, Any]], page_title: str | None = None
+) -> tuple[DiscoveredGameTarget, ...]:
+    """Recognize game clients and resolve their top-level portal pages."""
+    targets_by_id = {
+        target_id: target
+        for target in targets
+        if isinstance((target_id := target.get("id")), str)
+    }
+    discovered: list[DiscoveredGameTarget] = []
+    for frame in targets:
+        if frame.get("type") != "iframe":
+            continue
+        portal = next(
+            (
+                candidate
+                for candidate in PORTALS
+                if candidate.matches_game_frame_url(frame.get("url", ""))
+            ),
+            None,
+        )
+        if portal is None:
+            continue
+        page, ancestor_ids = _owning_page(frame, targets_by_id)
+        if page is None or not portal.matches_page_url(page.get("url", "")):
+            continue
+        frame_id = frame.get("id")
+        page_id = page.get("id")
+        frame_ws = frame.get("webSocketDebuggerUrl")
+        page_ws = page.get("webSocketDebuggerUrl")
+        if not all(isinstance(value, str) for value in (frame_id, page_id, frame_ws, page_ws)):
+            continue
+        discovered.append(
+            DiscoveredGameTarget(
+                portal=portal.kind,
+                game_target_id=frame_id,
+                page_target_id=page_id,
+                game_ws_url=_normalize_local_ws_url(frame_ws),
+                page_ws_url=_normalize_local_ws_url(page_ws),
+                ancestor_ids=ancestor_ids,
+                automation_supported=portal.automation_supported,
+                page_title=str(page.get("title", "")),
+                page_url=str(page.get("url", "")),
+                game_url=str(frame.get("url", "")),
+            )
+        )
+    if page_title is None:
+        return tuple(discovered)
+
+    title_filter = page_title.casefold()
+    title_matches = [
+        target for target in discovered if title_filter in target.page_title.casefold()
+    ]
+    matches = title_matches or [
+        target for target in discovered if title_filter in target.page_url.casefold()
+    ]
+    return tuple(matches)
+
+
 def _select_target_pair(
     targets: list[dict[str, Any]], page_title: str | None = None
 ) -> tuple[str, str]:
-    """Return the game-iframe and owning-page websocket URLs."""
-    title_filter = page_title.casefold() if page_title else None
-    reddit_pages = {
-        target.get("id"): target
-        for target in targets
-        if target.get("type") == "page" and _REDDIT_PAGE_URL_MARKER in str(target.get("url", ""))
-    }
-    candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
-    for frame in targets:
-        if frame.get("type") != "iframe" or not is_game_frame_url(frame.get("url", "")):
-            continue
-        page = reddit_pages.get(frame.get("parentId"))
-        if page is not None:
-            candidates.append((frame, page))
-
-    title_matches = [
-        pair
-        for pair in candidates
-        if title_filter is not None and title_filter in str(pair[1].get("title", "")).casefold()
+    """Return the single automation-enabled game and owning-page target pair."""
+    discovered = discover_game_targets(targets, page_title)
+    pairs = [
+        (target.game_ws_url, target.page_ws_url)
+        for target in discovered
+        if target.automation_supported
     ]
-    matches = title_matches or [
-        pair
-        for pair in candidates
-        if title_filter is None or title_filter in str(pair[1].get("url", "")).casefold()
-    ]
-    pairs: list[tuple[str, str]] = []
-    for frame, page in matches:
-        frame_ws = frame.get("webSocketDebuggerUrl")
-        page_ws = page.get("webSocketDebuggerUrl")
-        if frame_ws and page_ws:
-            pairs.append(
-                (_normalize_local_ws_url(str(frame_ws)), _normalize_local_ws_url(str(page_ws)))
-            )
 
     if len(pairs) == 1:
         return pairs[0]
@@ -470,15 +532,21 @@ def _select_target_pair(
             "or close the extra game tabs so board state and screen geometry are unambiguous."
         )
 
+    if discovered:
+        portals = ", ".join(sorted({target.portal.value for target in discovered}))
+        raise CdpConnectionError(
+            f"Recognized an observation-only Farm Merge Valley target ({portals}); "
+            "automation is not enabled for that portal."
+        )
     raise CdpConnectionError(
         "The browser's remote debugging endpoint is reachable, but no Farm Merge Valley iframe "
-        "paired with a matching Reddit page is open. Has the game been loaded (clicked "
-        "'Play'), and does the configured page target match that tab?"
+        "paired with a matching supported portal page is open. Has the game been loaded, and "
+        "does the configured page target match that tab?"
     )
 
 
 def has_game_target_pair(port: int, page_title: str | None = None) -> bool:
-    """Return whether exactly one usable game iframe and Reddit page pair is open."""
+    """Return whether exactly one automation-enabled game target pair is open."""
     try:
         _select_target_pair(_load_targets(port), page_title)
     except CdpConnectionError:
@@ -506,14 +574,14 @@ def _invalidate_target_pair(port: int, page_title: str | None = None) -> None:
 
 
 def find_game_frame_target(port: int, page_title: str | None = None) -> str:
-    """Return the game iframe target paired with its owning Reddit page."""
+    """Return the game iframe target paired with its owning portal page."""
     game_ws, _ = _target_pair(port, page_title)
     return game_ws
 
 
 def find_top_page_target(port: int, page_title: str | None = None) -> str:
-    """Returns the `webSocketDebuggerUrl` for the top-level Reddit post
-    page hosting the game -- as opposed to the game's own cross-origin
+    """Returns the `webSocketDebuggerUrl` for the top-level portal page
+    hosting the game -- as opposed to the game's own cross-origin
     iframe (`find_game_frame_target`).
 
     Used for browser-level controls that cannot run inside the cross-origin

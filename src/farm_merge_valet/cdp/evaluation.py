@@ -89,7 +89,7 @@ def evaluate_top_page(
     timeout: float = _CDP_COMMAND_TIMEOUT,
     cancel_event: Event | None = None,
 ) -> object:
-    """Evaluate an expression in the top-level Reddit page's JS context."""
+    """Evaluate an expression in the top-level portal page's JS context."""
     return _run_top_page_operation(
         port,
         page_title,
