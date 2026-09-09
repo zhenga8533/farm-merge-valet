@@ -17,36 +17,28 @@ GUI / CLI -> automation and catalog services -> core
   upgrade-progress value objects. It performs no I/O and imports no GUI,
   browser, CDP, configuration-persistence, or observability code.
 - `automation` owns the bot lifecycle, action-workflow execution, and its
-  adapter-neutral runtime contract. `Bot` receives an `AppConfig` snapshot, a
-  runtime, and a catalog provider. Saved updates are handed to a running bot as
-  complete snapshots and adopted between planning iterations. Workflow-specific
-  planning, submission, pending-action verification, retry state, and execution
-  belong to dedicated merge, tile-interaction, storage-bubble, supply-crate,
-  shop, marketplace, and farm-visit objects under `automation.workflows`.
+  adapter-neutral runtime contract. Workflow-specific planning, submission,
+  verification, and retry state belong to collaborators under
+  `automation.workflows`.
   `automation.perception` converts atomic snapshots into planning state, and
-  `automation.scheduler` owns renderer-load-aware polling cadence. Marketplace purchases use
-  stable `flash:<slot>:<candidate>` or `free:<offer>` identities.
-  Workflow objects are internal stateful collaborators. They depend on the narrow
-  internal `WorkflowContext` protocol rather than `Bot`; the context exposes runtime,
-  configuration and snapshot state plus named coordination/reporting operations.
-  `ActionTiming` owns common settle, stability, pending, retry, and failure defaults,
-  with named overrides for protocols such as marketplace ambiguity and farm visits.
-  `AutomationState` owns snapshot-derived mutable state, and `WorkflowArbiter` owns
-  workflow selection and precedence. `Bot` retains lifecycle, runtime recovery,
-  configuration adoption, scheduling, and loop control.
+  `automation.scheduler` owns renderer-load-aware polling cadence. Workflows
+  depend on the narrow internal `WorkflowContext` protocol rather than `Bot`.
+  `Bot` retains lifecycle, runtime recovery, configuration adoption, scheduling,
+  and loop control.
 - `catalog` owns catalog models, taxonomy, labels, construction, persistence,
   blueprint mapping, asset compilation, and synchronization orchestration.
   Its synchronization service accepts resource and metadata readers; concrete
   CDP readers are supplied only by the application composition root.
+- `integrations` owns registered platform identity, canonical URLs, trusted host
+  and game-frame recognition, support levels, and startup strategies.
 - `cdp` owns browser protocol transport, target/resource access, trusted launcher
   input and page-control primitives, atomic game-state snapshots, embedded
-  scripts, profiling, and `GameRuntimeAdapter`. Portal definitions own URL
-  recognition and automation capability. Target discovery walks the CDP parent
-  graph from a recognized game frame to its top-level portal page, so nested
+  scripts, profiling, and `GameRuntimeAdapter`. Target discovery walks the CDP
+  parent graph from a recognized game frame to its top-level portal page, so nested
   wrappers do not leak into runtime or workflow code.
 - `browser` owns managed browser process discovery, launch, shutdown, game-page
   startup, and bounded page recovery.
-- `config` owns stable platform paths, validated schema-version-1 models,
+- `config` owns stable platform paths, validated configuration models,
   canonical hotkey values, and atomic persistence. Its package root defines
   the public configuration API.
 - `gui` owns Qt pages, reusable components, services, windows, and the
@@ -74,22 +66,18 @@ Marketplace state is included only while a marketplace policy is enabled or a
 purchase is pending. The GUI owns only the persistent catalog and policy editor;
 all live marketplace reads belong to the automation runtime.
 
-The package root contains only package metadata, Python/CLI entry points, and
-the shared composition root. Feature implementation belongs to its owning
-package; there is no general-purpose diagnostics module or global settings
-proxy.
+The package root contains package metadata, Python/CLI entry points, shared
+integration metadata, and the composition root. Feature implementation belongs
+to its owning package; there is no general-purpose diagnostics module or global
+settings proxy.
 
-The public package entry points are `farm_merge_valet.automation`,
-`farm_merge_valet.config`, `farm_merge_valet.browser`,
-`farm_merge_valet.gui.run_application`, and
-`farm_merge_valet.observability.discord`. CDP modules are internal adapters.
-Former private paths under `core.catalog_*`, `core.bot`, `tools`, and the old
-top-level logging module are intentionally not retained.
+The public package entry points expose automation, configuration, browser,
+application, and observability services. CDP modules remain internal adapters.
 
 ## Generated and user-owned data
 
-User configuration remains schema version 1 at the existing platform-specific
-data path. Catalogs and atlases remain under the existing cache root. Browser
+User configuration, catalogs, and atlases use platform-specific application-data
+and cache roots. Browser
 profiles, captures, `.atlas_cache`, `.fmv-state`, and other runtime state are
 user-owned and must not be deleted by repository maintenance. Tests and package
 builds write disposable output beneath repository-local `.tmp/`. Dependencies are
@@ -97,9 +85,5 @@ resolved by the committed universal `uv.lock`; CI synchronizes it in locked mode
 
 ## Tests
 
-Tests mirror production packages under `tests/automation`, `tests/catalog`,
-`tests/config`, `tests/core`, `tests/cdp`, `tests/gui`, `tests/browser`, and
-`tests/observability`. Explicitly opted-in live tests reside in `tests/integration`.
-Architecture tests recursively parse absolute and relative imports, enforce inward
-dependencies from one rule table, and reject retired module paths so old structure
-cannot return unnoticed.
+Tests follow production package boundaries. Live-game tests require explicit
+opt-in, and architecture tests enforce the inward dependency rules.

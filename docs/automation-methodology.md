@@ -46,29 +46,27 @@ used to confirm the result before another submission is allowed.
 
 ## Runtime acquisition
 
-CDP recognizes registered Farm Merge Valley portals and walks each iframe's
+CDP recognizes registered Farm Merge Valley integrations and walks each iframe's
 parent chain to its owning top-level page. Target pairs are cached and
-rediscovered after a reload. Reddit and CrazyGames are automation-enabled and
-share the same validated game-runtime contract. Pogo is automation-enabled: its
-versioned `pogospike.com` game frame is recognized from Pogo's direct `/play`
-route, and unavailable optional capabilities remain blocked by runtime capability
-checks. Observation mode can apply browser
+rediscovered after a reload. Platform builds share a runtime contract, while
+unavailable optional features remain blocked by runtime capability checks.
+Observation mode can apply browser
 lifecycle overrides and run discovery, snapshots, and sanitized diagnostics,
 but a runtime-level gate rejects every action submission before its JavaScript
-is evaluated. Pogo sessions additionally perform a bounded page-level check
-for its exact inactivity dialog and presses **CONTINUE** when present; it does
-not call the game runtime. On acquisition, the bot
+is evaluated. Integrations may also perform bounded page-level session
+maintenance that does not call the game runtime. On acquisition, the bot
 applies each supported focus-emulation, unlocked/user-active, and
 active-lifecycle override once per browser target. Unsupported optional
 overrides are logged once at debug level. The managed browser must also be
 launched with the background-throttling switches
 documented in the README.
 
-Portal definitions centralize the canonical page URL, trusted page hosts,
+Integration definitions centralize the canonical page URL, trusted page hosts,
 game-frame matcher, support level, and startup strategy. Browser startup and
-runtime session maintenance use a shared lifecycle dispatcher, keeping portal
-branches out of their orchestration loops. A new portal should be registered
-there first and remain observation-only until its runtime contract is validated.
+runtime session maintenance use a shared lifecycle dispatcher, keeping
+integration-specific branches out of their orchestration loops. A new
+integration should be registered there only after its trusted target ancestry
+and runtime contract are validated.
 
 Pause/resume uses a fast health check against the cached scene. The cache is
 accepted only when the active map-grid service still owns the same board map
@@ -241,9 +239,11 @@ preserves normal rapid-click cadence without submitting claims concurrently.
 
 ## Visit other farms
 
-Farm visiting is default-disabled because it spends train tickets. Once enabled,
-it runs after higher-priority local work has no action to submit and before HUD
-supply crates are opened. This spends held tickets before crates can drop more,
+Farm visiting is an optional runtime capability and is default-disabled because
+it spends train tickets. Platforms that omit the feature never expose it to the
+workflow. When available and enabled, it runs after higher-priority local work
+has no action to submit and before HUD supply crates are opened. This spends held
+tickets before crates can drop more,
 leaving room below the three-ticket cap. The workflow opens the live train
 system, waits for an eligible native destination, and enters through the game's
 connection and scene-transition path so the local farm snapshot is preserved.

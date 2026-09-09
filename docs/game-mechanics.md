@@ -3,11 +3,10 @@
 Reference notes on how the game itself works. This document is about the
 game only — no automation design, architecture, or open questions here.
 
-Sources: [Farm Merge Valley Fandom Wiki](https://farm-merge-valley.fandom.com/wiki/Farm_Merge_Valley_Wiki)
-(via search snippets — direct page fetches were blocked/paywalled),
-[pogofans.com guide](https://pogofans.com/games/farm-merge-valley/),
-Facebook/TikTok community posts, and direct in-app observation (marked
-*observed*).
+These notes combine direct in-game observation with community references such
+as the [Farm Merge Valley Wiki](https://farm-merge-valley.fandom.com/wiki/Farm_Merge_Valley_Wiki)
+and [PogoFans guide](https://pogofans.com/games/farm-merge-valley/). Platform
+builds and live events can differ.
 
 ## Controls
 
@@ -110,20 +109,12 @@ through three states:
 3. **Ready** allows the completed rewards to be claimed. Reward objects spawn
    onto the board, after which the workshop receives its next order.
 
-The bot observes and advances this same lifecycle through the game's order
-service without opening the panel or moving the camera. It starts only
-affordable enabled recipes and reserves one empty board cell per reward object
-before claiming.
-
 ## Marketplace
 
-Marketplace configuration is discovered from the running game and cached during
-synchronization. All candidates in each active flash-deal configuration are
-retained as policies using the exact slot and candidate identity; free policies
-include only offers whose live payment type is literally `free`.
-Parallel ad and premium variants are therefore not treated as free. Stock is
-finite and may renew when the marketplace rotates. Event-specific offers appear
-only when the game exposes their shop.
+- Marketplace offers can include free, advertisement-supported, premium, and
+  rotating flash-deal variants.
+- Stock can be finite and may renew when the marketplace rotates.
+- Event-specific offers appear only while the corresponding event is active.
 
 ## Tier-4 Producers
 
@@ -135,11 +126,11 @@ only when the game exposes their shop.
   products from the board at once.
 - After the final harvest, animals retire into coins. Crops retire into two
   tier-1 items of the same crop, requiring one additional open cell.
-- The current live runtime reports a 3600-second regeneration duration. Yield
-  can vary and may be affected by upgrade cards, so collecting the full output
-  in one interaction can require several open cells.
+- Regeneration duration and yield can vary with the game build and upgrades.
 
 ## Train Tickets & Visiting
+
+These mechanics apply only to platform builds that expose the visiting feature.
 
 - Train tickets cap at **3** held at once; supply crates stop dropping new
   tickets once you're at the cap.
@@ -161,9 +152,8 @@ only when the game exposes their shop.
 
 ## Buildings
 
-- As the farm grows, buildings like railway stations and ports unlock,
-  enabling crop trade and further development.
-- The train station is central to the visiting/social loop described
-  above.
+- As the farm grows, buildings unlock additional production and progression.
+- Some platform builds include a train station and visiting/social loop; the
+  feature is absent from other builds.
 
 Remaining feature and supporting work is tracked in [Open Items](open-items.md).

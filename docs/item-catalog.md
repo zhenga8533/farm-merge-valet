@@ -68,21 +68,15 @@ as producer cooldown/depleted frames and broken/repaired building frames live
 in a sibling `variants` directory and retain their exact atlas aliases. The
 top-level `variants` mapping in `catalog.json` records each variant's semantic
 state, alias, and path; consumers never need to infer states from filenames.
-Catalog schema version 8 records marketplace discovery data in addition to the
-compact source fingerprint introduced by version 7. Startup compares the
-fingerprint before requesting full blueprint metadata, avoiding a complete
-catalog extraction when game data is unchanged. Version 6 and 7 caches remain
-readable and are upgraded during later synchronization.
+The catalog stores marketplace discovery data and a compact source fingerprint.
+Startup compares the fingerprint before requesting full blueprint metadata,
+avoiding a complete extraction when game data is unchanged. Older supported
+caches are upgraded during synchronization.
 Variant discovery uses exact numbered-family and building-state identities so
 similarly prefixed, unrelated game assets cannot be grouped together.
 Compilation fails if a declared alias is missing. Catalog metadata and compiled
 assets are built as one staged generation and published together, removing stale
 PNGs on success while leaving the previous generation intact on failure.
-
-The desktop GUI fits catalog-item and recipe sprites inside 40-by-40 icon boxes,
-while shop building previews use a 100-by-54 box. Both preserve the source
-aspect ratio, so wide stacks, tall crops, and square currencies are not
-stretched into a common shape.
 
 Generated game metadata, downloaded atlases, and compiled sprites are ignored
 and excluded from packages and releases. The repository contains only the
@@ -103,11 +97,10 @@ Categories are derived from runtime capabilities before falling back to an
 explicit `uncategorized` bucket. A small centralized compatibility table covers
 known graph families whose role is not represented by a unique component. New
 unknown content is retained and reported during compilation rather than being
-guessed or omitted. Current specialized groups include map areas,
-supply crates, blockers, deliveries, bonuses, transport, buildings, and plants
-in addition to the core game taxonomy. Exact runtime IDs, family IDs, and
-aliases retain any spelling used by the game; player-facing spelling belongs in
-`display_name`.
+guessed or omitted. Specialized groups cover content such as map areas,
+supplies, blockers, deliveries, transport, buildings, and plants. Exact runtime
+IDs, family IDs, and aliases retain any spelling used by the game; player-facing
+spelling belongs in `display_name`.
 
 Each catalog item also derives a tile-interaction mode from semantic runtime
 metadata. The modes distinguish direct interaction, confirmed currency rewards,
