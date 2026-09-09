@@ -1070,8 +1070,8 @@ def test_observation_runtime_maintains_portal_session_on_bounded_interval(monkey
     adapter = GameRuntimeAdapter(9222, "Pogo", observation_only=True)
     calls = []
     monkeypatch.setattr(
-        "farm_merge_valet.cdp.runtime.dismiss_pogo_inactivity_prompt",
-        lambda port, title: calls.append((port, title)) or False,
+        "farm_merge_valet.cdp.runtime.maintain_portal_session",
+        lambda port, title: calls.append((port, title)) or None,
     )
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.time.monotonic", lambda: 100.0)
 

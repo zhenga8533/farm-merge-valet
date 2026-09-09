@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 from farm_merge_valet.config.hotkeys import normalize_hotkey
 from farm_merge_valet.config.paths import user_cache_root
 from farm_merge_valet.core.items import item_base_policy_key, item_family_policy_key
+from farm_merge_valet.integrations import GamePortal, portal_definition, portal_for_page_url
 
 CONFIG_SCHEMA_VERSION: Literal[1] = 1
 
@@ -73,7 +74,8 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     schema_version: Literal[1] = CONFIG_SCHEMA_VERSION
-    window_title: str = "r/FarmMergeValley"
+    game_portal: GamePortal = GamePortal.REDDIT
+    window_title: str = ""
     browser: Literal["auto", "chrome", "edge", "brave", "chromium"] = "auto"
     browser_executable: Path | None = None
     browser_profile_dir: Path | None = None
@@ -170,10 +172,21 @@ class AppConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def discard_legacy_shop_start_toggle(cls, value: object) -> object:
-        if isinstance(value, Mapping) and "allow_shop_order_starts" in value:
+    def migrate_legacy_configuration(cls, value: object) -> object:
+        if isinstance(value, Mapping):
             value = dict(value)
-            value.pop("allow_shop_order_starts")
+            value.pop("allow_shop_order_starts", None)
+            if "game_portal" not in value:
+                portal = portal_for_page_url(value.get("game_url", ""))
+                if portal is not None:
+                    value["game_portal"] = portal.kind
+                    value["game_url"] = portal.canonical_url
+                elif value.get("game_url"):
+                    raise ValueError("game_url does not match a registered integration")
+            if "game_portal" in value:
+                value["game_url"] = portal_definition(
+                    GamePortal(value["game_portal"])
+                ).canonical_url
         return value
 
     @field_validator("discord_webhook_url", mode="before")

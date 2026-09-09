@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from farm_merge_valet.browser.manager import (
 )
 from farm_merge_valet.cdp.transport import CdpConnectionError
 from farm_merge_valet.config import AppConfig
+from farm_merge_valet.integrations import PortalSupportLevel, portal_for_page_url
 
 
 def _executable(path: Path) -> Path:
@@ -186,7 +188,6 @@ def test_launch_writes_marker_and_required_switches(tmp_path, monkeypatch) -> No
         browser="chrome",
         browser_executable=executable,
         browser_profile_dir=profile,
-        game_url="https://reddit.example/game",
     )
     manager = BrowserManager(settings)
     ready = BrowserStatus(
@@ -222,7 +223,7 @@ def test_launch_writes_marker_and_required_switches(tmp_path, monkeypatch) -> No
     assert "--remote-debugging-port=9222" in arguments
     assert "--enable-automation" not in arguments
     assert "--disable-background-mode" in arguments
-    assert "https://reddit.example/game" in arguments
+    assert "https://www.reddit.com/r/FarmMergeValley/" in arguments
 
 
 def test_stop_closes_only_a_verified_managed_endpoint(monkeypatch) -> None:
@@ -325,7 +326,7 @@ def test_ensure_game_open_waits_for_direct_portal_without_launcher(
     def unexpected_start(*_args):
         raise AssertionError("direct-load portal invoked a launcher")
 
-    monkeypatch.setattr("farm_merge_valet.browser.manager.try_start_game", unexpected_start)
+    monkeypatch.setattr("farm_merge_valet.browser.manager.request_game_start", unexpected_start)
 
     assert manager.ensure_game_open() is loaded
 
@@ -364,7 +365,7 @@ def test_ensure_game_open_retries_transient_play_error_until_game_is_loaded(
     monkeypatch.setattr(manager, "status", lambda: next(statuses))
     monkeypatch.setattr("farm_merge_valet.browser.manager.has_page_url", lambda *_args: True)
     monkeypatch.setattr(
-        "farm_merge_valet.browser.manager.try_start_game",
+        "farm_merge_valet.browser.manager.request_game_start",
         try_start,
     )
     monkeypatch.setattr("farm_merge_valet.browser.manager._GAME_START_RETRY_SECONDS", 0.0)
@@ -379,13 +380,38 @@ def test_recover_game_reloads_loaded_managed_page(monkeypatch) -> None:
     manager = BrowserManager(AppConfig(window_title="game title"))
     loaded = BrowserStatus(True, True, True, game_loaded=True)
     monkeypatch.setattr(manager, "ensure_running", lambda: loaded)
-    reloaded: list[tuple[int, str | None]] = []
+    reloaded: list[tuple[int, str | None, bool]] = []
     monkeypatch.setattr(
         "farm_merge_valet.browser.manager.reload_game_page",
-        lambda port, title: reloaded.append((port, title)),
+        lambda port, title, *, allow_observation=False: reloaded.append(
+            (port, title, allow_observation)
+        ),
     )
     monkeypatch.setattr(manager, "status", lambda: loaded)
     monkeypatch.setattr("farm_merge_valet.browser.manager.time.sleep", lambda _seconds: None)
 
     assert manager.recover_game() is loaded
-    assert reloaded == [(9222, "game title")]
+    assert reloaded == [(9222, "game title", False)]
+
+
+def test_recover_game_allows_observation_portal_reload(monkeypatch) -> None:
+    manager = BrowserManager(AppConfig(game_portal="pogo"))
+    pogo = portal_for_page_url(manager.settings.game_url)
+    assert pogo is not None
+    observation_portal = replace(pogo, support_level=PortalSupportLevel.OBSERVATION)
+    loaded = BrowserStatus(True, True, True, game_loaded=True)
+    monkeypatch.setattr(manager, "ensure_running", lambda: loaded)
+    monkeypatch.setattr(manager, "status", lambda: loaded)
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.portal_for_page_url",
+        lambda _url: observation_portal,
+    )
+    reloaded = []
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.reload_game_page",
+        lambda port, title, *, allow_observation=False: reloaded.append(allow_observation),
+    )
+    monkeypatch.setattr("farm_merge_valet.browser.manager.time.sleep", lambda _seconds: None)
+
+    assert manager.recover_game() is loaded
+    assert reloaded == [True]

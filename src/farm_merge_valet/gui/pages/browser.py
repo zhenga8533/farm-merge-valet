@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
     QWidget,
@@ -38,6 +39,12 @@ from farm_merge_valet.gui.services.catalog_freshness import (
     CatalogFreshness,
     CatalogFreshnessState,
     inspect_catalog_freshness,
+)
+from farm_merge_valet.integrations import (
+    PORTALS,
+    GamePortal,
+    PortalSupportLevel,
+    portal_definition,
 )
 
 
@@ -89,6 +96,27 @@ class BrowserPage(ConfigFormPage):
             self.browser_choice.set_current_value,
         )
         self._add_form_row(managed_form, "Status", self.status_label)
+        self.portal_choice = FocusAwareComboBox()
+        self.portal_choice.set_choices(
+            tuple((portal.display_name, portal.kind.value) for portal in PORTALS)
+        )
+        self.portal_choice.set_current_value(config.game_portal.value)
+        self.portal_choice.setAccessibleName("Game platform")
+        self.portal_choice.currentIndexChanged.connect(self._request_portal)
+        self._register_control(
+            "game_portal",
+            self.portal_choice,
+            lambda value: self._set_portal(GamePortal(str(value))),
+        )
+        self.portal_support_label = QLabel()
+        self.portal_support_label.setAccessibleName("Integration support level")
+        self.portal_url_label = QLabel()
+        self.portal_url_label.setAccessibleName("Integration game page")
+        self.portal_url_label.setWordWrap(True)
+        self._set_portal(config.game_portal)
+        self._add_form_row(managed_form, "Game platform", self.portal_choice)
+        self._add_form_row(managed_form, "Support", self.portal_support_label)
+        self._add_form_row(managed_form, "Game page", self.portal_url_label)
         self._add_form_row(managed_form, "Preferred browser", self.browser_choice)
         self._add_toggle(managed_form, "Launch automatically when needed", "browser_auto_launch")
         self._add_toggle(managed_form, "Reload frozen game automatically", "auto_recover_game")
@@ -110,8 +138,7 @@ class BrowserPage(ConfigFormPage):
         browser_advanced, form = disclosure_section("Advanced connection")
         self._add_path(form, "Browser executable", "browser_executable")
         self._add_path(form, "Browser profile directory", "browser_profile_dir")
-        self._add_text(form, "Game URL", "game_url")
-        self._add_text(form, "Page target", "window_title")
+        self._add_text(form, "Tab title filter", "window_title")
         self._add_int(form, "CDP port", "cdp_port", 1, 65535)
         self._add_toggle(
             form,
@@ -161,6 +188,33 @@ class BrowserPage(ConfigFormPage):
             self.stop_requested.emit()
         else:
             self.launch_requested.emit()
+
+    def _set_portal(self, portal: GamePortal) -> None:
+        definition = portal_definition(portal)
+        self.portal_choice.set_current_value(portal.value)
+        support = (
+            "Automation"
+            if definition.support_level is PortalSupportLevel.AUTOMATION
+            else "Observation only"
+        )
+        self.portal_support_label.setText(support)
+        self.portal_url_label.setText(definition.canonical_url)
+
+    def _request_portal(self, _index: int) -> None:
+        portal = GamePortal(str(self.portal_choice.current_value()))
+        definition = portal_definition(portal)
+        self._set_portal(portal)
+        self.config_edited.emit(
+            ConfigEdit(
+                {
+                    "game_portal": portal,
+                    "game_url": definition.canonical_url,
+                    "window_title": "",
+                },
+                "game_portal",
+                "browser",
+            )
+        )
 
     def set_browser_status(self, status: BrowserStatus) -> None:
         self._browser_status = status

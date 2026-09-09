@@ -80,12 +80,12 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
     settings_page = window.pages.widget(window._NAVIGATION.index("Settings"))
 
     assert set(window.browser_page.controls) == {
+        "game_portal",
         "browser",
         "browser_auto_launch",
         "auto_recover_game",
         "browser_executable",
         "browser_profile_dir",
-        "game_url",
         "window_title",
         "cdp_port",
         "close_managed_browser_on_exit",
@@ -123,6 +123,13 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
     assert window.browser_page.game_sync_button.text() == "Synchronize"
     assert window.browser_page.cache_clear_button.text() == "Clear cache"
     assert window.browser_page.cache_clear_button.property("danger") is True
+
+    window.browser_page.portal_choice.set_current_value("pogo")
+    window._flush_config()
+    selected = ConfigStore(store.path).load()
+    assert selected.game_portal.value == "pogo"
+    assert selected.game_url == "https://www.pogo.com/games/farm-merge-valley/play"
+    assert selected.window_title == ""
 
     window.browser_page._request("cdp_port", 9333)
     window._flush_config()

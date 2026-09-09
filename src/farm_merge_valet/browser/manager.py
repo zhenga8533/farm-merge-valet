@@ -15,11 +15,7 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from farm_merge_valet.cdp.portals import (
-    PortalStartupStrategy,
-    PortalSupportLevel,
-    portal_for_page_url,
-)
+from farm_merge_valet.cdp.portal_lifecycle import request_game_start
 from farm_merge_valet.cdp.targets import (
     REQUIRED_BACKGROUND_FLAGS,
     close_browser,
@@ -28,10 +24,14 @@ from farm_merge_valet.cdp.targets import (
     open_browser_page,
     read_browser_metadata,
     reload_game_page,
-    try_start_game,
 )
 from farm_merge_valet.cdp.transport import CdpConnectionError
 from farm_merge_valet.config import AppConfig
+from farm_merge_valet.integrations import (
+    PortalStartupStrategy,
+    PortalSupportLevel,
+    portal_for_page_url,
+)
 from farm_merge_valet.observability.logging import log_event
 
 logger = logging.getLogger(__name__)
@@ -481,10 +481,10 @@ class BrowserManager:
             ):
                 next_start_attempt_at = now + _GAME_START_RETRY_SECONDS
                 try:
-                    start_requested = try_start_game(
+                    start_requested = request_game_start(
                         self.settings.cdp_port,
                         self.settings.window_title,
-                        portal.kind,
+                        portal,
                     )
                 except CdpConnectionError as exc:
                     start_requested = False
@@ -520,7 +520,14 @@ class BrowserManager:
         if not status.managed:
             raise BrowserManagerError("Refusing to recover the game in an unowned browser.")
         if status.game_frame_available:
-            reload_game_page(self.settings.cdp_port, self.settings.window_title)
+            portal = portal_for_page_url(self.settings.game_url)
+            reload_game_page(
+                self.settings.cdp_port,
+                self.settings.window_title,
+                allow_observation=(
+                    portal is not None and portal.support_level is PortalSupportLevel.OBSERVATION
+                ),
+            )
             log_event(
                 logger,
                 logging.WARNING,

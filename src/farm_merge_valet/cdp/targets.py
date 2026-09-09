@@ -15,17 +15,17 @@ from urllib.error import URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import urlopen
 
-from farm_merge_valet.cdp.portals import (
-    PORTALS,
-    GamePortal,
-    PortalSupportLevel,
-    portal_definition,
-)
 from farm_merge_valet.cdp.transport import (
     CdpCancelledError,
     CdpConnectionError,
     _close_sessions,
     _command_target,
+)
+from farm_merge_valet.integrations import (
+    PORTALS,
+    GamePortal,
+    PortalSupportLevel,
+    portal_definition,
 )
 from farm_merge_valet.observability.logging import log_event
 
@@ -435,16 +435,22 @@ def try_start_game(
     return True
 
 
-def reload_game_page(port: int, page_title: str | None = None) -> None:
+def reload_game_page(
+    port: int,
+    page_title: str | None = None,
+    *,
+    allow_observation: bool = False,
+) -> None:
     """Reload the top-level page that owns the active game iframe."""
     try:
         _run_top_page_operation(
             port,
             page_title,
             lambda ws_url: _command_target(ws_url, "Page.reload"),
+            allow_observation=allow_observation,
         )
     finally:
-        _invalidate_target_pair(port, page_title)
+        _invalidate_target_pair(port, page_title, allow_observation=allow_observation)
 
 
 def _owning_page(
@@ -493,7 +499,12 @@ def discover_game_targets(
         page_id = page.get("id")
         frame_ws = frame.get("webSocketDebuggerUrl")
         page_ws = page.get("webSocketDebuggerUrl")
-        if not all(isinstance(value, str) for value in (frame_id, page_id, frame_ws, page_ws)):
+        if (
+            not isinstance(frame_id, str)
+            or not isinstance(page_id, str)
+            or not isinstance(frame_ws, str)
+            or not isinstance(page_ws, str)
+        ):
             continue
         discovered.append(
             DiscoveredGameTarget(

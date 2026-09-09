@@ -12,6 +12,7 @@ from farm_merge_valet.cdp.portals import (
     GamePortal,
     PortalSupportLevel,
     portal_definition,
+    portal_for_page_url,
 )
 from farm_merge_valet.cdp.targets import (
     _invalidate_target_pair,
@@ -310,16 +311,17 @@ def test_discover_game_targets_resolves_nested_crazygames_frame() -> None:
     assert target.support_level is PortalSupportLevel.AUTOMATION
 
 
-def test_discover_game_targets_recognizes_pogo_as_observation_only() -> None:
+def test_discover_game_targets_recognizes_pogo_as_automation_enabled() -> None:
     discovered = discover_game_targets(
         [_pogo_page(), _pogo_game_frame("game-frame", "pogo-page")], "Pogo"
     )
 
     assert len(discovered) == 1
     assert discovered[0].portal is GamePortal.POGO
-    assert discovered[0].support_level is PortalSupportLevel.OBSERVATION
-    with pytest.raises(CdpConnectionError, match="observation-only.*pogo"):
-        _select_target_pair([_pogo_page(), _pogo_game_frame("game-frame", "pogo-page")], "Pogo")
+    assert discovered[0].support_level is PortalSupportLevel.AUTOMATION
+    assert _select_target_pair(
+        [_pogo_page(), _pogo_game_frame("game-frame", "pogo-page")], "Pogo"
+    ) == ("ws://frame/game-frame", "ws://page/pogo-page")
 
 
 def test_select_target_pair_rejects_observation_only_portal(monkeypatch) -> None:
@@ -363,6 +365,17 @@ def test_discover_game_targets_rejects_spoofed_portal_host() -> None:
     }
 
     assert not discover_game_targets([page, _crazy_game_frame("game-frame", "crazy-page")])
+
+
+def test_reddit_game_frame_matcher_rejects_non_devvit_host() -> None:
+    portal = portal_definition(GamePortal.REDDIT)
+
+    assert portal.matches_game_frame_url("https://playfmv-example.devvit.net/index.html")
+    assert not portal.matches_game_frame_url("https://playfmv-attacker.example/index.html")
+
+
+def test_portal_canonical_urls_resolve_to_their_definitions() -> None:
+    assert all(portal_for_page_url(portal.canonical_url) is portal for portal in PORTALS)
 
 
 def test_evaluate_target_wraps_websocket_failures(monkeypatch) -> None:

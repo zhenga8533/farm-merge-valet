@@ -3,7 +3,27 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from farm_merge_valet.cdp.portals import GamePortal
 from farm_merge_valet.config import AppConfig, ConfigStore
+
+
+def test_legacy_game_url_infers_portal() -> None:
+    config = AppConfig.model_validate(
+        {"game_url": "https://www.pogo.com/games/farm-merge-valley/play"}
+    )
+
+    assert config.game_portal is GamePortal.POGO
+
+
+def test_explicit_portal_uses_its_canonical_url() -> None:
+    config = AppConfig(game_portal=GamePortal.CRAZY_GAMES)
+
+    assert config.game_url == "https://www.crazygames.com/game/farm-merge-valley"
+
+
+def test_unregistered_legacy_game_url_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="registered integration"):
+        AppConfig(game_url="https://example.com/game")
 
 
 def test_land_expansion_requires_explicit_enablement_and_spending_limits() -> None:

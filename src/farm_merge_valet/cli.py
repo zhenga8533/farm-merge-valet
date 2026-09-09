@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -27,6 +28,16 @@ diagnostics_app = typer.Typer(help="Run read-only runtime diagnostics.")
 app.add_typer(browser_app, name="browser")
 app.add_typer(assets_app, name="assets")
 app.add_typer(diagnostics_app, name="diagnostics")
+
+
+def _discover_observation_runtime(runtime: GameRuntimeAdapter, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        health = runtime.discover()
+        if health.available or time.monotonic() >= deadline:
+            return
+        time.sleep(0.25)
+
 
 logger = logging.getLogger(__name__)
 _config_store = ConfigStore()
@@ -185,7 +196,7 @@ def profile_runtime_cmd(
     )
     try:
         if observation_only:
-            runtime.discover()
+            _discover_observation_runtime(runtime)
         report = profile_runtime(runtime, duration_seconds=duration)
     except RuntimeError as exc:
         rprint(f"[red]{exc}[/red]")
@@ -218,7 +229,10 @@ def inspect_features_cmd(
         target,
         observation_only=observation_only,
     )
-    runtime.discover()
+    if observation_only:
+        _discover_observation_runtime(runtime)
+    else:
+        runtime.discover()
     serialized = json.dumps(
         read_feature_diagnostics(
             config.cdp_port,

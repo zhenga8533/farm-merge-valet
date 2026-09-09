@@ -42,22 +42,27 @@ session.
 
 With default automatic browser launch enabled, starting the bot opens the
 configured portal page when needed. Reddit startup requests Play through its
-launcher; CrazyGames loads the game directly. To use CrazyGames, set the Game
-URL to `https://www.crazygames.com/game/farm-merge-valley` and the Page target
-to `CrazyGames`. If Reddit does not expose the launcher control, open the post
+launcher; CrazyGames loads the game directly. Select the integration on the
+Browser page; its canonical game URL and support level are supplied by the
+integration registry. If Reddit does not expose the launcher control, open the post
 and click **Play** manually. The managed browser must remain open while automation runs;
 minimized and headless operation are outside the supported scope. The window may
 be unfocused, on another virtual desktop, or showing a different tab. The bot
 does not change fullscreen state, zoom, the cursor, or the foreground
 application, and it does not intentionally pan the game camera.
 
-Pogo is available for read-only observation and diagnostics using Game URL
-`https://www.pogo.com/games/farm-merge-valley/play` and Page target `Pogo`. This
+Pogo is available for automation and read-only diagnostics by selecting the
+Pogo integration. Its direct `/games/farm-merge-valley/play` route
 direct route loads the game without the landing page's **PLAY NOW** control. Complete
-the in-game onboarding manually; normal automation remains disabled for Pogo
-until its platform-specific runtime gaps have been validated. Observation sessions
+the in-game onboarding manually. Runtime capabilities are negotiated individually;
+features unavailable in the current Pogo build are not submitted. Bot sessions
 recognize and dismiss Pogo's exact **Still Playing?** inactivity prompt without
-submitting a game-runtime action.
+using a game-runtime action.
+
+The optional **Tab title filter** is under Advanced connection. Leave it blank
+when only one matching game tab is open; use it only to disambiguate multiple
+tabs. Existing configurations using Game URL and Page target are migrated
+automatically.
 
 ## Usage
 

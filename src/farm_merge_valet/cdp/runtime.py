@@ -37,6 +37,7 @@ from farm_merge_valet.cdp.marketplace import (
 from farm_merge_valet.cdp.marketplace import (
     parse_action_result as parse_marketplace_action_result,
 )
+from farm_merge_valet.cdp.portal_lifecycle import maintain_portal_session
 from farm_merge_valet.cdp.scripts import (
     _BOARD_ARMED_EXPRESSION,
     _DISCOVER_EXPRESSION,
@@ -59,7 +60,6 @@ from farm_merge_valet.cdp.scripts import (
 )
 from farm_merge_valet.cdp.snapshot import snapshot_expression
 from farm_merge_valet.cdp.targets import (
-    dismiss_pogo_inactivity_prompt,
     read_background_flag_status,
 )
 from farm_merge_valet.cdp.transport import CdpConnectionError
@@ -600,14 +600,12 @@ class GameRuntimeAdapter:
         )
 
     def _maintain_portal_session(self) -> None:
-        if not self.observation_only:
-            return
         now = time.monotonic()
         if now < self._next_portal_maintenance_at:
             return
         self._next_portal_maintenance_at = now + _PORTAL_MAINTENANCE_INTERVAL_SECONDS
         try:
-            dismissed = dismiss_pogo_inactivity_prompt(self.port, self.page_title)
+            result = maintain_portal_session(self.port, self.page_title)
         except CdpConnectionError as exc:
             log_event(
                 logger,
@@ -617,13 +615,14 @@ class GameRuntimeAdapter:
                 detail=str(exc),
             )
             return
-        if dismissed:
+        if result is not None and result[1]:
+            portal, _ = result
             log_event(
                 logger,
                 logging.INFO,
                 "runtime.portal_prompt_dismissed",
-                "Dismissed the Pogo inactivity prompt.",
-                portal="pogo",
+                "Dismissed a portal inactivity prompt.",
+                portal=portal.value,
             )
 
     @staticmethod

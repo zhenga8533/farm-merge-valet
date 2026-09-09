@@ -39,6 +39,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
     ),
     ConfigSection.MARKETPLACE: ("marketplace_policy_overrides",),
     ConfigSection.BROWSER: (
+        "game_portal",
         "window_title",
         "browser",
         "browser_executable",
