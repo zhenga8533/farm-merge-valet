@@ -16,17 +16,18 @@ from farm_merge_valet.automation.runtime import (
     RuntimeHealth,
     StorageBubbleState,
 )
+from farm_merge_valet.automation.timing import DEFAULT_ACTION_TIMING
 from farm_merge_valet.observability.logging import log_event
 
 if TYPE_CHECKING:
-    from farm_merge_valet.automation.bot import Bot
+    from farm_merge_valet.automation.context import WorkflowContext as Bot
 
 logger = logging.getLogger(__name__)
 
-_SETTLE_SECONDS = 3.0
-_STABLE_SECONDS = 0.75
-_MAX_PENDING_SECONDS = 8.0
-_RETRY_SECONDS = 10.0
+_SETTLE_SECONDS = DEFAULT_ACTION_TIMING.settle_seconds
+_STABLE_SECONDS = DEFAULT_ACTION_TIMING.stability_seconds
+_MAX_PENDING_SECONDS = DEFAULT_ACTION_TIMING.maximum_pending_seconds
+_RETRY_SECONDS = DEFAULT_ACTION_TIMING.retry_seconds
 
 
 @dataclass
@@ -71,8 +72,7 @@ class StorageBubbleWorkflow:
                 bot.config.item_action_delay_min,
                 bot.config.item_action_delay_max,
             )
-            bot._last_wait_reason = None
-            bot._idle_active = False
+            bot.clear_wait_state()
             log_event(
                 logger,
                 logging.DEBUG,
@@ -176,7 +176,7 @@ class StorageBubbleWorkflow:
         )
         result = bot.runtime.submit_storage_bubble_pop(bubble.object_id)
         if result.submitted:
-            bot._last_wait_reason = None
+            bot.clear_wait_state()
             log_event(
                 logger,
                 logging.DEBUG,

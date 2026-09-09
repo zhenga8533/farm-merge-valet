@@ -10,6 +10,7 @@ from farm_merge_valet.automation.action_control import OperationKey, OperationKi
 from farm_merge_valet.automation.board_space import BoardSpaceAssessment
 from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.automation.runtime import ActionStatus, RuntimeHealth
+from farm_merge_valet.automation.timing import DEFAULT_ACTION_TIMING
 from farm_merge_valet.core.shops import (
     ShopAction,
     ShopActionKind,
@@ -21,12 +22,12 @@ from farm_merge_valet.core.shops import (
 from farm_merge_valet.observability.logging import log_event
 
 if TYPE_CHECKING:
-    from farm_merge_valet.automation.bot import Bot
+    from farm_merge_valet.automation.context import WorkflowContext as Bot
 
 logger = logging.getLogger(__name__)
 
-_ACTION_SETTLE_SECONDS = 3.0
-_ACTION_MAX_PENDING_SECONDS = 8.0
+_ACTION_SETTLE_SECONDS = DEFAULT_ACTION_TIMING.settle_seconds
+_ACTION_MAX_PENDING_SECONDS = DEFAULT_ACTION_TIMING.maximum_pending_seconds
 _CLAIM_REFRESH_READ_LIMIT = 3
 
 
@@ -99,8 +100,7 @@ class ShopWorkflow:
         if succeeded:
             self.pending = None
             bot._actions().complete(OperationKind.SHOP, self._action_key(pending.action))
-            bot._last_wait_reason = None
-            bot._idle_active = False
+            bot.clear_wait_state()
             if pending.action.kind is ShopActionKind.CLAIM:
                 replacement_visible = any(
                     order.shop_id == pending.action.shop_id for order in orders
@@ -186,7 +186,7 @@ class ShopWorkflow:
             else bot.runtime.claim_shop_order(action.shop_id, action.recipe_id)
         )
         if result.status is ActionStatus.SUBMITTED:
-            bot._last_wait_reason = None
+            bot.clear_wait_state()
             log_event(
                 logger,
                 logging.DEBUG,

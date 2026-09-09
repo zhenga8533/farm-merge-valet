@@ -15,14 +15,15 @@ from farm_merge_valet.automation.runtime import (
     RuntimeHealth,
     VisitorActionState,
 )
+from farm_merge_valet.automation.timing import FARM_VISIT_ACTION_TIMING
 from farm_merge_valet.observability.logging import log_event
 
 if TYPE_CHECKING:
-    from farm_merge_valet.automation.bot import Bot
+    from farm_merge_valet.automation.context import WorkflowContext as Bot
 
 logger = logging.getLogger(__name__)
-_ACTION_TIMEOUT_SECONDS = 30.0
-_RETRY_SECONDS = 5.0
+_ACTION_TIMEOUT_SECONDS = FARM_VISIT_ACTION_TIMING.maximum_pending_seconds
+_RETRY_SECONDS = FARM_VISIT_ACTION_TIMING.retry_seconds
 
 
 class FarmVisitActionKind(StrEnum):
@@ -76,8 +77,7 @@ class FarmVisitWorkflow:
             elapsed = bot._now() - pending.submitted_at
             self.pending = None
             bot._actions().complete(OperationKind.FARM_VISIT, pending.key)
-            bot._last_wait_reason = None
-            bot._idle_active = False
+            bot.clear_wait_state()
             log_event(
                 logger,
                 logging.INFO

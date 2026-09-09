@@ -29,6 +29,7 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.4",
     "mypy>=1.10",
+    "pip-audit>=2.7",
 ]
 package = [
     "build>=1.2",
@@ -57,3 +58,14 @@ warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+cache_dir = ".tmp/pytest-cache"
+addopts = "--basetemp=.tmp/pytest"
+
+[tool.coverage.run]
+data_file = ".tmp/coverage/.coverage"
+
+[tool.coverage.html]
+directory = ".tmp/coverage/html"
+
+[tool.coverage.xml]
+output = ".tmp/coverage/coverage.xml"

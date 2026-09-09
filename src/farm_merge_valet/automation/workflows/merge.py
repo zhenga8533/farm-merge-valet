@@ -13,21 +13,22 @@ from farm_merge_valet.automation.board_space import (
 )
 from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.automation.runtime import ActionStatus, RuntimeHealth
+from farm_merge_valet.automation.timing import DEFAULT_ACTION_TIMING
 from farm_merge_valet.core.board import Cell
 from farm_merge_valet.core.items import GridCoord, ItemRef
 from farm_merge_valet.core.merge_planner import MergeAction, MoveEffect
 from farm_merge_valet.observability.logging import log_event
 
 if TYPE_CHECKING:
-    from farm_merge_valet.automation.bot import Bot
+    from farm_merge_valet.automation.context import WorkflowContext as Bot
 
 logger = logging.getLogger(__name__)
 
-_ACTION_SETTLE_SECONDS = 3.0
-_ACTION_STABLE_SECONDS = 0.75
-_ACTION_MAX_PENDING_SECONDS = 8.0
-_ACTION_RETRY_SECONDS = 10.0
-_ACTION_FAILURE_LIMIT = 3
+_ACTION_SETTLE_SECONDS = DEFAULT_ACTION_TIMING.settle_seconds
+_ACTION_STABLE_SECONDS = DEFAULT_ACTION_TIMING.stability_seconds
+_ACTION_MAX_PENDING_SECONDS = DEFAULT_ACTION_TIMING.maximum_pending_seconds
+_ACTION_RETRY_SECONDS = DEFAULT_ACTION_TIMING.retry_seconds
+_ACTION_FAILURE_LIMIT = DEFAULT_ACTION_TIMING.failure_limit
 
 
 @dataclass
@@ -117,8 +118,7 @@ class MergeWorkflow:
             action_key = bot._action_key(pending.action)
             bot._actions().complete(OperationKind.MERGE, action_key)
             bot._schedule_next_item_action(now)
-            bot._last_wait_reason = None
-            bot._idle_active = False
+            bot.clear_wait_state()
             log_event(
                 logger,
                 logging.DEBUG,
@@ -220,7 +220,7 @@ class MergeWorkflow:
         )
         result = bot.runtime.submit_item_drop(action.start, action.end)
         if result.status is ActionStatus.SUBMITTED:
-            bot._last_wait_reason = None
+            bot.clear_wait_state()
             log_event(
                 logger,
                 logging.DEBUG,

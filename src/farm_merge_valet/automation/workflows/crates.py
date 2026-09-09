@@ -14,7 +14,7 @@ from farm_merge_valet.automation.runtime import ActionStatus, RuntimeConnectionE
 from farm_merge_valet.observability.logging import log_event
 
 if TYPE_CHECKING:
-    from farm_merge_valet.automation.bot import Bot
+    from farm_merge_valet.automation.context import WorkflowContext as Bot
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +89,7 @@ class CrateWorkflow:
             self.last_claim_log_at = now
         if result.spawned:
             bot._actions().complete(OperationKind.CRATE, operation_key)
-            bot._last_wait_reason = None
-            bot._idle_active = False
+            bot.clear_wait_state()
             self.last_claim_limit = None
             log_event(
                 logger,

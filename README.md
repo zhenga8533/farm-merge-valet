@@ -20,9 +20,7 @@ Microsoft Edge are supported. Brave and Chromium are experimental targets.
 Firefox is not supported because this implementation requires Chromium CDP.
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+uv sync --locked --all-extras --dev
 ```
 
 The project creates and launches a dedicated browser profile with its required
@@ -384,17 +382,18 @@ to the terminal.
 ## Development
 
 ```powershell
-pytest --cov=farm_merge_valet
-ruff check .
-ruff format --check .
-mypy src
+uv run --locked pytest --cov=farm_merge_valet
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked mypy src
+uv run --locked pip-audit --local --skip-editable
 ```
 
 Live reads and explicitly authorized live actions are separate:
 
 ```powershell
-pytest tests/integration --live-game
-pytest tests/integration --live-game --live-actions
+uv run --locked pytest tests/integration --live-game
+uv run --locked pytest tests/integration --live-game --live-actions
 ```
 
 The second command may mutate the configured game account and currently verifies
@@ -407,7 +406,14 @@ farm-merge-valet diagnostics session-summary --hours 24
 ```
 
 Version tags matching `v*` build a wheel, source distribution, and standalone
-Windows desktop executable through the release workflow.
+Windows desktop executable through the release workflow. The tag must exactly match
+the package version (for example, `v0.1.0`). Build outputs and test artifacts are
+written beneath `.tmp/`.
+
+`uv.lock` is the reviewed, cross-platform resolution used by development, CI, and
+release builds. Refresh all dependencies with `uv lock --upgrade`, or update one
+dependency with `uv lock --upgrade-package <name>`, then run the checks above and
+review the lockfile diff. Package compatibility ranges remain in `pyproject.toml`.
 
 See [Automation Methodology](docs/automation-methodology.md) and
 [Game Mechanics](docs/game-mechanics.md) for additional context. The generated

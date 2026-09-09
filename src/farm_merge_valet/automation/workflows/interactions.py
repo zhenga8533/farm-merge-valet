@@ -14,6 +14,7 @@ from farm_merge_valet.automation.runtime import (
     LiveCellState,
     RuntimeHealth,
 )
+from farm_merge_valet.automation.timing import DEFAULT_ACTION_TIMING
 from farm_merge_valet.core.items import (
     GridCoord,
     InteractionTargetKind,
@@ -24,14 +25,14 @@ from farm_merge_valet.core.obstacles import ObstacleState
 from farm_merge_valet.observability.logging import log_event
 
 if TYPE_CHECKING:
-    from farm_merge_valet.automation.bot import Bot
+    from farm_merge_valet.automation.context import WorkflowContext as Bot
 
 logger = logging.getLogger(__name__)
 
-_ACTION_SETTLE_SECONDS = 3.0
-_ACTION_STABLE_SECONDS = 0.75
-_ACTION_MAX_PENDING_SECONDS = 8.0
-_ACTION_RETRY_SECONDS = 10.0
+_ACTION_SETTLE_SECONDS = DEFAULT_ACTION_TIMING.settle_seconds
+_ACTION_STABLE_SECONDS = DEFAULT_ACTION_TIMING.stability_seconds
+_ACTION_MAX_PENDING_SECONDS = DEFAULT_ACTION_TIMING.maximum_pending_seconds
+_ACTION_RETRY_SECONDS = DEFAULT_ACTION_TIMING.retry_seconds
 
 
 @dataclass(frozen=True)
@@ -258,8 +259,7 @@ class InteractionWorkflow:
                 )
             self.pending = None
             bot._actions().complete(OperationKind.INTERACTION, action_key)
-            bot._last_wait_reason = None
-            bot._idle_active = False
+            bot.clear_wait_state()
             log_event(
                 logger,
                 logging.DEBUG,
@@ -361,7 +361,7 @@ class InteractionWorkflow:
                 action, self.output_space_request
             ):
                 self.output_space_request = None
-            bot._last_wait_reason = None
+            bot.clear_wait_state()
             log_event(
                 logger,
                 logging.DEBUG,

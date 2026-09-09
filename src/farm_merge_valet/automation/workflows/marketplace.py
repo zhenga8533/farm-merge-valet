@@ -12,6 +12,7 @@ from farm_merge_valet.automation.runtime import (
     RuntimeConnectionError,
     RuntimeHealth,
 )
+from farm_merge_valet.automation.timing import MARKETPLACE_ACTION_TIMING
 from farm_merge_valet.core.marketplace import (
     MarketplaceAction,
     MarketplaceLiveOffer,
@@ -20,12 +21,12 @@ from farm_merge_valet.core.marketplace import (
 from farm_merge_valet.observability.logging import log_event
 
 if TYPE_CHECKING:
-    from farm_merge_valet.automation.bot import Bot
+    from farm_merge_valet.automation.context import WorkflowContext as Bot
 
 logger = logging.getLogger(__name__)
-_SETTLE_SECONDS = 3.0
-_PENDING_SECONDS = 10.0
-_AMBIGUOUS_BACKOFF_SECONDS = 60.0
+_SETTLE_SECONDS = MARKETPLACE_ACTION_TIMING.settle_seconds
+_PENDING_SECONDS = MARKETPLACE_ACTION_TIMING.maximum_pending_seconds
+_AMBIGUOUS_BACKOFF_SECONDS = MARKETPLACE_ACTION_TIMING.retry_seconds
 
 
 @dataclass
@@ -74,7 +75,7 @@ class MarketplaceWorkflow:
             assert current is not None
             self.pending = None
             bot._actions().complete(OperationKind.MARKETPLACE, self._action_key(pending.action))
-            bot._last_wait_reason = None
+            bot.clear_wait_state()
             log_event(
                 logger,
                 logging.INFO,

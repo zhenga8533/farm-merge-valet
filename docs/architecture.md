@@ -26,9 +26,14 @@ GUI / CLI -> automation and catalog services -> core
   `automation.perception` converts atomic snapshots into planning state, and
   `automation.scheduler` owns renderer-load-aware polling cadence. Marketplace purchases use
   stable `flash:<slot>:<candidate>` or `free:<offer>` identities.
-  Workflow objects are internal stateful collaborators of `Bot`, not standalone
-  services: they may use the bot's orchestration context, while shared planner
-  phases and adapter contracts remain independently defined modules.
+  Workflow objects are internal stateful collaborators. They depend on the narrow
+  internal `WorkflowContext` protocol rather than `Bot`; the context exposes runtime,
+  configuration and snapshot state plus named coordination/reporting operations.
+  `ActionTiming` owns common settle, stability, pending, retry, and failure defaults,
+  with named overrides for protocols such as marketplace ambiguity and farm visits.
+  `AutomationState` owns snapshot-derived mutable state, and `WorkflowArbiter` owns
+  workflow selection and precedence. `Bot` retains lifecycle, runtime recovery,
+  configuration adoption, scheduling, and loop control.
 - `catalog` owns catalog models, taxonomy, labels, construction, persistence,
   blueprint mapping, asset compilation, and synchronization orchestration.
   Its synchronization service accepts resource and metadata readers; concrete
@@ -84,13 +89,14 @@ User configuration remains schema version 1 at the existing platform-specific
 data path. Catalogs and atlases remain under the existing cache root. Browser
 profiles, captures, `.atlas_cache`, `.fmv-state`, and other runtime state are
 user-owned and must not be deleted by repository maintenance. Tests and package
-builds write disposable output beneath repository-local `.tmp/`.
+builds write disposable output beneath repository-local `.tmp/`. Dependencies are
+resolved by the committed universal `uv.lock`; CI synchronizes it in locked mode.
 
 ## Tests
 
 Tests mirror production packages under `tests/automation`, `tests/catalog`,
 `tests/config`, `tests/core`, `tests/cdp`, `tests/gui`, `tests/browser`, and
 `tests/observability`. Explicitly opted-in live tests reside in `tests/integration`.
-Architecture tests parse imports,
-enforce inward dependencies, and reject retired module paths so old structure
+Architecture tests recursively parse absolute and relative imports, enforce inward
+dependencies from one rule table, and reject retired module paths so old structure
 cannot return unnoticed.

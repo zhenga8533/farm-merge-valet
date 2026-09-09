@@ -11,6 +11,7 @@ from threading import Event, Lock, Thread
 from typing import Literal
 
 from farm_merge_valet.automation.action_control import ActionCoordinator
+from farm_merge_valet.automation.arbiter import WorkflowArbiter
 from farm_merge_valet.automation.board_space import (
     BoardSpaceAssessment,
     BoardSpaceRequest,
@@ -35,6 +36,8 @@ from farm_merge_valet.automation.runtime import (
     TransientOverlayKind,
 )
 from farm_merge_valet.automation.scheduler import MINIMUM_ACTIVE_INTERVAL, AdaptiveScheduler
+from farm_merge_valet.automation.state import AutomationState
+from farm_merge_valet.automation.timing import DEFAULT_ACTION_TIMING
 from farm_merge_valet.automation.workflows import (
     CrateWorkflow,
     FarmVisitWorkflow,
@@ -85,7 +88,7 @@ from farm_merge_valet.observability.logging import log_event
 
 logger = logging.getLogger(__name__)
 
-_ACTION_FAILURE_LIMIT = 3
+_ACTION_FAILURE_LIMIT = DEFAULT_ACTION_TIMING.failure_limit
 _RUNTIME_STARTUP_GRACE_SECONDS = 30.0
 
 
@@ -109,6 +112,8 @@ class Bot:
         self._quit_requested = False
         self._quit_lock = Lock()
         self.phase = Phase.CLAIM_CRATES
+        self._state = AutomationState()
+        self._workflow_arbiter = WorkflowArbiter()
         self._blueprint_items: dict[str, ItemRef] = {}
         self._blueprint_policy_keys: dict[str, str] = {}
         self._direct_interaction_ids: frozenset[str] = frozenset()
@@ -207,6 +212,10 @@ class Bot:
 
     def _actions(self) -> ActionCoordinator:
         return self._action_control
+
+    def clear_wait_state(self) -> None:
+        self._last_wait_reason = None
+        self._idle_active = False
 
     def _wait_for_next_iteration(self, delay: float) -> None:
         self._loop_wakeup.clear()
@@ -487,6 +496,17 @@ class Bot:
         self._marketplace_offers = snapshot.marketplace_offers
         self._land_expansions = snapshot.land_expansions
         self._building_repairs = snapshot.building_repairs
+        self._state = AutomationState(
+            board=perceived.board,
+            live_cells=perceived.live_cells,
+            energy=perceived.energy,
+            workers=perceived.workers,
+            storage_bubbles=perceived.storage_bubbles,
+            shop_orders=perceived.shop_orders,
+            marketplace_offers=snapshot.marketplace_offers,
+            land_expansions=snapshot.land_expansions,
+            building_repairs=snapshot.building_repairs,
+        )
         if snapshot.metrics is not None:
             self._scheduler.record_snapshot(snapshot.metrics.wall_duration_ms / 1000.0)
 

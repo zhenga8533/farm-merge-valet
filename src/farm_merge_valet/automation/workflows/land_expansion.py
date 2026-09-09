@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from farm_merge_valet.automation.action_control import OperationKind
 from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.automation.runtime import ActionStatus, RuntimeCapability, RuntimeHealth
+from farm_merge_valet.automation.timing import DEFAULT_ACTION_TIMING
 from farm_merge_valet.core.land_expansion import (
     ExpansionCurrency,
     LandExpansionCandidate,
@@ -18,11 +19,11 @@ from farm_merge_valet.core.land_expansion import (
 from farm_merge_valet.observability.logging import log_event
 
 if TYPE_CHECKING:
-    from farm_merge_valet.automation.bot import Bot
+    from farm_merge_valet.automation.context import WorkflowContext as Bot
 
 logger = logging.getLogger(__name__)
 
-_ACTION_MAX_PENDING_SECONDS = 8.0
+_ACTION_MAX_PENDING_SECONDS = DEFAULT_ACTION_TIMING.maximum_pending_seconds
 
 
 @dataclass

@@ -76,6 +76,10 @@ class Bot:
     def _report_wait(self, reason: str) -> None:
         self._last_wait_reason = reason
 
+    def clear_wait_state(self) -> None:
+        self._last_wait_reason = None
+        self._idle_active = False
+
     def _record_action_no_progress(self, _action: str) -> None:
         raise AssertionError("unexpected no-progress result")
 
