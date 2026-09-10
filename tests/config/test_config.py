@@ -444,6 +444,8 @@ def test_idle_and_webhook_summary_defaults() -> None:
     assert settings.idle_wait_seconds == 30.0
     assert settings.webhook_summary_interval == 3600.0
     assert settings.webhook_status_interval == 60.0
+    assert settings.webhook_include_charts
+    assert not settings.webhook_include_screenshots
 
 
 def test_empty_webhook_url_disables_notifications() -> None:

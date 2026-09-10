@@ -251,7 +251,9 @@ class DiscordStatusMixin:
             ],
         }
 
-    def _take_summary(self, now: float, *, final: bool = False) -> dict[str, object] | None:
+    def _take_summary(
+        self, now: float, *, final: bool = False
+    ) -> tuple[dict[str, object], Counter[str]] | None:
         with self._metrics_lock:
             metrics = self._metrics
             self._metrics = Counter()
@@ -330,7 +332,11 @@ class DiscordStatusMixin:
                     "footer": {"text": "farm-merge-valet.summary"},
                 }
             ],
-        }
+        }, metrics
+
+    def _restore_summary_metrics(self, metrics: Counter[str]) -> None:
+        with self._metrics_lock:
+            self._metrics.update(metrics)
 
     def _status_payload(self, now: float) -> dict[str, object]:
         with self._status_lock:

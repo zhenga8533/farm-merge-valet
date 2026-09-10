@@ -15,6 +15,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from farm_merge_valet.automation.bot import Bot
 from farm_merge_valet.automation.runtime import RuntimeRecoveryRequired
 from farm_merge_valet.browser import BrowserManager, BrowserManagerError, BrowserStatus
+from farm_merge_valet.cdp.capture import capture_game_screenshot
 from farm_merge_valet.composition import create_bot, create_catalog_sync_service
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.config.change_policy import BOT_RESTART_FIELDS, BROWSER_RESTART_FIELDS
@@ -259,6 +260,11 @@ class ApplicationController(QObject):
                 config.webhook_status_interval,
                 notification_profile=config.webhook_notification_profile,
                 include_charts=config.webhook_include_charts,
+                screenshot_provider=(
+                    lambda: capture_game_screenshot(config.cdp_port, config.window_title)
+                )
+                if config.webhook_include_screenshots
+                else None,
             ):
                 recovery_attempted = False
                 while not self._shutting_down and not self._stopping:

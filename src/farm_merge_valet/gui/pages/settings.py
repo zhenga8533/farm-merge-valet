@@ -251,6 +251,9 @@ class SettingsPage(ConfigFormPage):
             profile,
         )
         self._add_toggle(notifications_form, "Include activity charts", "webhook_include_charts")
+        self._add_toggle(
+            notifications_form, "Include game screenshots", "webhook_include_screenshots"
+        )
         self.notifications_hint = QLabel(
             "Add a Discord webhook to configure notification delivery."
         )
@@ -311,6 +314,7 @@ class SettingsPage(ConfigFormPage):
         self._notification_fields = (
             "webhook_notification_profile",
             "webhook_include_charts",
+            "webhook_include_screenshots",
             "webhook_status_interval",
             "webhook_summary_interval",
         )

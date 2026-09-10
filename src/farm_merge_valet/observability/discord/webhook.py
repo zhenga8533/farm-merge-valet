@@ -87,27 +87,32 @@ class DiscordWebhookTransportMixin:
         self,
         client: httpx.Client,
         payload: dict[str, object],
-        attachment: DiscordAttachment | None = None,
+        attachments: tuple[DiscordAttachment, ...] = (),
     ) -> httpx.Response | None:
-        if attachment is None:
+        if not attachments:
             data = None
             files = None
         else:
             embeds = payload.get("embeds")
             if isinstance(embeds, list) and embeds and isinstance(embeds[0], dict):
-                embeds[0]["image"] = {"url": f"attachment://{attachment.filename}"}
+                embeds[0]["image"] = {"url": f"attachment://{attachments[0].filename}"}
+                embeds.extend(
+                    {"image": {"url": f"attachment://{attachment.filename}"}}
+                    for attachment in attachments[1:]
+                )
             data = {"payload_json": json.dumps(payload)}
             files = {
-                "files[0]": (
+                f"files[{index}]": (
                     attachment.filename,
                     attachment.content,
                     attachment.content_type,
                 )
+                for index, attachment in enumerate(attachments)
             }
         last_error: httpx.HTTPError | None = None
         for attempt in range(3):
             try:
-                if attachment is None:
+                if not attachments:
                     response = client.post(self._url, params={"wait": "true"}, json=payload)
                 else:
                     response = client.post(

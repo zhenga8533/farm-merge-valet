@@ -24,6 +24,7 @@ class ActivityChart:
         self._bucket_seconds = max(60.0, interval_seconds / bucket_count)
         self._bucket_count = bucket_count
         self._buckets: dict[int, Counter[str]] = {}
+        self._rendered: dict[int, Counter[str]] = {}
         self._lock = Lock()
 
     def record(self, now: float, metrics: Counter[str]) -> None:
@@ -39,17 +40,17 @@ class ActivityChart:
         current = int(now // self._bucket_seconds)
         start = current - self._bucket_count + 1
         with self._lock:
-            populated = dict(self._buckets)
-            self._buckets.clear()
+            populated = {key: value.copy() for key, value in self._buckets.items() if key >= start}
+            self._rendered = populated
         if not populated:
             return None
 
         series = [populated.get(index, Counter()) for index in range(start, current + 1)]
-        width, height = 1000, 500
+        width, height = 1200, 650
         image = np.full((height, width, 3), (35, 37, 42), dtype=np.uint8)
         cv2.putText(
             image,
-            "Activity timeline",
+            "Session activity report",
             (42, 48),
             cv2.FONT_HERSHEY_SIMPLEX,
             1.05,
@@ -74,8 +75,34 @@ class ActivityChart:
                     for bucket in series
                 ]
             )
+        totals = [sum(series_values) for series_values in values]
+        card_width = 208
+        for index, ((label, _prefix, color), value) in enumerate(zip(labels, totals, strict=True)):
+            card_left = 42 + index * 229
+            cv2.rectangle(image, (card_left, 72), (card_left + card_width, 156), (48, 51, 58), -1)
+            cv2.rectangle(image, (card_left, 72), (card_left + 6, 156), color, -1)
+            cv2.putText(
+                image,
+                label,
+                (card_left + 22, 103),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (185, 188, 194),
+                1,
+                cv2.LINE_AA,
+            )
+            cv2.putText(
+                image,
+                str(value),
+                (card_left + 22, 140),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.0,
+                (245, 245, 245),
+                2,
+                cv2.LINE_AA,
+            )
         maximum = max(1, max((sum(parts) for parts in zip(*values, strict=True)), default=0))
-        left, right, top, bottom = 70, width - 38, 90, height - 78
+        left, right, top, bottom = 70, width - 38, 190, height - 78
         cv2.line(image, (left, bottom), (right, bottom), (102, 105, 113), 1)
         bar_width = max(4, int((right - left) / len(series)) - 3)
         for index in range(len(series)):
@@ -105,4 +132,19 @@ class ActivityChart:
         encoded, data = cv2.imencode(".png", image, [cv2.IMWRITE_PNG_COMPRESSION, 7])
         if not encoded:
             return None
-        return DiscordAttachment("activity-timeline.png", data.tobytes())
+        return DiscordAttachment("session-report.png", data.tobytes())
+
+    def commit(self) -> None:
+        """Discard activity included in a successfully delivered report."""
+        with self._lock:
+            for key, rendered in self._rendered.items():
+                bucket = self._buckets.get(key)
+                if bucket is None:
+                    continue
+                bucket.subtract(rendered)
+                remaining = Counter({name: count for name, count in bucket.items() if count > 0})
+                if remaining:
+                    self._buckets[key] = remaining
+                else:
+                    self._buckets.pop(key, None)
+            self._rendered = {}

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
+from threading import Lock
 
 import pytest
 
 from farm_merge_valet.observability.discord import handler as discord
+from farm_merge_valet.observability.discord.charts import ActivityChart
 from farm_merge_valet.observability.logging import log_event, logging_sink
 
 
@@ -64,6 +67,37 @@ def test_webhook_rejects_insecure_url_without_echoing_it() -> None:
     assert "private-token" not in str(error.value)
 
 
+def test_activity_report_is_consumed_only_after_delivery() -> None:
+    chart = ActivityChart(3600)
+    chart.record(1000.0, Counter({"action.merge": 2}))
+
+    assert chart.render(1000.0) is not None
+    assert chart.render(1000.0) is not None
+
+    chart.record(1000.0, Counter({"action.merge": 1}))
+    chart.commit()
+
+    assert chart.render(1000.0) is not None
+    chart.commit()
+    assert chart.render(1000.0) is None
+
+
+def test_failed_summary_restores_metrics_and_chart_history(monkeypatch) -> None:
+    handler = object.__new__(discord.DiscordWebhookHandler)
+    handler._metrics = Counter()
+    handler._metrics_lock = Lock()
+    handler._include_charts = True
+    handler._screenshot_provider = None
+    handler._activity_chart = ActivityChart(3600)
+    handler._activity_chart.record(1000.0, Counter({"action.merge": 1}))
+    monkeypatch.setattr(handler, "_send", lambda *_args: None)
+    summary_metrics = Counter({"action.merge": 1})
+
+    assert not handler._deliver_summary(object(), ({}, summary_metrics), 1000.0)
+    assert handler._metrics == summary_metrics
+    assert handler._activity_chart.render(1000.0) is not None
+
+
 def test_webhook_routes_lifecycle_and_summarizes_actions(monkeypatch, tmp_path) -> None:
     _FakeClient.requests = []
     _FakeClient.next_id = 100
@@ -72,6 +106,7 @@ def test_webhook_routes_lifecycle_and_summarizes_actions(monkeypatch, tmp_path) 
         "https://example.test/webhook",
         3600,
         status_state_path=tmp_path / "status.json",
+        screenshot_provider=lambda: b"\xff\xd8\xffgame",
     )
     event_logger = logging.getLogger("farm_merge_valet.tests.discord")
     event_logger.setLevel(logging.DEBUG)
@@ -162,7 +197,10 @@ def test_webhook_routes_lifecycle_and_summarizes_actions(monkeypatch, tmp_path) 
     assert "Crates 2" in replacement["json"]["embeds"][0]["fields"][3]["value"]
     chart_posts = [post for post in posts if "files" in post]
     assert chart_posts
-    assert chart_posts[0]["files"]["files[0]"][0] == "activity-timeline.png"
+    assert chart_posts[0]["files"]["files[0]"][0] == "session-report.png"
+    assert chart_posts[0]["files"]["files[1]"][0] == "game-view.jpg"
+    summary_embeds = _request_payload(chart_posts[0])["embeds"]
+    assert summary_embeds[1]["image"]["url"] == "attachment://game-view.jpg"
 
 
 def test_webhook_rate_limits_duplicate_warning_delivery(monkeypatch, tmp_path) -> None:

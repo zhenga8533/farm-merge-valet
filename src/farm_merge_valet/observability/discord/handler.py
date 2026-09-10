@@ -6,7 +6,7 @@ import hashlib
 import logging
 import time
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,7 +57,7 @@ _IMMEDIATE_STATUS_EVENTS = frozenset(
 @dataclass(frozen=True)
 class _PostMessage:
     payload: dict[str, object]
-    attachment: DiscordAttachment | None = None
+    attachments: tuple[DiscordAttachment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -77,6 +77,7 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
         status_state_path: Path = _DEFAULT_STATUS_STATE_PATH,
         notification_profile: Literal["minimal", "balanced", "detailed"] = "balanced",
         include_charts: bool = True,
+        screenshot_provider: Callable[[], bytes | None] | None = None,
     ) -> None:
         if not url.startswith("https://"):
             raise ValueError("Discord webhook URL must use HTTPS.")
@@ -87,6 +88,7 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
         self._status_state_path = status_state_path
         self._notification_profile = notification_profile
         self._include_charts = include_charts
+        self._screenshot_provider = screenshot_provider
         self._activity_chart = ActivityChart(summary_interval)
         self._webhook_fingerprint = hashlib.sha256(url.encode()).hexdigest()[:16]
         self._status_message_id = self._load_status_message_id()
@@ -146,10 +148,7 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
                 if now >= self._next_summary_at:
                     summary = self._take_summary(now)
                     if summary is not None:
-                        attachment = (
-                            self._activity_chart.render(now) if self._include_charts else None
-                        )
-                        self._send(client, summary, attachment)
+                        self._deliver_summary(client, summary, now)
                         self._refresh_status(client, now)
                     self._next_summary_at = now + self._summary_interval
                     self._next_status_at = (
@@ -161,16 +160,13 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
                 if item is _STOP:
                     final_summary = self._take_summary(now, final=True)
                     if final_summary is not None:
-                        attachment = (
-                            self._activity_chart.render(now) if self._include_charts else None
-                        )
-                        self._send(client, final_summary, attachment)
+                        self._deliver_summary(client, final_summary, now)
                         self._refresh_status(client, now)
                     else:
                         self._refresh_status(client, now)
                     return
                 if isinstance(item, _PostMessage):
-                    if self._send(client, item.payload, item.attachment) is not None:
+                    if self._send(client, item.payload, item.attachments) is not None:
                         self._refresh_status(client, now)
                         self._next_status_at = (
                             now + self._status_interval
@@ -187,6 +183,44 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
             return
         self._thread.join(timeout=timeout)
 
+    def _summary_attachments(self, now: float) -> tuple[DiscordAttachment, ...]:
+        attachments: list[DiscordAttachment] = []
+        if self._include_charts:
+            chart = self._activity_chart.render(now)
+            if chart is not None:
+                attachments.append(chart)
+        if self._screenshot_provider is not None:
+            try:
+                screenshot = self._screenshot_provider()
+            except (OSError, RuntimeError, ValueError) as exc:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "webhook.screenshot_failed",
+                    "Could not capture the game for the Discord summary: %s.",
+                    type(exc).__name__,
+                    detail=type(exc).__name__,
+                )
+            else:
+                if screenshot is not None:
+                    attachments.append(DiscordAttachment("game-view.jpg", screenshot, "image/jpeg"))
+        return tuple(attachments)
+
+    def _deliver_summary(
+        self,
+        client: httpx.Client,
+        summary: tuple[dict[str, object], Counter[str]],
+        now: float,
+    ) -> bool:
+        payload, metrics = summary
+        attachments = self._summary_attachments(now)
+        if self._send(client, payload, attachments) is None:
+            self._restore_summary_metrics(metrics)
+            return False
+        if any(attachment.filename == "session-report.png" for attachment in attachments):
+            self._activity_chart.commit()
+        return True
+
 
 @contextmanager
 def discord_webhook_sink(
@@ -196,6 +230,7 @@ def discord_webhook_sink(
     *,
     notification_profile: Literal["minimal", "balanced", "detailed"] = "balanced",
     include_charts: bool = True,
+    screenshot_provider: Callable[[], bytes | None] | None = None,
 ) -> Iterator[None]:
     """Attach the Discord sink only for the bot run command."""
     if url is None:
@@ -207,6 +242,7 @@ def discord_webhook_sink(
         status_interval,
         notification_profile=notification_profile,
         include_charts=include_charts,
+        screenshot_provider=screenshot_provider,
     )
     with logging_sink(handler):
         try:

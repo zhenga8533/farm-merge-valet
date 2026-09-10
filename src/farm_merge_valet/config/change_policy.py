@@ -23,6 +23,7 @@ BOT_RESTART_FIELDS = frozenset(
         "webhook_status_interval",
         "webhook_notification_profile",
         "webhook_include_charts",
+        "webhook_include_screenshots",
         "catalog_dir",
         "atlas_cache_dir",
         "start_paused",

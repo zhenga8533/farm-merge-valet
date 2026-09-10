@@ -163,10 +163,12 @@ detail, `WARNING` identifies recoverable problems, and `ERROR` identifies a
 condition that prevents safe operation.
 
 An HTTPS Discord webhook can receive status changes, selected warnings and
-workflow completions, periodic activity summaries, and an optional activity
-timeline. Notification failures never block automation. Secrets, authentication
-values, URL query strings, raw CDP expressions, and game-state payloads are not
-written to diagnostic logs.
+workflow completions, and periodic activity summaries. Summaries can include a
+compiled activity report and an opt-in game-renderer screenshot. Screenshots
+come from the verified game iframe, are not saved locally, and may contain
+visible in-game account information. Notification failures never block
+automation. Secrets, authentication values, URL query strings, raw CDP
+expressions, and game-state payloads are not written to diagnostic logs.
 
 ## Development
 

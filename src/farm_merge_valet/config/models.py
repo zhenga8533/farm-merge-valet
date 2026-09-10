@@ -150,6 +150,7 @@ class AppConfig(BaseModel):
     webhook_status_interval: float = Field(default=60.0, ge=0.0, le=3600.0)
     webhook_notification_profile: Literal["minimal", "balanced", "detailed"] = "balanced"
     webhook_include_charts: bool = True
+    webhook_include_screenshots: bool = False
 
     theme: Literal["system", "dark", "light"] = "system"
     start_minimized: bool = False
