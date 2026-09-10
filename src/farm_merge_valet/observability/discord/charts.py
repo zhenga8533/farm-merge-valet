@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from math import ceil
 from threading import Lock
 
 import cv2
@@ -15,6 +16,16 @@ class DiscordAttachment:
     filename: str
     content: bytes
     content_type: str = "image/png"
+
+
+def _relative_time_label(seconds: float) -> str:
+    if seconds < 30:
+        return "now"
+    minutes = round(seconds / 60)
+    if minutes < 60:
+        return f"-{minutes}m"
+    hours = minutes / 60
+    return f"-{hours:g}h"
 
 
 class ActivityChart:
@@ -46,7 +57,7 @@ class ActivityChart:
             return None
 
         series = [populated.get(index, Counter()) for index in range(start, current + 1)]
-        width, height = 1200, 650
+        width, height = 1200, 720
         image = np.full((height, width, 3), (35, 37, 42), dtype=np.uint8)
         cv2.putText(
             image,
@@ -102,19 +113,71 @@ class ActivityChart:
                 cv2.LINE_AA,
             )
         maximum = max(1, max((sum(parts) for parts in zip(*values, strict=True)), default=0))
-        left, right, top, bottom = 70, width - 38, 190, height - 78
-        cv2.line(image, (left, bottom), (right, bottom), (102, 105, 113), 1)
-        bar_width = max(4, int((right - left) / len(series)) - 3)
+        tick_step = max(1, ceil(maximum / 4))
+        scale_maximum = tick_step * ceil(maximum / tick_step)
+        left, right, top, bottom = 105, width - 38, 205, height - 140
+        cv2.putText(
+            image,
+            "Events per bucket",
+            (left, top - 14),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.48,
+            (185, 188, 194),
+            1,
+            cv2.LINE_AA,
+        )
+        for tick in range(0, scale_maximum + 1, tick_step):
+            y = bottom - round((bottom - top) * tick / scale_maximum)
+            cv2.line(image, (left, y), (right, y), (63, 66, 73), 1)
+            text = str(tick)
+            text_width = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.44, 1)[0][0]
+            cv2.putText(
+                image,
+                text,
+                (left - text_width - 12, y + 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.44,
+                (185, 188, 194),
+                1,
+                cv2.LINE_AA,
+            )
+        slot_width = (right - left) / len(series)
+        bar_width = max(4, int(slot_width) - 3)
         for index in range(len(series)):
-            x = left + int(index * (right - left) / len(series))
+            x = left + round(index * slot_width)
             y = bottom
             for label_index, (_label, _prefix, color) in enumerate(labels):
                 value = values[label_index][index]
                 if not value:
                     continue
-                segment = max(2, int((bottom - top) * value / maximum))
+                segment = max(2, int((bottom - top) * value / scale_maximum))
                 cv2.rectangle(image, (x, y - segment), (x + bar_width, y), color, -1)
                 y -= segment
+        tick_indices = sorted({round(index * (len(series) - 1) / 4) for index in range(5)})
+        for index in tick_indices:
+            x = left + round((index + 0.5) * slot_width)
+            label = _relative_time_label((len(series) - 1 - index) * self._bucket_seconds)
+            text_width = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1)[0][0]
+            cv2.putText(
+                image,
+                label,
+                (x - text_width // 2, bottom + 25),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.42,
+                (185, 188, 194),
+                1,
+                cv2.LINE_AA,
+            )
+        cv2.putText(
+            image,
+            "Time before report",
+            (left, bottom + 52),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.46,
+            (185, 188, 194),
+            1,
+            cv2.LINE_AA,
+        )
         legend_x = left
         for label, _prefix, color in labels:
             cv2.rectangle(image, (legend_x, height - 42), (legend_x + 16, height - 26), color, -1)

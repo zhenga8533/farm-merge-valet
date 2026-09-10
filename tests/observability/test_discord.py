@@ -8,7 +8,7 @@ from threading import Lock
 import pytest
 
 from farm_merge_valet.observability.discord import handler as discord
-from farm_merge_valet.observability.discord.charts import ActivityChart
+from farm_merge_valet.observability.discord.charts import ActivityChart, _relative_time_label
 from farm_merge_valet.observability.logging import log_event, logging_sink
 
 
@@ -80,6 +80,14 @@ def test_activity_report_is_consumed_only_after_delivery() -> None:
     assert chart.render(1000.0) is not None
     chart.commit()
     assert chart.render(1000.0) is None
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [(0, "now"), (600, "-10m"), (3600, "-1h"), (5400, "-1.5h")],
+)
+def test_activity_report_formats_relative_time_axis(seconds: float, expected: str) -> None:
+    assert _relative_time_label(seconds) == expected
 
 
 def test_failed_summary_restores_metrics_and_chart_history(monkeypatch) -> None:
