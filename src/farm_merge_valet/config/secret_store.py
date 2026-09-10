@@ -5,12 +5,16 @@ from __future__ import annotations
 import base64
 import ctypes
 import os
+import tempfile
 from ctypes import wintypes
 from pathlib import Path
 
 
 class _DataBlob(ctypes.Structure):
     _fields_ = [("size", wintypes.DWORD), ("data", ctypes.POINTER(ctypes.c_byte))]
+
+
+_CRYPTPROTECT_UI_FORBIDDEN = 0x1
 
 
 def _blob(value: bytes) -> tuple[_DataBlob, ctypes.Array[ctypes.c_char]]:
@@ -25,7 +29,13 @@ def _protect(value: bytes) -> bytes:
     output = _DataBlob()
     crypt32 = ctypes.windll.crypt32
     if not crypt32.CryptProtectData(
-        ctypes.byref(source), None, None, None, None, 0, ctypes.byref(output)
+        ctypes.byref(source),
+        None,
+        None,
+        None,
+        None,
+        _CRYPTPROTECT_UI_FORBIDDEN,
+        ctypes.byref(output),
     ):
         raise ctypes.WinError()
     try:
@@ -42,7 +52,13 @@ def _unprotect(value: bytes) -> bytes:
     output = _DataBlob()
     crypt32 = ctypes.windll.crypt32
     if not crypt32.CryptUnprotectData(
-        ctypes.byref(source), None, None, None, None, 0, ctypes.byref(output)
+        ctypes.byref(source),
+        None,
+        None,
+        None,
+        None,
+        _CRYPTPROTECT_UI_FORBIDDEN,
+        ctypes.byref(output),
     ):
         raise ctypes.WinError()
     try:
@@ -70,11 +86,22 @@ class SecretStore:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = base64.b64encode(_protect(value.encode("utf-8")))
-        temporary = self.path.with_suffix(f"{self.path.suffix}.{os.getpid()}.tmp")
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=self.path.parent,
+            prefix=f".{self.path.name}.",
+            suffix=".tmp",
+        )
+        temporary = Path(temporary_name)
         try:
-            temporary.write_bytes(payload)
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
             if os.name != "nt":
                 temporary.chmod(0o600)
             temporary.replace(self.path)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
         finally:
             temporary.unlink(missing_ok=True)

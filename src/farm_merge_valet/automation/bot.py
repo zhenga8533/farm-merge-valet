@@ -35,7 +35,7 @@ from farm_merge_valet.automation.runtime import (
     StorageBubbleState,
     TransientOverlayKind,
 )
-from farm_merge_valet.automation.scheduler import MINIMUM_ACTIVE_INTERVAL, AdaptiveScheduler
+from farm_merge_valet.automation.scheduler import AdaptiveScheduler
 from farm_merge_valet.automation.state import AutomationState
 from farm_merge_valet.automation.timing import DEFAULT_ACTION_TIMING
 from farm_merge_valet.automation.workflows import (
@@ -157,7 +157,6 @@ class Bot:
         self._last_cooling_producer_count: int | None = None
         self._capability_retries: dict[RuntimeCapability, tuple[float, float]] = {}
         self._scheduler = AdaptiveScheduler()
-        self._poll_floor_reported = False
 
     def update_config(self, config: AppConfig) -> None:
         """Queue a complete configuration snapshot for the next planning iteration."""
@@ -1539,18 +1538,6 @@ class Bot:
             )
 
     def _effective_loop_delay(self, requested_delay: float) -> float:
-        if self.config.loop_interval < MINIMUM_ACTIVE_INTERVAL and not self._poll_floor_reported:
-            log_event(
-                logger,
-                logging.WARNING,
-                "bot.poll_interval_clamped",
-                "Configured loop interval %.3fs was clamped to the safe %.3fs minimum.",
-                self.config.loop_interval,
-                MINIMUM_ACTIVE_INTERVAL,
-                configured_interval=self.config.loop_interval,
-                effective_interval=MINIMUM_ACTIVE_INTERVAL,
-            )
-            self._poll_floor_reported = True
         return max(
             requested_delay,
             self._scheduler.active_delay(self.config.loop_interval),
