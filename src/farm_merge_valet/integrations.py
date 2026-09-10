@@ -15,6 +15,7 @@ class GamePortal(StrEnum):
     MSN = "msn"
     DISCORD = "discord"
     AGAME = "agame"
+    FACEBOOK = "facebook"
 
 
 class PortalSupportLevel(StrEnum):
@@ -123,6 +124,19 @@ PORTALS = (
         lambda host, path: (
             host == "cdn.games.mobinozer.com"
             and path.startswith("/ext/farm_merge_azerion/production/")
+        ),
+    ),
+    PortalDefinition(
+        GamePortal.FACEBOOK,
+        "Facebook Gaming",
+        ("facebook.com",),
+        PortalSupportLevel.AUTOMATION,
+        PortalStartupStrategy.DIRECT,
+        "https://www.facebook.com/gaming/play/farm_merge_valley",
+        lambda host, path: (
+            host == "apps-158098743030140.apps.fbsbx.com"
+            and path.startswith("/instant-bundle/")
+            and path.endswith("/index.html")
         ),
     ),
 )

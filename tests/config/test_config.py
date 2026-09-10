@@ -36,6 +36,10 @@ def test_discord_selection_and_legacy_url_use_the_canonical_url() -> None:
 
 
 def test_explicit_game_page_override_is_preserved_for_selected_portal() -> None:
+    facebook = "https://www.facebook.com/gaming/play/farm_merge_valley"
+    assert AppConfig(game_portal=GamePortal.FACEBOOK).game_url == facebook
+    assert AppConfig.model_validate({"game_url": facebook}).game_portal is GamePortal.FACEBOOK
+
     agame = "https://www.agame.com/game/farm-merge-valley"
     assert AppConfig(game_portal=GamePortal.AGAME).game_url == agame
     assert AppConfig.model_validate({"game_url": agame}).game_portal is GamePortal.AGAME

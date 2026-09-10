@@ -158,6 +158,29 @@ def _agame_game_frame(id_: str, parent_id: str) -> dict[str, str]:
     }
 
 
+def _facebook_page(id_: str = "facebook-page") -> dict[str, str]:
+    return {
+        "id": id_,
+        "type": "page",
+        "title": "Farm Merge Valley | Facebook",
+        "url": "https://www.facebook.com/gaming/play/farm_merge_valley",
+        "webSocketDebuggerUrl": f"ws://page/{id_}",
+    }
+
+
+def _facebook_game_frame(id_: str, parent_id: str) -> dict[str, str]:
+    return {
+        "id": id_,
+        "parentId": parent_id,
+        "type": "iframe",
+        "url": (
+            "https://apps-158098743030140.apps.fbsbx.com/"
+            "instant-bundle/4318293594945706/29377260731873670/index.html"
+        ),
+        "webSocketDebuggerUrl": f"ws://frame/{id_}",
+    }
+
+
 def test_select_target_pair_uses_parent_page_and_title() -> None:
     targets = [
         _page("other", "Another post"),
@@ -467,6 +490,43 @@ def test_agame_recognition_rejects_spoofed_hosts_and_unrelated_paths() -> None:
     assert not discover_game_targets([page, _agame_game_frame("game-frame", "agame-page")])
     assert not portal.matches_game_frame_url(
         "https://cdn.games.mobinozer.com/ext/farm_merge_microsoft/prod/1/"
+    )
+
+
+def test_discover_game_targets_resolves_nested_facebook_frame() -> None:
+    wrapper = {
+        "id": "shield",
+        "parentId": "facebook-page",
+        "type": "iframe",
+        "url": "https://shield-apps-158098743030140.apps.fbsbx.com/shield-bundle/root/index.html",
+        "webSocketDebuggerUrl": "ws://frame/shield",
+    }
+    targets = [_facebook_page(), wrapper, _facebook_game_frame("game-frame", "shield")]
+    discovered = discover_game_targets(targets)
+
+    assert len(discovered) == 1
+    assert discovered[0].portal is GamePortal.FACEBOOK
+    assert discovered[0].ancestor_ids == ("shield", "facebook-page")
+    assert discovered[0].support_level is PortalSupportLevel.AUTOMATION
+    assert _select_target_pair(targets, "Facebook") == (
+        "ws://frame/game-frame",
+        "ws://page/facebook-page",
+    )
+
+
+def test_facebook_recognition_rejects_spoofed_app_and_page_hosts() -> None:
+    portal = portal_definition(GamePortal.FACEBOOK)
+    page = {
+        **_facebook_page(),
+        "url": "https://www.facebook.com.example.test/gaming/play/farm_merge_valley",
+    }
+
+    assert not discover_game_targets([page, _facebook_game_frame("game-frame", "facebook-page")])
+    assert not portal.matches_game_frame_url(
+        "https://apps-999.apps.fbsbx.com/instant-bundle/1/2/index.html"
+    )
+    assert not portal.matches_game_frame_url(
+        "https://apps-158098743030140.apps.fbsbx.com/shield-bundle/1/2/index.html"
     )
 
 
