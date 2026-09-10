@@ -125,14 +125,14 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
     assert window.browser_page.cache_clear_button.text() == "Clear cache"
     assert window.browser_page.cache_clear_button.property("danger") is True
 
-    window.browser_page.portal_choice.set_current_value("facebook")
+    window.browser_page.portal_choice.set_current_value("yahoo")
     window._flush_config()
     selected = ConfigStore(store.path).load()
-    assert selected.game_portal.value == "facebook"
-    assert selected.game_url == "https://www.facebook.com/gaming/play/farm_merge_valley"
+    assert selected.game_portal.value == "yahoo"
+    assert selected.game_url == "https://www.yahoo.com/games/play/farm-merge-valley"
     assert selected.window_title == ""
 
-    custom_url = "https://www.facebook.com/gaming/play/custom_farm_merge_valley"
+    custom_url = "https://www.yahoo.com/games/play/custom-farm-merge-valley"
     window.browser_page.controls["game_url"].setText(custom_url)
     window.browser_page.controls["game_url"].editingFinished.emit()
     window._flush_config()

@@ -530,6 +530,43 @@ def test_facebook_recognition_rejects_spoofed_app_and_page_hosts() -> None:
     )
 
 
+def test_discover_game_targets_recognizes_yahoo_as_automation_enabled() -> None:
+    page = {
+        "id": "yahoo-page",
+        "type": "page",
+        "title": "Yahoo Games",
+        "url": "https://www.yahoo.com/games/play/farm-merge-valley?tracking=ignored",
+        "webSocketDebuggerUrl": "ws://page/yahoo-page",
+    }
+    frame = {
+        "id": "game-frame",
+        "parentId": "yahoo-page",
+        "type": "iframe",
+        "url": "https://farm-merge-valley-yhus.mobinozer.com/production/1.80.0-4/",
+        "webSocketDebuggerUrl": "ws://frame/game-frame",
+    }
+
+    discovered = discover_game_targets([page, frame])
+    assert len(discovered) == 1
+    assert discovered[0].portal is GamePortal.YAHOO
+    assert discovered[0].support_level is PortalSupportLevel.AUTOMATION
+    assert _select_target_pair([page, frame], "Yahoo") == (
+        "ws://frame/game-frame",
+        "ws://page/yahoo-page",
+    )
+
+
+def test_yahoo_recognition_rejects_spoofed_hosts_and_paths() -> None:
+    portal = portal_definition(GamePortal.YAHOO)
+    assert not portal.matches_page_url("https://www.yahoo.com.example.test/games/play/farm")
+    assert not portal.matches_game_frame_url(
+        "https://farm-merge-valley-yhus.mobinozer.com.example.test/production/1/"
+    )
+    assert not portal.matches_game_frame_url(
+        "https://farm-merge-valley-yhus.mobinozer.com/unrelated/1/"
+    )
+
+
 def test_select_target_pair_rejects_observation_only_portal(monkeypatch) -> None:
     observation_portal = replace(
         portal_definition(GamePortal.CRAZY_GAMES),

@@ -317,6 +317,7 @@ def test_ensure_game_open_opens_configured_url_once_in_managed_browser(
         ("https://discord.com/activities/1187013846746005515", "Discord"),
         ("https://www.agame.com/game/farm-merge-valley", "Agame"),
         ("https://www.facebook.com/gaming/play/farm_merge_valley", "Facebook"),
+        ("https://www.yahoo.com/games/play/farm-merge-valley", "Yahoo"),
     ],
 )
 def test_ensure_game_open_waits_for_direct_portal_without_launcher(

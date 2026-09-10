@@ -16,6 +16,7 @@ class GamePortal(StrEnum):
     DISCORD = "discord"
     AGAME = "agame"
     FACEBOOK = "facebook"
+    YAHOO = "yahoo"
 
 
 class PortalSupportLevel(StrEnum):
@@ -137,6 +138,17 @@ PORTALS = (
             host == "apps-158098743030140.apps.fbsbx.com"
             and path.startswith("/instant-bundle/")
             and path.endswith("/index.html")
+        ),
+    ),
+    PortalDefinition(
+        GamePortal.YAHOO,
+        "Yahoo Games",
+        ("yahoo.com",),
+        PortalSupportLevel.AUTOMATION,
+        PortalStartupStrategy.DIRECT,
+        "https://www.yahoo.com/games/play/farm-merge-valley",
+        lambda host, path: (
+            host == "farm-merge-valley-yhus.mobinozer.com" and path.startswith("/production/")
         ),
     ),
 )
