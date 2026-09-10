@@ -138,6 +138,26 @@ def _discord_game_frame(id_: str, parent_id: str) -> dict[str, str]:
     }
 
 
+def _agame_page(id_: str = "agame-page") -> dict[str, str]:
+    return {
+        "id": id_,
+        "type": "page",
+        "title": "Play Farm Merge Valley online for Free on Agame",
+        "url": "https://www.agame.com/game/farm-merge-valley",
+        "webSocketDebuggerUrl": f"ws://page/{id_}",
+    }
+
+
+def _agame_game_frame(id_: str, parent_id: str) -> dict[str, str]:
+    return {
+        "id": id_,
+        "parentId": parent_id,
+        "type": "iframe",
+        "url": "https://cdn.games.mobinozer.com/ext/farm_merge_azerion/production/1.80.0-4/",
+        "webSocketDebuggerUrl": f"ws://frame/{id_}",
+    }
+
+
 def test_select_target_pair_uses_parent_page_and_title() -> None:
     targets = [
         _page("other", "Another post"),
@@ -423,6 +443,30 @@ def test_discord_recognition_rejects_spoofed_hosts_and_paths() -> None:
     assert not portal.matches_game_frame_url("https://999.discordsays.com/")
     assert not portal.matches_game_frame_url(
         "https://1187013846746005515.discordsays.com/unrelated"
+    )
+
+
+def test_discover_game_targets_recognizes_agame_as_automation_enabled() -> None:
+    targets = [_agame_page(), _agame_game_frame("game-frame", "agame-page")]
+    discovered = discover_game_targets(targets)
+
+    assert len(discovered) == 1
+    assert discovered[0].portal is GamePortal.AGAME
+    assert discovered[0].ancestor_ids == ("agame-page",)
+    assert discovered[0].support_level is PortalSupportLevel.AUTOMATION
+    assert _select_target_pair(targets, "Agame") == (
+        "ws://frame/game-frame",
+        "ws://page/agame-page",
+    )
+
+
+def test_agame_recognition_rejects_spoofed_hosts_and_unrelated_paths() -> None:
+    portal = portal_definition(GamePortal.AGAME)
+    page = {**_agame_page(), "url": "https://www.agame.com.example.test/game/farm-merge-valley"}
+
+    assert not discover_game_targets([page, _agame_game_frame("game-frame", "agame-page")])
+    assert not portal.matches_game_frame_url(
+        "https://cdn.games.mobinozer.com/ext/farm_merge_microsoft/prod/1/"
     )
 
 

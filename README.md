@@ -32,7 +32,7 @@ and login state. It never takes ownership of or closes an unrelated browser
 profile.
 
 The Browser page selects the game integration and manages browser startup.
-Supported integrations are Reddit, CrazyGames, Pogo, MSN, and Discord Activities.
+Supported integrations are Reddit, CrazyGames, Pogo, MSN, Discord Activities, and Agame.
 
 The managed game browser must remain open while automation runs. It may be
 unfocused, occluded, on another virtual desktop, or showing a different tab, but

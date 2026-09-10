@@ -36,6 +36,10 @@ def test_discord_selection_and_legacy_url_use_the_canonical_url() -> None:
 
 
 def test_explicit_game_page_override_is_preserved_for_selected_portal() -> None:
+    agame = "https://www.agame.com/game/farm-merge-valley"
+    assert AppConfig(game_portal=GamePortal.AGAME).game_url == agame
+    assert AppConfig.model_validate({"game_url": agame}).game_portal is GamePortal.AGAME
+
     custom = "https://discord.com/channels/@me/custom"
 
     assert AppConfig(game_portal=GamePortal.DISCORD, game_url=custom).game_url == custom
