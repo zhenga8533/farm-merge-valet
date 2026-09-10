@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QPushButton,
     QWidget,
@@ -43,7 +42,6 @@ from farm_merge_valet.gui.services.catalog_freshness import (
 from farm_merge_valet.integrations import (
     PORTALS,
     GamePortal,
-    PortalSupportLevel,
     portal_definition,
 )
 
@@ -108,15 +106,9 @@ class BrowserPage(ConfigFormPage):
             self.portal_choice,
             lambda value: self._set_portal(GamePortal(str(value))),
         )
-        self.portal_support_label = QLabel()
-        self.portal_support_label.setAccessibleName("Integration support level")
-        self.portal_url_label = QLabel()
-        self.portal_url_label.setAccessibleName("Integration game page")
-        self.portal_url_label.setWordWrap(True)
         self._set_portal(config.game_portal)
         self._add_form_row(managed_form, "Game platform", self.portal_choice)
-        self._add_form_row(managed_form, "Support", self.portal_support_label)
-        self._add_form_row(managed_form, "Game page", self.portal_url_label)
+        self._add_text(managed_form, "Game page", "game_url")
         self._add_form_row(managed_form, "Preferred browser", self.browser_choice)
         self._add_toggle(managed_form, "Launch automatically when needed", "browser_auto_launch")
         self._add_toggle(managed_form, "Reload frozen game automatically", "auto_recover_game")
@@ -190,15 +182,7 @@ class BrowserPage(ConfigFormPage):
             self.launch_requested.emit()
 
     def _set_portal(self, portal: GamePortal) -> None:
-        definition = portal_definition(portal)
         self.portal_choice.set_current_value(portal.value)
-        support = (
-            "Automation"
-            if definition.support_level is PortalSupportLevel.AUTOMATION
-            else "Observation only"
-        )
-        self.portal_support_label.setText(support)
-        self.portal_url_label.setText(definition.canonical_url)
 
     def _request_portal(self, _index: int) -> None:
         portal = GamePortal(str(self.portal_choice.current_value()))

@@ -81,6 +81,7 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
 
     assert set(window.browser_page.controls) == {
         "game_portal",
+        "game_url",
         "browser",
         "browser_auto_launch",
         "auto_recover_game",
@@ -124,14 +125,18 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
     assert window.browser_page.cache_clear_button.text() == "Clear cache"
     assert window.browser_page.cache_clear_button.property("danger") is True
 
-    window.browser_page.portal_choice.set_current_value("msn")
+    window.browser_page.portal_choice.set_current_value("discord")
     window._flush_config()
     selected = ConfigStore(store.path).load()
-    assert selected.game_portal.value == "msn"
-    assert selected.game_url == (
-        "https://www.msn.com/en-nz/play/games/farm-merge-valley/cg-9nf2hg8fnlts"
-    )
+    assert selected.game_portal.value == "discord"
+    assert selected.game_url == "https://discord.com/activities/1187013846746005515"
     assert selected.window_title == ""
+
+    custom_url = "https://discord.com/channels/@me/custom"
+    window.browser_page.controls["game_url"].setText(custom_url)
+    window.browser_page.controls["game_url"].editingFinished.emit()
+    window._flush_config()
+    assert ConfigStore(store.path).load().game_url == custom_url
 
     window.browser_page._request("cdp_port", 9333)
     window._flush_config()

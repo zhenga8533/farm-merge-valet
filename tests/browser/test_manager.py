@@ -237,7 +237,8 @@ def test_stop_closes_only_a_verified_managed_endpoint(monkeypatch) -> None:
     monkeypatch.setattr(manager, "_endpoint_reachable", lambda: next(endpoint_samples))
     closed = []
     monkeypatch.setattr(
-        "farm_merge_valet.browser.manager.close_browser", lambda port: closed.append(port)
+        "farm_merge_valet.browser.manager.close_browser",
+        lambda port: closed.append(port),
     )
 
     manager.stop()
@@ -283,7 +284,9 @@ def test_launch_retries_after_profile_handoff_exit(tmp_path, monkeypatch) -> Non
     assert launches == 2
 
 
-def test_ensure_game_open_opens_configured_url_once_in_managed_browser(monkeypatch) -> None:
+def test_ensure_game_open_opens_configured_url_once_in_managed_browser(
+    monkeypatch,
+) -> None:
     settings = AppConfig(game_url="https://www.reddit.com/r/FarmMergeValley/")
     manager = BrowserManager(settings)
     waiting = BrowserStatus(True, True, True, kind=BrowserKind.CHROME, game_loaded=False)
@@ -311,6 +314,7 @@ def test_ensure_game_open_opens_configured_url_once_in_managed_browser(monkeypat
             "https://www.msn.com/en-nz/play/games/farm-merge-valley/cg-9nf2hg8fnlts",
             "MSN",
         ),
+        ("https://discord.com/activities/1187013846746005515", "Discord"),
     ],
 )
 def test_ensure_game_open_waits_for_direct_portal_without_launcher(

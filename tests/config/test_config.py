@@ -28,6 +28,32 @@ def test_msn_selection_and_legacy_url_use_the_canonical_url() -> None:
     assert AppConfig.model_validate({"game_url": canonical}).game_portal is GamePortal.MSN
 
 
+def test_discord_selection_and_legacy_url_use_the_canonical_url() -> None:
+    canonical = "https://discord.com/activities/1187013846746005515"
+
+    assert AppConfig(game_portal=GamePortal.DISCORD).game_url == canonical
+    assert AppConfig.model_validate({"game_url": canonical}).game_portal is GamePortal.DISCORD
+
+
+def test_explicit_game_page_override_is_preserved_for_selected_portal() -> None:
+    custom = "https://discord.com/channels/@me/custom"
+
+    assert AppConfig(game_portal=GamePortal.DISCORD, game_url=custom).game_url == custom
+
+
+@pytest.mark.parametrize(
+    "game_url",
+    [
+        "http://discord.com/activities/1187013846746005515",
+        "https://discord.com.example.test/activities/1187013846746005515",
+        "https://user@discord.com/activities/1187013846746005515",
+    ],
+)
+def test_game_page_override_must_remain_trusted(game_url: str) -> None:
+    with pytest.raises(ValidationError, match="HTTPS page owned by the selected integration"):
+        AppConfig(game_portal=GamePortal.DISCORD, game_url=game_url)
+
+
 def test_unregistered_legacy_game_url_is_rejected() -> None:
     with pytest.raises(ValidationError, match="registered integration"):
         AppConfig(game_url="https://example.com/game")

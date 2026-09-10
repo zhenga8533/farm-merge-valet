@@ -13,6 +13,7 @@ class GamePortal(StrEnum):
     CRAZY_GAMES = "crazygames"
     POGO = "pogo"
     MSN = "msn"
+    DISCORD = "discord"
 
 
 class PortalSupportLevel(StrEnum):
@@ -101,6 +102,15 @@ PORTALS = (
         lambda host, path: (
             host == "cdn.games.mobinozer.com" and path.startswith("/ext/farm_merge_microsoft/prod/")
         ),
+    ),
+    PortalDefinition(
+        GamePortal.DISCORD,
+        "Discord Activities",
+        ("discord.com",),
+        PortalSupportLevel.AUTOMATION,
+        PortalStartupStrategy.DIRECT,
+        "https://discord.com/activities/1187013846746005515",
+        lambda host, path: host == "1187013846746005515.discordsays.com" and path == "/",
     ),
 )
 

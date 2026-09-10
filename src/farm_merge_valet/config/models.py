@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
@@ -183,11 +184,24 @@ class AppConfig(BaseModel):
                     value["game_url"] = portal.canonical_url
                 elif value.get("game_url"):
                     raise ValueError("game_url does not match a registered integration")
-            if "game_portal" in value:
+            if "game_portal" in value and "game_url" not in value:
                 value["game_url"] = portal_definition(
                     GamePortal(value["game_portal"])
                 ).canonical_url
         return value
+
+    @model_validator(mode="after")
+    def game_url_matches_selected_portal(self) -> Self:
+        parts = urlsplit(self.game_url)
+        portal = portal_definition(self.game_portal)
+        if (
+            parts.scheme.casefold() != "https"
+            or parts.username is not None
+            or parts.password is not None
+            or not portal.matches_page_url(self.game_url)
+        ):
+            raise ValueError("game_url must be an HTTPS page owned by the selected integration")
+        return self
 
     @field_validator("discord_webhook_url", mode="before")
     @classmethod

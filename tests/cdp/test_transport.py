@@ -118,6 +118,26 @@ def _msn_game_frame(id_: str, parent_id: str) -> dict[str, str]:
     }
 
 
+def _discord_page(id_: str = "discord-page") -> dict[str, str]:
+    return {
+        "id": id_,
+        "type": "page",
+        "title": "Discord | @Farm Merge Valley",
+        "url": "https://discord.com/channels/@me/1378504101163434044",
+        "webSocketDebuggerUrl": f"ws://page/{id_}",
+    }
+
+
+def _discord_game_frame(id_: str, parent_id: str) -> dict[str, str]:
+    return {
+        "id": id_,
+        "parentId": parent_id,
+        "type": "iframe",
+        "url": "https://1187013846746005515.discordsays.com/?instance_id=ephemeral",
+        "webSocketDebuggerUrl": f"ws://frame/{id_}",
+    }
+
+
 def test_select_target_pair_uses_parent_page_and_title() -> None:
     targets = [
         _page("other", "Another post"),
@@ -380,6 +400,29 @@ def test_msn_recognition_rejects_spoofed_hosts_and_unrelated_paths() -> None:
     )
     assert not portal.matches_game_frame_url(
         "https://cdn.games.mobinozer.com/ext/unrelated/prod/1/"
+    )
+
+
+def test_discover_game_targets_recognizes_discord_activity() -> None:
+    discovered = discover_game_targets(
+        [_discord_page(), _discord_game_frame("game-frame", "discord-page")]
+    )
+    assert len(discovered) == 1
+    assert discovered[0].portal is GamePortal.DISCORD
+    assert discovered[0].ancestor_ids == ("discord-page",)
+    assert discovered[0].support_level is PortalSupportLevel.AUTOMATION
+    assert _select_target_pair(
+        [_discord_page(), _discord_game_frame("game-frame", "discord-page")], "Discord"
+    ) == ("ws://frame/game-frame", "ws://page/discord-page")
+
+
+def test_discord_recognition_rejects_spoofed_hosts_and_paths() -> None:
+    portal = portal_definition(GamePortal.DISCORD)
+    page = {**_discord_page(), "url": "https://discord.com.example.test/channels/@me/123"}
+    assert not discover_game_targets([page, _discord_game_frame("game-frame", "discord-page")])
+    assert not portal.matches_game_frame_url("https://999.discordsays.com/")
+    assert not portal.matches_game_frame_url(
+        "https://1187013846746005515.discordsays.com/unrelated"
     )
 
 

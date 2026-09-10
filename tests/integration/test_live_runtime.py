@@ -15,7 +15,12 @@ pytestmark = pytest.mark.live_game
 def live_runtime() -> GameRuntimeAdapter:
     config = ConfigStore().load()
     runtime = GameRuntimeAdapter(config.cdp_port, config.window_title)
-    health = runtime.discover()
+    deadline = time.monotonic() + 15
+    while True:
+        health = runtime.discover()
+        if health.available or time.monotonic() >= deadline:
+            break
+        time.sleep(0.25)
     assert health.available, health.detail
     assert health.scene_id is not None
     assert health.board_available
