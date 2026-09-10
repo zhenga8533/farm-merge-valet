@@ -18,6 +18,7 @@ from urllib.request import urlopen
 from farm_merge_valet.cdp.transport import (
     CdpCancelledError,
     CdpConnectionError,
+    CdpTimeoutError,
     _close_sessions,
     _command_target,
 )
@@ -30,6 +31,12 @@ from farm_merge_valet.integrations import (
 from farm_merge_valet.observability.logging import log_event
 
 logger = logging.getLogger(__name__)
+
+
+class PortalStartSubmissionError(CdpConnectionError):
+    """Raised when a portal Play request was sent but its result is unknown."""
+
+
 _LAUNCHER_FRAME_LOOKUP_SCRIPT = """
 const findLauncherFrame = launcherUrl => {
   const frames = [];
@@ -431,7 +438,10 @@ def try_start_game(
     y = click_position.get("y")
     if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
         return False
-    _dispatch_mouse_click(normalized_page_ws_url, float(x), float(y))
+    try:
+        _dispatch_mouse_click(normalized_page_ws_url, float(x), float(y))
+    except CdpTimeoutError as exc:
+        raise PortalStartSubmissionError(str(exc)) from exc
     return True
 
 

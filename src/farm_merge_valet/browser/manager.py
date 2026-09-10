@@ -18,6 +18,7 @@ from urllib.request import urlopen
 from farm_merge_valet.cdp.portal_lifecycle import request_game_start
 from farm_merge_valet.cdp.targets import (
     REQUIRED_BACKGROUND_FLAGS,
+    PortalStartSubmissionError,
     close_browser,
     has_game_target_pair,
     has_page_url,
@@ -477,6 +478,7 @@ class BrowserManager:
             now = time.monotonic()
             if (
                 portal.startup_strategy is not PortalStartupStrategy.DIRECT
+                and not start_attempted
                 and now >= next_start_attempt_at
             ):
                 next_start_attempt_at = now + _GAME_START_RETRY_SECONDS
@@ -485,6 +487,18 @@ class BrowserManager:
                         self.settings.cdp_port,
                         self.settings.window_title,
                         portal,
+                    )
+                except PortalStartSubmissionError as exc:
+                    start_requested = False
+                    start_attempted = True
+                    deadline = max(deadline, time.monotonic() + _GAME_LOAD_TIMEOUT)
+                    log_event(
+                        logger,
+                        logging.DEBUG,
+                        "browser.game_start_ambiguous",
+                        "The portal did not acknowledge the Play request; waiting to see whether "
+                        "the game loads.",
+                        detail=str(exc),
                     )
                 except CdpConnectionError as exc:
                     start_requested = False
@@ -504,6 +518,7 @@ class BrowserManager:
                             "Requested game startup through the portal launcher.",
                         )
                     start_attempted = True
+                    deadline = max(deadline, time.monotonic() + _GAME_LOAD_TIMEOUT)
             time.sleep(0.25)
         status = self.status()
         if status.game_frame_available:

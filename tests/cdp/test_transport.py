@@ -8,6 +8,7 @@ import pytest
 
 from farm_merge_valet.cdp.evaluation import _evaluate_target, evaluate
 from farm_merge_valet.cdp.targets import (
+    PortalStartSubmissionError,
     _invalidate_target_pair,
     _normalize_local_ws_url,
     _select_target_pair,
@@ -283,6 +284,38 @@ def test_try_start_game_clicks_launcher_for_matching_page(monkeypatch) -> None:
         "buttons": 1,
         "clickCount": 1,
     }
+
+
+def test_try_start_game_reports_mouse_timeout_as_ambiguous(monkeypatch) -> None:
+    page = _page("game", "Crates are waiting! : r/FarmMergeValley")
+    launcher = {
+        **_frame("launcher", "game"),
+        "url": "https://playfmv-example.devvit.net/launcher/launcher.html",
+    }
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets._load_targets",
+        lambda _port: [page, launcher],
+    )
+    evaluations = iter(
+        (
+            {"result": {"value": {"xRatio": 0.5, "yRatio": 0.8}}},
+            {"result": {"value": True}},
+            {"result": {"value": {"x": 500, "y": 400}}},
+        )
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets._command_target",
+        lambda *_args, **_kwargs: next(evaluations),
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets._dispatch_mouse_click",
+        lambda *_args: (_ for _ in ()).throw(
+            CdpTimeoutError("CDP Input.dispatchMouseEvent timed out after 5s.")
+        ),
+    )
+
+    with pytest.raises(PortalStartSubmissionError, match="dispatchMouseEvent"):
+        try_start_game(9222, "r/FarmMergeValley")
 
 
 def test_dismiss_pogo_inactivity_prompt_uses_exact_sdk_dialog(monkeypatch) -> None:

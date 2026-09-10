@@ -13,6 +13,7 @@ from farm_merge_valet.browser.manager import (
     BrowserStatus,
     SupportTier,
 )
+from farm_merge_valet.cdp.targets import PortalStartSubmissionError
 from farm_merge_valet.cdp.transport import CdpConnectionError
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.integrations import PortalSupportLevel, portal_for_page_url
@@ -385,6 +386,51 @@ def test_ensure_game_open_retries_transient_play_error_until_game_is_loaded(
 
     assert manager.ensure_game_open() is loaded
     assert attempts == [True, True]
+
+
+def test_ensure_game_open_waits_after_play_request_without_clicking_again(
+    monkeypatch,
+) -> None:
+    manager = BrowserManager(AppConfig())
+    waiting = BrowserStatus(True, True, True, game_loaded=False)
+    loaded = BrowserStatus(True, True, True, game_loaded=True)
+    statuses = iter((waiting, waiting, waiting, loaded))
+    attempts: list[bool] = []
+
+    monkeypatch.setattr(manager, "ensure_running", lambda: waiting)
+    monkeypatch.setattr(manager, "status", lambda: next(statuses))
+    monkeypatch.setattr("farm_merge_valet.browser.manager.has_page_url", lambda *_args: True)
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.request_game_start",
+        lambda *_args: attempts.append(True) or True,
+    )
+    monkeypatch.setattr("farm_merge_valet.browser.manager.time.sleep", lambda _seconds: None)
+
+    assert manager.ensure_game_open() is loaded
+    assert attempts == [True]
+
+
+def test_ensure_game_open_treats_play_timeout_as_ambiguous_submission(
+    monkeypatch,
+) -> None:
+    manager = BrowserManager(AppConfig())
+    waiting = BrowserStatus(True, True, True, game_loaded=False)
+    loaded = BrowserStatus(True, True, True, game_loaded=True)
+    statuses = iter((waiting, waiting, loaded))
+    attempts: list[bool] = []
+
+    def time_out(*_args) -> bool:
+        attempts.append(True)
+        raise PortalStartSubmissionError("CDP Input.dispatchMouseEvent timed out after 5s.")
+
+    monkeypatch.setattr(manager, "ensure_running", lambda: waiting)
+    monkeypatch.setattr(manager, "status", lambda: next(statuses))
+    monkeypatch.setattr("farm_merge_valet.browser.manager.has_page_url", lambda *_args: True)
+    monkeypatch.setattr("farm_merge_valet.browser.manager.request_game_start", time_out)
+    monkeypatch.setattr("farm_merge_valet.browser.manager.time.sleep", lambda _seconds: None)
+
+    assert manager.ensure_game_open() is loaded
+    assert attempts == [True]
 
 
 def test_recover_game_reloads_loaded_managed_page(monkeypatch) -> None:
