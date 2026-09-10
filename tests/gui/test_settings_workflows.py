@@ -561,12 +561,12 @@ def test_decimal_setting_accepts_fractional_keyboard_input(tmp_path) -> None:
 def test_settings_controls_match_model_range_and_parent_feature_state(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     store = ConfigStore(tmp_path / "config.json")
-    store.replace(AppConfig(close_to_tray=False, loop_interval=0.01))
+    store.replace(AppConfig(close_to_tray=False, loop_interval=0.25))
     window = MainWindow(ApplicationController(store))
     page = window.settings_page
 
-    assert page.controls["loop_interval"].minimum() == 0.01
-    assert page.controls["loop_interval"].value() == 0.01
+    assert page.controls["loop_interval"].minimum() == 0.25
+    assert page.controls["loop_interval"].value() == 0.25
     assert not page.controls["land_expansion_max_coin_cost"].isEnabled()
     assert not page.controls["land_expansion_max_gem_cost"].isEnabled()
     assert not page.controls["webhook_summary_interval"].isEnabled()

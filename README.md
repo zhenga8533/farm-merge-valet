@@ -141,6 +141,11 @@ atomically in the platform's per-user application-data directory. Invalid
 configuration is not silently overwritten; startup offers an explicit reset to
 safe defaults. `.env` and `FMV_*` variables are not read.
 
+Discord webhook credentials are stored separately from `config.json`. Windows
+protects them for the current OS user; other platforms restrict the credential
+file to the current user. Existing plaintext webhook values are migrated when
+configuration is loaded.
+
 Changes to automation policies and timing are adopted by a running bot. Browser
 connection, cache location, notification delivery, and other startup settings
 require the corresponding restart. Automatic page opening, recovery, and

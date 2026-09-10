@@ -368,15 +368,13 @@ def test_crate_connection_loss_releases_the_global_action_lease() -> None:
     assert bot._actions().available(OperationKind.MERGE, ("next",), float("inf"))
 
 
-def test_merge_five_policy_does_not_fall_back_while_space_remains(monkeypatch) -> None:
+def test_merge_five_policy_does_not_fall_back_while_space_remains() -> None:
     bot = bare_bot()
     wheat = ItemRef("crops", "wheat", 1)
     bot._max_item_tiers[("crops", "wheat")] = 4
     for x in range(3):
         bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
     bot.board.set_cell((10, 10), Cell(CellKind.EMPTY))
-    monkeypatch.setattr(bot.config, "prefer_merge_five", True)
-
     assert bot._merge_actions_for_policy() == []
 
 

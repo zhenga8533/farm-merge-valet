@@ -11,6 +11,7 @@ from threading import RLock
 
 from farm_merge_valet.config.models import AppConfig
 from farm_merge_valet.config.paths import user_config_path
+from farm_merge_valet.config.secret_store import SecretStore
 
 ConfigListener = Callable[[AppConfig], None]
 
@@ -33,7 +34,13 @@ class ConfigStore:
     def load(self) -> AppConfig:
         with self._lock:
             if self.path.exists():
-                self._current = AppConfig.model_validate_json(self.path.read_text(encoding="utf-8"))
+                payload = json.loads(self.path.read_text(encoding="utf-8"))
+                legacy_webhook = payload.get("discord_webhook_url")
+                stored_webhook = SecretStore(self.path).read()
+                payload["discord_webhook_url"] = stored_webhook or legacy_webhook
+                self._current = AppConfig.model_validate(payload)
+                if legacy_webhook:
+                    self._persist(self._current)
             else:
                 self._persist(self._current)
             return self._current.model_copy(deep=True)
@@ -89,11 +96,12 @@ class ConfigStore:
 
     def _persist(self, config: AppConfig) -> None:
         payload = config.model_dump(mode="json")
-        payload["discord_webhook_url"] = (
+        webhook = (
             config.discord_webhook_url.get_secret_value()
             if config.discord_webhook_url is not None
             else None
         )
+        payload["discord_webhook_url"] = None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
             dir=self.path.parent, prefix=f".{self.path.name}.", suffix=".tmp", text=True
@@ -108,6 +116,7 @@ class ConfigStore:
         except BaseException:
             temporary.unlink(missing_ok=True)
             raise
+        SecretStore(self.path).write(webhook)
         if os.name != "nt":
             try:
                 self.path.chmod(0o600)

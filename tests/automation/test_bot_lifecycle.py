@@ -390,7 +390,7 @@ def test_unexpected_bot_failure_is_logged_before_propagating(monkeypatch, caplog
 
 def test_runtime_connection_loss_reinitializes_without_stopping(monkeypatch, caplog) -> None:
     bot = bare_bot()
-    bot.config = AppConfig(loop_interval=0.01)
+    bot.config = AppConfig(loop_interval=0.25)
     bot._resume_cached_runtime = lambda: False
     initializations: list[bool] = []
     steps = 0

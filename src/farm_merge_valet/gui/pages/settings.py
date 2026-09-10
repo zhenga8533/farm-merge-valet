@@ -87,12 +87,18 @@ class SettingsPage(ConfigFormPage):
             0,
             1_000_000_000,
         )
+        self.controls["land_expansion_max_coin_cost"].setToolTip(
+            "Zero allows only expansions that cost no coins."
+        )
         self._add_int(
             workflows_form,
             "Maximum crystals per expansion",
             "land_expansion_max_gem_cost",
             0,
             1_000_000_000,
+        )
+        self.controls["land_expansion_max_gem_cost"].setToolTip(
+            "Zero allows only expansions that cost no crystals."
         )
         sections.addWidget(workflows)
 
@@ -138,6 +144,7 @@ class SettingsPage(ConfigFormPage):
             ("Minimum crystal reserve", "minimum_gem_reserve"),
         ):
             self._add_int(safeguards_form, label, field, 0, 1_000_000_000)
+            self.controls[field].setToolTip("Zero means no balance is reserved.")
         sections.addWidget(safeguards)
 
         repairs, repairs_form = settings_section("Building repairs")
@@ -164,7 +171,14 @@ class SettingsPage(ConfigFormPage):
 
         timing, timing_form = disclosure_section("Advanced automation timing")
         self._add_float(timing_form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)
-        self._add_float(timing_form, "Loop interval (seconds)", "loop_interval", 0.01, 60, 0.1)
+        self._add_float(
+            timing_form,
+            "Active polling interval (seconds)",
+            "loop_interval",
+            0.25,
+            60,
+            0.1,
+        )
         self._add_float(
             timing_form, "Item delay minimum (seconds)", "item_action_delay_min", 0, 60, 0.1
         )

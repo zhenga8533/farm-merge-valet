@@ -14,7 +14,7 @@ from farm_merge_valet.config.paths import user_cache_root
 from farm_merge_valet.core.items import item_base_policy_key, item_family_policy_key
 from farm_merge_valet.integrations import GamePortal, portal_definition, portal_for_page_url
 
-CONFIG_SCHEMA_VERSION: Literal[1] = 1
+CONFIG_SCHEMA_VERSION: Literal[2] = 2
 
 
 class ItemPolicy(BaseModel):
@@ -73,7 +73,7 @@ class AppConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    schema_version: Literal[1] = CONFIG_SCHEMA_VERSION
+    schema_version: Literal[2] = CONFIG_SCHEMA_VERSION
     game_portal: GamePortal = GamePortal.REDDIT
     window_title: str = ""
     browser: Literal["auto", "chrome", "edge", "brave", "chromium"] = "auto"
@@ -104,7 +104,6 @@ class AppConfig(BaseModel):
     minimum_gem_reserve: int = Field(default=0, ge=0, le=1_000_000_000)
     shop_ingredient_reserve_default: int = Field(default=0, ge=0, le=1_000_000_000)
     shop_ingredient_reserves: dict[str, int] = Field(default_factory=dict)
-    prefer_merge_five: bool = True
     item_automation_enabled: bool = True
     item_policy_defaults: ItemPolicy = Field(default_factory=ItemPolicy)
     item_category_defaults: dict[str, ItemPolicyOverride] = Field(default_factory=dict)
@@ -134,7 +133,7 @@ class AppConfig(BaseModel):
     marketplace_sort_column: Literal["offer", "cost", "enabled"] = "offer"
     marketplace_sort_descending: bool = False
 
-    loop_interval: float = Field(default=1.0, ge=0.01, le=60.0)
+    loop_interval: float = Field(default=1.0, ge=0.25, le=60.0)
     idle_wait_seconds: float = Field(default=30.0, ge=0.0, le=3600.0)
     item_action_delay_min: float = Field(default=1.5, ge=0.0, le=60.0)
     item_action_delay_max: float = Field(default=3.5, ge=0.0, le=60.0)
@@ -175,7 +174,15 @@ class AppConfig(BaseModel):
     def migrate_legacy_configuration(cls, value: object) -> object:
         if isinstance(value, Mapping):
             value = dict(value)
+            legacy_merge_five = value.pop("prefer_merge_five", None)
+            if legacy_merge_five is not None:
+                defaults = dict(value.get("item_policy_defaults") or {})
+                if not legacy_merge_five:
+                    defaults["prefer_merge_five"] = False
+                value["item_policy_defaults"] = defaults
             value.pop("allow_shop_order_starts", None)
+            if value.get("schema_version", 1) == 1:
+                value["schema_version"] = CONFIG_SCHEMA_VERSION
             if "game_portal" not in value:
                 portal = portal_for_page_url(value.get("game_url", ""))
                 if portal is not None:
@@ -312,8 +319,6 @@ class AppConfig(BaseModel):
         resolution_keys = _item_policy_resolution_keys(policy_key)
         base_key = resolution_keys[0]
         values = self.item_policy_defaults.model_dump()
-        if not self.prefer_merge_five:
-            values["prefer_merge_five"] = False
         category_key = category or base_key.partition("/")[0]
         if recommended := _RECOMMENDED_ITEM_CATEGORY_DEFAULTS.get(category_key):
             values.update(recommended.model_dump(exclude_none=True))

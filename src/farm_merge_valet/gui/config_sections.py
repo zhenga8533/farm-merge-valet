@@ -14,12 +14,12 @@ class ConfigSection(StrEnum):
     MARKETPLACE = "marketplace"
     BROWSER = "browser"
     SETTINGS = "settings"
+    LOGS = "logs"
     VIEW = "view"
 
 
 SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
     ConfigSection.ITEMS: (
-        "prefer_merge_five",
         "item_policy_defaults",
         "item_category_defaults",
         "item_default_overrides",
@@ -84,7 +84,6 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "pause_hotkey",
         "quit_hotkey",
         "start_paused",
-        "log_level",
         "discord_webhook_url",
         "webhook_summary_interval",
         "webhook_status_interval",
@@ -97,13 +96,14 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "main_always_on_top",
         "main_focused_opacity",
         "main_unfocused_opacity",
-        "overlay_visible",
         "overlay_always_on_top",
         "overlay_click_through",
         "overlay_focused_opacity",
         "overlay_unfocused_opacity",
     ),
+    ConfigSection.LOGS: ("log_level",),
     ConfigSection.VIEW: (
+        "overlay_visible",
         "items_sort_column",
         "items_sort_descending",
         "shops_sort_column",
@@ -119,8 +119,6 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
 def reset_config_section(config: AppConfig, section: ConfigSection) -> AppConfig:
     defaults = AppConfig()
     fields = SECTION_FIELDS[section]
-    if section is ConfigSection.SETTINGS:
-        fields = tuple(field for field in fields if field not in {"log_level", "overlay_visible"})
     changes = {field: getattr(defaults, field) for field in fields}
     candidate = config.model_copy(update=changes)
     return AppConfig.model_validate(candidate.model_dump())

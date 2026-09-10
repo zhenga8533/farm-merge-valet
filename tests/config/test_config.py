@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -324,13 +326,17 @@ def test_item_policy_override_can_reenable_family_when_global_default_is_disable
     assert settings.item_policy("animals/cow").enabled
 
 
-def test_legacy_merge_five_switch_remains_a_global_kill_switch() -> None:
-    settings = AppConfig(
-        _env_file=None,
-        prefer_merge_five=False,
-        item_policy_overrides={"animals/cow": {"prefer_merge_five": True}},
+def test_legacy_merge_five_switch_migrates_to_item_policy_defaults() -> None:
+    settings = AppConfig.model_validate(
+        {
+            "schema_version": 1,
+            "prefer_merge_five": False,
+            "item_policy_defaults": {"prefer_merge_five": True},
+            "item_policy_overrides": {"animals/cow": {"prefer_merge_five": True}},
+        }
     )
 
+    assert settings.schema_version == 2
     assert not settings.item_policy("crops/wheat").prefer_merge_five
     assert settings.item_policy("animals/cow").prefer_merge_five
 
@@ -472,8 +478,22 @@ def test_config_store_round_trips_atomically_and_notifies(tmp_path) -> None:
     assert updated.theme == "dark"
     assert received == [updated]
     assert ConfigStore(path).load() == updated
-    assert "private-token" in path.read_text(encoding="utf-8")
+    assert "private-token" not in path.read_text(encoding="utf-8")
+    assert path.with_suffix(".json.secrets").exists()
     assert not list(path.parent.glob(".config.json.*.tmp"))
+
+
+def test_config_store_migrates_plaintext_webhook_storage(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    payload = AppConfig().model_dump(mode="json")
+    payload["discord_webhook_url"] = "https://example.test/legacy-token"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = ConfigStore(path).load()
+
+    assert loaded.discord_webhook_url is not None
+    assert loaded.discord_webhook_url.get_secret_value().endswith("legacy-token")
+    assert "legacy-token" not in path.read_text(encoding="utf-8")
 
 
 def test_config_store_skips_unchanged_snapshot_notifications(tmp_path) -> None:
