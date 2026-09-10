@@ -7,13 +7,6 @@ from threading import Event
 import pytest
 
 from farm_merge_valet.cdp.evaluation import _evaluate_target, evaluate
-from farm_merge_valet.cdp.portals import (
-    PORTALS,
-    GamePortal,
-    PortalSupportLevel,
-    portal_definition,
-    portal_for_page_url,
-)
 from farm_merge_valet.cdp.targets import (
     _invalidate_target_pair,
     _normalize_local_ws_url,
@@ -32,6 +25,13 @@ from farm_merge_valet.cdp.transport import (
     CdpConnectionError,
     CdpTimeoutError,
     _CdpSession,
+)
+from farm_merge_valet.integrations import (
+    PORTALS,
+    GamePortal,
+    PortalSupportLevel,
+    portal_definition,
+    portal_for_page_url,
 )
 
 
@@ -619,6 +619,28 @@ def test_reddit_game_frame_matcher_rejects_non_devvit_host() -> None:
 
 def test_portal_canonical_urls_resolve_to_their_definitions() -> None:
     assert all(portal_for_page_url(portal.canonical_url) is portal for portal in PORTALS)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://www.yahoo.com/games/play/farm-merge-valley",
+        "https://user@www.yahoo.com/games/play/farm-merge-valley",
+    ],
+)
+def test_portal_page_recognition_requires_trusted_https_url(url: str) -> None:
+    assert portal_for_page_url(url) is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://farm-merge-valley-yhus.mobinozer.com/production/1/",
+        "https://user@farm-merge-valley-yhus.mobinozer.com/production/1/",
+    ],
+)
+def test_game_frame_recognition_requires_trusted_https_url(url: str) -> None:
+    assert not portal_definition(GamePortal.YAHOO).matches_game_frame_url(url)
 
 
 def test_evaluate_target_wraps_websocket_failures(monkeypatch) -> None:

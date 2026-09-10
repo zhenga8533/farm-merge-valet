@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 
 class GamePortal(StrEnum):
@@ -40,18 +40,30 @@ class PortalDefinition:
     game_frame_matcher: Callable[[str, str], bool]
 
     def matches_page_url(self, value: object) -> bool:
-        host = _hostname(value)
+        parts = _trusted_url_parts(value)
+        if parts is None:
+            return False
+        host = (parts.hostname or "").casefold()
         return any(host == allowed or host.endswith(f".{allowed}") for allowed in self.page_hosts)
 
     def matches_game_frame_url(self, value: object) -> bool:
-        parts = urlsplit(str(value))
+        parts = _trusted_url_parts(value)
+        if parts is None:
+            return False
         host = (parts.hostname or "").casefold()
         path = parts.path.casefold()
         return self.game_frame_matcher(host, path)
 
 
-def _hostname(value: object) -> str:
-    return (urlsplit(str(value)).hostname or "").casefold()
+def _trusted_url_parts(value: object) -> SplitResult | None:
+    parts = urlsplit(str(value))
+    if (
+        parts.scheme.casefold() != "https"
+        or parts.username is not None
+        or parts.password is not None
+    ):
+        return None
+    return parts
 
 
 PORTALS = (

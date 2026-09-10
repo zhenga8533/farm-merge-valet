@@ -66,6 +66,7 @@ RETIRED_MODULE_PREFIXES = tuple(
         "core.catalog_taxonomy",
         "core.item_catalog",
         "cdp.client",
+        "cdp.portals",
         "cdp.scene_geometry",
         "diagnostics",
         "gui.pages._all",

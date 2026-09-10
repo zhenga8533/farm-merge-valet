@@ -29,8 +29,8 @@ GUI / CLI -> automation and catalog services -> core
   blueprint mapping, asset compilation, and synchronization orchestration.
   Its synchronization service accepts resource and metadata readers; concrete
   CDP readers are supplied only by the application composition root.
-- `integrations` owns registered platform identity, canonical URLs, trusted host
-  and game-frame recognition, support levels, and startup strategies.
+- `integrations` owns registered platform identity, default URLs, trusted HTTPS
+  page and game-frame recognition, support levels, and startup strategies.
 - `cdp` owns browser protocol transport, target/resource access, trusted launcher
   input and page-control primitives, atomic game-state snapshots, embedded
   scripts, profiling, and `GameRuntimeAdapter`. Target discovery walks the CDP
@@ -39,8 +39,8 @@ GUI / CLI -> automation and catalog services -> core
 - `browser` owns managed browser process discovery, launch, shutdown, game-page
   startup, and bounded page recovery.
 - `config` owns stable platform paths, validated configuration models,
-  canonical hotkey values, and atomic persistence. Its package root defines
-  the public configuration API.
+  canonical hotkey values, trusted per-platform game-page overrides, and atomic
+  persistence. Its package root defines the public configuration API.
 - `gui` owns Qt pages, reusable components, services, windows, and the
   controller mediator. Qt-neutral services own cancellable background work,
   catalog onboarding and synchronization, configuration saving, hotkeys,

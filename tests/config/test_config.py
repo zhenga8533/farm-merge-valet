@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from farm_merge_valet.cdp.portals import GamePortal
 from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.integrations import GamePortal
 
 
 def test_legacy_game_url_infers_portal() -> None:

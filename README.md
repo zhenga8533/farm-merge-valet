@@ -35,6 +35,12 @@ The Browser page selects the game integration and manages browser startup.
 Supported integrations are Reddit, CrazyGames, Pogo, MSN, Discord Activities, Agame,
 Facebook Gaming, and Yahoo Games.
 
+Each platform supplies a verified default game page. The Browser page allows an
+advanced user to override that URL when a platform changes its route, but the URL
+must remain HTTPS and on the selected platform's trusted host. Target discovery
+still requires the platform's recognized game frame and verified owning-page
+ancestry, so changing this URL does not broaden automation trust.
+
 The managed game browser must remain open while automation runs. It may be
 unfocused, occluded, on another virtual desktop, or showing a different tab, but
 minimized and headless operation are unsupported. The bot does not change

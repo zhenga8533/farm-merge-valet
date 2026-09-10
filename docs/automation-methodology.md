@@ -61,8 +61,10 @@ overrides are logged once at debug level. The managed browser must also be
 launched with the background-throttling switches
 documented in the README.
 
-Integration definitions centralize the canonical page URL, trusted page hosts,
-game-frame matcher, support level, and startup strategy. Browser startup and
+Integration definitions centralize the default page URL, trusted HTTPS page hosts,
+game-frame matcher, support level, and startup strategy. A user may override the
+page URL only within the selected integration's trusted host; this changes the
+startup location without broadening target recognition. Browser startup and
 runtime session maintenance use a shared lifecycle dispatcher, keeping
 integration-specific branches out of their orchestration loops. A new
 integration should be registered there only after its trusted target ancestry
@@ -423,8 +425,9 @@ available as inbound controls without being part of game interaction.
 
 When default automatic browser launch is enabled, starting automation ensures
 the managed browser is running, opens the configured game page when absent, and
-requests Play at bounded intervals until the game iframe appears or the
-20-second startup timeout expires. Three consecutive submitted actions with no
+runs the integration's bounded startup strategy until the game iframe appears or
+the 20-second startup timeout expires. Direct integrations require no host-page
+action; Reddit may request Play. Three consecutive submitted actions with no
 authoritative progress classify the action pipeline as unresponsive even when
 browser animation frames continue. Default-enabled recovery reloads the verified
 managed game page once and rebuilds bot state. A repeated failure stops
