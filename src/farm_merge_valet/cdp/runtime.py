@@ -14,6 +14,7 @@ from farm_merge_valet.automation.runtime import (
     ActionResult,
     ActionStatus,
     CrateSpawnResult,
+    EventRewardState,
     EventState,
     FarmSceneKind,
     FarmVisitState,
@@ -53,6 +54,7 @@ from farm_merge_valet.cdp.scripts import (
     _dismiss_overlay_expression,
     _drop_expression,
     _event_action_expression,
+    _event_reward_claim_expression,
     _farm_visit_action_expression,
     _interaction_expression,
     _removal_expression,
@@ -599,6 +601,7 @@ class GameRuntimeAdapter:
             land_expansions=self._parse_land_expansions(raw.get("landExpansions")),
             building_repairs=parse_building_repairs(raw.get("buildingRepairs")),
             event=self._parse_event(raw.get("event")),
+            event_rewards=self._parse_event_rewards(raw.get("eventRewards")),
             metrics=metrics,
         )
 
@@ -649,6 +652,40 @@ class GameRuntimeAdapter:
             ),
             detail=raw.get("detail") if isinstance(raw.get("detail"), str) else None,
         )
+
+    @staticmethod
+    def _parse_event_rewards(raw: object) -> tuple[EventRewardState, ...]:
+        if not isinstance(raw, list):
+            return ()
+        rewards: list[EventRewardState] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            event_key = entry.get("eventKey")
+            event_type = entry.get("eventType")
+            track = entry.get("track")
+            level = entry.get("level")
+            reward_key = entry.get("rewardKey")
+            reward_amount = entry.get("rewardAmount")
+            if (
+                all(isinstance(value, str) and value for value in (
+                    event_key, event_type, track, reward_key
+                ))
+                and isinstance(level, int)
+                and not isinstance(level, bool)
+                and level > 0
+                and isinstance(reward_amount, int)
+                and not isinstance(reward_amount, bool)
+                and reward_amount > 0
+            ):
+                assert isinstance(event_key, str)
+                assert isinstance(event_type, str)
+                assert isinstance(track, str)
+                assert isinstance(reward_key, str)
+                rewards.append(EventRewardState(
+                    event_key, event_type, track, level, reward_key, reward_amount
+                ))
+        return tuple(rewards)
 
     def _maintain_portal_session(self) -> None:
         now = time.monotonic()
@@ -854,6 +891,22 @@ class GameRuntimeAdapter:
     def return_from_event(self, event_key: str) -> ActionResult:
         return self._action_result(
             self._evaluate_action(_event_action_expression("return", event_key))
+        )
+
+    def claim_event_reward(self, reward: EventRewardState) -> ActionResult:
+        return self._action_result(
+            self._evaluate_action(
+                _event_reward_claim_expression(
+                    {
+                        "eventKey": reward.event_key,
+                        "eventType": reward.event_type,
+                        "track": reward.track,
+                        "level": reward.level,
+                        "rewardKey": reward.reward_key,
+                        "rewardAmount": reward.reward_amount,
+                    }
+                )
+            )
         )
 
     def submit_storage_bubble_pop(self, expected_object_id: int) -> ActionResult:

@@ -211,6 +211,7 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     assert "Automate marketplace purchases" in labels
     assert "Automate event islands" in labels
     assert "Enable newly supported events by default" in labels
+    assert "Automatically claim event rewards" in labels
     assert "Minimum energy before visiting" in labels
     assert "Expand farm land automatically" in labels
     assert "Maximum coins per expansion" in labels
@@ -248,9 +249,11 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         "land_expansion_automation_enabled",
     ):
         assert section_groups["Automation"].isAncestorOf(window.settings_page.controls[field])
+    assert section_groups["Automation"].isAncestorOf(window.settings_page.timing_advanced_section)
     for field in (
         "event_automation_enabled",
         "event_default_enabled",
+        "auto_claim_event_rewards",
         "event_visit_energy_threshold",
     ):
         assert section_groups["Event islands"].isAncestorOf(window.settings_page.controls[field])
@@ -578,6 +581,7 @@ def test_settings_controls_match_model_range_and_parent_feature_state(tmp_path) 
     assert page.controls["loop_interval"].minimum() == 0.25
     assert page.controls["loop_interval"].value() == 0.25
     assert not page.controls["event_default_enabled"].isEnabled()
+    assert not page.controls["auto_claim_event_rewards"].isEnabled()
     assert not page.controls["event_visit_energy_threshold"].isEnabled()
     assert not page.controls["land_expansion_max_coin_cost"].isEnabled()
     assert not page.controls["land_expansion_max_gem_cost"].isEnabled()
@@ -589,6 +593,7 @@ def test_settings_controls_match_model_range_and_parent_feature_state(tmp_path) 
 
     page.event_automation_toggle.click()
     assert page.controls["event_default_enabled"].isEnabled()
+    assert page.controls["auto_claim_event_rewards"].isEnabled()
     assert page.controls["event_visit_energy_threshold"].isEnabled()
     page.land_expansion_toggle.click()
     assert page.controls["land_expansion_max_coin_cost"].isEnabled()

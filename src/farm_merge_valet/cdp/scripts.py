@@ -793,6 +793,123 @@ _READ_EVENT_EXPRESSION = r"""
 """
 
 
+_READ_EVENT_REWARDS_EXPRESSION = r"""
+(() => {
+  const gameplayServices = window.__fmvGameplayServices;
+  const rootServices = gameplayServices?.ordersService?._autoSaveService?.services ||
+    gameplayServices?.ordersService?._autoSaveService?._services ||
+    window.__fmvEventHud?._eventEnergyCounter?._resourceService?.services ||
+    gameplayServices;
+  const instances = [
+    ...(gameplayServices?.timedEventService?._eventInstances?.values?.() || []),
+  ];
+  const rewards = [];
+  const seasonal = instances.find((candidate) => candidate?._eventActive === true &&
+    candidate?.eventType === 'seasonaleventpass');
+  const pass = seasonal?._passInstance;
+  if (pass?._isInitialized === true && pass._isDestroyed !== true &&
+      typeof pass.getUnclaimedRewards === 'function' &&
+      typeof pass.getRewardState === 'function') {
+    const tracks = Array.isArray(pass?._config?.tracks) ? pass._config.tracks : [];
+    for (const entry of pass.getUnclaimedRewards()) {
+      const track = tracks.find((candidate) => candidate?.id === entry?.trackId);
+      if (!track || pass.getRewardState(entry.trackId, entry.level) !== 'CLAIMABLE') continue;
+      const reward = entry.reward;
+      if (!Number.isInteger(entry.level) || typeof reward?.key !== 'string' ||
+          !Number.isInteger(reward?.amount) || reward.amount <= 0) continue;
+      rewards.push({
+        eventKey: seasonal._seasonKey || seasonal?._eventConfiguration?.seasonKey,
+        eventType: 'seasonal-event-pass',
+        track: entry.trackId,
+        level: entry.level,
+        rewardKey: reward.key,
+        rewardAmount: reward.amount,
+        paid: track.type !== 'free',
+      });
+    }
+  }
+  const timed = rootServices?.timeLimitedEvent;
+  if (timed?.model && typeof timed.getUnclaimedRewards === 'function' &&
+      typeof timed.canReceiveReward === 'function') {
+    const unclaimed = new Set(timed.getUnclaimedRewards());
+    for (const level of timed._rewardsConfig || []) {
+      for (const [track, trackID] of [['free', 0], ['premium', 1]]) {
+        const reward = level?.rewards?.[track];
+        if (!unclaimed.has(reward) || timed.canReceiveReward(trackID, level.level) !== true ||
+            typeof reward?.key !== 'string' || !Number.isInteger(reward?.amount) ||
+            reward.amount <= 0) continue;
+        rewards.push({
+          eventKey: timed._activeTheme || timed._eventTheme || timed.eventKey,
+          eventType: 'time-limited-event',
+          track,
+          level: level.level,
+          rewardKey: reward.key,
+          rewardAmount: reward.amount,
+          paid: trackID === 1,
+        });
+      }
+    }
+  }
+  return rewards.sort((left, right) =>
+    Number(left.paid) - Number(right.paid) || left.level - right.level);
+})()
+"""
+
+
+def _event_reward_claim_expression(expected: dict[str, object]) -> str:
+    payload = json.dumps(expected)
+    return f"""
+(async () => {{
+  const expected = {payload};
+  const available = ({_READ_EVENT_REWARDS_EXPRESSION});
+  const current = available.find((entry) =>
+    entry.eventKey === expected.eventKey && entry.eventType === expected.eventType &&
+    entry.track === expected.track && entry.level === expected.level &&
+    entry.rewardKey === expected.rewardKey && entry.rewardAmount === expected.rewardAmount);
+  if (!current) return {{status: 'stale-source', detail: 'event-reward-changed'}};
+  const gameplayServices = window.__fmvGameplayServices;
+  const rootServices = gameplayServices?.ordersService?._autoSaveService?.services ||
+    gameplayServices?.ordersService?._autoSaveService?._services ||
+    window.__fmvEventHud?._eventEnergyCounter?._resourceService?.services ||
+    gameplayServices;
+  if (expected.eventType === 'seasonal-event-pass') {{
+    const event = [...(gameplayServices?.timedEventService?._eventInstances?.values?.() || [])]
+      .find((candidate) => candidate?._eventActive === true &&
+        candidate?._seasonKey === expected.eventKey);
+    const pass = event?._passInstance;
+    if (!pass || typeof event?._grantAndConfirmReward !== 'function')
+      return {{status: 'unavailable', detail: 'seasonal-reward-handler-unavailable'}};
+    const reward = pass.requestRewardClaim(expected.track, expected.level);
+    if (!reward || reward.key !== expected.rewardKey || reward.amount !== expected.rewardAmount)
+      return {{status: 'stale-source', detail: 'seasonal-reward-changed'}};
+    await event._grantAndConfirmReward({{
+      trackId: expected.track, level: expected.level, reward,
+    }});
+    return pass.getRewardState(expected.track, expected.level) === 'CLAIMED'
+      ? {{status: 'submitted', detail: 'seasonal-event-reward'}}
+      : {{status: 'rejected', detail: 'seasonal-reward-not-confirmed'}};
+  }}
+  const service = rootServices?.timeLimitedEvent;
+  const trackID = expected.track === 'free' ? 0 : 1;
+  const level = service?._rewardsConfig?.find((entry) => entry?.level === expected.level);
+  const reward = level?.rewards?.[expected.track];
+  if (!service?.model || typeof service.grantUnclaimedRewards !== 'function' ||
+      service.canReceiveReward(trackID, expected.level) !== true ||
+      reward?.key !== expected.rewardKey || reward?.amount !== expected.rewardAmount)
+    return {{status: 'stale-source', detail: 'timed-event-reward-changed'}};
+  const rewardService = service._services?.rewardService || gameplayServices?.rewardService;
+  const container = window.__fmvGameplayMapScreen;
+  if (!rewardService || !container)
+    return {{status: 'unavailable', detail: 'timed-event-reward-handler-unavailable'}};
+  await service.grantUnclaimedRewards(rewardService, container, [reward]);
+  service.model.claimReward(service.eventKey, expected.level, trackID);
+  return service.isRewardClaimed(trackID, expected.level)
+    ? {{status: 'submitted', detail: 'time-limited-event-reward'}}
+    : {{status: 'rejected', detail: 'timed-event-reward-not-confirmed'}};
+}})()
+"""
+
+
 def _event_action_expression(kind: str, event_key: str, **expected: object) -> str:
     payload = json.dumps({"kind": kind, "eventKey": event_key, **expected})
     return f"""

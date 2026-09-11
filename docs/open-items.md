@@ -13,6 +13,14 @@ and can be controlled by event theme. While on the main farm, the bot reads the
 shared event-energy inventory and visits an enabled event only when its configured
 minimum energy threshold is met.
 
+Enabled events expose their authoritative unclaimed reward tracks in the atomic
+runtime snapshot. When automatic event reward claiming is enabled, the bot claims
+one unlocked reward per iteration through the event's native grant-and-confirm
+pipeline. Free rewards are always eligible;
+premium or VIP rewards are included only when the live pass model reports that
+their paid track has been purchased. Each claim revalidates the event, track,
+level, reward identity, amount, and claimable state immediately before granting.
+
 Future event-specific actions beyond the shared board workflow still require
 separate validation because event scenes and rules can change.
 

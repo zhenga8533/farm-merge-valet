@@ -97,6 +97,16 @@ class EventState:
 
 
 @dataclass(frozen=True)
+class EventRewardState:
+    event_key: str
+    event_type: str
+    track: str
+    level: int
+    reward_key: str
+    reward_amount: int
+
+
+@dataclass(frozen=True)
 class VisitorActionState:
     coord: GridCoord
     blueprint_id: str
@@ -266,6 +276,7 @@ class RuntimeSnapshot:
     land_expansions: tuple[LandExpansionCandidate, ...] | None = None
     building_repairs: tuple[BuildingRepairState, ...] | None = None
     event: EventState | None = None
+    event_rewards: tuple[EventRewardState, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -352,6 +363,8 @@ class GameRuntime(Protocol):
     def explore_event(self, event_key: str, area_id: str, required_level: int) -> ActionResult: ...
 
     def return_from_event(self, event_key: str) -> ActionResult: ...
+
+    def claim_event_reward(self, reward: EventRewardState) -> ActionResult: ...
 
     def submit_land_expansion(
         self, candidate: LandExpansionCandidate, minimum_balance_after: int

@@ -22,6 +22,7 @@ from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.automation.runtime import (
     ActionStatus,
     BuildingRepairState,
+    EventRewardState,
     EventState,
     FarmSceneKind,
     GameRuntime,
@@ -1348,6 +1349,11 @@ class Bot:
                 heartbeat_age_ms=health.heartbeat_age_ms,
             )
             return
+        if self.config.auto_claim_event_rewards:
+            for reward in snapshot.event_rewards:
+                if self.config.event_automation_enabled_for(reward.event_key):
+                    self._claim_event_reward(reward)
+                    return
         event_state = snapshot.event
         if on_event_map and event_state is not None and event_state.can_explore:
             self._submit_event_action("explore", event_state)
@@ -1572,6 +1578,40 @@ class Bot:
             return True
         self._actions().release(OperationKind.EVENT, key)
         self._report_wait(result.detail or f"event {kind} unavailable")
+        return False
+
+    def _claim_event_reward(self, reward: EventRewardState) -> bool:
+        key = ("reward", reward.event_key, reward.track, reward.level)
+        if not self._actions().begin(OperationKind.EVENT, key, self._now()):
+            return False
+        result = self.runtime.claim_event_reward(reward)
+        if result.submitted:
+            self._actions().complete(OperationKind.EVENT, key)
+            log_event(
+                logger,
+                logging.INFO,
+                "event.reward_claimed",
+                "Claimed %s event reward level %d (%s): %s ×%d.",
+                reward.event_key,
+                reward.level,
+                reward.track,
+                reward.reward_key,
+                reward.reward_amount,
+                event_key=reward.event_key,
+                event_type=reward.event_type,
+                track=reward.track,
+                reward_level=reward.level,
+                reward_key=reward.reward_key,
+                reward_amount=reward.reward_amount,
+            )
+            return True
+        self._actions().fail(
+            OperationKind.EVENT,
+            key,
+            self._now(),
+            base_delay=10.0,
+        )
+        self._report_wait(result.detail or "event reward unavailable")
         return False
 
     def _ensure_capability(

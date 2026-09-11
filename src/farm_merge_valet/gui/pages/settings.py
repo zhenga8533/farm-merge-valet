@@ -100,6 +100,26 @@ class SettingsPage(ConfigFormPage):
         self.controls["land_expansion_max_gem_cost"].setToolTip(
             "Zero allows only expansions that cost no crystals."
         )
+        timing, timing_form = disclosure_section("Advanced automation timing")
+        self._add_float(timing_form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)
+        self._add_float(
+            timing_form,
+            "Active polling interval (seconds)",
+            "loop_interval",
+            0.25,
+            60,
+            0.1,
+        )
+        self._add_float(
+            timing_form, "Item delay minimum (seconds)", "item_action_delay_min", 0, 60, 0.1
+        )
+        self._add_float(
+            timing_form, "Item delay maximum (seconds)", "item_action_delay_max", 0, 60, 0.1
+        )
+        self._add_float(timing_form, "Crate delay minimum (seconds)", "crate_delay_min", 0, 5, 0.05)
+        self._add_float(timing_form, "Crate delay maximum (seconds)", "crate_delay_max", 0, 5, 0.05)
+        self.timing_advanced_section = timing
+        workflows_form.addRow(timing)
         sections.addWidget(workflows)
 
         events, events_form = settings_section("Event islands")
@@ -110,6 +130,11 @@ class SettingsPage(ConfigFormPage):
             events_form,
             "Enable newly supported events by default",
             "event_default_enabled",
+        )
+        self._add_toggle(
+            events_form,
+            "Automatically claim event rewards",
+            "auto_claim_event_rewards",
         )
         self._add_int(
             events_form,
@@ -190,27 +215,6 @@ class SettingsPage(ConfigFormPage):
         repairs_form.addRow(repairs_advanced)
         self._building_repair_fields = tuple(field for _label, field in repair_priority_fields)
         sections.addWidget(repairs)
-
-        timing, timing_form = disclosure_section("Advanced automation timing")
-        self._add_float(timing_form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)
-        self._add_float(
-            timing_form,
-            "Active polling interval (seconds)",
-            "loop_interval",
-            0.25,
-            60,
-            0.1,
-        )
-        self._add_float(
-            timing_form, "Item delay minimum (seconds)", "item_action_delay_min", 0, 60, 0.1
-        )
-        self._add_float(
-            timing_form, "Item delay maximum (seconds)", "item_action_delay_max", 0, 60, 0.1
-        )
-        self._add_float(timing_form, "Crate delay minimum (seconds)", "crate_delay_min", 0, 5, 0.05)
-        self._add_float(timing_form, "Crate delay maximum (seconds)", "crate_delay_max", 0, 5, 0.05)
-        self.timing_advanced_section = timing
-        sections.addWidget(timing)
 
         controls, form = settings_section("Keyboard shortcuts")
         self._add_hotkey(form, "Start / stop", "start_stop_hotkey")
@@ -346,6 +350,7 @@ class SettingsPage(ConfigFormPage):
     def _sync_dependent_controls(self, *_args: object) -> None:
         events_enabled = self.event_automation_toggle.isChecked()
         self._set_control_enabled("event_default_enabled", events_enabled)
+        self._set_control_enabled("auto_claim_event_rewards", events_enabled)
         self._set_control_enabled("event_visit_energy_threshold", events_enabled)
         land_enabled = self.land_expansion_toggle.isChecked()
         self._set_control_enabled("land_expansion_max_coin_cost", land_enabled)

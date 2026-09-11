@@ -4,6 +4,7 @@ from threading import Event, Thread
 from farm_merge_valet.automation.runtime import (
     ActionResult,
     ActionStatus,
+    EventRewardState,
     GameRuntime,
     RuntimeCapability,
     RuntimeHealth,
@@ -1179,6 +1180,41 @@ def test_event_state_parses_structured_runtime_data() -> None:
     assert state.detail == "event-map"
 
 
+def test_event_rewards_parse_free_and_paid_tracks() -> None:
+    rewards = GameRuntimeAdapter._parse_event_rewards(
+        [
+            {
+                "eventKey": "jungle",
+                "eventType": "time-limited-event",
+                "track": "free",
+                "level": 2,
+                "rewardKey": "tool_3",
+                "rewardAmount": 2,
+            },
+            {
+                "eventKey": "seasonal_event_pass_cinema",
+                "eventType": "seasonal-event-pass",
+                "track": "vip",
+                "level": 1,
+                "rewardKey": "energy",
+                "rewardAmount": 100,
+            },
+        ]
+    )
+
+    assert rewards == (
+        EventRewardState("jungle", "time-limited-event", "free", 2, "tool_3", 2),
+        EventRewardState(
+            "seasonal_event_pass_cinema",
+            "seasonal-event-pass",
+            "vip",
+            1,
+            "energy",
+            100,
+        ),
+    )
+
+
 def test_event_actions_use_guarded_native_handlers(monkeypatch) -> None:
     expressions: list[str] = []
 
@@ -1201,6 +1237,30 @@ def test_event_actions_use_guarded_native_handlers(monkeypatch) -> None:
     assert "transition.returnFromEventMap()" in expressions[3]
     assert "EventPassPopup" not in expressions[3]
     assert all('"eventKey": "jungle"' in expression for expression in expressions)
+
+
+def test_event_reward_claim_uses_guarded_native_handler(monkeypatch) -> None:
+    expressions: list[str] = []
+
+    def evaluate_expression(_port, expression, _title, **_kwargs):
+        expressions.append(expression)
+        return {"status": "submitted"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", evaluate_expression)
+    adapter = GameRuntimeAdapter(9222, "Farm")
+    reward = EventRewardState(
+        "seasonal_event_pass_cinema",
+        "seasonal-event-pass",
+        "free",
+        3,
+        "milk",
+        3,
+    )
+
+    assert adapter.claim_event_reward(reward).submitted
+    assert "pass.requestRewardClaim(expected.track, expected.level)" in expressions[0]
+    assert "event._grantAndConfirmReward" in expressions[0]
+    assert '"rewardKey": "milk"' in expressions[0]
 
 
 def test_farm_visit_keeps_required_destination_popup_but_returns_directly(monkeypatch) -> None:

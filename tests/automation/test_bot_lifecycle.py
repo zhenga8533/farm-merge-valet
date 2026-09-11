@@ -10,6 +10,7 @@ from farm_merge_valet.automation.runtime import (
     ActionResult,
     ActionStatus,
     CrateSpawnResult,
+    EventRewardState,
     EventState,
     LiveCellState,
     RuntimeConnectionError,
@@ -47,6 +48,8 @@ class FakeRuntime:
         self.shop_orders: tuple[ShopOrder, ...] = ()
         self.board_state: dict[tuple[int, int], LiveCellState] | None = {}
         self.event_state: EventState | None = None
+        self.event_rewards: tuple[EventRewardState, ...] = ()
+        self.claimed_event_rewards: list[EventRewardState] = []
         self.dismissed_overlays = 0
         self.event_actions: list[tuple[str, str]] = []
         self.event_action_result = ActionResult(ActionStatus.SUBMITTED)
@@ -67,6 +70,7 @@ class FakeRuntime:
             self.board_state,
             shop_orders=self.shop_orders,
             event=self.event_state,
+            event_rewards=self.event_rewards,
         )
 
     def read_board_state(self):
@@ -93,6 +97,10 @@ class FakeRuntime:
 
     def return_from_event(self, event_key):
         self.event_actions.append(("return", event_key))
+        return self.event_action_result
+
+    def claim_event_reward(self, reward):
+        self.claimed_event_rewards.append(reward)
         return self.event_action_result
 
     def submit_item_drop(self, start, end):
@@ -827,6 +835,43 @@ def test_event_exploration_runs_before_other_board_work() -> None:
 
     assert bot.runtime.event_actions == [("explore", "jungle", "A1", 2)]
     assert bot.runtime.spawn_limits == []
+
+
+def test_event_rewards_are_claimed_before_event_board_work() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(event_automation_enabled=True)
+    reward = EventRewardState(
+        "seasonal_event_pass_cinema",
+        "seasonal-event-pass",
+        "free",
+        3,
+        "milk",
+        3,
+    )
+    bot.runtime.event_rewards = (reward,)
+
+    bot.step()
+
+    assert bot.runtime.claimed_event_rewards == [reward]
+    assert bot.runtime.drops == []
+
+
+def test_event_rewards_are_not_claimed_when_reward_claiming_is_disabled() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(event_automation_enabled=True, auto_claim_event_rewards=False)
+    reward = EventRewardState(
+        "seasonal_event_pass_cinema",
+        "seasonal-event-pass",
+        "free",
+        3,
+        "milk",
+        3,
+    )
+    bot.runtime.event_rewards = (reward,)
+
+    bot.step()
+
+    assert bot.runtime.claimed_event_rewards == []
 
 
 def test_event_idle_skips_supply_crates_and_returns_home() -> None:
