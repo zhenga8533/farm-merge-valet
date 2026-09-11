@@ -1349,7 +1349,11 @@ class Bot:
                 heartbeat_age_ms=health.heartbeat_age_ms,
             )
             return
-        if self.config.auto_claim_event_rewards:
+        if (
+            self.config.auto_claim_event_rewards
+            and health.farm_scene is FarmSceneKind.OWN
+            and not health.scene_transition_active
+        ):
             for reward in snapshot.event_rewards:
                 if self.config.event_automation_enabled_for(reward.event_key):
                     self._claim_event_reward(reward)

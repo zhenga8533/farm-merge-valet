@@ -12,6 +12,7 @@ from farm_merge_valet.automation.runtime import (
     CrateSpawnResult,
     EventRewardState,
     EventState,
+    FarmSceneKind,
     LiveCellState,
     RuntimeConnectionError,
     RuntimeHealth,
@@ -144,6 +145,8 @@ def health(
     item_action_busy: bool = False,
     transient_overlay: TransientOverlayKind | None = None,
     transient_overlay_detail: str | None = None,
+    farm_scene: FarmSceneKind = FarmSceneKind.OWN,
+    scene_transition_active: bool = False,
 ) -> RuntimeHealth:
     return RuntimeHealth(
         True,
@@ -162,6 +165,8 @@ def health(
         removal_available=True,
         transient_overlay=transient_overlay,
         transient_overlay_detail=transient_overlay_detail,
+        farm_scene=farm_scene,
+        scene_transition_active=scene_transition_active,
     )
 
 
@@ -868,6 +873,36 @@ def test_event_rewards_are_not_claimed_when_reward_claiming_is_disabled() -> Non
         3,
     )
     bot.runtime.event_rewards = (reward,)
+
+    bot.step()
+
+    assert bot.runtime.claimed_event_rewards == []
+
+
+@pytest.mark.parametrize("scene", [FarmSceneKind.EVENT, FarmSceneKind.VISITOR])
+def test_event_rewards_wait_until_the_bot_returns_to_its_main_farm(scene) -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(event_automation_enabled=True)
+    bot.runtime.read_runtime_health = lambda: health(advancing=True, farm_scene=scene)
+    bot.runtime.event_rewards = (
+        EventRewardState("jungle", "time-limited-event", "free", 2, "tool_3", 2),
+    )
+
+    bot.step()
+
+    assert bot.runtime.claimed_event_rewards == []
+
+
+def test_event_rewards_wait_during_a_scene_transition() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(event_automation_enabled=True)
+    bot.runtime.read_runtime_health = lambda: health(
+        advancing=True,
+        scene_transition_active=True,
+    )
+    bot.runtime.event_rewards = (
+        EventRewardState("jungle", "time-limited-event", "free", 2, "tool_3", 2),
+    )
 
     bot.step()
 
