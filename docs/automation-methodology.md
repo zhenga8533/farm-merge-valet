@@ -254,9 +254,10 @@ A visited farm is a distinct runtime scene. Normal local-farm automation is not
 applied there. The runtime reads only objects carrying the game's transient
 `visitorAction` behavior and submits them through the visitor-action system.
 Each reward is confirmed by removal of that exact behavior before another is
-attempted. When no actions remain, the workflow fires the friend HUD's native
-Home event and waits for a fresh authoritative local scene. Disabling the
-setting during a visit still allows the return-home transition to complete.
+attempted. When no actions remain, the workflow calls the native friend-farm
+transition service directly and waits for a fresh authoritative local scene.
+Disabling the setting during a visit still allows the return-home transition to
+complete.
 Expected scene transitions receive a short bounded grace period before runtime
 board recovery, avoiding heap searches while neither farm's map grid is active.
 The native travel-summary reward popup is then closed through the standard

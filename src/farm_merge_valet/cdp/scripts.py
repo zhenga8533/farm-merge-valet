@@ -68,9 +68,6 @@ _DISCOVER_EXPRESSION = r"""
   const visitorActionHandler = gameplaySystems.find((candidate) =>
     candidate?._services === services && candidate._visitorActionsFamily &&
     typeof candidate._onActivityTapped === 'function') || null;
-  const returnHud = visitorActionHandler?._notificationEvent?._subscribers
-    ?.map((subscriber) => subscriber?.context)
-    .find((candidate) => typeof candidate?._returnButtonClicked === 'function') || null;
   const shovelHandler = gameplaySystems.find((candidate) =>
         candidate?._services === services &&
         candidate._services?.shovelService === services?.shovelService &&
@@ -117,6 +114,12 @@ _DISCOVER_EXPRESSION = r"""
   const validCrateSignal = typeof crateSignal?.fire === 'function' &&
     crateSubscribers.length > 0 ? crateSignal : null;
   const orders = services?.ordersService;
+  const rootServices = orders?._autoSaveService?.services ||
+    orders?._autoSaveService?._services;
+  const farmVisitTransition = rootServices?.transition;
+  const validFarmVisitTransition = farmVisitTransition?._services === rootServices &&
+    typeof farmVisitTransition.goToFriendsFarm === 'function' &&
+    typeof farmVisitTransition.goToOwnFarm === 'function';
   const inventory = orders?._inventory?.getInventoryItem?.('crates');
   const energy = orders?._inventory?.getInventoryItem?.('energy');
   const validInventory = inventory?._key === 'crates' &&
@@ -155,7 +158,7 @@ _DISCOVER_EXPRESSION = r"""
   window.__fmvFarmSceneKind = sceneKind;
   window.__fmvTrainHandler = trainHandler;
   window.__fmvVisitorActionHandler = visitorActionHandler;
-  window.__fmvVisitorReturnHud = returnHud;
+  window.__fmvFarmVisitTransition = validFarmVisitTransition ? farmVisitTransition : null;
   window.__fmvTrainPopup = null;
   window.__fmvFarmVisitPanelExpected = false;
   window.__fmvFarmVisitTransitionStartedAt = null;
@@ -202,7 +205,7 @@ _DISCOVER_EXPRESSION = r"""
     marketplace: Boolean(validMarketplace),
     landExpansion: validLandExpansion,
     farmVisit: Boolean(sceneKind === 'visitor'
-      ? visitorActionHandler && returnHud : sceneKind === 'own' && trainHandler),
+      ? visitorActionHandler && validFarmVisitTransition : sceneKind === 'own' && trainHandler),
     farmScene: sceneKind,
     missing,
   };
@@ -224,7 +227,7 @@ _DISCOVER_EXPRESSION = r"""
     marketplace: Boolean(validMarketplace),
     landExpansion: validLandExpansion,
     farmVisit: Boolean(sceneKind === 'visitor'
-      ? visitorActionHandler && returnHud : sceneKind === 'own' && trainHandler),
+      ? visitorActionHandler && validFarmVisitTransition : sceneKind === 'own' && trainHandler),
     farmScene: sceneKind,
     detail: missing.length ? `${missing.join(',')}-not-found` : null,
     discovery: window.__fmvRuntimeDiscovery,
@@ -316,7 +319,7 @@ _HEALTH_EXPRESSION = (
   const farmScene = window.__fmvFarmSceneKind;
   const trainHandler = window.__fmvTrainHandler;
   const visitorActionHandler = window.__fmvVisitorActionHandler;
-  const visitorReturnHud = window.__fmvVisitorReturnHud;
+  const farmVisitTransition = window.__fmvFarmVisitTransition;
   const subscribers = (signal) => Array.isArray(signal?._subscribers)
     ? signal._subscribers : [];
   const firstCell = board instanceof Map ? board.values().next().value : null;
@@ -411,7 +414,8 @@ _HEALTH_EXPRESSION = (
       : farmScene === 'visitor' && visitorActionHandler?._services === services &&
         visitorActionHandler._isActive !== false &&
         typeof visitorActionHandler._onActivityTapped === 'function' &&
-        typeof visitorReturnHud?._returnButtonClicked === 'function');
+        farmVisitTransition?._services === sharedServices &&
+        typeof farmVisitTransition.goToOwnFarm === 'function');
 """
     + _overlay_context_expression()
     + r"""
@@ -872,12 +876,15 @@ def _farm_visit_action_expression(kind: str, scene_id: int | None, **expected: o
       return {{status: 'submitted'}};
     }}
     if (expected.kind === 'return') {{
-      const hud = window.__fmvVisitorReturnHud;
+      const transition = window.__fmvFarmVisitTransition;
+      const rootServices = transition?._services;
+      const chosenDestination = rootServices?.navigation?.getChosenFriendDestination?.();
       if (window.__fmvFarmSceneKind !== 'visitor' ||
-          typeof hud?._returnButtonClicked !== 'function')
-        return {{status: 'unavailable', detail: 'return-handler-not-current'}};
+          typeof transition?.goToOwnFarm !== 'function' ||
+          !chosenDestination || rootServices?.friends?.isVisitingFriend !== true)
+        return {{status: 'unavailable', detail: 'farm-visit-transition-not-current'}};
       window.__fmvFarmVisitTransitionStartedAt = performance.now();
-      hud._returnButtonClicked();
+      void transition.goToOwnFarm();
       return {{status: 'submitted'}};
     }}
     return {{status: 'rejected', detail: 'unknown-farm-visit-action'}};

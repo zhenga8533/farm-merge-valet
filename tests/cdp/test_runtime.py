@@ -11,6 +11,7 @@ from farm_merge_valet.automation.runtime import (
     TransientOverlayKind,
 )
 from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
+from farm_merge_valet.cdp.scripts import _HEALTH_EXPRESSION
 from farm_merge_valet.core.items import InteractionTargetKind
 from farm_merge_valet.core.obstacles import WorkerState
 from farm_merge_valet.core.shops import ShopOrderState
@@ -1191,3 +1192,28 @@ def test_event_actions_use_guarded_native_handlers(monkeypatch) -> None:
     assert "transition.returnFromEventMap()" in expressions[3]
     assert "EventPassPopup" not in expressions[3]
     assert all('"eventKey": "jungle"' in expression for expression in expressions)
+
+
+def test_farm_visit_keeps_required_destination_popup_but_returns_directly(monkeypatch) -> None:
+    expressions: list[str] = []
+
+    def evaluate_expression(_port, expression, _title, **_kwargs):
+        expressions.append(expression)
+        return {"status": "submitted"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", evaluate_expression)
+    adapter = GameRuntimeAdapter(9222, "Farm")
+
+    assert adapter.open_farm_visit().submitted
+    assert adapter.start_farm_visit().submitted
+    assert adapter.return_from_farm_visit().submitted
+    assert "handler._openTrainstationPopup()" in expressions[0]
+    assert "popup._chosenPlayerDestination" in expressions[1]
+    assert "transition.goToOwnFarm()" in expressions[2]
+    assert "_returnButtonClicked()" not in expressions[2]
+
+
+def test_farm_visit_health_uses_direct_return_transition() -> None:
+    assert "farmVisitTransition?._services === sharedServices" in _HEALTH_EXPRESSION
+    assert "typeof farmVisitTransition.goToOwnFarm === 'function'" in _HEALTH_EXPRESSION
+    assert "__fmvVisitorReturnHud" not in _HEALTH_EXPRESSION
