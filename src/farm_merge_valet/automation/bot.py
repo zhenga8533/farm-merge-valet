@@ -10,7 +10,7 @@ from queue import Empty, Queue
 from threading import Event, Lock, Thread
 from typing import Literal
 
-from farm_merge_valet.automation.action_control import ActionCoordinator
+from farm_merge_valet.automation.action_control import ActionCoordinator, OperationKind
 from farm_merge_valet.automation.arbiter import WorkflowArbiter
 from farm_merge_valet.automation.board_space import (
     BoardSpaceAssessment,
@@ -22,6 +22,7 @@ from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.automation.runtime import (
     ActionStatus,
     BuildingRepairState,
+    EventState,
     FarmSceneKind,
     GameRuntime,
     LiveCellState,
@@ -126,6 +127,8 @@ class Bot:
         self.board = BoardGrid()
         self._live_cells: dict[GridCoord, LiveCellState] = {}
         self._energy: int | None = None
+        self._event_state: EventState | None = None
+        self._pending_event_action: tuple[str, str, str | None, float] | None = None
         self._workers: WorkerState | None = None
         self._storage_bubbles: tuple[StorageBubbleState, ...] | None = None
         self._shop_orders: tuple[ShopOrder, ...] | None = None
@@ -1243,6 +1246,7 @@ class Bot:
                 self._report_wait("authoritative runtime snapshot unavailable")
                 return
             health = snapshot.health
+            self._event_state = snapshot.event
             self._last_health = health
             if health.backend_connected is False:
                 self._report_wait(
@@ -1253,6 +1257,8 @@ class Bot:
                 return
             if health.scene_transition_active:
                 self._report_wait("game scene transition is still resolving")
+                return
+            if not self._handle_event_state(snapshot.event):
                 return
             if not self._ensure_capability(health, RuntimeCapability.BOARD):
                 return
@@ -1306,6 +1312,12 @@ class Bot:
         board_synced = snapshot.cells is not None
         if board_synced:
             self._apply_runtime_snapshot(snapshot)
+            if (
+                snapshot.event is not None
+                and snapshot.event.current
+                and snapshot.event.energy is not None
+            ):
+                self._energy = snapshot.event.energy
         if not board_synced:
             if self._interrupt_event.is_set():
                 return
@@ -1318,14 +1330,15 @@ class Bot:
         if not self._verify_pending_storage_bubble(health):
             return
         farm_visit_workflow = self._farm_visit_workflow
-        farm_visit_state = snapshot.farm_visit
+        on_event_map = snapshot.event is not None and snapshot.event.current
+        farm_visit_state = None if on_event_map else snapshot.farm_visit
         if not farm_visit_workflow.verify_pending(self, health, farm_visit_state):
             return
         land_expansion_workflow = self._land_expansion_workflow
-        land_expansions = self._land_expansions
+        land_expansions = None if on_event_map else self._land_expansions
         if not land_expansion_workflow.verify_pending(self, health, land_expansions):
             return
-        shop_policy_enabled = self._shop_policy().may_enable_orders
+        shop_policy_enabled = self._shop_policy().may_enable_orders and not on_event_map
         shop_orders: tuple[ShopOrder, ...] | None = self._shop_orders
         if not self._verify_pending_shop_action(health, shop_orders):
             return
@@ -1334,6 +1347,10 @@ class Bot:
                 "game heartbeat is not advancing",
                 heartbeat_age_ms=health.heartbeat_age_ms,
             )
+            return
+        event_state = snapshot.event
+        if on_event_map and event_state is not None and event_state.can_explore:
+            self._submit_event_action("explore", event_state)
             return
         if farm_visit_state is not None and farm_visit_state.scene.value == "visitor":
             if not self._ensure_capability(health, RuntimeCapability.FARM_VISITS):
@@ -1441,6 +1458,13 @@ class Bot:
             if self.phase is Phase.FARM_VISITS:
                 self._set_phase(Phase.CLAIM_CRATES)
         if self.phase is Phase.CLAIM_CRATES:
+            if on_event_map:
+                if board_space.merge_actions:
+                    self._set_phase(Phase.MERGE)
+                    self._step_merge(health, board_space)
+                else:
+                    self._defer_idle()
+                return
             if (
                 self.config.auto_claim_supply_crates
                 and not board_space.needs_merge
@@ -1452,6 +1476,103 @@ class Bot:
             if not self._ensure_capability(health, RuntimeCapability.MERGE_DROP):
                 return
             self._step_merge(health, board_space)
+
+    def _handle_event_state(self, state: EventState | None) -> bool:
+        pending = self._pending_event_action
+        if pending is not None:
+            kind, key, area_id, submitted_at = pending
+            completed = state is not None and (
+                (kind == "dismiss" and state.key == key and not state.introduction_open)
+                or (kind == "enter" and state.current)
+                or (
+                    kind == "explore"
+                    and state.current
+                    and (not state.can_explore or state.exploration_area_id != area_id)
+                )
+            )
+            completed = completed or (kind == "return" and (state is None or not state.current))
+            if completed:
+                self._pending_event_action = None
+                self._actions().complete(OperationKind.EVENT, (kind, key, area_id))
+                log_event(
+                    logger,
+                    logging.INFO,
+                    f"event.{kind}_confirmed",
+                    "Event %s confirmed.",
+                    kind,
+                    event_key=key,
+                )
+            elif self._now() - submitted_at < 30.0:
+                self._report_wait(f"event {kind} is still resolving")
+                return False
+            else:
+                self._pending_event_action = None
+                self._actions().fail(
+                    OperationKind.EVENT,
+                    (kind, key, area_id),
+                    self._now(),
+                    base_delay=10.0,
+                )
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "event.not_confirmed",
+                    "Event %s was not confirmed.",
+                    kind,
+                    event_key=key,
+                )
+                return False
+        if state is None:
+            return True
+        enabled = self.config.event_automation_enabled_for(state.key)
+        if state.introduction_open:
+            if not enabled:
+                self._report_wait(
+                    f"event introduction is open for disabled event {state.display_name}"
+                )
+                return False
+            self._submit_event_action("dismiss", state)
+            return False
+        if not state.supported:
+            self._report_wait(f"unsupported event runtime is active ({state.detail or state.key})")
+            return False
+        if state.current and not enabled:
+            self._report_wait(f"event automation is disabled for {state.display_name}")
+            return False
+        return True
+
+    def _submit_event_action(self, kind: str, state: EventState) -> bool:
+        area_id = state.exploration_area_id if kind == "explore" else None
+        required_level = state.exploration_required_level
+        if kind == "explore" and (area_id is None or required_level is None):
+            self._report_wait("event exploration state is incomplete")
+            return False
+        key = (kind, state.key, area_id)
+        if not self._actions().begin(OperationKind.EVENT, key, self._now()):
+            return False
+        if kind == "dismiss":
+            result = self.runtime.dismiss_event_introduction(state.key)
+        elif kind == "enter":
+            result = self.runtime.enter_event(state.key)
+        elif kind == "explore":
+            assert area_id is not None and required_level is not None
+            result = self.runtime.explore_event(state.key, area_id, required_level)
+        else:
+            result = self.runtime.return_from_event(state.key)
+        if result.submitted:
+            self._pending_event_action = (kind, state.key, area_id, self._now())
+            log_event(
+                logger,
+                logging.INFO,
+                f"event.{kind}_submitted",
+                "Event %s submitted.",
+                kind,
+                event_key=state.key,
+            )
+            return True
+        self._actions().release(OperationKind.EVENT, key)
+        self._report_wait(result.detail or f"event {kind} unavailable")
+        return False
 
     def _ensure_capability(
         self,
@@ -1561,7 +1682,25 @@ class Bot:
             self._last_wait_log_at = now
 
     def _defer_idle(self) -> None:
-        now = time.monotonic()
+        now = self._now()
+        event = self._event_state
+        if (
+            event is not None
+            and event.current
+            and self.config.event_automation_enabled_for(event.key)
+        ):
+            if self._submit_event_action("return", event):
+                return
+        if (
+            event is not None
+            and not event.current
+            and event.can_enter
+            and self.config.event_automation_enabled_for(event.key)
+            and event.energy is not None
+            and event.energy >= self.config.event_visit_energy_threshold
+        ):
+            if self._submit_event_action("enter", event):
+                return
         delay = max(self.config.loop_interval, self.config.idle_wait_seconds)
         self._next_loop_delay = delay
         if not self._idle_active or now - self._last_idle_log_at >= 900:

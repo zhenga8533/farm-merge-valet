@@ -4,14 +4,17 @@ This document tracks work that still requires a concrete live-game contract.
 
 ## Planned feature work
 
-### Event workflows
+### Additional event workflows
 
-Add event-specific navigation and actions beyond the event items and marketplace
-offers that the generic catalog and marketplace automation already recognize.
-The scope must be defined per event because event scenes and rules can change.
+Event-island navigation, level-gated Explore actions, board automation,
+event-energy obstacle costs, and return-to-farm transitions are supported
+through the active event's native runtime handlers. Automation remains opt-in
+and can be controlled by event theme. While on the main farm, the bot reads the
+shared event-energy inventory and visits an enabled event only when its configured
+minimum energy threshold is met.
 
-Mutation stays disabled until an active event exposes enough information to
-validate navigation, costs, targets, and completion.
+Future event-specific actions beyond the shared board workflow still require
+separate validation because event scenes and rules can change.
 
 ### Building repair submission
 

@@ -73,6 +73,27 @@ class RuntimeCapability(StrEnum):
 class FarmSceneKind(StrEnum):
     OWN = "own"
     VISITOR = "visitor"
+    EVENT = "event"
+
+
+@dataclass(frozen=True)
+class EventState:
+    key: str
+    display_name: str
+    active: bool
+    supported: bool
+    current: bool = False
+    introduction_open: bool = False
+    can_enter: bool = False
+    can_return: bool = False
+    energy_key: str | None = None
+    energy: int | None = None
+    can_explore: bool = False
+    exploration_area_id: str | None = None
+    exploration_cell_count: int | None = None
+    exploration_required_level: int | None = None
+    exploration_current_level: int | None = None
+    detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -244,6 +265,7 @@ class RuntimeSnapshot:
     farm_visit: FarmVisitState | None = None
     land_expansions: tuple[LandExpansionCandidate, ...] | None = None
     building_repairs: tuple[BuildingRepairState, ...] | None = None
+    event: EventState | None = None
 
 
 @dataclass(frozen=True)
@@ -322,6 +344,14 @@ class GameRuntime(Protocol):
     def submit_visitor_action(self, action: VisitorActionState) -> ActionResult: ...
 
     def return_from_farm_visit(self) -> ActionResult: ...
+
+    def dismiss_event_introduction(self, event_key: str) -> ActionResult: ...
+
+    def enter_event(self, event_key: str) -> ActionResult: ...
+
+    def explore_event(self, event_key: str, area_id: str, required_level: int) -> ActionResult: ...
+
+    def return_from_event(self, event_key: str) -> ActionResult: ...
 
     def submit_land_expansion(
         self, candidate: LandExpansionCandidate, minimum_balance_after: int

@@ -383,7 +383,12 @@ class InteractionWorkflow:
                 **bot._interaction_event_context(action),
             )
         elif result.status is ActionStatus.UNAVAILABLE:
-            bot._actions().release(OperationKind.INTERACTION, action_key)
+            bot._actions().fail(
+                OperationKind.INTERACTION,
+                action_key,
+                bot._now(),
+                base_delay=_ACTION_RETRY_SECONDS,
+            )
             bot._report_wait(
                 result.detail or "board interaction handler unavailable",
                 status=result.status.value,

@@ -117,6 +117,10 @@ class AppConfig(BaseModel):
     marketplace_policy_overrides: dict[str, bool] = Field(default_factory=dict)
     marketplace_automation_enabled: bool = True
     farm_visit_automation_enabled: bool = False
+    event_automation_enabled: bool = False
+    event_default_enabled: bool = True
+    event_automation_overrides: dict[str, bool] = Field(default_factory=dict)
+    event_visit_energy_threshold: int = Field(default=50, ge=0, le=1_000_000_000)
     land_expansion_automation_enabled: bool = False
     land_expansion_max_coin_cost: int = Field(default=0, ge=0, le=1_000_000_000)
     land_expansion_max_gem_cost: int = Field(default=0, ge=0, le=1_000_000_000)
@@ -170,6 +174,11 @@ class AppConfig(BaseModel):
         data.pop("_env_file", None)
         super().__init__(**data)
 
+    def event_automation_enabled_for(self, event_key: str) -> bool:
+        return self.event_automation_enabled and self.event_automation_overrides.get(
+            event_key, self.event_default_enabled
+        )
+
     @model_validator(mode="before")
     @classmethod
     def migrate_legacy_configuration(cls, value: object) -> object:
@@ -182,6 +191,7 @@ class AppConfig(BaseModel):
                     defaults["prefer_merge_five"] = False
                 value["item_policy_defaults"] = defaults
             value.pop("allow_shop_order_starts", None)
+            value.pop("event_revisit_interval", None)
             if value.get("schema_version", 1) == 1:
                 value["schema_version"] = CONFIG_SCHEMA_VERSION
             if "game_portal" not in value:

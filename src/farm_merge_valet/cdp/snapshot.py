@@ -12,6 +12,7 @@ from farm_merge_valet.cdp.land_expansion import _READ_LAND_EXPANSION_EXPRESSION
 from farm_merge_valet.cdp.marketplace import _READ_MARKETPLACE_EXPRESSION
 from farm_merge_valet.cdp.scripts import (
     _HEALTH_EXPRESSION,
+    _READ_EVENT_EXPRESSION,
     _READ_FARM_VISIT_EXPRESSION,
     _READ_SHOP_ORDERS_EXPRESSION,
     _READ_STORAGE_BUBBLES_EXPRESSION,
@@ -31,10 +32,13 @@ def snapshot_expression(options: SnapshotOptions) -> str:
 (() => {{
   const startedAt = performance.now();
   const farmVisit = {farm_visit} ? ({_READ_FARM_VISIT_EXPRESSION}) : null;
+  const event = ({_READ_EVENT_EXPRESSION});
   const landExpansions = {land_expansion} ? ({_READ_LAND_EXPANSION_EXPRESSION}) : null;
   const health = ({_HEALTH_EXPRESSION});
   const cells = health?.board ? ({_READ_EXPRESSION}) : null;
-  const energy = {obstacle} ? ({_READ_ENERGY_EXPRESSION}) : null;
+  const farmEnergy = {obstacle} ? ({_READ_ENERGY_EXPRESSION}) : null;
+  const energy = {obstacle} && event?.current && Number.isInteger(event.energy)
+    ? event.energy : farmEnergy;
   const workers = {obstacle} ? ({_READ_WORKERS_EXPRESSION}) : null;
   const storageBubbles = {bubbles} ? ({_READ_STORAGE_BUBBLES_EXPRESSION}) : null;
   const shopOrders = {shops} ? ({_READ_SHOP_ORDERS_EXPRESSION}) : null;
@@ -50,6 +54,7 @@ def snapshot_expression(options: SnapshotOptions) -> str:
     shopOrders,
     marketplace,
     farmVisit,
+    event,
     landExpansions,
     buildingRepairs,
     rendererDurationMs,

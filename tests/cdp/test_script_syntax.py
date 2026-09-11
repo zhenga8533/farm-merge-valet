@@ -15,9 +15,11 @@ from farm_merge_valet.cdp.land_expansion import (
 )
 from farm_merge_valet.cdp.scripts import (
     _HEALTH_EXPRESSION,
+    _READ_EVENT_EXPRESSION,
     _crate_expression,
     _dismiss_overlay_expression,
     _drop_expression,
+    _event_action_expression,
     _farm_visit_action_expression,
     _interaction_expression,
     _overlay_context_expression,
@@ -32,7 +34,12 @@ from farm_merge_valet.cdp.scripts import (
     "expression",
     (
         _HEALTH_EXPRESSION,
+        _READ_EVENT_EXPRESSION,
         _READ_LAND_EXPANSION_EXPRESSION,
+        _event_action_expression("dismiss", "jungle"),
+        _event_action_expression("enter", "jungle"),
+        _event_action_expression("explore", "jungle", areaID="A1", requiredLevel=2),
+        _event_action_expression("return", "jungle"),
         land_expansion_action_expression("A1", False, (("coins", 10),), 0, 7),
         _farm_visit_action_expression("open", 7),
         _storage_bubble_pop_expression(11, 7),

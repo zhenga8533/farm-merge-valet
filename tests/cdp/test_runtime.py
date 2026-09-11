@@ -712,7 +712,8 @@ def test_obstacle_clear_uses_resource_gate_payment_handler(monkeypatch) -> None:
     assert result.status is ActionStatus.SUBMITTED
     assert "content.hasBehavior?.('mapSource')" in expression
     assert "content.hasBehavior?.('resourceGate')" in expression
-    assert "typeof obstacleHandler._getTotalCost === 'function'" in expression
+    assert "typeof handler?._getTotalCost === 'function'" in expression
+    assert "typeof handler?._getEventCost !== 'function'" in expression
     assert "gate?._data?.cost" in expression
     assert "energy.amount < energyCost" in expression
     assert "gameWorkers.hasEnoughWorkers(requiredWorkers)" in expression
@@ -1127,3 +1128,66 @@ def test_atomic_snapshot_reads_requested_state_once_without_retry(monkeypatch) -
     assert calls[0][1]["retry"] is False
     assert "const energy = false" in calls[0][0]
     assert calls[0][0].index("const farmVisit =") < calls[0][0].index("const health =")
+
+
+def test_event_state_parses_structured_runtime_data() -> None:
+    state = GameRuntimeAdapter._parse_event(
+        {
+            "key": "jungle",
+            "displayName": "Jungle",
+            "active": True,
+            "supported": True,
+            "current": True,
+            "introductionOpen": True,
+            "canEnter": False,
+            "canReturn": True,
+            "energy": 150,
+            "canExplore": True,
+            "explorationAreaID": "A1",
+            "explorationCellCount": 50,
+            "explorationRequiredLevel": 2,
+            "explorationCurrentLevel": 2,
+            "detail": "event-map",
+        }
+    )
+
+    assert state is not None
+    assert state.key == "jungle"
+    assert state.display_name == "Jungle"
+    assert state.active
+    assert state.supported
+    assert state.current
+    assert state.introduction_open
+    assert not state.can_enter
+    assert state.can_return
+    assert state.energy == 150
+    assert state.can_explore
+    assert state.exploration_area_id == "A1"
+    assert state.exploration_cell_count == 50
+    assert state.exploration_required_level == 2
+    assert state.exploration_current_level == 2
+    assert state.detail == "event-map"
+
+
+def test_event_actions_use_guarded_native_handlers(monkeypatch) -> None:
+    expressions: list[str] = []
+
+    def evaluate_expression(_port, expression, _title, **_kwargs):
+        expressions.append(expression)
+        return {"status": "submitted"}
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", evaluate_expression)
+    adapter = GameRuntimeAdapter(9222, "Farm")
+
+    assert adapter.dismiss_event_introduction("jungle").submitted
+    assert adapter.enter_event("jungle").submitted
+    assert adapter.explore_event("jungle", "A1", 2).submitted
+    assert adapter.return_from_event("jungle").submitted
+    assert "popup.close()" in expressions[0]
+    assert "eventService._goToEventMap()" in expressions[1]
+    assert "service.unlockArea(area)" in expressions[2]
+    assert '"areaID": "A1"' in expressions[2]
+    assert '"requiredLevel": 2' in expressions[2]
+    assert "transition.returnFromEventMap()" in expressions[3]
+    assert "EventPassPopup" not in expressions[3]
+    assert all('"eventKey": "jungle"' in expression for expression in expressions)

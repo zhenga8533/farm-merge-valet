@@ -14,6 +14,7 @@ from farm_merge_valet.automation.runtime import (
     ActionResult,
     ActionStatus,
     CrateSpawnResult,
+    EventState,
     FarmSceneKind,
     FarmVisitState,
     RuntimeHealth,
@@ -51,6 +52,7 @@ from farm_merge_valet.cdp.scripts import (
     _crate_expression,
     _dismiss_overlay_expression,
     _drop_expression,
+    _event_action_expression,
     _farm_visit_action_expression,
     _interaction_expression,
     _removal_expression,
@@ -596,7 +598,56 @@ class GameRuntimeAdapter:
             farm_visit=self._parse_farm_visit(raw.get("farmVisit")),
             land_expansions=self._parse_land_expansions(raw.get("landExpansions")),
             building_repairs=parse_building_repairs(raw.get("buildingRepairs")),
+            event=self._parse_event(raw.get("event")),
             metrics=metrics,
+        )
+
+    @staticmethod
+    def _parse_event(raw: object) -> EventState | None:
+        if not isinstance(raw, dict) or not isinstance(raw.get("key"), str):
+            return None
+        event_key = raw["key"]
+        display_name = raw.get("displayName")
+        energy_key = raw.get("energyKey")
+        energy = raw.get("energy")
+        exploration_area_id = raw.get("explorationAreaID")
+        exploration_cell_count = raw.get("explorationCellCount")
+        exploration_required_level = raw.get("explorationRequiredLevel")
+        exploration_current_level = raw.get("explorationCurrentLevel")
+        return EventState(
+            key=event_key,
+            display_name=display_name if isinstance(display_name, str) else event_key,
+            active=raw.get("active") is True,
+            supported=raw.get("supported") is True,
+            current=raw.get("current") is True,
+            introduction_open=raw.get("introductionOpen") is True,
+            can_enter=raw.get("canEnter") is True,
+            can_return=raw.get("canReturn") is True,
+            energy_key=energy_key if isinstance(energy_key, str) else None,
+            energy=energy if isinstance(energy, int) and not isinstance(energy, bool) else None,
+            can_explore=raw.get("canExplore") is True,
+            exploration_area_id=(
+                exploration_area_id if isinstance(exploration_area_id, str) else None
+            ),
+            exploration_cell_count=(
+                exploration_cell_count
+                if isinstance(exploration_cell_count, int)
+                and not isinstance(exploration_cell_count, bool)
+                else None
+            ),
+            exploration_required_level=(
+                exploration_required_level
+                if isinstance(exploration_required_level, int)
+                and not isinstance(exploration_required_level, bool)
+                else None
+            ),
+            exploration_current_level=(
+                exploration_current_level
+                if isinstance(exploration_current_level, int)
+                and not isinstance(exploration_current_level, bool)
+                else None
+            ),
+            detail=raw.get("detail") if isinstance(raw.get("detail"), str) else None,
         )
 
     def _maintain_portal_session(self) -> None:
@@ -776,6 +827,33 @@ class GameRuntimeAdapter:
     def dismiss_transient_overlay(self) -> ActionResult:
         return self._action_result(
             self._evaluate_action(_dismiss_overlay_expression(self._scene_id))
+        )
+
+    def dismiss_event_introduction(self, event_key: str) -> ActionResult:
+        return self._action_result(
+            self._evaluate_action(_event_action_expression("dismiss", event_key))
+        )
+
+    def enter_event(self, event_key: str) -> ActionResult:
+        return self._action_result(
+            self._evaluate_action(_event_action_expression("enter", event_key))
+        )
+
+    def explore_event(self, event_key: str, area_id: str, required_level: int) -> ActionResult:
+        return self._action_result(
+            self._evaluate_action(
+                _event_action_expression(
+                    "explore",
+                    event_key,
+                    areaID=area_id,
+                    requiredLevel=required_level,
+                )
+            )
+        )
+
+    def return_from_event(self, event_key: str) -> ActionResult:
+        return self._action_result(
+            self._evaluate_action(_event_action_expression("return", event_key))
         )
 
     def submit_storage_bubble_pop(self, expected_object_id: int) -> ActionResult:

@@ -7,8 +7,8 @@ or taking control of the foreground application.
 
 Automation includes item collection, producer harvesting, shop orders, supply
 crates, obstacle clearing, land expansion, marketplace offers, and merge-3 or
-merge-5 planning. Optional workflows, such as farm visits, are enabled only when
-the selected platform exposes the required runtime capability.
+merge-5 planning. Optional workflows, such as farm visits and event islands, are
+enabled only when the selected platform exposes the required runtime capability.
 
 ## Setup
 
@@ -125,8 +125,8 @@ Defaults favor ordinary progression but protect consequential spending:
 
 - Item automation, merging, shop orders, free marketplace claims, and obstacle
   clearing are enabled.
-- Paid marketplace purchases, land expansion, item removal, and farm visits are
-  disabled until explicitly enabled.
+- Paid marketplace purchases, land expansion, item removal, farm visits, and
+  event island automation are disabled until explicitly enabled.
 - Resource and ingredient reserves default to zero and should be configured
   before the first run when preserving a balance matters.
 

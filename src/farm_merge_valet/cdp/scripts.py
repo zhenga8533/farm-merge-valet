@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from farm_merge_valet.cdp.obstacle_resources import _OBSTACLE_RESOURCE_HELPERS
 from farm_merge_valet.core.items import GridCoord, InteractionTargetKind
 
 _DISCOVER_EXPRESSION = r"""
@@ -54,6 +55,13 @@ _DISCOVER_EXPRESSION = r"""
   const gameplaySystems = Array.isArray(systemsOwner?._systems) ? systemsOwner._systems : [];
   const visitorScene = systemsOwner?._options?.startOnTrainStation === true &&
     Boolean(systemsOwner?._commonFriendEvents);
+  let stage = screen;
+  while (stage?.parent) stage = stage.parent;
+  const layers = stage?.children?.[0]?.children || [];
+  const hud = layers.find((layer) => layer?.name === 'hud')?.children?.[0];
+  const eventHud = typeof hud?._returnButtonClicked === 'function' &&
+    hud?._eventEnergyCounter?._eventEnergyItem ? hud : null;
+  const sceneKind = eventHud ? 'event' : visitorScene ? 'visitor' : 'own';
   const trainHandler = gameplaySystems.find((candidate) =>
     candidate?._services === services &&
     typeof candidate._openTrainstationPopup === 'function') || null;
@@ -143,7 +151,8 @@ _DISCOVER_EXPRESSION = r"""
   window.__fmvEnergyInventoryItem = energy?._key === 'energy' &&
     Number.isInteger(energy.amount) && energy.amount >= 0 ? energy : null;
   window.__fmvOrdersService = validShopOrders ? orders : null;
-  window.__fmvFarmSceneKind = visitorScene ? 'visitor' : 'own';
+  window.__fmvEventHud = eventHud;
+  window.__fmvFarmSceneKind = sceneKind;
   window.__fmvTrainHandler = trainHandler;
   window.__fmvVisitorActionHandler = visitorActionHandler;
   window.__fmvVisitorReturnHud = returnHud;
@@ -162,15 +171,17 @@ _DISCOVER_EXPRESSION = r"""
   if (!services) missing.push('gameplay-services');
   if (!itemHandler) missing.push('item-interaction-handler');
   if (!interactionHandler) missing.push('tile-interaction-handler');
-  if (!shovelHandler) missing.push('shovel-handler');
-  if (!rewardInteractionHandler) missing.push('reward-interaction-handler');
   if (!obstacleClearHandler) missing.push('obstacle-clear-handler');
   if (!rewardContainerHandler) missing.push('reward-container-handler');
   if (!storageBubbleInteractionHandler || !storageBubblePopHandler)
     missing.push('storage-bubble-handler');
-  if (!validUpgradeInteraction) missing.push('upgrade-card-handler');
-  if (!validCrateSignal) missing.push('crate-spawn-signal');
-  if (!validInventory) missing.push('crate-inventory');
+  if (sceneKind !== 'event') {
+    if (!shovelHandler) missing.push('shovel-handler');
+    if (!rewardInteractionHandler) missing.push('reward-interaction-handler');
+    if (!validUpgradeInteraction) missing.push('upgrade-card-handler');
+    if (!validCrateSignal) missing.push('crate-spawn-signal');
+    if (!validInventory) missing.push('crate-inventory');
+  }
   window.__fmvRuntimeDiscovery = {
     strategy: 'bounded-signal-anchors',
     services: Boolean(services),
@@ -190,8 +201,9 @@ _DISCOVER_EXPRESSION = r"""
     shopOrders: Boolean(validShopOrders),
     marketplace: Boolean(validMarketplace),
     landExpansion: validLandExpansion,
-    farmVisit: Boolean(visitorScene ? visitorActionHandler && returnHud : trainHandler),
-    farmScene: visitorScene ? 'visitor' : 'own',
+    farmVisit: Boolean(sceneKind === 'visitor'
+      ? visitorActionHandler && returnHud : sceneKind === 'own' && trainHandler),
+    farmScene: sceneKind,
     missing,
   };
   return {
@@ -211,8 +223,9 @@ _DISCOVER_EXPRESSION = r"""
     shopOrders: Boolean(validShopOrders),
     marketplace: Boolean(validMarketplace),
     landExpansion: validLandExpansion,
-    farmVisit: Boolean(visitorScene ? visitorActionHandler && returnHud : trainHandler),
-    farmScene: visitorScene ? 'visitor' : 'own',
+    farmVisit: Boolean(sceneKind === 'visitor'
+      ? visitorActionHandler && returnHud : sceneKind === 'own' && trainHandler),
+    farmScene: sceneKind,
     detail: missing.length ? `${missing.join(',')}-not-found` : null,
     discovery: window.__fmvRuntimeDiscovery,
   };
@@ -649,6 +662,153 @@ _READ_FARM_VISIT_EXPRESSION = r"""
     actions: [],
   };
 })()
+"""
+
+_READ_EVENT_EXPRESSION = r"""
+(() => {
+  let scene = window.__fmvGameplayMapScreen;
+  if (!scene || scene._destroyed === true) return null;
+  let stage = scene;
+  while (stage?.parent) stage = stage.parent;
+  const layers = stage?.children?.[0]?.children || [];
+  const hud = layers.find((layer) => layer?.name === 'hud')?.children?.[0];
+  const popup = layers.find((layer) => layer?.name === 'popup')?.children?.find((child) =>
+    child?.visible !== false && child?.renderable !== false && child?._destroyed !== true);
+  const introduction = popup?._name === 'TimeLimitedEventExplanationPopup' &&
+    typeof popup.close === 'function' ? popup : null;
+  const eventHud = typeof hud?._returnButtonClicked === 'function' && hud?._eventEnergyCounter
+    ? hud : null;
+  const queue = [...(hud?.children || [])];
+  let launcher = null;
+  for (let visited = 0; queue.length && visited < 500; visited += 1) {
+    const candidate = queue.shift();
+    if (candidate?.name === 'eventLauncher' && typeof candidate.onClick === 'function') {
+      launcher = candidate;
+      break;
+    }
+    for (const child of candidate?.children || []) queue.push(child);
+  }
+  if (!eventHud && !introduction && !launcher) return null;
+  const level = eventHud?._levelDisplay?._levelItem;
+  const gameplayServices = window.__fmvGameplayServices;
+  const eventInstances =
+    gameplayServices?.timedEventService?._eventInstances?.values?.() || [];
+  const eventInstance = [...eventInstances]
+    .find((candidate) => candidate?._eventActive === true &&
+      candidate?.eventType === 'timelimitedevent' &&
+      (!launcher || candidate?._button === launcher));
+  const eventService = gameplayServices?.timeLimitedEvent ||
+    eventHud?._eventEnergyCounter?._resourceService?.services?.timeLimitedEvent ||
+    eventInstance;
+  const sharedInventory = eventInstance?._services === gameplayServices
+    ? gameplayServices?.ordersService?._inventory : null;
+  const sharedEnergy = sharedInventory?.getInventoryItem?.('time_limited_event_energy');
+  const energy = eventHud?._eventEnergyCounter?._eventEnergyItem || sharedEnergy;
+  const theme = eventService?._eventConfiguration?.theme ||
+    eventService?._activeTheme || eventService?._eventTheme ||
+    scene?._themeConfig?.key || scene?._themeConfig?.theme ||
+    scene?._options?.theme || 'time-limited-event';
+  const key = typeof theme === 'string' && theme ? theme : 'time-limited-event';
+  window.__fmvEventIntroduction = introduction;
+  window.__fmvEventHud = eventHud;
+  window.__fmvEventLauncher = launcher;
+  window.__fmvEventService = eventService;
+  if (eventHud) window.__fmvFarmSceneKind = 'event';
+  const areaService = eventHud ? window.__fmvGameplayServices?.mapAreaService : null;
+  const explorationArea = areaService?.getNextAreaToUnlock?.();
+  const explorationRequirements = explorationArea?.requirements?.buy;
+  const explorationRequirement = Array.isArray(explorationRequirements) &&
+    explorationRequirements.length === 1 &&
+    explorationRequirements[0]?.key === level?._key &&
+    Number.isInteger(explorationRequirements[0]?.amount)
+    ? explorationRequirements[0] : null;
+  const explorationCurrentLevel = Number.isInteger(level?.amount) ? level.amount :
+    (Number.isInteger(level?._amount) ? level._amount : null);
+  const explorationAreaID = explorationArea?.state === 3 &&
+    typeof explorationArea?.id === 'string' && Array.isArray(explorationArea?.cells) &&
+    explorationRequirement && Number.isInteger(explorationCurrentLevel)
+    ? explorationArea.id : null;
+  return {
+    key,
+    displayName: key === 'time-limited-event' ? 'Time-limited event' : key,
+    active: true,
+    supported: Boolean(eventHud || launcher || introduction),
+    current: Boolean(eventHud),
+    introductionOpen: Boolean(introduction),
+    canEnter: Boolean(launcher && !eventHud),
+    canReturn: Boolean(eventHud),
+    energyKey: typeof energy?._key === 'string' ? energy._key : null,
+    energy: Number.isInteger(energy?.amount) ? energy.amount :
+      (Number.isInteger(energy?._amount) ? energy._amount : null),
+    canExplore: Boolean(explorationAreaID &&
+      areaService?.canUnlockArea?.(explorationArea) === true),
+    explorationAreaID,
+    explorationCellCount: explorationAreaID ? explorationArea.cells.length : null,
+    explorationRequiredLevel: explorationAreaID ? explorationRequirement.amount : null,
+    explorationCurrentLevel: explorationAreaID ? explorationCurrentLevel : null,
+    detail: eventHud ? 'event-map' : introduction ? 'event-introduction' : 'event-available',
+  };
+})()
+"""
+
+
+def _event_action_expression(kind: str, event_key: str, **expected: object) -> str:
+    payload = json.dumps({"kind": kind, "eventKey": event_key, **expected})
+    return f"""
+(() => {{
+  const expected = {payload};
+  const state = ({_READ_EVENT_EXPRESSION});
+  if (!state || state.key !== expected.eventKey)
+    return {{status: 'stale-source', detail: 'event-changed'}};
+  try {{
+    if (expected.kind === 'dismiss') {{
+      const popup = window.__fmvEventIntroduction;
+      if (!popup || popup._destroyed === true || typeof popup.close !== 'function')
+        return {{status: 'unavailable', detail: 'event-introduction-not-current'}};
+      void popup.close();
+      return {{status: 'submitted', detail: 'event-introduction'}};
+    }}
+    if (expected.kind === 'enter') {{
+      const eventService = window.__fmvEventService;
+      if (state.current || !state.canEnter ||
+          typeof eventService?._goToEventMap !== 'function')
+        return {{status: 'unavailable', detail: 'event-transition-not-current'}};
+      void eventService._goToEventMap();
+      return {{status: 'submitted', detail: 'event-transition'}};
+    }}
+    if (expected.kind === 'explore') {{
+      const services = window.__fmvGameplayServices;
+      const service = services?.mapAreaService;
+      const area = service?.getNextAreaToUnlock?.();
+      const requirements = area?.requirements?.buy;
+      const requirement = Array.isArray(requirements) && requirements.length === 1
+        ? requirements[0] : null;
+      if (!state.current || service?._services !== services || service._isActive === false ||
+          typeof service.canUnlockArea !== 'function' || typeof service.unlockArea !== 'function')
+        return {{status: 'unavailable', detail: 'event-exploration-handler-not-current'}};
+      if (!area || area.id !== expected.areaID || area.state !== 3 ||
+          requirement?.key !== 'time_limited_event_level' ||
+          requirement?.amount !== expected.requiredLevel)
+        return {{status: 'stale-source', detail: 'event-exploration-changed'}};
+      if (service.canUnlockArea(area) !== true)
+        return {{status: 'rejected', detail: 'event-exploration-level-not-met'}};
+      service.unlockArea(area);
+      return area.state !== 3
+        ? {{status: 'submitted', detail: 'event-exploration'}}
+        : {{status: 'rejected', detail: 'event-exploration-did-not-unlock'}};
+    }}
+    if (expected.kind === 'return') {{
+      const transition = window.__fmvEventService?._services?.transition;
+      if (!state.current || typeof transition?.returnFromEventMap !== 'function')
+        return {{status: 'unavailable', detail: 'event-transition-not-current'}};
+      void transition.returnFromEventMap();
+      return {{status: 'submitted', detail: 'event-return'}};
+    }}
+    return {{status: 'rejected', detail: 'unknown-event-action'}};
+  }} catch (error) {{
+    return {{status: 'rejected', detail: String(error?.message || error)}};
+  }}
+}})()
 """
 
 
@@ -1266,6 +1426,7 @@ def _interaction_expression(
   if (!content || content._blueprintID !== expectedBlueprintID ||
       (expectedObjectID !== null && content.id !== expectedObjectID))
     return {{status: 'stale-source'}};
+  {_OBSTACLE_RESOURCE_HELPERS}
   const producer = content.hasBehavior?.('harvestable') &&
     ['animal', 'crop'].includes(content.getBehavior?.('harvestable')?._data?.harvestableType);
   const targetValidators = {{
@@ -1365,11 +1526,10 @@ def _interaction_expression(
         return {{status: 'unavailable', detail: 'obstacle-clear-handler-not-found'}};
       const gate = content.getBehavior('resourceGate');
       const position = content.getBehavior('gridPosition');
-      const effectiveCost = typeof obstacleHandler._getTotalCost === 'function'
-        ? obstacleHandler._getTotalCost(gate) : gate?._data?.cost;
-      const energyCost = effectiveCost?.find((item) => item?.key === 'energy')?.amount;
+      const effectiveCost = resolveObstacleCost(obstacleHandler, gate);
+      const energyCost = effectiveCost?.amount;
       const requiredWorkers = gate?._data?.workers;
-      const energy = window.__fmvEnergyInventoryItem;
+      const energy = resolveObstacleResourceItem(effectiveCost);
       const gameWorkers = services?.gameWorkers;
       if (!position || !Number.isInteger(energyCost) || energyCost < 0 ||
           !Number.isInteger(requiredWorkers) || requiredWorkers < 0)

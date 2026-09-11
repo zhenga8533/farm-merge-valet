@@ -102,6 +102,28 @@ class SettingsPage(ConfigFormPage):
         )
         sections.addWidget(workflows)
 
+        events, events_form = settings_section("Event islands")
+        self.event_automation_toggle = self._add_toggle(
+            events_form, "Automate event islands", "event_automation_enabled"
+        )
+        self._add_toggle(
+            events_form,
+            "Enable newly supported events by default",
+            "event_default_enabled",
+        )
+        self._add_int(
+            events_form,
+            "Minimum energy before visiting",
+            "event_visit_energy_threshold",
+            0,
+            1_000_000_000,
+        )
+        events_hint = QLabel("Event item merging and interaction behavior is configured in Items.")
+        events_hint.setObjectName("settingsHint")
+        events_hint.setWordWrap(True)
+        events_form.addRow(events_hint)
+        sections.addWidget(events)
+
         automation, automation_form = settings_section("Board behavior")
         self._add_toggle(
             automation_form,
@@ -308,6 +330,7 @@ class SettingsPage(ConfigFormPage):
         sections.addWidget(appearance)
 
         sections.addStretch()
+        self.event_automation_toggle.toggled.connect(self._sync_dependent_controls)
         self.land_expansion_toggle.toggled.connect(self._sync_dependent_controls)
         self.building_repairs_toggle.toggled.connect(self._sync_dependent_controls)
         webhook.textChanged.connect(self._sync_dependent_controls)
@@ -321,6 +344,9 @@ class SettingsPage(ConfigFormPage):
         self._sync_dependent_controls()
 
     def _sync_dependent_controls(self, *_args: object) -> None:
+        events_enabled = self.event_automation_toggle.isChecked()
+        self._set_control_enabled("event_default_enabled", events_enabled)
+        self._set_control_enabled("event_visit_energy_threshold", events_enabled)
         land_enabled = self.land_expansion_toggle.isChecked()
         self._set_control_enabled("land_expansion_max_coin_cost", land_enabled)
         self._set_control_enabled("land_expansion_max_gem_cost", land_enabled)

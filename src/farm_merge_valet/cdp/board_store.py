@@ -15,6 +15,7 @@ from threading import Event
 from farm_merge_valet.automation.runtime import LiveCellState as _LiveCellState
 from farm_merge_valet.automation.runtime import RewardRequirement as _RewardRequirement
 from farm_merge_valet.cdp.evaluation import evaluate
+from farm_merge_valet.cdp.obstacle_resources import _OBSTACLE_RESOURCE_HELPERS
 from farm_merge_valet.cdp.targets import run_game_frame_operation
 from farm_merge_valet.cdp.transport import CdpConnectionError, _command_target
 from farm_merge_valet.core.items import GridCoord, ProducerKind, ProducerState
@@ -140,6 +141,7 @@ function() {{
 
 _READ_EXPRESSION = """
 (() => {
+  __FMV_OBSTACLE_RESOURCE_HELPERS__
   const cells = window.__fmvBoardCells;
   if (!cells) return null;
   const services = window.__fmvGameplayServices;
@@ -189,10 +191,9 @@ _READ_EXPRESSION = """
     const mapSource = content?.getBehavior?.('mapSource');
     const hitpoints = content?.getBehavior?.('hitpoints');
     const resourceGate = content?.getBehavior?.('resourceGate');
-    const effectiveCost = resourceGate &&
-      window.__fmvObstacleClearHandler?._getTotalCost?.(resourceGate);
-    const energyCost = (Array.isArray(effectiveCost) ? effectiveCost : resourceGate?._data?.cost)
-      ?.find((item) => item?.key === 'energy')?.amount;
+    const effectiveCost = resourceGate
+      ? resolveObstacleCost(window.__fmvObstacleClearHandler, resourceGate) : null;
+    const energyCost = effectiveCost?.amount;
     const requiredWorkers = resourceGate?._data?.workers;
     const harvestableType = harvestable?._data?.harvestableType;
     const producerKind = harvestableType === 'animal' || harvestableType === 'crop'
@@ -269,7 +270,7 @@ _READ_EXPRESSION = """
   }
   return out;
 })()
-"""
+""".replace("__FMV_OBSTACLE_RESOURCE_HELPERS__", _OBSTACLE_RESOURCE_HELPERS)
 
 
 def _arm_board_store_target(ws_url: str, cancel_event: Event | None) -> str:

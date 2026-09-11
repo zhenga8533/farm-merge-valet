@@ -53,6 +53,10 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "close_managed_browser_on_exit",
     ),
     ConfigSection.SETTINGS: (
+        "event_automation_enabled",
+        "event_default_enabled",
+        "event_automation_overrides",
+        "event_visit_energy_threshold",
         "merge_empty_cell_reserve",
         "producer_interact_min_empty_cells",
         "auto_dismiss_overlays",

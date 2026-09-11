@@ -73,6 +73,25 @@ def test_unregistered_legacy_game_url_is_rejected() -> None:
         AppConfig(game_url="https://example.com/game")
 
 
+def test_event_automation_requires_explicit_enablement_and_supports_overrides() -> None:
+    config = AppConfig(event_automation_overrides={"jungle": False})
+
+    assert not config.event_automation_enabled_for("jungle")
+    assert not config.event_automation_enabled_for("future-event")
+
+    enabled = config.model_copy(update={"event_automation_enabled": True})
+    assert not enabled.event_automation_enabled_for("jungle")
+    assert enabled.event_automation_enabled_for("future-event")
+
+    disabled_by_default = AppConfig(
+        event_automation_enabled=True,
+        event_default_enabled=False,
+        event_automation_overrides={"jungle": True},
+    )
+    assert disabled_by_default.event_automation_enabled_for("jungle")
+    assert not disabled_by_default.event_automation_enabled_for("future-event")
+
+
 def test_land_expansion_requires_explicit_enablement_and_spending_limits() -> None:
     config = AppConfig()
 
@@ -135,6 +154,13 @@ def test_legacy_shop_start_toggle_is_discarded() -> None:
     assert "allow_shop_order_starts" not in config.model_dump()
 
 
+def test_legacy_event_revisit_interval_is_discarded() -> None:
+    config = AppConfig.model_validate({"event_revisit_interval": 300})
+
+    assert config.event_visit_energy_threshold == 50
+    assert "event_revisit_interval" not in config.model_dump()
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -146,6 +172,8 @@ def test_legacy_shop_start_toggle_is_discarded() -> None:
         ("loop_interval", 0),
         ("loop_interval", 60.1),
         ("idle_wait_seconds", -0.1),
+        ("event_visit_energy_threshold", -1),
+        ("event_visit_energy_threshold", 1_000_000_001),
         ("crate_delay_max", 5.1),
         ("webhook_summary_interval", 59),
         ("webhook_status_interval", -0.1),

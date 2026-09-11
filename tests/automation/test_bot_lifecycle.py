@@ -10,6 +10,7 @@ from farm_merge_valet.automation.runtime import (
     ActionResult,
     ActionStatus,
     CrateSpawnResult,
+    EventState,
     LiveCellState,
     RuntimeConnectionError,
     RuntimeHealth,
@@ -45,7 +46,10 @@ class FakeRuntime:
         self.claimed_orders: list[tuple[str, str]] = []
         self.shop_orders: tuple[ShopOrder, ...] = ()
         self.board_state: dict[tuple[int, int], LiveCellState] | None = {}
+        self.event_state: EventState | None = None
         self.dismissed_overlays = 0
+        self.event_actions: list[tuple[str, str]] = []
+        self.event_action_result = ActionResult(ActionStatus.SUBMITTED)
         self.configured_crate_delays: list[tuple[float, float]] = []
 
     def set_cancel_event(self, cancel_event):
@@ -62,6 +66,7 @@ class FakeRuntime:
             self.read_runtime_health(),
             self.board_state,
             shop_orders=self.shop_orders,
+            event=self.event_state,
         )
 
     def read_board_state(self):
@@ -73,6 +78,22 @@ class FakeRuntime:
     def dismiss_transient_overlay(self):
         self.dismissed_overlays += 1
         return ActionResult(ActionStatus.SUBMITTED, "level-up")
+
+    def dismiss_event_introduction(self, event_key):
+        self.event_actions.append(("dismiss", event_key))
+        return self.event_action_result
+
+    def enter_event(self, event_key):
+        self.event_actions.append(("enter", event_key))
+        return self.event_action_result
+
+    def explore_event(self, event_key, area_id, required_level):
+        self.event_actions.append(("explore", event_key, area_id, required_level))
+        return self.event_action_result
+
+    def return_from_event(self, event_key):
+        self.event_actions.append(("return", event_key))
+        return self.event_action_result
 
     def submit_item_drop(self, start, end):
         self.drops.append((start, end))
@@ -712,3 +733,110 @@ def test_onboarding_pauses_with_manual_completion_guidance(caplog) -> None:
 
     assert bot.runtime.dismissed_overlays == 0
     assert any("complete it manually" in message for message in caplog.messages)
+
+
+def test_event_introduction_submission_blocks_other_automation() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(event_automation_enabled=True)
+    state = EventState("jungle", "Jungle", True, True, introduction_open=True)
+
+    assert not bot._handle_event_state(state)
+    assert bot.runtime.event_actions == [("dismiss", "jungle")]
+    assert bot._pending_event_action is not None
+
+
+def test_event_introduction_can_be_dismissed_before_other_runtime_support_is_ready() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(event_automation_enabled=True)
+    state = EventState("jungle", "Jungle", True, False, introduction_open=True)
+
+    assert not bot._handle_event_state(state)
+    assert bot.runtime.event_actions == [("dismiss", "jungle")]
+
+
+def test_failed_event_submission_still_blocks_other_automation() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(event_automation_enabled=True)
+    bot.runtime.event_action_result = ActionResult(ActionStatus.UNAVAILABLE, "not-ready")
+    state = EventState("jungle", "Jungle", True, True, introduction_open=True)
+
+    assert not bot._handle_event_state(state)
+    assert bot.runtime.event_actions == [("dismiss", "jungle")]
+    assert bot._pending_event_action is None
+
+
+def test_disabled_event_map_pauses_without_navigation() -> None:
+    bot = bare_bot()
+    state = EventState("jungle", "Jungle", True, True, current=True, can_return=True)
+
+    assert not bot._handle_event_state(state)
+    assert bot.runtime.event_actions == []
+
+
+def test_event_entry_accepts_destination_identity_change() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(event_automation_enabled=True)
+    launcher = EventState("time-limited-event", "Time-limited event", True, True, can_enter=True)
+
+    assert bot._submit_event_action("enter", launcher)
+    destination = EventState("jungle", "Jungle", True, True, current=True, can_return=True)
+    assert bot._handle_event_state(destination)
+    assert bot._pending_event_action is None
+
+
+def test_event_visit_requires_configured_energy_across_identity_change() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(event_automation_enabled=True, event_visit_energy_threshold=50)
+    bot._event_state = EventState("jungle", "Jungle", True, True, current=True, can_return=True)
+
+    bot._defer_idle()
+
+    launcher = EventState(
+        "time-limited-event", "Time-limited event", True, True, can_enter=True, energy=49
+    )
+    assert bot._handle_event_state(launcher)
+    bot._event_state = launcher
+    bot._defer_idle()
+    assert bot.runtime.event_actions == [("return", "jungle")]
+
+    bot._event_state = EventState(
+        "time-limited-event", "Time-limited event", True, True, can_enter=True, energy=50
+    )
+    bot._defer_idle()
+    assert bot.runtime.event_actions == [("return", "jungle"), ("enter", "time-limited-event")]
+
+
+def test_event_exploration_runs_before_other_board_work() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(event_automation_enabled=True)
+    bot.runtime.event_state = EventState(
+        "jungle",
+        "Jungle",
+        True,
+        True,
+        current=True,
+        can_return=True,
+        can_explore=True,
+        exploration_area_id="A1",
+        exploration_cell_count=50,
+        exploration_required_level=2,
+        exploration_current_level=2,
+    )
+
+    bot.step()
+
+    assert bot.runtime.event_actions == [("explore", "jungle", "A1", 2)]
+    assert bot.runtime.spawn_limits == []
+
+
+def test_event_idle_skips_supply_crates_and_returns_home() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(event_automation_enabled=True)
+    bot.runtime.event_state = EventState(
+        "jungle", "Jungle", True, True, current=True, can_return=True
+    )
+
+    bot.step()
+
+    assert bot.runtime.spawn_limits == []
+    assert bot.runtime.event_actions == [("return", "jungle")]
