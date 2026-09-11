@@ -34,6 +34,10 @@ def test_capture_game_screenshot_uses_verified_game_target(monkeypatch) -> None:
 
     def command(ws_url, method, params, **_kwargs):
         commands.append((ws_url, method, params))
+        if method == "DOM.getFrameOwner":
+            return {"backendNodeId": 42}
+        if method == "DOM.getBoxModel":
+            return {"model": {"content": [10, 20, 810, 20, 810, 620, 10, 620]}}
         return {"data": base64.b64encode(jpeg).decode()}
 
     monkeypatch.setattr("farm_merge_valet.cdp.capture._command_target", command)
@@ -41,13 +45,30 @@ def test_capture_game_screenshot_uses_verified_game_target(monkeypatch) -> None:
     assert capture_game_screenshot(9222) == jpeg
     assert commands == [
         (
-            "ws://game",
+            "ws://page",
+            "DOM.getFrameOwner",
+            {"frameId": "game"},
+        ),
+        (
+            "ws://page",
+            "DOM.getBoxModel",
+            {"backendNodeId": 42},
+        ),
+        (
+            "ws://page",
             "Page.captureScreenshot",
             {
                 "format": "jpeg",
                 "quality": 75,
                 "fromSurface": True,
                 "captureBeyondViewport": False,
+                "clip": {
+                    "x": 10,
+                    "y": 20,
+                    "width": 800,
+                    "height": 600,
+                    "scale": 1,
+                },
             },
         )
     ]

@@ -198,8 +198,8 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
                     logging.WARNING,
                     "webhook.screenshot_failed",
                     "Could not capture the game for the Discord summary: %s.",
-                    type(exc).__name__,
-                    detail=type(exc).__name__,
+                    str(exc),
+                    detail=str(exc),
                 )
             else:
                 if screenshot is not None:

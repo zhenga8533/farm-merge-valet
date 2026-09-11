@@ -18,14 +18,50 @@ def capture_game_screenshot(port: int, page_title: str | None = None) -> bytes:
         raise CdpConnectionError(
             f"Expected exactly one game target for screenshot capture, found {len(matches)}."
         )
+    match = matches[0]
+    owner = _command_target(
+        match.page_ws_url,
+        "DOM.getFrameOwner",
+        {"frameId": match.game_target_id},
+        timeout=10.0,
+    )
+    backend_node_id = owner.get("backendNodeId")
+    if not isinstance(backend_node_id, int):
+        raise CdpConnectionError("The game iframe owner could not be resolved.")
+    box = _command_target(
+        match.page_ws_url,
+        "DOM.getBoxModel",
+        {"backendNodeId": backend_node_id},
+        timeout=10.0,
+    )
+    content = box.get("model", {}).get("content")
+    if (
+        not isinstance(content, list)
+        or len(content) != 8
+        or not all(isinstance(value, int | float) for value in content)
+    ):
+        raise CdpConnectionError("The game iframe returned invalid capture bounds.")
+    left = min(content[::2])
+    top = min(content[1::2])
+    width = max(content[::2]) - left
+    height = max(content[1::2]) - top
+    if width <= 0 or height <= 0:
+        raise CdpConnectionError("The game iframe is not visible.")
     result = _command_target(
-        matches[0].game_ws_url,
+        match.page_ws_url,
         "Page.captureScreenshot",
         {
             "format": "jpeg",
             "quality": 75,
             "fromSurface": True,
             "captureBeyondViewport": False,
+            "clip": {
+                "x": left,
+                "y": top,
+                "width": width,
+                "height": height,
+                "scale": 1,
+            },
         },
         timeout=10.0,
     )
