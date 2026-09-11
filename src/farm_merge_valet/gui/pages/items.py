@@ -40,6 +40,7 @@ from farm_merge_valet.gui.components.metrics import (
 )
 from farm_merge_valet.gui.components.policy_tree import create_policy_tree
 from farm_merge_valet.gui.components.policy_view import (
+    POLICY_SEARCH_ROLE,
     LazyPolicyBranches,
     PolicyCheckBox,
     PolicyTreeItem,
@@ -452,6 +453,11 @@ class ItemsPage(AppPage):
                 tier=tier,
             )
             child.setData(0, Qt.ItemDataRole.UserRole, definition.policy_key)
+            child.setData(
+                0,
+                POLICY_SEARCH_ROLE,
+                self._search_text_by_policy_key[definition.policy_key],
+            )
             root.addChild(child)
             self._add_policy_controls(child, definition, f"{family_name}, {child_name}")
 

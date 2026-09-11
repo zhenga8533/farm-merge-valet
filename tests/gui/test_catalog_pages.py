@@ -605,7 +605,7 @@ def test_item_tiers_sort_numerically(tmp_path) -> None:
     catalog = ItemCatalog(
         {
             "coin_1": coin_1,
-            "coin_2": replace(coin_1, game_id="coin_2", tier=2),
+            "coin_2": replace(coin_1, game_id="coin_2", display_name="Silver Coin", tier=2),
             "coin_10": replace(coin_1, game_id="coin_10", tier=10),
         }
     )
@@ -616,7 +616,7 @@ def test_item_tiers_sort_numerically(tmp_path) -> None:
 
     coin = window.items_page.table.topLevelItem(0)
     assert coin.childCount() == 0
-    window.items_page.search.setText("Tier 2")
+    window.items_page.search.setText("Silver")
     QTest.qWait(150)
     assert coin.childCount() == 0
     assert not coin.isHidden()
