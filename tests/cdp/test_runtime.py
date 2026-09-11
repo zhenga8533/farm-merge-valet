@@ -382,6 +382,15 @@ def test_discovery_uses_active_gameplay_crate_signal() -> None:
     assert "inventory?.onAnimateChanges" not in _DISCOVER_EXPRESSION
 
 
+def test_event_discovery_replaces_destroyed_scene_references() -> None:
+    from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _READ_EVENT_EXPRESSION
+
+    for expression in (_DISCOVER_EXPRESSION, _READ_EVENT_EXPRESSION):
+        assert "candidate._destroyed !== true" in expression
+        assert "mapGridView?._view" in expression
+    assert "window.__fmvGameplayMapScreen = scene" in _READ_EVENT_EXPRESSION
+
+
 def test_discovery_does_not_require_marketplace_ui_purchase_notifier() -> None:
     from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 

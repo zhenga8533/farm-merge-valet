@@ -46,8 +46,10 @@ _DISCOVER_EXPRESSION = r"""
   const itemHandler = pickContexts.find((candidate) => dropContexts.has(candidate)) || null;
   const interactionHandler = pickContexts.find(validInteractionHandler) || null;
 
-  const screen = services?.hudService?._screen ||
-    services?.mapGridView?._view || itemHandler;
+  const activeScreen = (candidate) => candidate && candidate._destroyed !== true &&
+    (candidate.parent || candidate._parent || candidate.children?.length);
+  const screen = [services?.hudService?._screen, services?.mapGridView?._view]
+    .find(activeScreen) || itemHandler;
   let systemsOwner = screen;
   for (let depth = 0; systemsOwner && !Array.isArray(systemsOwner._systems) && depth < 8;
        depth += 1) {
@@ -698,8 +700,16 @@ _READ_FARM_VISIT_EXPRESSION = r"""
 
 _READ_EVENT_EXPRESSION = r"""
 (() => {
-  let scene = window.__fmvGameplayMapScreen;
-  if (!scene || scene._destroyed === true) return null;
+  const gameplayServices = window.__fmvGameplayServices;
+  const activeScreen = (candidate) => candidate && candidate._destroyed !== true &&
+    (candidate.parent || candidate._parent || candidate.children?.length);
+  const scene = [
+    gameplayServices?.hudService?._screen,
+    gameplayServices?.mapGridView?._view,
+    window.__fmvGameplayMapScreen,
+  ].find(activeScreen);
+  if (!scene) return null;
+  window.__fmvGameplayMapScreen = scene;
   let stage = scene;
   while (stage?.parent) stage = stage.parent;
   const layers = stage?.children?.[0]?.children || [];
@@ -722,7 +732,6 @@ _READ_EVENT_EXPRESSION = r"""
   }
   if (!eventHud && !introduction && !launcher) return null;
   const level = eventHud?._levelDisplay?._levelItem;
-  const gameplayServices = window.__fmvGameplayServices;
   const eventInstances =
     gameplayServices?.timedEventService?._eventInstances?.values?.() || [];
   const eventInstance = [...eventInstances]
