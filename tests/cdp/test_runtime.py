@@ -1224,9 +1224,12 @@ def test_event_actions_use_guarded_native_handlers(monkeypatch) -> None:
 
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", evaluate_expression)
     adapter = GameRuntimeAdapter(9222, "Farm")
+    adapter._scene_id = 4
 
     assert adapter.dismiss_event_introduction("jungle").submitted
     assert adapter.enter_event("jungle").submitted
+    assert adapter._scene_refresh_required
+    assert adapter._scene_refresh_origin_id == 4
     assert adapter.explore_event("jungle", "A1", 2).submitted
     assert adapter.return_from_event("jungle").submitted
     assert "popup.close()" in expressions[0]
@@ -1237,6 +1240,43 @@ def test_event_actions_use_guarded_native_handlers(monkeypatch) -> None:
     assert "transition.returnFromEventMap()" in expressions[3]
     assert "EventPassPopup" not in expressions[3]
     assert all('"eventKey": "jungle"' in expression for expression in expressions)
+
+
+def test_event_transition_refreshes_scene_before_next_snapshot(monkeypatch) -> None:
+    discoveries = 0
+
+    def discover():
+        nonlocal discoveries
+        discoveries += 1
+        adapter._scene_id = 5
+        return RuntimeHealth(True, 5, True, True, True, True, 1, 0.0, True)
+
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.evaluate",
+        lambda *_args, **_kwargs: {
+            "health": {
+                "sceneId": 5,
+                "board": True,
+                "itemDrop": True,
+                "crateSpawn": True,
+                "inventory": True,
+                "heartbeat": 2,
+                "heartbeatAgeMs": 0,
+            },
+            "cellCount": 0,
+            "occupiedCellCount": 0,
+        },
+    )
+    adapter = GameRuntimeAdapter(9222, "Farm")
+    adapter._scene_id = 4
+    adapter._scene_refresh_origin_id = 4
+    adapter._scene_refresh_required = True
+    monkeypatch.setattr(adapter, "discover", discover)
+
+    assert adapter.read_snapshot(SnapshotOptions(False, False, False)) is not None
+    assert discoveries == 1
+    assert not adapter._scene_refresh_required
+    assert adapter._scene_refresh_origin_id is None
 
 
 def test_event_reward_claim_uses_guarded_native_handler(monkeypatch) -> None:

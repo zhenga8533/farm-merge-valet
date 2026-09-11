@@ -127,6 +127,8 @@ class GameRuntimeAdapter:
         self._heartbeat_stalled = False
         self._runtime_bootstrap_ready_at: float | None = None
         self._next_portal_maintenance_at = 0.0
+        self._scene_refresh_origin_id: int | None = None
+        self._scene_refresh_required = False
 
     def set_cancel_event(self, cancel_event: Event) -> None:
         self._cancel_event = cancel_event
@@ -529,6 +531,14 @@ class GameRuntimeAdapter:
 
     def read_snapshot(self, options: SnapshotOptions) -> RuntimeSnapshot | None:
         self._maintain_portal_session()
+        if self._scene_refresh_required:
+            health = self.discover()
+            if health.board_available and (
+                self._scene_refresh_origin_id is None
+                or health.scene_id != self._scene_refresh_origin_id
+            ):
+                self._scene_refresh_required = False
+                self._scene_refresh_origin_id = None
         started = time.monotonic()
         raw = self._evaluate(snapshot_expression(options), retry=False)
         wall_duration_ms = (time.monotonic() - started) * 1000.0
@@ -668,9 +678,10 @@ class GameRuntimeAdapter:
             reward_key = entry.get("rewardKey")
             reward_amount = entry.get("rewardAmount")
             if (
-                all(isinstance(value, str) and value for value in (
-                    event_key, event_type, track, reward_key
-                ))
+                all(
+                    isinstance(value, str) and value
+                    for value in (event_key, event_type, track, reward_key)
+                )
                 and isinstance(level, int)
                 and not isinstance(level, bool)
                 and level > 0
@@ -682,9 +693,9 @@ class GameRuntimeAdapter:
                 assert isinstance(event_type, str)
                 assert isinstance(track, str)
                 assert isinstance(reward_key, str)
-                rewards.append(EventRewardState(
-                    event_key, event_type, track, level, reward_key, reward_amount
-                ))
+                rewards.append(
+                    EventRewardState(event_key, event_type, track, level, reward_key, reward_amount)
+                )
         return tuple(rewards)
 
     def _maintain_portal_session(self) -> None:
@@ -872,9 +883,13 @@ class GameRuntimeAdapter:
         )
 
     def enter_event(self, event_key: str) -> ActionResult:
-        return self._action_result(
+        result = self._action_result(
             self._evaluate_action(_event_action_expression("enter", event_key))
         )
+        if result.submitted:
+            self._scene_refresh_origin_id = self._scene_id
+            self._scene_refresh_required = True
+        return result
 
     def explore_event(self, event_key: str, area_id: str, required_level: int) -> ActionResult:
         return self._action_result(
@@ -889,9 +904,13 @@ class GameRuntimeAdapter:
         )
 
     def return_from_event(self, event_key: str) -> ActionResult:
-        return self._action_result(
+        result = self._action_result(
             self._evaluate_action(_event_action_expression("return", event_key))
         )
+        if result.submitted:
+            self._scene_refresh_origin_id = self._scene_id
+            self._scene_refresh_required = True
+        return result
 
     def claim_event_reward(self, reward: EventRewardState) -> ActionResult:
         return self._action_result(
