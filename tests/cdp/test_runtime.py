@@ -11,7 +11,7 @@ from farm_merge_valet.automation.runtime import (
     TransientOverlayKind,
 )
 from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
-from farm_merge_valet.cdp.scripts import _HEALTH_EXPRESSION
+from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 from farm_merge_valet.core.items import InteractionTargetKind
 from farm_merge_valet.core.obstacles import WorkerState
 from farm_merge_valet.core.shops import ShopOrderState
@@ -1209,8 +1209,13 @@ def test_farm_visit_keeps_required_destination_popup_but_returns_directly(monkey
     assert adapter.return_from_farm_visit().submitted
     assert "handler._openTrainstationPopup()" in expressions[0]
     assert "popup._chosenPlayerDestination" in expressions[1]
+    assert "transition.goToFriendsFarm()" in expressions[1]
     assert "transition.goToOwnFarm()" in expressions[2]
     assert "_returnButtonClicked()" not in expressions[2]
+
+
+def test_discovery_anchors_services_to_recovered_board() -> None:
+    assert "candidate?.mapGrid?._cells === board" in _DISCOVER_EXPRESSION
 
 
 def test_farm_visit_health_uses_direct_return_transition() -> None:

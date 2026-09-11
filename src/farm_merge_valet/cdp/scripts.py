@@ -27,7 +27,8 @@ _DISCOVER_EXPRESSION = r"""
     for (const key of ['onContentAdded', 'onContentRemoved', 'onChanged']) {
       for (const subscriber of subscribers(cell?.[key])) {
         const candidate = subscriber?.context?._services;
-        if (candidate?.mapGrid && candidate?.interactionService) {
+        if (candidate?.mapGrid?._cells === board &&
+            candidate.mapGrid._isActive !== false && candidate.interactionService) {
           services = candidate;
           break;
         }
@@ -848,7 +849,17 @@ def _farm_visit_action_expression(kind: str, scene_id: int | None, **expected: o
           popup?._mainScreen?._visitButton?._isEnabled === false)
         return {{status: 'busy', detail: 'visit-destination-unavailable'}};
       window.__fmvFarmVisitTransitionStartedAt = performance.now();
-      popup._onVisitButtonPressed(popup._chosenPlayerDestination);
+      try {{
+        popup._onVisitButtonPressed(popup._chosenPlayerDestination);
+      }} catch (error) {{
+        const transition = window.__fmvFarmVisitTransition;
+        const rootServices = transition?._services;
+        const chosenDestination = rootServices?.navigation?.getChosenFriendDestination?.();
+        if (typeof transition?.goToFriendsFarm !== 'function' ||
+            !chosenDestination || rootServices?.friends?.isVisitingFriend !== true)
+          throw error;
+        void transition.goToFriendsFarm();
+      }}
       return {{status: 'submitted'}};
     }}
     if (expected.kind === 'close') {{
