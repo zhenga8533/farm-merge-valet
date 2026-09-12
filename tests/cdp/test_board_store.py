@@ -59,7 +59,30 @@ def test_arm_board_store_releases_query_object(monkeypatch) -> None:
 
 def test_board_reader_omits_inert_clouds_and_unused_behavior_names() -> None:
     assert "content?._blueprintID === 'area_cloud'" in _READ_EXPRESSION
-    assert "name === 'cooldown' || name === 'lootable'" in _READ_EXPRESSION
+    assert "name === 'cooldown' || name === 'lootable' || name === 'friendReward'" in (
+        _READ_EXPRESSION
+    )
+
+
+def test_read_board_state_preserves_friend_reward_marker(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.board_store.evaluate",
+        lambda *_args, **_kwargs: [
+            {
+                "column": 3,
+                "row": 4,
+                "hasContent": True,
+                "blueprintID": "building_bbq",
+                "objectID": 81,
+                "behaviorNames": ["friendReward"],
+            }
+        ],
+    )
+
+    state = read_board_state(9222, "Farm")
+
+    assert state is not None
+    assert state[(3, 4)].behavior_names == frozenset({"friendReward"})
 
 
 def test_read_board_state_preserves_collectable_semantics(monkeypatch) -> None:

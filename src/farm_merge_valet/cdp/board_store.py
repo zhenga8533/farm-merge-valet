@@ -246,7 +246,9 @@ _READ_EXPRESSION = """
       itemVariant: upgradeTarget,
       upgradeAppliedTier: Number.isInteger(appliedUpgradeTier) && appliedUpgradeTier >= 0
         ? appliedUpgradeTier : null,
-      behaviorNames: behaviors.filter((name) => name === 'cooldown' || name === 'lootable'),
+      behaviorNames: behaviors.filter((name) =>
+        name === 'cooldown' || name === 'lootable' || name === 'friendReward'
+      ),
       claimOutputCapacity,
       claimOutputIDs: Array.from(rewardIDs(claimReward)),
       rewardRequirements: rewardRequirements?.map((item) => ({
