@@ -864,7 +864,6 @@ class Bot:
         if (
             self.config.prioritize_obstacle_repair_resources
             and missing_ids
-            and self._obstacle_focus is None
         ):
             matching = [
                 candidate
@@ -873,6 +872,11 @@ class Bot:
             ]
             if matching:
                 prioritized = matching
+                if self._obstacle_focus is not None and not any(
+                    (candidate.coord, candidate.object_id) == self._obstacle_focus
+                    for candidate in matching
+                ):
+                    self._obstacle_focus = None
         focused = self._focused_obstacle(prioritized)
         if focused is None:
             return None
@@ -887,7 +891,7 @@ class Bot:
             return None
 
         selected = plan_obstacle_clear(
-            candidates, energy, workers, self.config.minimum_energy_reserve
+            prioritized, energy, workers, self.config.minimum_energy_reserve
         )
         if selected is not None:
             self._obstacle_focus = selected.coord, selected.object_id

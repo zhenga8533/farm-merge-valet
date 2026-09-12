@@ -429,6 +429,63 @@ def test_missing_repair_item_uses_catalog_source_when_future_loot_is_unavailable
     assert bot._obstacle_to_clear([fixed_rock, movable_toolbox]) == movable_toolbox
 
 
+def test_clearing_toolbox_fallback_keeps_repair_resource_priority() -> None:
+    bot = bare_bot()
+    bot._blueprint_items = {"tool_6": ItemRef("resources", "tool", 6)}
+    bot._obstacle_resource_names = {
+        "rock_large": "stone",
+        "toolbox_medium": "tool",
+    }
+    bot._building_repairs = (
+        BuildingRepairState(
+            "bbq",
+            0,
+            True,
+            True,
+            False,
+            False,
+            (BuildingRequirement("tool_6", 2, 0),),
+        ),
+    )
+    bot._energy = 50
+    bot._workers = WorkerState(1, 1)
+    bot._obstacle_focus = ((1, 0), 2)
+    fixed_rock = ObstacleCandidate(
+        (0, 0), "rock_large", 1, ObstacleState(10, 10, 5, False, required_workers=1)
+    )
+    clearing_toolbox = ObstacleCandidate(
+        (1, 0), "toolbox_medium", 2, ObstacleState(4, 5, None, True, clearing=True)
+    )
+    next_toolbox = ObstacleCandidate(
+        (2, 0), "toolbox_medium", 3, ObstacleState(5, 5, 5, True, required_workers=1)
+    )
+
+    assert bot._obstacle_to_clear([fixed_rock, clearing_toolbox, next_toolbox]) == next_toolbox
+
+
+def test_clearing_toolbox_does_not_fall_through_to_unneeded_rock() -> None:
+    bot = bare_bot()
+    bot._blueprint_items = {"tool_6": ItemRef("resources", "tool", 6)}
+    bot._obstacle_resource_names = {"rock_large": "stone", "toolbox_medium": "tool"}
+    bot._building_repairs = (
+        BuildingRepairState(
+            "bbq", 0, True, True, False, False,
+            (BuildingRequirement("tool_6", 2, 0),),
+        ),
+    )
+    bot._energy = 50
+    bot._workers = WorkerState(1, 1)
+    bot._obstacle_focus = ((1, 0), 2)
+    fixed_rock = ObstacleCandidate(
+        (0, 0), "rock_large", 1, ObstacleState(10, 10, 5, False, required_workers=1)
+    )
+    clearing_toolbox = ObstacleCandidate(
+        (1, 0), "toolbox_medium", 2, ObstacleState(4, 5, None, True, clearing=True)
+    )
+
+    assert bot._obstacle_to_clear([fixed_rock, clearing_toolbox]) is None
+
+
 def test_live_sync_uses_one_atomic_snapshot_and_suppresses_disabled_sections() -> None:
     class SnapshotRuntime(FakeRuntime):
         def __init__(self) -> None:
