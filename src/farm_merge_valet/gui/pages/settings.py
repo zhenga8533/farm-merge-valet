@@ -75,6 +75,11 @@ class SettingsPage(ConfigFormPage):
             "Visit other farms automatically",
             "farm_visit_automation_enabled",
         )
+        self._add_toggle(
+            workflows_form,
+            "Automatically claim visitor rewards",
+            "auto_claim_friend_rewards",
+        )
         self.land_expansion_toggle = self._add_toggle(
             workflows_form,
             "Expand farm land automatically",

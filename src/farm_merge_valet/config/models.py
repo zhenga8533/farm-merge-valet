@@ -117,6 +117,7 @@ class AppConfig(BaseModel):
     marketplace_policy_overrides: dict[str, bool] = Field(default_factory=dict)
     marketplace_automation_enabled: bool = True
     farm_visit_automation_enabled: bool = False
+    auto_claim_friend_rewards: bool = True
     event_automation_enabled: bool = False
     event_default_enabled: bool = True
     event_automation_overrides: dict[str, bool] = Field(default_factory=dict)

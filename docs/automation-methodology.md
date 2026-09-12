@@ -273,6 +273,14 @@ board recovery, avoiding heap searches while neither farm's map grid is active.
 The native travel-summary reward popup is then closed through the standard
 verified overlay path before local automation resumes.
 
+Back on the player's own farm, visitor-assisted tiles carry the game's
+authoritative `friendReward` behavior and may contain rewards from multiple
+visitors. The separate default-enabled visitor-reward setting submits one
+marked tile at a time through the native tile interaction handler. Immediately
+before submission, the runtime revalidates the scene, coordinate, object
+identity, behavior, and non-empty reward data. Collection is confirmed only
+when that exact behavior disappears from the authoritative board snapshot.
+
 ## Shop orders
 
 The runtime reads current orders from the game's order service. Each typed order

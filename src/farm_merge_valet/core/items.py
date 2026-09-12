@@ -25,6 +25,7 @@ def item_base_policy_key(policy_key: str) -> str:
 
 class InteractionTargetKind(StrEnum):
     IMMEDIATE = "immediate"
+    FRIEND_REWARD = "friend-reward"
     REWARD = "reward"
     REWARD_CONTAINER = "reward-container"
     UPGRADE = "upgrade"

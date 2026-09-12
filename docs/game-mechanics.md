@@ -140,6 +140,9 @@ These mechanics apply only to platform builds that expose the visiting feature.
   buildings (grants the ingredient they produce).
 - Visiting a friend can also grant a "x2 Boost" that doubles crate/energy
   rewards for a period.
+- Actions other players perform on your farm leave a reward marker on the
+  affected tile. Claiming that tile can collect one or more accumulated visitor
+  rewards without spending a ticket.
 
 ## Land / Board Expansion
 

@@ -209,6 +209,7 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     assert "Automate item actions" in labels
     assert "Automate shops" in labels
     assert "Automate marketplace purchases" in labels
+    assert "Automatically claim visitor rewards" in labels
     assert "Automate event islands" in labels
     assert "Enable newly supported events by default" in labels
     assert "Automatically claim event rewards" in labels
@@ -246,6 +247,7 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         "shop_automation_enabled",
         "marketplace_automation_enabled",
         "farm_visit_automation_enabled",
+        "auto_claim_friend_rewards",
         "land_expansion_automation_enabled",
     ):
         assert section_groups["Automation"].isAncestorOf(window.settings_page.controls[field])

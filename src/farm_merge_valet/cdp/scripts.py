@@ -1612,6 +1612,10 @@ def _interaction_expression(
     ['animal', 'crop'].includes(content.getBehavior?.('harvestable')?._data?.harvestableType);
   const targetValidators = {{
     'immediate': () => content.hasBehavior?.('collectable'),
+    'friend-reward': () =>
+      content.hasBehavior?.('friendReward') &&
+        Array.isArray(content.getBehavior?.('friendReward')?._data?.rewardData) &&
+        content.getBehavior('friendReward')._data.rewardData.length > 0,
     'reward': () =>
       content.hasBehavior?.('collectable') && content.hasBehavior?.('currency') &&
         Array.isArray(content.getBehavior?.('collectable')?.reward) &&

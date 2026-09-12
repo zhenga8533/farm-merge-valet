@@ -76,6 +76,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "shop_automation_enabled",
         "marketplace_automation_enabled",
         "farm_visit_automation_enabled",
+        "auto_claim_friend_rewards",
         "land_expansion_automation_enabled",
         "land_expansion_max_coin_cost",
         "land_expansion_max_gem_cost",

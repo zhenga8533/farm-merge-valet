@@ -1226,6 +1226,30 @@ def test_pending_product_interaction_confirms_from_authoritative_source_change(
     assert any(record.fmv_event == "interaction.confirmed" for record in caplog.records)
 
 
+def test_pending_friend_reward_confirms_when_marker_is_removed(monkeypatch) -> None:
+    bot = bare_bot()
+    initial = LiveCellState(
+        True,
+        "building_bbq",
+        10,
+        behavior_names=frozenset({"friendReward"}),
+    )
+    interaction = InteractionAction(
+        InteractionTargetKind.FRIEND_REWARD,
+        (1, 2),
+        "building_bbq",
+        10,
+    )
+    bot._interaction_workflow.pending = PendingInteraction(
+        interaction, initial, 7, 1.0, initial, 1.0
+    )
+    bot._live_cells[interaction.coord] = LiveCellState(True, "building_bbq", 10)
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
+
+    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot._interaction_workflow.pending is None
+
+
 def test_pending_removal_confirms_from_authoritative_source_change(monkeypatch) -> None:
     bot = bare_bot()
     initial = LiveCellState(True, "rock_1", 91)

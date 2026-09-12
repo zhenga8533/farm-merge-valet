@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from threading import Event, Lock
 
 import pytest
@@ -14,12 +15,14 @@ from farm_merge_valet.automation.runtime import (
     BuildingRepairState,
     BuildingRequirement,
     CrateSpawnResult,
+    FarmSceneKind,
     LiveCellState,
     RuntimeConnectionError,
     RuntimeHealth,
     RuntimeSnapshot,
 )
 from farm_merge_valet.automation.workflows import (
+    InteractionAction,
     InteractionWorkflow,
     MergeWorkflow,
     ShopWorkflow,
@@ -206,6 +209,53 @@ def test_repair_reservation_protects_exact_items_for_best_placed_shop() -> None:
     assert bot._repair_target() is not None
     assert bot._repair_target().building_id == "bakery"
     assert bot._merge_consumes_reserved_repair_item(action)
+
+
+def test_friend_rewards_are_claimed_independently_of_item_automation() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(item_automation_enabled=False)
+    bot._last_health = replace(health(advancing=True), farm_scene=FarmSceneKind.OWN)
+    bot._live_cells = {
+        (3, 4): LiveCellState(
+            True,
+            "building_bbq",
+            81,
+            behavior_names=frozenset({"friendReward"}),
+        )
+    }
+
+    immediate, depleted, ready = bot._interaction_actions()
+
+    assert immediate == [
+        InteractionAction(
+            InteractionTargetKind.FRIEND_REWARD,
+            (3, 4),
+            "building_bbq",
+            81,
+        )
+    ]
+    assert depleted == []
+    assert ready == []
+
+
+def test_friend_reward_claiming_respects_setting_and_scene() -> None:
+    bot = bare_bot()
+    bot._live_cells = {
+        (3, 4): LiveCellState(
+            True,
+            "building_bbq",
+            81,
+            behavior_names=frozenset({"friendReward"}),
+        )
+    }
+    bot._last_health = replace(health(advancing=True), farm_scene=FarmSceneKind.VISITOR)
+
+    assert bot._interaction_actions() == ([], [], [])
+
+    bot._last_health = replace(health(advancing=True), farm_scene=FarmSceneKind.OWN)
+    bot.config = AppConfig(auto_claim_friend_rewards=False)
+
+    assert bot._interaction_actions() == ([], [], [])
 
 
 def test_absent_buildings_never_reserve_resources() -> None:

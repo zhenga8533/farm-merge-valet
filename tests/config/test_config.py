@@ -425,6 +425,10 @@ def test_reward_overlays_are_dismissed_by_default() -> None:
     assert AppConfig().auto_dismiss_overlays
 
 
+def test_friend_rewards_are_claimed_by_default() -> None:
+    assert AppConfig().auto_claim_friend_rewards
+
+
 def test_storage_bubbles_are_popped_by_default() -> None:
     assert AppConfig().auto_pop_storage_bubbles
 

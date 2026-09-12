@@ -160,6 +160,12 @@ class InteractionWorkflow:
             InteractionTargetKind.REMOVE,
         }:
             return current is None or current.object_id != pending.action.object_id
+        if pending.action.kind is InteractionTargetKind.FRIEND_REWARD:
+            return (
+                current is None
+                or current.object_id != pending.action.object_id
+                or "friendReward" not in current.behavior_names
+            )
         if pending.action.kind is InteractionTargetKind.UPGRADE:
             return (
                 current is None

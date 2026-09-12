@@ -925,7 +925,12 @@ class Bot:
     def _interaction_actions(
         self,
     ) -> tuple[list[InteractionAction], list[InteractionAction], list[InteractionAction]]:
-        if not self.config.item_automation_enabled:
+        claim_friend_rewards = (
+            self.config.auto_claim_friend_rewards
+            and self._last_health is not None
+            and self._last_health.farm_scene is FarmSceneKind.OWN
+        )
+        if not self.config.item_automation_enabled and not claim_friend_rewards:
             self._obstacle_focus = None
             return [], [], []
         immediate: list[InteractionAction] = []
@@ -934,6 +939,18 @@ class Bot:
         ready: list[InteractionAction] = []
         for coord, state in sorted(self._live_cells.items()):
             if state.blueprint_id is None:
+                continue
+            if claim_friend_rewards and "friendReward" in state.behavior_names:
+                immediate.append(
+                    InteractionAction(
+                        InteractionTargetKind.FRIEND_REWARD,
+                        coord,
+                        state.blueprint_id,
+                        state.object_id,
+                    )
+                )
+                continue
+            if not self.config.item_automation_enabled:
                 continue
             policy_key = self._live_policy_key(state)
             if policy_key is None:
@@ -1085,6 +1102,7 @@ class Bot:
         producer_order = {ProducerKind.ANIMAL: 0, ProducerKind.CROP: 1, None: 2}
         immediate_order = {
             InteractionTargetKind.REMOVE: 0,
+            InteractionTargetKind.FRIEND_REWARD: 1,
             InteractionTargetKind.IMMEDIATE: 1,
             InteractionTargetKind.REWARD: 1,
             InteractionTargetKind.REWARD_CONTAINER: 1,
