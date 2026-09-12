@@ -715,6 +715,7 @@ _READ_EVENT_EXPRESSION = r"""
     window.__fmvGameplayMapScreen,
   ].find(activeScreen);
   if (!scene) return null;
+  if (gameplayServices?.mapGrid?._isActive === false) return null;
   window.__fmvGameplayMapScreen = scene;
   let stage = scene;
   while (stage?.parent) stage = stage.parent;
@@ -736,7 +737,14 @@ _READ_EVENT_EXPRESSION = r"""
     }
     for (const child of candidate?.children || []) queue.push(child);
   }
-  if (!eventHud && !introduction && !launcher) return null;
+  const rootServices = gameplayServices?.ordersService?._autoSaveService?.services ||
+    gameplayServices?.ordersService?._autoSaveService?._services;
+  const timedEvent = rootServices?.timeLimitedEvent;
+  const directEnter = !eventHud && window.__fmvFarmSceneKind === 'own' &&
+    timedEvent?._services === rootServices &&
+    typeof timedEvent.goToEventMap === 'function' &&
+    typeof timedEvent.activeTheme === 'string' && Boolean(timedEvent.activeTheme);
+  if (!eventHud && !introduction && !launcher && !directEnter) return null;
   const level = eventHud?._levelDisplay?._levelItem;
   const eventInstances =
     gameplayServices?.timedEventService?._eventInstances?.values?.() || [];
@@ -744,11 +752,10 @@ _READ_EVENT_EXPRESSION = r"""
     .find((candidate) => candidate?._eventActive === true &&
       candidate?.eventType === 'timelimitedevent' &&
       (!launcher || candidate?._button === launcher));
-  const eventService = gameplayServices?.timeLimitedEvent ||
+  const eventService = timedEvent || gameplayServices?.timeLimitedEvent ||
     eventHud?._eventEnergyCounter?._resourceService?.services?.timeLimitedEvent ||
     eventInstance;
-  const sharedInventory = eventInstance?._services === gameplayServices
-    ? gameplayServices?.ordersService?._inventory : null;
+  const sharedInventory = gameplayServices?.ordersService?._inventory;
   const sharedEnergy = sharedInventory?.getInventoryItem?.('time_limited_event_energy');
   const energy = eventHud?._eventEnergyCounter?._eventEnergyItem || sharedEnergy;
   const theme = eventService?._eventConfiguration?.theme ||
@@ -779,10 +786,10 @@ _READ_EVENT_EXPRESSION = r"""
     key,
     displayName: key === 'time-limited-event' ? 'Time-limited event' : key,
     active: true,
-    supported: Boolean(eventHud || launcher || introduction),
+    supported: Boolean(eventHud || launcher || introduction || directEnter),
     current: Boolean(eventHud),
     introductionOpen: Boolean(introduction),
-    canEnter: Boolean(launcher && !eventHud),
+    canEnter: Boolean(!eventHud && (launcher || directEnter)),
     canReturn: Boolean(eventHud),
     energyKey: typeof energy?._key === 'string' ? energy._key : null,
     energy: Number.isInteger(energy?.amount) ? energy.amount :
@@ -934,10 +941,13 @@ def _event_action_expression(kind: str, event_key: str, **expected: object) -> s
     }}
     if (expected.kind === 'enter') {{
       const eventService = window.__fmvEventService;
-      if (state.current || !state.canEnter ||
-          typeof eventService?._goToEventMap !== 'function')
+      const enter = typeof eventService?._goToEventMap === 'function'
+        ? eventService._goToEventMap.bind(eventService)
+        : typeof eventService?.goToEventMap === 'function'
+          ? eventService.goToEventMap.bind(eventService) : null;
+      if (state.current || !state.canEnter || !enter)
         return {{status: 'unavailable', detail: 'event-transition-not-current'}};
-      void eventService._goToEventMap();
+      void enter();
       return {{status: 'submitted', detail: 'event-transition'}};
     }}
     if (expected.kind === 'explore') {{

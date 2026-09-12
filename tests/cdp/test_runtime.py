@@ -396,6 +396,21 @@ def test_event_discovery_replaces_destroyed_scene_references() -> None:
     assert "window.__fmvGameplayMapScreen = scene" in _READ_EVENT_EXPRESSION
 
 
+def test_event_discovery_can_use_active_timed_event_service_without_launcher() -> None:
+    from farm_merge_valet.cdp.scripts import _READ_EVENT_EXPRESSION, _event_action_expression
+
+    assert "gameplayServices?.mapGrid?._isActive === false" in _READ_EVENT_EXPRESSION
+    assert "timedEvent?._services === rootServices" in _READ_EVENT_EXPRESSION
+    assert "typeof timedEvent.goToEventMap === 'function'" in _READ_EVENT_EXPRESSION
+    assert "const sharedInventory = gameplayServices?.ordersService?._inventory" in (
+        _READ_EVENT_EXPRESSION
+    )
+    assert "launcher || directEnter" in _READ_EVENT_EXPRESSION
+    assert "eventService.goToEventMap.bind(eventService)" in _event_action_expression(
+        "enter", "jungle"
+    )
+
+
 def test_discovery_does_not_require_marketplace_ui_purchase_notifier() -> None:
     from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
 
@@ -1247,7 +1262,8 @@ def test_event_actions_use_guarded_native_handlers(monkeypatch) -> None:
     assert adapter.explore_event("jungle", "A1", 2).submitted
     assert adapter.return_from_event("jungle").submitted
     assert "popup.close()" in expressions[0]
-    assert "eventService._goToEventMap()" in expressions[1]
+    assert "eventService._goToEventMap.bind(eventService)" in expressions[1]
+    assert "eventService.goToEventMap.bind(eventService)" in expressions[1]
     assert "service.unlockArea(area)" in expressions[2]
     assert '"areaID": "A1"' in expressions[2]
     assert '"requiredLevel": 2' in expressions[2]
