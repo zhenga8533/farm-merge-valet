@@ -47,6 +47,19 @@ def capture_game_screenshot(port: int, page_title: str | None = None) -> bytes:
     height = max(content[1::2]) - top
     if width <= 0 or height <= 0:
         raise CdpConnectionError("The game iframe is not visible.")
+    metrics = _command_target(
+        match.page_ws_url,
+        "Page.getLayoutMetrics",
+        {},
+        timeout=10.0,
+    )
+    viewport = metrics.get("cssVisualViewport")
+    if not isinstance(viewport, dict):
+        raise CdpConnectionError("The game page returned invalid viewport metrics.")
+    page_x = viewport.get("pageX")
+    page_y = viewport.get("pageY")
+    if not all(isinstance(value, int | float) for value in (page_x, page_y)):
+        raise CdpConnectionError("The game page returned invalid viewport coordinates.")
     result = _command_target(
         match.page_ws_url,
         "Page.captureScreenshot",
@@ -56,8 +69,8 @@ def capture_game_screenshot(port: int, page_title: str | None = None) -> bytes:
             "fromSurface": True,
             "captureBeyondViewport": False,
             "clip": {
-                "x": left,
-                "y": top,
+                "x": left + page_x,
+                "y": top + page_y,
                 "width": width,
                 "height": height,
                 "scale": 1,
