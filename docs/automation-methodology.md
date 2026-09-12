@@ -113,8 +113,10 @@ A strict, default-enabled transient-overlay
 step runs before this gate. It handles level-up, daily bonus/challenge, timed-event,
 ordinary reward, travel-summary, promotional, sticker album/set, and sticker-pack
 transitions through their native callbacks. Sticker packs use their native Skip and
-subsequent Collect transitions. Optional
-high-rank duplicate raffle proposals are declined through their registered
+subsequent Collect transitions. Explicitly non-interactive, non-dismissible
+popup-layer elements are treated as passive notifications; unknown interactive
+popups still pause automation. Optional high-rank duplicate raffle proposals
+are declined through their registered
 "Not now" interaction after its animation resolver is ready. The push-notification
 opt-in popup likewise uses its native dismiss handler, preserving the game's
 dismissal timestamp and analytics without requesting notification permission. A partially closed

@@ -96,3 +96,13 @@ def test_health_and_dismissal_share_overlay_contract() -> None:
             continue
         assert kind.value in _HEALTH_EXPRESSION
         assert kind.value in dismissal
+
+
+def test_passive_popup_filter_keeps_interactive_popups_blocking() -> None:
+    context = _overlay_context_expression()
+    assert "popup?.eventMode === 'none'" in context
+    assert "popup?.interactiveChildren === false" in context
+    assert "typeof popup?.close !== 'function'" in context
+    assert "child?.eventMode === 'static'" in context
+    assert "child?.eventMode === 'dynamic'" in context
+    assert "!passivePopup(child)" in context
