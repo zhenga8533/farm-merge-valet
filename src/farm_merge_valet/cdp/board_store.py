@@ -29,10 +29,13 @@ _CELL_MAP_MIN_SIZE = 50
 _CELL_MAP_MAX_SIZE = 5000
 
 _FIND_CELLS_MAP_EXPRESSION = f"""
-function() {{
+async function() {{
   const subscribers = (signal) => Array.isArray(signal?._subscribers)
     ? signal._subscribers : [];
+  let inspected = 0;
   for (const m of this) {{
+    if (++inspected % 32 === 0)
+      await new Promise((resolve) => setTimeout(resolve, 0));
     try {{
       if (m.size < {_CELL_MAP_MIN_SIZE} || m.size > {_CELL_MAP_MAX_SIZE}) continue;
       const first = m.values().next().value;
@@ -40,7 +43,10 @@ function() {{
       const keys = {list(_CELL_SHAPE_KEYS)!r};
       if (!keys.every((k) => k in first)) continue;
       let services = null;
+      let inspectedCells = 0;
       for (const cell of m.values()) {{
+        if (++inspectedCells % 128 === 0)
+          await new Promise((resolve) => setTimeout(resolve, 0));
         for (const key of ['onContentAdded', 'onContentRemoved', 'onChanged']) {{
           const subscriber = subscribers(cell?.[key]).find((entry) =>
             entry?.context?._services?.mapGrid?._cells === m &&
@@ -308,6 +314,7 @@ def _arm_board_store_target(ws_url: str, cancel_event: Event | None) -> str:
                 "objectId": instances_object_id,
                 "functionDeclaration": _FIND_CELLS_MAP_EXPRESSION,
                 "returnByValue": True,
+                "awaitPromise": True,
             },
             timeout=30,
             cancel_event=cancel_event,

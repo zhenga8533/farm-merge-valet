@@ -91,7 +91,9 @@ Before heap recovery, a bounded bootstrap check waits for the game document,
 JavaScript bundle, and render canvas to become ready and stable. Heap recovery
 then verifies that the renderer can produce a frame. It locates
 the exact active board through its map-grid service owner instead of measuring
-render bounds across candidate maps. Failed scans use a 5, 15, 60, then
+render bounds across candidate maps. The board search yields between batches
+of candidate maps and cells so the game loop and backend heartbeat can continue
+during scene transitions. Failed scans use a 5, 15, 60, then
 300-second cooldown. Expected startup probes, failed scans, and cooldowns are
 debug diagnostics; successful recovery remains an informational event.
 

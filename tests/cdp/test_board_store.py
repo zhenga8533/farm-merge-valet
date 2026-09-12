@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
+
+import pytest
+
 from farm_merge_valet.automation.runtime import LiveCellState, RewardRequirement
 from farm_merge_valet.cdp.board_store import (
+    _FIND_CELLS_MAP_EXPRESSION,
     _READ_EXPRESSION,
     _arm_board_store_target,
     read_board_state,
@@ -29,6 +35,7 @@ def test_read_board_state_preserves_cells_without_content(monkeypatch) -> None:
 
 def test_arm_board_store_releases_query_object(monkeypatch) -> None:
     methods = []
+    scan_params = []
 
     def command(_ws_url, method, _params=None, **_kwargs):
         methods.append(method)
@@ -37,6 +44,7 @@ def test_arm_board_store_releases_query_object(monkeypatch) -> None:
         if method == "Runtime.queryObjects":
             return {"objects": {"objectId": "map-instances"}}
         if method == "Runtime.callFunctionOn":
+            scan_params.append(_params)
             return {
                 "result": {
                     "value": {
@@ -54,7 +62,28 @@ def test_arm_board_store_releases_query_object(monkeypatch) -> None:
     result = _arm_board_store_target("ws://game", None)
 
     assert result.startswith("found")
+    assert scan_params[0]["awaitPromise"] is True
     assert methods[-2:] == ["Runtime.releaseObject", "Runtime.releaseObject"]
+
+
+def test_board_recovery_yields_during_large_heap_and_board_scans() -> None:
+    assert _FIND_CELLS_MAP_EXPRESSION.startswith("\nasync function()")
+    assert "inspected % 32 === 0" in _FIND_CELLS_MAP_EXPRESSION
+    assert "inspectedCells % 128 === 0" in _FIND_CELLS_MAP_EXPRESSION
+    assert "await new Promise((resolve) => setTimeout(resolve, 0))" in (
+        _FIND_CELLS_MAP_EXPRESSION
+    )
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for JavaScript syntax checks")
+    result = subprocess.run(
+        [node, "--check", "-"],
+        input=f"({_FIND_CELLS_MAP_EXPRESSION});",
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_board_reader_omits_inert_clouds_and_unused_behavior_names() -> None:
