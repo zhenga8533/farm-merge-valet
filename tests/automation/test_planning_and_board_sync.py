@@ -149,6 +149,8 @@ def bare_bot() -> Bot:
     bot._reward_interaction_ids = frozenset()
     bot._clearable_ids = frozenset()
     bot._shovelable_ids = frozenset()
+    bot._decorative_building_ids = frozenset()
+    bot._event_building_ids = frozenset()
     bot._energy = None
     bot._workers = None
     bot._obstacle_focus = None
@@ -223,6 +225,89 @@ def test_absent_buildings_never_reserve_resources() -> None:
 
     assert bot._repair_target() is None
     assert bot._repair_reserves() == {}
+
+
+def test_repair_target_prioritizes_nearly_complete_workshop_by_missing_cost() -> None:
+    bot = bare_bot()
+    bot._building_repairs = (
+        BuildingRepairState(
+            "bbq",
+            0,
+            True,
+            True,
+            False,
+            False,
+            (
+                BuildingRequirement("wood_7", 2, 2),
+                BuildingRequirement("stone_7", 2, 2),
+                BuildingRequirement("tool_6", 2, 0),
+            ),
+        ),
+        BuildingRepairState(
+            "sweets",
+            0,
+            True,
+            True,
+            False,
+            False,
+            (
+                BuildingRequirement("wood_9", 1, 0),
+                BuildingRequirement("stone_8", 2, 0),
+                BuildingRequirement("tool_8", 2, 0),
+            ),
+        ),
+    )
+
+    assert bot._repair_target() is not None
+    assert bot._repair_target().building_id == "bbq"
+
+
+def test_repair_target_excludes_events_and_prioritizes_structures_over_decorations() -> None:
+    bot = bare_bot()
+    bot._decorative_building_ids = frozenset({"decorative_toilet"})
+    bot._event_building_ids = frozenset({"decorative_battlepass_cinema"})
+    requirement = (BuildingRequirement("tool_1", 1, 0),)
+    bot._building_repairs = (
+        BuildingRepairState(
+            "decorative_battlepass_cinema", 0, False, True, False, False, requirement
+        ),
+        BuildingRepairState("decorative_toilet", 0, False, True, False, False, requirement),
+        BuildingRepairState("museum", 0, False, True, False, False, requirement),
+    )
+
+    assert bot._repair_target() is not None
+    assert bot._repair_target().building_id == "museum"
+
+
+def test_repair_cost_accounts_for_resource_tiers() -> None:
+    bot = bare_bot()
+    bot._blueprint_items = {
+        "tool_2": ItemRef("resources", "tool", 2),
+        "tool_7": ItemRef("resources", "tool", 7),
+    }
+    bot._building_repairs = (
+        BuildingRepairState(
+            "high_tier",
+            0,
+            False,
+            True,
+            False,
+            False,
+            (BuildingRequirement("tool_7", 1, 0),),
+        ),
+        BuildingRepairState(
+            "low_tier",
+            0,
+            False,
+            True,
+            False,
+            False,
+            (BuildingRequirement("tool_2", 2, 0),),
+        ),
+    )
+
+    assert bot._repair_target() is not None
+    assert bot._repair_target().building_id == "low_tier"
 
 
 def test_missing_repair_item_prioritizes_lower_tier_output_over_fixed_obstacle() -> None:

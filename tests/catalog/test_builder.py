@@ -290,16 +290,23 @@ def test_catalog_classifies_event_content_by_function_and_adds_event_trait() -> 
                 graph="golden_christmas_tree",
                 tier=1,
             ),
+            "decorative_battlepass_cinema": _metadata(
+                components=["building", "decorative"],
+                alias="obj_battlepass_cinema",
+                graph="decorative_battlepass_cinema",
+                extends="base_decorative",
+            ),
         }
     )
 
     flower = catalog.items["islandflower_1"]
     bush = catalog.items["islandbush_small"]
     currency = catalog.items["golden_christmas_tree_1"]
+    battle_pass_building = catalog.items["decorative_battlepass_cinema"]
     assert (flower.category, flower.display_name) == ("resources", "Island Flower")
     assert bush.category == "obstacles"
     assert currency.category == "currencies"
-    assert all("event" in item.traits for item in (flower, bush, currency))
+    assert all("event" in item.traits for item in (flower, bush, currency, battle_pass_building))
 
 
 def test_catalog_splits_disconnected_nodes_from_a_merge_family() -> None:

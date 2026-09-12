@@ -255,11 +255,14 @@ class BuildingsPage(AppPage):
     ) -> QTreeWidgetItem:
         if is_workshop:
             label = "Workshops"
-        elif catalog_item is not None and catalog_item.display_name.casefold().startswith(
-            "decorative "
+        elif catalog_item is not None and (
+            "event" in catalog_item.traits
+            or catalog_item.display_name.casefold().startswith("decorative ")
         ):
             label = "Event Buildings"
-        elif building_id.startswith("decorative_"):
+        elif (
+            catalog_item is not None and "decorative" in catalog_item.traits
+        ) or building_id.startswith("decorative_"):
             label = "Decorative Buildings"
         else:
             label = "Structures"

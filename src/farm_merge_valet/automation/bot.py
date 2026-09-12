@@ -6,6 +6,7 @@ import logging
 import random
 import time
 from collections.abc import Callable
+from fractions import Fraction
 from queue import Empty, Queue
 from threading import Event, Lock, Thread
 from typing import Literal
@@ -125,6 +126,8 @@ class Bot:
         self._upgrade_interaction_ids: frozenset[str] = frozenset()
         self._clearable_ids: frozenset[str] = frozenset()
         self._shovelable_ids: frozenset[str] = frozenset()
+        self._decorative_building_ids: frozenset[str] = frozenset()
+        self._event_building_ids: frozenset[str] = frozenset()
         self._max_item_tiers: dict[tuple[str, str] | tuple[str, str, str | None], int] = {}
         self.board = BoardGrid()
         self._live_cells: dict[GridCoord, LiveCellState] = {}
@@ -349,6 +352,14 @@ class Bot:
             self._upgrade_interaction_ids = catalog.upgrade_interaction_ids
             self._clearable_ids = catalog.clearable_ids
             self._shovelable_ids = catalog.shovelable_ids
+            self._decorative_building_ids = frozenset(
+                item.game_id for item in catalog.items.values() if "decorative" in item.traits
+            )
+            self._event_building_ids = frozenset(
+                item.game_id
+                for item in catalog.items.values()
+                if "building" in item.capabilities and "event" in item.traits
+            )
             self._marketplace_catalog = catalog.marketplace_offers
         except (CatalogUnavailableError, OSError, ValueError) as exc:
             log_event(
@@ -625,6 +636,7 @@ class Bot:
             if state.placed
             and not state.active
             and state.requirements
+            and state.building_id not in self._event_building_ids
             and self.config.building_repair_enabled(state.building_id)
         ]
         if not candidates:
@@ -632,13 +644,30 @@ class Bot:
         return min(
             candidates,
             key=lambda state: (
-                not state.workshop if self.config.prioritize_repair_shops else False,
-                sum(requirement.amount for requirement in state.requirements)
+                self._building_repair_priority(state)
+                if self.config.prioritize_repair_shops
+                else 0,
+                self._remaining_repair_cost(state)
                 if self.config.prioritize_cheaper_repairs
                 else 0,
                 state.building_id,
             ),
         )
+
+    def _building_repair_priority(self, state: BuildingRepairState) -> int:
+        if state.workshop:
+            return 0
+        if state.building_id not in self._decorative_building_ids:
+            return 1
+        return 2
+
+    def _remaining_repair_cost(self, state: BuildingRepairState) -> Fraction:
+        cost = Fraction()
+        for requirement in state.requirements:
+            item = self._blueprint_items.get(requirement.blueprint_id)
+            tier = item.tier if item is not None else 1
+            cost += requirement.missing * Fraction(5, 2) ** (tier - 1)
+        return cost
 
     def _repair_reserves(self) -> dict[ItemRef, int]:
         if not self.config.preserve_building_repair_resources:

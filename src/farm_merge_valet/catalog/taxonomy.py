@@ -165,6 +165,7 @@ def _is_event_content(blueprint_id: str, family_id: str) -> bool:
         (
             "decorative_christmas_",
             "decorative_halloween_",
+            "decorative_battlepass_",
             "decorative_timelimitedevent_",
             "reward_crate_golden_",
             "reward_crate_jingleballs",
@@ -178,6 +179,7 @@ def _is_seasonal_decoration(blueprint_id: str) -> bool:
         (
             "decorative_christmas_",
             "decorative_halloween_",
+            "decorative_battlepass_",
             "decorative_timelimitedevent_",
         )
     )
