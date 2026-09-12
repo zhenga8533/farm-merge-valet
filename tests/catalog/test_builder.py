@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from farm_merge_valet.catalog.builder import build_item_catalog
 from farm_merge_valet.catalog.models import TileInteractionMode
+from farm_merge_valet.catalog.taxonomy import obstacle_resource_name
 
 
 def _metadata(
@@ -307,6 +308,29 @@ def test_catalog_classifies_event_content_by_function_and_adds_event_trait() -> 
     assert bush.category == "obstacles"
     assert currency.category == "currencies"
     assert all("event" in item.traits for item in (flower, bush, currency, battle_pass_building))
+
+
+def test_catalog_derives_obstacle_resource_sources_from_base_blueprints() -> None:
+    catalog = build_item_catalog(
+        {
+            "tree_small": _metadata(
+                components=["mapSource"], alias="obj_tree_small", extends="base_tree"
+            ),
+            "rock_small": _metadata(
+                components=["mapSource"], alias="obj_rock_small", extends="base_rock"
+            ),
+            "toolbox_small": _metadata(
+                components=["mapSource", "movable"],
+                alias="obj_toolbox_small",
+                extends="base_toolbox",
+            ),
+        }
+    )
+
+    assert "wood-source" in catalog.items["tree_small"].traits
+    assert "stone-source" in catalog.items["rock_small"].traits
+    assert "tool-source" in catalog.items["toolbox_small"].traits
+    assert obstacle_resource_name(frozenset(), "toolbox") == "tool"
 
 
 def test_catalog_splits_disconnected_nodes_from_a_merge_family() -> None:

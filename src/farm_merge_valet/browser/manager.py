@@ -24,7 +24,7 @@ from farm_merge_valet.cdp.targets import (
     has_page_url,
     open_browser_page,
     read_browser_metadata,
-    reload_game_page,
+    restart_game_page,
 )
 from farm_merge_valet.cdp.transport import CdpConnectionError
 from farm_merge_valet.config import AppConfig
@@ -530,14 +530,15 @@ class BrowserManager:
         raise BrowserManagerError(f"The game did not finish loading. {detail}")
 
     def recover_game(self) -> BrowserStatus:
-        """Reload a frozen game page or restore its managed browser and page."""
+        """Restart a frozen game page or restore its managed browser and page."""
         status = self.ensure_running()
         if not status.managed:
             raise BrowserManagerError("Refusing to recover the game in an unowned browser.")
         if status.game_frame_available:
             portal = portal_for_page_url(self.settings.game_url)
-            reload_game_page(
+            restart_game_page(
                 self.settings.cdp_port,
+                self.settings.game_url,
                 self.settings.window_title,
                 allow_observation=(
                     portal is not None and portal.support_level is PortalSupportLevel.OBSERVATION
@@ -546,8 +547,8 @@ class BrowserManager:
             log_event(
                 logger,
                 logging.WARNING,
-                "browser.game_reloaded",
-                "Reloaded the game page after its action pipeline stopped responding.",
+                "browser.game_restarted",
+                "Restarted the game page after its action pipeline stopped responding.",
             )
             time.sleep(0.25)
             return self.ensure_game_open()

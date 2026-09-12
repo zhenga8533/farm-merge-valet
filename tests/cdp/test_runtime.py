@@ -241,6 +241,10 @@ def test_health_detects_each_supported_reward_overlay_phase() -> None:
     assert "promotional-popup" in _HEALTH_EXPRESSION
     assert "activePopup?._rewardService === services?.rewardService" in _HEALTH_EXPRESSION
     assert "'upsellPopupOptions' in activePopup" in _HEALTH_EXPRESSION
+    assert "_userDisconnectBySingleSocket" in _HEALTH_EXPRESSION
+    assert "_singleSocketDisconnect" in _HEALTH_EXPRESSION
+    assert "activePopup?._name === 'ConnectedOnDifferentDevicePopup'" in _HEALTH_EXPRESSION
+    assert "session-replaced" in _HEALTH_EXPRESSION
     assert "unsupportedOverlayDetail" in _HEALTH_EXPRESSION
     assert "['disconnection', 'onboarding', 'fake_ad']" in _HEALTH_EXPRESSION
     assert "backendConnection?.isConnected" in _HEALTH_EXPRESSION

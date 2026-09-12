@@ -16,6 +16,7 @@ from farm_merge_valet.automation.runtime import (
     LiveCellState,
     RuntimeConnectionError,
     RuntimeHealth,
+    RuntimeRecoveryRequired,
     RuntimeSnapshot,
     TransientOverlayKind,
 )
@@ -147,6 +148,7 @@ def health(
     transient_overlay_detail: str | None = None,
     farm_scene: FarmSceneKind = FarmSceneKind.OWN,
     scene_transition_active: bool = False,
+    backend_connected: bool | None = None,
 ) -> RuntimeHealth:
     return RuntimeHealth(
         True,
@@ -167,6 +169,7 @@ def health(
         transient_overlay_detail=transient_overlay_detail,
         farm_scene=farm_scene,
         scene_transition_active=scene_transition_active,
+        backend_connected=backend_connected,
     )
 
 
@@ -668,6 +671,22 @@ def test_known_overlay_is_dismissed_before_frozen_heartbeat_and_board_sync(caplo
     assert bot.runtime.dismissed_overlays == 1
     assert board_reads == 0
     assert "Dismissed level-up overlay." in caplog.messages
+
+
+def test_replaced_backend_session_requests_runtime_recovery() -> None:
+    class ReplacedSessionRuntime(FakeRuntime):
+        def read_runtime_health(self):
+            return health(
+                advancing=False,
+                transient_overlay=TransientOverlayKind.SESSION_REPLACED,
+                backend_connected=False,
+            )
+
+    bot = bare_bot()
+    bot.runtime = ReplacedSessionRuntime()
+
+    with pytest.raises(RuntimeRecoveryRequired, match="replaced this session"):
+        bot.step()
 
 
 def test_overlay_dismissal_can_be_disabled(caplog) -> None:

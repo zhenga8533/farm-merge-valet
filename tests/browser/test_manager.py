@@ -433,25 +433,27 @@ def test_ensure_game_open_treats_play_timeout_as_ambiguous_submission(
     assert attempts == [True]
 
 
-def test_recover_game_reloads_loaded_managed_page(monkeypatch) -> None:
+def test_recover_game_restarts_loaded_managed_page(monkeypatch) -> None:
     manager = BrowserManager(AppConfig(window_title="game title"))
     loaded = BrowserStatus(True, True, True, game_loaded=True)
     monkeypatch.setattr(manager, "ensure_running", lambda: loaded)
-    reloaded: list[tuple[int, str | None, bool]] = []
+    restarted: list[tuple[int, str, str | None, bool]] = []
     monkeypatch.setattr(
-        "farm_merge_valet.browser.manager.reload_game_page",
-        lambda port, title, *, allow_observation=False: reloaded.append(
-            (port, title, allow_observation)
+        "farm_merge_valet.browser.manager.restart_game_page",
+        lambda port, url, title, *, allow_observation=False: restarted.append(
+            (port, url, title, allow_observation)
         ),
     )
     monkeypatch.setattr(manager, "status", lambda: loaded)
     monkeypatch.setattr("farm_merge_valet.browser.manager.time.sleep", lambda _seconds: None)
 
     assert manager.recover_game() is loaded
-    assert reloaded == [(9222, "game title", False)]
+    assert restarted == [
+        (9222, "https://www.reddit.com/r/FarmMergeValley/", "game title", False)
+    ]
 
 
-def test_recover_game_allows_observation_portal_reload(monkeypatch) -> None:
+def test_recover_game_allows_observation_portal_restart(monkeypatch) -> None:
     manager = BrowserManager(AppConfig(game_portal="pogo"))
     pogo = portal_for_page_url(manager.settings.game_url)
     assert pogo is not None
@@ -463,12 +465,14 @@ def test_recover_game_allows_observation_portal_reload(monkeypatch) -> None:
         "farm_merge_valet.browser.manager.portal_for_page_url",
         lambda _url: observation_portal,
     )
-    reloaded = []
+    restarted = []
     monkeypatch.setattr(
-        "farm_merge_valet.browser.manager.reload_game_page",
-        lambda port, title, *, allow_observation=False: reloaded.append(allow_observation),
+        "farm_merge_valet.browser.manager.restart_game_page",
+        lambda port, url, title, *, allow_observation=False: restarted.append(
+            allow_observation
+        ),
     )
     monkeypatch.setattr("farm_merge_valet.browser.manager.time.sleep", lambda _seconds: None)
 
     assert manager.recover_game() is loaded
-    assert reloaded == [True]
+    assert restarted == [True]

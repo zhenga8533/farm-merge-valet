@@ -205,6 +205,14 @@ claimed through the normal tile-interaction pipeline before another stage is
 started. The global obstacle-spending control prevents new stages from being paid
 without blocking loot collection from an already-paid stage. While no worker is
 available, the focused obstacle remains unchanged.
+When building-resource preservation is enabled, the repair target is selected
+from placed, inactive, non-event buildings. Configured priority first favors
+workshops, then other structures, then decorative buildings; within a class it
+favors the lowest remaining tier-weighted material cost. Existing repair
+materials are reserved from merges. Before an obstacle is focused, the optional
+repair-material priority narrows candidates to trees, rocks, or toolboxes that
+produce a material still missing from that target. Once work has started, focus
+is retained so a later snapshot cannot redirect the assigned worker.
 If a paid obstacle has no fresh resource gate, that stage is not charged again
 and does not block an available worker from starting the next eligible
 obstacle. The paid marker can persist after loot is collected; when a fresh
@@ -432,9 +440,11 @@ runs the integration's bounded startup strategy until the game iframe appears or
 the 20-second startup timeout expires. Direct integrations require no host-page
 action; Reddit may request Play. Three consecutive submitted actions with no
 authoritative progress classify the action pipeline as unresponsive even when
-browser animation frames continue. Default-enabled recovery reloads the verified
-managed game page once and rebuilds bot state. A repeated failure stops
-automation, and recovery never reloads or restarts an unowned browser.
+browser animation frames continue. A backend single-session replacement requests
+the same recovery immediately. Default-enabled recovery restarts the verified
+managed game page once, with a short disconnect grace period before reopening
+the configured portal in the same tab, and rebuilds bot state. A repeated
+failure stops automation, and recovery never restarts an unowned browser.
 
 Future phases, supporting work, and non-blocking research are tracked in
 [Open Items](open-items.md).

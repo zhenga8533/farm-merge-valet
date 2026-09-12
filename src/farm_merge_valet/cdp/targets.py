@@ -445,18 +445,30 @@ def try_start_game(
     return True
 
 
-def reload_game_page(
+def restart_game_page(
     port: int,
+    url: str,
     page_title: str | None = None,
     *,
     allow_observation: bool = False,
+    disconnect_grace_seconds: float = 2.0,
 ) -> None:
-    """Reload the top-level page that owns the active game iframe."""
+    """Restart a game page after allowing its previous backend socket to close."""
+    if not any(portal.matches_page_url(url) for portal in PORTALS):
+        raise CdpConnectionError("Refusing to restart an unrecognized game page URL.")
+
+    def restart(ws_url: str) -> None:
+        _command_target(ws_url, "Page.navigate", {"url": "about:blank"})
+        time.sleep(max(0.0, disconnect_grace_seconds))
+        result = _command_target(ws_url, "Page.navigate", {"url": url})
+        if isinstance(error := result.get("errorText"), str) and error:
+            raise CdpConnectionError(f"Browser could not reopen the game page: {error}")
+
     try:
         _run_top_page_operation(
             port,
             page_title,
-            lambda ws_url: _command_target(ws_url, "Page.reload"),
+            restart,
             allow_observation=allow_observation,
         )
     finally:

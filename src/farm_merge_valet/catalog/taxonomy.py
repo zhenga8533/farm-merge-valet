@@ -12,6 +12,16 @@ _CATEGORY_EXCEPTIONS = {
     "supplies": "resources",
 }
 _SIZE_SUFFIX = re.compile(r"_(small|medium|large)(?:_moveable)?$")
+_OBSTACLE_RESOURCE_TRAITS = {
+    "base_tree": "wood-source",
+    "base_rock": "stone-source",
+    "base_toolbox": "tool-source",
+}
+_OBSTACLE_GROUP_RESOURCES = {
+    "tree": "wood",
+    "rock": "stone",
+    "toolbox": "tool",
+}
 
 
 @dataclass(frozen=True)
@@ -157,7 +167,16 @@ def _traits_for(
     }
     if "source-clearable" in traits and "movable" not in traits:
         traits.add("fixed")
+    if isinstance(extends, str) and (resource_trait := _OBSTACLE_RESOURCE_TRAITS.get(extends)):
+        traits.add(resource_trait)
     return traits
+
+
+def obstacle_resource_name(traits: frozenset[str], group_id: str | None = None) -> str | None:
+    for resource_name in ("wood", "stone", "tool"):
+        if f"{resource_name}-source" in traits:
+            return resource_name
+    return _OBSTACLE_GROUP_RESOURCES.get(group_id or "")
 
 
 def _is_event_content(blueprint_id: str, family_id: str) -> bool:

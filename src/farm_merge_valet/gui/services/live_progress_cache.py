@@ -124,8 +124,11 @@ def _parse_buildings(value: object) -> tuple[BuildingRepairState, ...] | None:
     for entry in value:
         if not isinstance(entry, dict) or not isinstance(entry.get("buildingID"), str):
             return None
+        raw_requirements = entry.get("requirements")
+        if not isinstance(raw_requirements, list):
+            return None
         requirements: list[BuildingRequirement] = []
-        for requirement in entry.get("requirements", []):
+        for requirement in raw_requirements:
             if not isinstance(requirement, dict):
                 return None
             blueprint_id = requirement.get("blueprintID")

@@ -19,6 +19,7 @@ from farm_merge_valet.cdp.targets import (
     find_top_page_target,
     read_background_flag_status,
     read_browser_metadata,
+    restart_game_page,
     try_start_game,
 )
 from farm_merge_valet.cdp.transport import (
@@ -97,6 +98,59 @@ def _pogo_game_frame(id_: str, parent_id: str) -> dict[str, str]:
         "url": "https://cdn-h5farmvalley-prod.pogospike.com/20/index.html",
         "webSocketDebuggerUrl": f"ws://frame/{id_}",
     }
+
+
+def test_restart_game_page_allows_the_previous_socket_to_close(monkeypatch) -> None:
+    calls: list[tuple[str, str, dict[str, str]]] = []
+    sleeps: list[float] = []
+    invalidations: list[tuple[int, str | None, bool]] = []
+
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets._run_top_page_operation",
+        lambda _port, _title, operation, *, allow_observation=False: operation(
+            "ws://page/game"
+        ),
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets._command_target",
+        lambda ws_url, method, params: calls.append((ws_url, method, params)) or {},
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets.time.sleep", lambda seconds: sleeps.append(seconds)
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets._invalidate_target_pair",
+        lambda port, title, *, allow_observation=False: invalidations.append(
+            (port, title, allow_observation)
+        ),
+    )
+
+    url = "https://www.reddit.com/r/FarmMergeValley/"
+    restart_game_page(9222, url, "game title", disconnect_grace_seconds=1.25)
+
+    assert calls == [
+        ("ws://page/game", "Page.navigate", {"url": "about:blank"}),
+        ("ws://page/game", "Page.navigate", {"url": url}),
+    ]
+    assert sleeps == [1.25]
+    assert invalidations == [(9222, "game title", False)]
+
+
+def test_restart_game_page_rejects_an_unrecognized_url(monkeypatch) -> None:
+    operated = False
+
+    def record_operation(*_args, **_kwargs) -> None:
+        nonlocal operated
+        operated = True
+
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets._run_top_page_operation", record_operation
+    )
+
+    with pytest.raises(CdpConnectionError, match="unrecognized game page URL"):
+        restart_game_page(9222, "https://example.com/")
+
+    assert operated is False
 
 
 def _msn_page(id_: str = "msn-page") -> dict[str, str]:

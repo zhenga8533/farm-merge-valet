@@ -33,10 +33,13 @@ The animation-frame heartbeat proves renderer availability, not that the game's
 own action pipeline is responsive. A cross-workflow progress watchdog therefore
 counts submitted actions that settle without any authoritative state change.
 Confirmed actions and successful supply-crate spawns reset the count. Three
-consecutive no-progress submissions request runtime recovery. When automatic
-game recovery is enabled, the application reloads the game page in its verified
-managed browser once and creates a fresh bot/runtime. A repeated failure ends
-the run; unowned browser processes and pages are never reloaded automatically.
+consecutive no-progress submissions request runtime recovery. The game-reported
+single-session replacement state requests the same recovery immediately. When
+automatic game recovery is enabled, the application navigates the verified game
+tab away, allows the prior backend socket two seconds to close, reopens the
+configured trusted portal in that tab, and creates a fresh bot/runtime. A
+repeated failure ends the run; unowned browser processes and pages are never
+restarted automatically.
 
 Board discovery normally uses the cached active map. If that reference is lost,
 recovery first confirms that the renderer can produce a frame, performs one

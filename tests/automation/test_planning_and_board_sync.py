@@ -151,6 +151,7 @@ def bare_bot() -> Bot:
     bot._shovelable_ids = frozenset()
     bot._decorative_building_ids = frozenset()
     bot._event_building_ids = frozenset()
+    bot._obstacle_resource_names = {}
     bot._energy = None
     bot._workers = None
     bot._obstacle_focus = None
@@ -343,6 +344,36 @@ def test_missing_repair_item_prioritizes_lower_tier_output_over_fixed_obstacle()
         2,
         ObstacleState(3, 3, 5, True, required_workers=1),
         frozenset({"tool_1"}),
+    )
+
+    assert bot._obstacle_to_clear([fixed_rock, movable_toolbox]) == movable_toolbox
+
+
+def test_missing_repair_item_uses_catalog_source_when_future_loot_is_unavailable() -> None:
+    bot = bare_bot()
+    bot._blueprint_items = {"tool_6": ItemRef("resources", "tool", 6)}
+    bot._obstacle_resource_names = {
+        "rock_large": "stone",
+        "toolbox_medium": "tool",
+    }
+    bot._building_repairs = (
+        BuildingRepairState(
+            "bbq",
+            0,
+            True,
+            True,
+            False,
+            False,
+            (BuildingRequirement("tool_6", 2, 0),),
+        ),
+    )
+    bot._energy = 50
+    bot._workers = WorkerState(1, 1)
+    fixed_rock = ObstacleCandidate(
+        (0, 0), "rock_large", 1, ObstacleState(10, 10, 5, False, required_workers=1)
+    )
+    movable_toolbox = ObstacleCandidate(
+        (1, 0), "toolbox_medium", 2, ObstacleState(5, 5, 5, True, required_workers=1)
     )
 
     assert bot._obstacle_to_clear([fixed_rock, movable_toolbox]) == movable_toolbox

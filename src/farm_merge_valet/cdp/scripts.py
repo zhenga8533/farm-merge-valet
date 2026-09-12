@@ -411,6 +411,8 @@ _HEALTH_EXPRESSION = (
     typeof backendConnection?.isConnected === 'boolean' &&
     typeof backendConnection?.attemptReconnection === 'function' &&
     typeof backendConnection?.onDisconnect?.fire === 'function';
+  const sessionReplaced = backendConnection?._userDisconnectBySingleSocket === true ||
+    backendConnection?._nakamaProvider?._connectivity?._singleSocketDisconnect === true;
   const backendHangingPings = Number.isInteger(
     backendConnection?._consecutiveHangingPings
   ) ? backendConnection._consecutiveHangingPings : null;
@@ -455,6 +457,8 @@ _HEALTH_EXPRESSION = (
   if (trainPopup) window.__fmvTrainPopup = trainPopup;
   const levelUpPopup = activePopup?._name === 'LevelUpPopup' &&
     typeof activePopup.close === 'function' ? activePopup : null;
+  const connectedOnDifferentDevicePopup =
+    activePopup?._name === 'ConnectedOnDifferentDevicePopup';
   const stickerNavigation = stage?.children?.find((child) =>
     Array.isArray(child?._viewStack) && child?._packOpeningView);
   const currentStickerView = stickerNavigation?._viewStack?.at(-1);
@@ -573,7 +577,9 @@ _HEALTH_EXPRESSION = (
             !stickerSetActive && !stickerAlbumTransition
           ? `sticker-view:${currentStickerView.constructor?.name || 'unknown'}`
           : null;
-  const transientOverlay = levelUpPopup ? 'level-up'
+  const transientOverlay = sessionReplaced || connectedOnDifferentDevicePopup
+    ? 'session-replaced'
+    : levelUpPopup ? 'level-up'
     : dailyChallengePopup ? 'daily-challenge'
     : timedEventSubmitted ? 'timed-event-transition'
     : timedEventPopup ? 'timed-event'

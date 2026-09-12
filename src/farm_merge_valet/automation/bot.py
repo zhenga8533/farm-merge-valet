@@ -55,6 +55,7 @@ from farm_merge_valet.automation.workflows import (
 )
 from farm_merge_valet.catalog.provider import CatalogProvider
 from farm_merge_valet.catalog.store import CatalogUnavailableError
+from farm_merge_valet.catalog.taxonomy import obstacle_resource_name
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.config.change_policy import changed_fields, live_config
 from farm_merge_valet.core.board import (
@@ -128,6 +129,7 @@ class Bot:
         self._shovelable_ids: frozenset[str] = frozenset()
         self._decorative_building_ids: frozenset[str] = frozenset()
         self._event_building_ids: frozenset[str] = frozenset()
+        self._obstacle_resource_names: dict[str, str] = {}
         self._max_item_tiers: dict[tuple[str, str] | tuple[str, str, str | None], int] = {}
         self.board = BoardGrid()
         self._live_cells: dict[GridCoord, LiveCellState] = {}
@@ -360,6 +362,16 @@ class Bot:
                 for item in catalog.items.values()
                 if "building" in item.capabilities and "event" in item.traits
             )
+            self._obstacle_resource_names = {
+                item.game_id: resource_name
+                for item in catalog.items.values()
+                if (
+                    resource_name := obstacle_resource_name(
+                        item.traits, item.presentation_group_id
+                    )
+                )
+                is not None
+            }
             self._marketplace_catalog = catalog.marketplace_offers
         except (CatalogUnavailableError, OSError, ValueError) as exc:
             log_event(
@@ -857,10 +869,7 @@ class Bot:
             matching = [
                 candidate
                 for candidate in candidates
-                if any(
-                    self._contributes_to_repair(output_id, missing_ids)
-                    for output_id in candidate.output_ids
-                )
+                if self._obstacle_contributes_to_repair(candidate, missing_ids)
             ]
             if matching:
                 prioritized = matching
@@ -883,6 +892,21 @@ class Bot:
         if selected is not None:
             self._obstacle_focus = selected.coord, selected.object_id
         return selected
+
+    def _obstacle_contributes_to_repair(
+        self, candidate: ObstacleCandidate, missing_ids: set[str]
+    ) -> bool:
+        if any(
+            self._contributes_to_repair(output_id, missing_ids)
+            for output_id in candidate.output_ids
+        ):
+            return True
+        resource_name = self._obstacle_resource_names.get(candidate.blueprint_id)
+        return resource_name is not None and any(
+            item is not None and item.name == resource_name
+            for missing_id in missing_ids
+            if (item := self._blueprint_items.get(missing_id)) is not None
+        )
 
     def _contributes_to_repair(self, output_id: str, missing_ids: set[str]) -> bool:
         if output_id in missing_ids:
@@ -1307,6 +1331,10 @@ class Bot:
             health = snapshot.health
             self._event_state = snapshot.event
             self._last_health = health
+            if health.transient_overlay is TransientOverlayKind.SESSION_REPLACED:
+                raise RuntimeRecoveryRequired(
+                    "The game backend replaced this session with another connection."
+                )
             if health.backend_connected is False:
                 self._report_wait(
                     "game backend connection is unavailable",

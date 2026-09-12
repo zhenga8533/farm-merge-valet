@@ -110,7 +110,7 @@ class BrowserPage(ConfigFormPage):
         self._add_form_row(managed_form, "Game platform", self.portal_choice)
         self._add_form_row(managed_form, "Preferred browser", self.browser_choice)
         self._add_toggle(managed_form, "Launch automatically when needed", "browser_auto_launch")
-        self._add_toggle(managed_form, "Reload frozen game automatically", "auto_recover_game")
+        self._add_toggle(managed_form, "Restart frozen game automatically", "auto_recover_game")
         buttons = QHBoxLayout()
         self.browser_action_button = QPushButton("Launch browser")
         self.restart_button = secondary_button("Restart")
