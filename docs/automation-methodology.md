@@ -209,10 +209,12 @@ When building-resource preservation is enabled, the repair target is selected
 from placed, inactive, non-event buildings. Configured priority first favors
 workshops, then other structures, then decorative buildings; within a class it
 favors the lowest remaining tier-weighted material cost. Existing repair
-materials are reserved from merges. Before an obstacle is focused, the optional
-repair-material priority narrows candidates to trees, rocks, or toolboxes that
-produce a material still missing from that target. Once work has started, focus
-is retained so a later snapshot cannot redirect the assigned worker.
+materials are reserved from merges. The optional repair-material priority
+narrows candidates to trees, rocks, or toolboxes that produce a material still
+missing from that target, including every size variant. It also applies when a
+focused obstacle is clearing and another stage can be started. Focus is retained
+among matching obstacles, but is replaced if the repair target changes and the
+focused obstacle no longer supplies a needed material.
 If a paid obstacle has no fresh resource gate, that stage is not charged again
 and does not block an available worker from starting the next eligible
 obstacle. The paid marker can persist after loot is collected; when a fresh

@@ -486,6 +486,30 @@ def test_clearing_toolbox_does_not_fall_through_to_unneeded_rock() -> None:
     assert bot._obstacle_to_clear([fixed_rock, clearing_toolbox]) is None
 
 
+def test_new_repair_need_replaces_focus_on_unneeded_rock() -> None:
+    bot = bare_bot()
+    bot._blueprint_items = {"tool_6": ItemRef("resources", "tool", 6)}
+    bot._obstacle_resource_names = {"rock_large": "stone", "toolbox_medium": "tool"}
+    bot._building_repairs = (
+        BuildingRepairState(
+            "bbq", 0, True, True, False, False,
+            (BuildingRequirement("tool_6", 2, 0),),
+        ),
+    )
+    bot._energy = 50
+    bot._workers = WorkerState(1, 1)
+    bot._obstacle_focus = ((0, 0), 1)
+    fixed_rock = ObstacleCandidate(
+        (0, 0), "rock_large", 1, ObstacleState(6, 10, 25, False, required_workers=1)
+    )
+    movable_toolbox = ObstacleCandidate(
+        (1, 0), "toolbox_medium", 2, ObstacleState(5, 5, 5, True, required_workers=1)
+    )
+
+    assert bot._obstacle_to_clear([fixed_rock, movable_toolbox]) == movable_toolbox
+    assert bot._obstacle_focus == ((1, 0), 2)
+
+
 def test_live_sync_uses_one_atomic_snapshot_and_suppresses_disabled_sections() -> None:
     class SnapshotRuntime(FakeRuntime):
         def __init__(self) -> None:

@@ -313,23 +313,20 @@ def test_catalog_classifies_event_content_by_function_and_adds_event_trait() -> 
 def test_catalog_derives_obstacle_resource_sources_from_base_blueprints() -> None:
     catalog = build_item_catalog(
         {
-            "tree_small": _metadata(
-                components=["mapSource"], alias="obj_tree_small", extends="base_tree"
-            ),
-            "rock_small": _metadata(
-                components=["mapSource"], alias="obj_rock_small", extends="base_rock"
-            ),
-            "toolbox_small": _metadata(
-                components=["mapSource", "movable"],
-                alias="obj_toolbox_small",
-                extends="base_toolbox",
-            ),
+            f"{kind}_{size}": _metadata(
+                components=["mapSource", *(["movable"] if kind == "toolbox" else [])],
+                alias=f"obj_{kind}_{size}",
+                extends=f"base_{kind}",
+            )
+            for kind in ("tree", "rock", "toolbox")
+            for size in ("small", "medium", "large")
         }
     )
 
-    assert "wood-source" in catalog.items["tree_small"].traits
-    assert "stone-source" in catalog.items["rock_small"].traits
-    assert "tool-source" in catalog.items["toolbox_small"].traits
+    for size in ("small", "medium", "large"):
+        assert "wood-source" in catalog.items[f"tree_{size}"].traits
+        assert "stone-source" in catalog.items[f"rock_{size}"].traits
+        assert "tool-source" in catalog.items[f"toolbox_{size}"].traits
     assert obstacle_resource_name(frozenset(), "toolbox") == "tool"
 
 

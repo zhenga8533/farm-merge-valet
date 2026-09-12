@@ -861,10 +861,7 @@ class Bot:
             else set()
         )
         prioritized = candidates
-        if (
-            self.config.prioritize_obstacle_repair_resources
-            and missing_ids
-        ):
+        if self.config.prioritize_obstacle_repair_resources and missing_ids:
             matching = [
                 candidate
                 for candidate in candidates
