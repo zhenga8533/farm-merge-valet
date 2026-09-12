@@ -98,6 +98,45 @@ def test_health_and_dismissal_share_overlay_contract() -> None:
         assert kind.value in dismissal
 
 
+def test_reward_popup_is_submitted_once_per_instance() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for overlay execution checks")
+    expression = _dismiss_overlay_expression(7)
+    script = f"""
+const board = new Map();
+const mapGrid = {{}};
+const rewardService = {{}};
+const services = {{mapGrid, rewardService}};
+const popupLayer = {{name: 'popup', children: []}};
+const scene = {{children: [{{children: [popupLayer]}}]}};
+global.window = {{
+  __fmvBoardCells: board,
+  __fmvRuntimeBoard: board,
+  __fmvGameplayServices: services,
+  __fmvGameplayMapScreen: scene,
+  __fmvRuntimeSceneIds: new WeakMap([[mapGrid, 7]]),
+}};
+let closes = 0;
+const popup = () => ({{visible: true, renderable: true, rewardService,
+  close() {{ closes += 1; }}}});
+popupLayer.children.push(popup());
+const run = () => {expression};
+const first = run();
+const second = run();
+popupLayer.children[0] = popup();
+const third = run();
+console.log(JSON.stringify({{first, second, third, closes}}));
+"""
+    completed = subprocess.run(
+        [node, "-"], input=script, text=True, capture_output=True, check=False
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert '"status":"submitted"' in completed.stdout
+    assert '"status":"busy"' in completed.stdout
+    assert '"closes":2' in completed.stdout
+
+
 def test_passive_popup_filter_keeps_interactive_popups_blocking() -> None:
     context = _overlay_context_expression()
     assert "popup?.eventMode === 'none'" in context

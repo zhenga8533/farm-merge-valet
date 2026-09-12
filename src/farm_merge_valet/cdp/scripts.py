@@ -320,6 +320,9 @@ _HEARTBEAT_EXPRESSION = r"""
 def _overlay_context_expression() -> str:
     return r"""let stage = scene;
   while (stage?.parent) stage = stage.parent;
+  const overlaySubmissions = window.__fmvOverlaySubmissions ||= new WeakMap();
+  const overlaySubmitted = (target, phase = 'dismiss') =>
+    Boolean(target && overlaySubmissions.get(target)?.has(phase));
   const layerRoot = stage?.children?.[0];
   const popupLayer = layerRoot?.children?.find((child) => child?.name === 'popup');
   const passivePopup = (popup) => popup?.eventMode === 'none' &&
@@ -518,7 +521,7 @@ _HEALTH_EXPRESSION = (
     currentStickerView.parent === stickerNavigation && currentStickerView.visible !== false &&
     currentStickerView._destroyed !== true && Boolean(stickerSetPanel);
   const stickerSetSubmitted = stickerSetActive &&
-    window.__fmvStickerSetCompletionSubmission === stickerSetPanel;
+    overlaySubmitted(stickerSetPanel);
   const stickerAlbumTransition = stickerNavigation?.visible !== false &&
     currentStickerView && currentStickerView !== packOpeningView &&
     currentStickerView.parent === stickerNavigation && currentStickerView.visible !== false &&
@@ -533,7 +536,7 @@ _HEALTH_EXPRESSION = (
     typeof activePopup.onClosed?.listenOnce === 'function' &&
     Boolean(activePopup._options?.content);
   const timedEventSubmitted = timedEventPopup &&
-    window.__fmvTimedEventPopupSubmission === activePopup;
+    overlaySubmitted(activePopup);
   const dailyBonusPopup = activePopup?._name === 'DailyBonusPopup' &&
     typeof activePopup.close === 'function' &&
     typeof activePopup._claimReward === 'function' &&
@@ -1169,6 +1172,20 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
 
   {_overlay_context_expression()}
+  const submitOverlayAction = (target, phase, action, detail, waitingDetail = detail) => {{
+    if (overlaySubmitted(target, phase))
+      return {{status: 'busy', detail: waitingDetail}};
+    const phases = overlaySubmissions.get(target) || new Set();
+    phases.add(phase);
+    overlaySubmissions.set(target, phases);
+    try {{
+      action();
+      return {{status: 'submitted', detail}};
+    }} catch (error) {{
+      phases.delete(phase);
+      return {{status: 'rejected', detail: String(error?.message || error)}};
+    }}
+  }};
   const popupAnimationBusy = (popup) =>
     popup?._baseAnimationContent?.isAnimationPlaying?.('open') === true ||
     popup?._baseAnimationBackground?.isAnimationPlaying?.('open') === true ||
@@ -1187,12 +1204,9 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     if (!listeners.some((listener) =>
         listener?.fn === levelUpPopup.close && listener?.context === levelUpPopup))
       return {{status: 'busy', detail: 'level-up'}};
-    try {{
+    return submitOverlayAction(levelUpPopup, 'dismiss', () => {{
       void levelUpPopup.close();
-      return {{status: 'submitted', detail: 'level-up'}};
-    }} catch (error) {{
-      return {{status: 'rejected', detail: String(error?.message || error)}};
-    }}
+    }}, 'level-up');
   }}
 
   const dailyChallengePopup = activePopup?._name === 'DailyChallengePopup' &&
@@ -1220,12 +1234,9 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     if (activePopup._popupLocked === true ||
         activePopup._popupInteractionsLocked === true || popupAnimationBusy(activePopup))
       return {{status: 'busy', detail}};
-    try {{
+    return submitOverlayAction(activePopup, 'dismiss', () => {{
       activePopup._onDismiss();
-      return {{status: 'submitted', detail}};
-    }} catch (error) {{
-      return {{status: 'rejected', detail: String(error?.message || error)}};
-    }}
+    }}, detail);
   }}
   if (dailyChallengePopup || timedEventPopup || dailyBonusPopup || albumStartedPopup ||
       travelSummaryRewardPopup) {{
@@ -1233,22 +1244,16 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
       : timedEventPopup ? 'timed-event'
       : dailyBonusPopup ? 'daily-bonus-collect'
       : albumStartedPopup ? 'sticker-album-started' : 'travel-summary-reward';
-    if (timedEventPopup && window.__fmvTimedEventPopupSubmission === activePopup)
+    if (timedEventPopup && overlaySubmitted(activePopup))
       return {{status: 'busy', detail: 'timed-event-transition'}};
     if (dailyBonusPopup && activePopup._rewardCollected)
       return {{status: 'busy', detail: 'daily-bonus-transition'}};
     if (activePopup._popupLocked === true ||
         activePopup._popupInteractionsLocked === true || popupAnimationBusy(activePopup))
       return {{status: 'busy', detail}};
-    try {{
-      if (timedEventPopup) window.__fmvTimedEventPopupSubmission = activePopup;
+    return submitOverlayAction(activePopup, 'dismiss', () => {{
       void activePopup.close();
-      return {{status: 'submitted', detail}};
-    }} catch (error) {{
-      if (window.__fmvTimedEventPopupSubmission === activePopup)
-        window.__fmvTimedEventPopupSubmission = null;
-      return {{status: 'rejected', detail: String(error?.message || error)}};
-    }}
+    }}, detail, timedEventPopup ? 'timed-event-transition' : detail);
   }}
   const activePopupService = activePopup?.service || activePopup?._service;
   const rewardPopup = activePopup && typeof activePopup.close === 'function' && (
@@ -1263,12 +1268,9 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     if (activePopup._popupLocked === true ||
         activePopup._popupInteractionsLocked === true || popupAnimationBusy(activePopup))
       return {{status: 'busy', detail}};
-    try {{
+    return submitOverlayAction(activePopup, 'dismiss', () => {{
       void activePopup.close();
-      return {{status: 'submitted', detail}};
-    }} catch (error) {{
-      return {{status: 'rejected', detail: String(error?.message || error)}};
-    }}
+    }}, detail);
   }}
 
   const stickerNavigation = stage?.children?.find((child) =>
@@ -1307,17 +1309,11 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
       currentStickerView._destroyed !== true && Boolean(stickerSetPanel);
     if (!stickerSetActive)
       return {{status: 'stale-source', detail: 'no-supported-overlay'}};
-    if (window.__fmvStickerSetCompletionSubmission === stickerSetPanel || !stickerSetButton)
+    if (overlaySubmitted(stickerSetPanel) || !stickerSetButton)
       return {{status: 'busy', detail: 'sticker-set-transition'}};
-    try {{
-      window.__fmvStickerSetCompletionSubmission = stickerSetPanel;
+    return submitOverlayAction(stickerSetPanel, 'dismiss', () => {{
       void stickerSetPanel._onButtonPressed();
-      return {{status: 'submitted', detail: 'sticker-set-collect'}};
-    }} catch (error) {{
-      if (window.__fmvStickerSetCompletionSubmission === stickerSetPanel)
-        window.__fmvStickerSetCompletionSubmission = null;
-      return {{status: 'rejected', detail: String(error?.message || error)}};
-    }}
+    }}, 'sticker-set-collect', 'sticker-set-transition');
   }}
 
   const stickerSpineView = stickerController._spineAnimation;
@@ -1334,25 +1330,21 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     if (typeof proposalResolve !== 'function')
       return {{status: 'busy', detail: 'sticker-raffle-proposal-initializing'}};
     if (stickerRaffleProposal._closing === true) {{
-      try {{
+      return submitOverlayAction(stickerRaffleProposal, 'recovery', () => {{
         proposalResolve(undefined);
-        return {{status: 'submitted', detail: 'sticker-raffle-proposal-recovery'}};
-      }} catch (error) {{
-        return {{status: 'rejected', detail: String(error?.message || error)}};
-      }}
+      }}, 'sticker-raffle-proposal-recovery', 'sticker-raffle-proposal-closing');
     }}
+    if (overlaySubmitted(stickerRaffleProposal))
+      return {{status: 'busy', detail: 'sticker-raffle-proposal-closing'}};
     const notNowLink = stickerRaffleProposal._notNowLink;
     const dismissEvent = ['pointertap', 'pointerup', 'click'].find((event) =>
       notNowLink?._events?.[event]);
     if (notNowLink?._destroyed === true || notNowLink?.interactive !== true ||
         typeof notNowLink?.emit !== 'function' || !dismissEvent)
       return {{status: 'busy', detail: 'sticker-raffle-proposal-initializing'}};
-    try {{
+    return submitOverlayAction(stickerRaffleProposal, 'dismiss', () => {{
       notNowLink.emit(dismissEvent);
-      return {{status: 'submitted', detail: 'sticker-raffle-proposal'}};
-    }} catch (error) {{
-      return {{status: 'rejected', detail: String(error?.message || error)}};
-    }}
+    }}, 'sticker-raffle-proposal', 'sticker-raffle-proposal-closing');
   }}
   const liveSkipText = stickerSpineView?._skipText &&
     !stickerSpineView._skipText._destroyed;
@@ -1361,12 +1353,9 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     : typeof stickerSpineView?._onSkipPressed === 'function'
       ? stickerSpineView._onSkipPressed : null;
   if (liveSkipText && skip) {{
-    try {{
+    return submitOverlayAction(stickerSpineView, 'skip', () => {{
       skip.call(stickerSpineView);
-      return {{status: 'submitted', detail: 'sticker-pack-skip'}};
-    }} catch (error) {{
-      return {{status: 'rejected', detail: String(error?.message || error)}};
-    }}
+    }}, 'sticker-pack-skip', 'sticker-pack-transition');
   }}
 
   const collectButton = stickerRevealView?.children?.find((child) =>
@@ -1375,13 +1364,10 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     typeof child.destroy === 'function');
   if (!collectButton || typeof stickerRevealView._animationResolve !== 'function')
     return {{status: 'busy', detail: 'sticker-pack-transition'}};
-  try {{
+  return submitOverlayAction(stickerRevealView, 'collect', () => {{
     collectButton.destroy();
     stickerRevealView._animationResolve();
-    return {{status: 'submitted', detail: 'sticker-pack-collect'}};
-  }} catch (error) {{
-    return {{status: 'rejected', detail: String(error?.message || error)}};
-  }}
+  }}, 'sticker-pack-collect', 'sticker-pack-transition');
 }})()
 """
 

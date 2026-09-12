@@ -173,13 +173,13 @@ def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) ->
     assert "collectButton.destroy()" in expressions[0]
     assert "stickerRevealView._animationResolve()" in expressions[0]
     assert "void stickerSetPanel._onButtonPressed()" in expressions[0]
-    assert "window.__fmvStickerSetCompletionSubmission = stickerSetPanel" in expressions[0]
+    assert "submitOverlayAction(stickerSetPanel, 'dismiss'" in expressions[0]
     assert "void activePopup.close()" in expressions[0]
     assert "activePopup?._name === 'DailyBonusPopup'" in expressions[0]
     assert "activePopup?._name === 'DailyChallengePopup'" in expressions[0]
     assert "activePopup === services?.dailyChallenge?._popup" in expressions[0]
     assert "activePopup?._name === 'TimedEventPopup'" in expressions[0]
-    assert "window.__fmvTimedEventPopupSubmission = activePopup" in expressions[0]
+    assert "submitOverlayAction(activePopup, 'dismiss'" in expressions[0]
     assert "timed-event-transition" in expressions[0]
     assert "popup?._baseAnimationContent?.isAnimationPlaying?.('open')" in expressions[0]
     assert "popupAnimationBusy(levelUpPopup)" in expressions[0]
@@ -196,6 +196,9 @@ def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) ->
     assert "typeof proposalResolve !== 'function'" in expressions[0]
     assert "proposalResolve(undefined)" in expressions[0]
     assert "notNowLink.emit(dismissEvent)" in expressions[0]
+    assert "submitOverlayAction(stickerRaffleProposal, 'recovery'" in expressions[0]
+    assert "sticker-raffle-proposal-closing" in expressions[0]
+    assert "window.__fmvOverlaySubmissions" in expressions[0]
     assert "stickerRaffleProposal._close(undefined)" not in expressions[0]
     assert "services?.specialOfferService" in expressions[0]
     assert "services?.recurringConversionService" in expressions[0]
@@ -224,7 +227,7 @@ def test_health_detects_each_supported_reward_overlay_phase() -> None:
     assert "daily-challenge" in _HEALTH_EXPRESSION
     assert "activePopup === services?.dailyChallenge?._popup" in _HEALTH_EXPRESSION
     assert "activePopup?._name === 'TimedEventPopup'" in _HEALTH_EXPRESSION
-    assert "window.__fmvTimedEventPopupSubmission === activePopup" in _HEALTH_EXPRESSION
+    assert "overlaySubmitted(activePopup)" in _HEALTH_EXPRESSION
     assert "timed-event-transition" in _HEALTH_EXPRESSION
     assert "child?._name === 'DailyBonusPopup'" not in _HEALTH_EXPRESSION
     assert "activePopup?._name === 'DailyBonusPopup'" in _HEALTH_EXPRESSION

@@ -115,13 +115,16 @@ ordinary reward, travel-summary, promotional, sticker album/set, and sticker-pac
 transitions through their native callbacks. Sticker packs use their native Skip and
 subsequent Collect transitions. Explicitly non-interactive, non-dismissible
 popup-layer elements are treated as passive notifications; unknown interactive
-popups still pause automation. Optional high-rank duplicate raffle proposals
+popups still pause automation. One-shot overlay actions share a per-instance
+submission guard, so a popup that remains visible while closing is not
+dismissed again. Optional high-rank duplicate raffle proposals
 are declined through their registered
 "Not now" interaction after its animation resolver is ready. The push-notification
 opt-in popup likewise uses its native dismiss handler, preserving the game's
 dismissal timestamp and analytics without requesting notification permission. A partially closed
 proposal left by an interrupted transition completes that resolver before pack
-collection continues. Each
+collection continues; each proposal submits the dismiss action and closing
+resolver at most once. Each
 transition is handled in a separate loop iteration, and intermediate sticker
 animation states block board actions until Collect becomes available. Sticker
 pack state is read from its dedicated top-level navigation view rather than the
