@@ -238,6 +238,21 @@ def test_friend_rewards_are_claimed_independently_of_item_automation() -> None:
     assert ready == []
 
 
+def test_unclaimed_likes_use_visitor_reward_setting() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(item_automation_enabled=False)
+    bot._last_health = replace(health(advancing=True), farm_scene=FarmSceneKind.OWN)
+    bot._live_cells = {
+        (3, 4): LiveCellState(True, "likes_billboard", 81, unclaimed_likes=True)
+    }
+
+    immediate, _, _ = bot._interaction_actions()
+
+    assert immediate == [
+        InteractionAction(InteractionTargetKind.LIKE_REWARD, (3, 4), "likes_billboard", 81)
+    ]
+
+
 def test_friend_reward_claiming_respects_setting_and_scene() -> None:
     bot = bare_bot()
     bot._live_cells = {

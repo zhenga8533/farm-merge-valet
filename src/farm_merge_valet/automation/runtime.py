@@ -297,6 +297,7 @@ class LiveCellState:
     producer_state: ProducerState | None = None
     item_variant: str | None = None
     behavior_names: frozenset[str] = frozenset()
+    unclaimed_likes: bool = False
     obstacle: ObstacleState | None = None
     claim_output_capacity: int | None = None
     claim_output_ids: frozenset[str] = frozenset()

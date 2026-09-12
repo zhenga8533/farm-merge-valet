@@ -166,6 +166,12 @@ class InteractionWorkflow:
                 or current.object_id != pending.action.object_id
                 or "friendReward" not in current.behavior_names
             )
+        if pending.action.kind is InteractionTargetKind.LIKE_REWARD:
+            return (
+                current is None
+                or current.object_id != pending.action.object_id
+                or not current.unclaimed_likes
+            )
         if pending.action.kind is InteractionTargetKind.UPGRADE:
             return (
                 current is None

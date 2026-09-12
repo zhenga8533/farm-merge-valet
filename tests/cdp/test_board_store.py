@@ -114,6 +114,27 @@ def test_read_board_state_preserves_friend_reward_marker(monkeypatch) -> None:
     assert state[(3, 4)].behavior_names == frozenset({"friendReward"})
 
 
+def test_read_board_state_preserves_unclaimed_likes(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.board_store.evaluate",
+        lambda *_args, **_kwargs: [
+            {
+                "column": 3,
+                "row": 4,
+                "hasContent": True,
+                "blueprintID": "likes_billboard",
+                "objectID": 81,
+                "unclaimedLikes": True,
+            }
+        ],
+    )
+
+    state = read_board_state(9222, "Farm")
+
+    assert state is not None
+    assert state[(3, 4)].unclaimed_likes
+
+
 def test_read_board_state_preserves_collectable_semantics(monkeypatch) -> None:
     monkeypatch.setattr(
         "farm_merge_valet.cdp.board_store.evaluate",

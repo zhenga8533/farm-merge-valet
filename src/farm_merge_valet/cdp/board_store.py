@@ -151,6 +151,8 @@ _READ_EXPRESSION = """
   const cells = window.__fmvBoardCells;
   if (!cells) return null;
   const services = window.__fmvGameplayServices;
+  const likesHandler = window.__fmvLikesHandler;
+  const farmLike = services?.ordersService?._autoSaveService?.services?.farmLike;
   const rootServices = services?.ordersService?._recipes?._services;
   const blueprints = rootServices?.blueprintCollection?._blueprints;
   const rewardCapacity = (value, seen = new WeakSet(), depth = 0) => {
@@ -255,6 +257,9 @@ _READ_EXPRESSION = """
       behaviorNames: behaviors.filter((name) =>
         name === 'cooldown' || name === 'lootable' || name === 'friendReward'
       ),
+      unclaimedLikes: Boolean(content?.hasBehavior?.('likesBillboard') &&
+        likesHandler?._services === services && likesHandler?._isActive !== false &&
+        likesHandler?._popoutMap?.has?.(content) && farmLike?.unclaimedLikes > 0),
       claimOutputCapacity,
       claimOutputIDs: Array.from(rewardIDs(claimReward)),
       rewardRequirements: rewardRequirements?.map((item) => ({
@@ -514,6 +519,7 @@ def parse_board_state(raw: object) -> dict[GridCoord, _LiveCellState] | None:
             behavior_names=frozenset(
                 value for value in behavior_names or [] if isinstance(value, str)
             ),
+            unclaimed_likes=entry.get("unclaimedLikes") is True,
             obstacle=obstacle,
             claim_output_capacity=claim_output_capacity,
             claim_output_ids=frozenset(

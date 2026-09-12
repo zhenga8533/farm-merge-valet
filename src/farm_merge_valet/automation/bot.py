@@ -951,6 +951,16 @@ class Bot:
                     )
                 )
                 continue
+            if claim_friend_rewards and state.unclaimed_likes:
+                immediate.append(
+                    InteractionAction(
+                        InteractionTargetKind.LIKE_REWARD,
+                        coord,
+                        state.blueprint_id,
+                        state.object_id,
+                    )
+                )
+                continue
             if not self.config.item_automation_enabled:
                 continue
             policy_key = self._live_policy_key(state)
@@ -1104,6 +1114,7 @@ class Bot:
         immediate_order = {
             InteractionTargetKind.REMOVE: 0,
             InteractionTargetKind.FRIEND_REWARD: 1,
+            InteractionTargetKind.LIKE_REWARD: 1,
             InteractionTargetKind.IMMEDIATE: 1,
             InteractionTargetKind.REWARD: 1,
             InteractionTargetKind.REWARD_CONTAINER: 1,

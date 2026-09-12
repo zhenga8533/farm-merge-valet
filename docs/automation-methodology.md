@@ -286,6 +286,10 @@ marked tile at a time through the native tile interaction handler. Immediately
 before submission, the runtime revalidates the scene, coordinate, object
 identity, behavior, and non-empty reward data. Collection is confirmed only
 when that exact behavior disappears from the authoritative board snapshot.
+The likes billboard uses a separate native claim handler. It is eligible under
+the same setting only when the live farm-like count is positive and the game's
+unclaimed-likes popout is attached to that exact billboard; the bot confirms
+submission when the popout is removed.
 
 ## Shop orders
 

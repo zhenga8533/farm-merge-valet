@@ -71,6 +71,10 @@ _DISCOVER_EXPRESSION = r"""
   const visitorActionHandler = gameplaySystems.find((candidate) =>
     candidate?._services === services && candidate._visitorActionsFamily &&
     typeof candidate._onActivityTapped === 'function') || null;
+  const likesHandler = gameplaySystems.find((candidate) =>
+    candidate?._services === services && candidate._isActive !== false &&
+    candidate._popoutMap instanceof Map &&
+    typeof candidate._claimLikes === 'function') || null;
   const visitorHud = subscribers(
     services?.friendHudService?._commonFriendEvents?.notificationEvent
   ).map((entry) => entry?.context).find((candidate) =>
@@ -168,6 +172,7 @@ _DISCOVER_EXPRESSION = r"""
   window.__fmvFarmSceneKind = sceneKind;
   window.__fmvTrainHandler = trainHandler;
   window.__fmvVisitorActionHandler = visitorActionHandler;
+  window.__fmvLikesHandler = likesHandler;
   window.__fmvVisitorReturnSignal = validVisitorReturnSignal;
   window.__fmvFarmVisitTransition = validFarmVisitTransition ? farmVisitTransition : null;
   window.__fmvTrainPopup = null;
@@ -1633,6 +1638,16 @@ def _interaction_expression(
       content.hasBehavior?.('friendReward') &&
         Array.isArray(content.getBehavior?.('friendReward')?._data?.rewardData) &&
         content.getBehavior('friendReward')._data.rewardData.length > 0,
+    'like-reward': () => {{
+      const likesHandler = window.__fmvLikesHandler;
+      const farmLike = services?.ordersService?._autoSaveService?.services?.farmLike;
+      return window.__fmvFarmSceneKind === 'own' &&
+        content.hasBehavior?.('likesBillboard') &&
+        likesHandler?._services === services && likesHandler?._isActive !== false &&
+        likesHandler?._popoutMap?.has?.(content) &&
+        typeof likesHandler._claimLikes === 'function' &&
+        Number.isInteger(farmLike?.unclaimedLikes) && farmLike.unclaimedLikes > 0;
+    }},
     'reward': () =>
       content.hasBehavior?.('collectable') && content.hasBehavior?.('currency') &&
         Array.isArray(content.getBehavior?.('collectable')?.reward) &&
@@ -1665,7 +1680,9 @@ def _interaction_expression(
       handler?._currentObject || handler?._originCell)
     return {{status: 'busy'}};
   try {{
-    if (expectedKind === 'reward') {{
+    if (expectedKind === 'like-reward') {{
+      window.__fmvLikesHandler._claimLikes(content);
+    }} else if (expectedKind === 'reward') {{
       if (rewardHandler?._services !== services ||
           typeof rewardHandler._collectReward !== 'function' ||
           typeof rewardHandler.onItemCollect?.fire !== 'function')

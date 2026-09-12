@@ -703,6 +703,20 @@ def test_interaction_submission_defines_minimum_contract_for_every_kind(monkeypa
     assert "detail: 'unsupported-interaction-kind'" in expression
 
 
+def test_like_claim_uses_live_billboard_handler_and_unclaimed_count() -> None:
+    from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _interaction_expression
+
+    expression = _interaction_expression(
+        (3, 4), InteractionTargetKind.LIKE_REWARD, "likes_billboard", 81, 7
+    )
+
+    assert "window.__fmvLikesHandler = likesHandler" in _DISCOVER_EXPRESSION
+    assert "content.hasBehavior?.('likesBillboard')" in expression
+    assert "likesHandler?._popoutMap?.has?.(content)" in expression
+    assert "farmLike.unclaimedLikes > 0" in expression
+    assert "window.__fmvLikesHandler._claimLikes(content)" in expression
+
+
 def test_reward_interaction_uses_claim_callback_without_opening_popout(monkeypatch) -> None:
     expression = ""
 

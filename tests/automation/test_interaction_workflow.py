@@ -1250,6 +1250,22 @@ def test_pending_friend_reward_confirms_when_marker_is_removed(monkeypatch) -> N
     assert bot._interaction_workflow.pending is None
 
 
+def test_pending_like_reward_confirms_when_popout_is_removed(monkeypatch) -> None:
+    bot = bare_bot()
+    initial = LiveCellState(True, "likes_billboard", 10, unclaimed_likes=True)
+    interaction = InteractionAction(
+        InteractionTargetKind.LIKE_REWARD, (1, 2), "likes_billboard", 10
+    )
+    bot._interaction_workflow.pending = PendingInteraction(
+        interaction, initial, 7, 1.0, initial, 1.0
+    )
+    bot._live_cells[interaction.coord] = LiveCellState(True, "likes_billboard", 10)
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
+
+    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot._interaction_workflow.pending is None
+
+
 def test_pending_removal_confirms_from_authoritative_source_change(monkeypatch) -> None:
     bot = bare_bot()
     initial = LiveCellState(True, "rock_1", 91)
