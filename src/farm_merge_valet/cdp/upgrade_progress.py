@@ -75,6 +75,10 @@ def read_upgrade_progress(
 }})()
 """
     raw = evaluate(port, expression, page_title)
+    return parse_upgrade_progress(raw)
+
+
+def parse_upgrade_progress(raw: object) -> UpgradeProgress | None:
     if not isinstance(raw, list):
         return None
     targets: dict[str, UpgradeTargetProgress] = {}

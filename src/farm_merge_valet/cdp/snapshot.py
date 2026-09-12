@@ -19,6 +19,7 @@ from farm_merge_valet.cdp.scripts import (
     _READ_STORAGE_BUBBLES_EXPRESSION,
     _READ_WORKERS_EXPRESSION,
 )
+from farm_merge_valet.cdp.upgrade_progress import _READ_UPGRADE_PROGRESS_EXPRESSION
 
 
 def snapshot_expression(options: SnapshotOptions) -> str:
@@ -29,6 +30,7 @@ def snapshot_expression(options: SnapshotOptions) -> str:
     farm_visit = json.dumps(options.include_farm_visit)
     land_expansion = json.dumps(options.include_land_expansion)
     building_repairs = json.dumps(options.include_building_repairs)
+    upgrade_progress = json.dumps(options.include_upgrade_progress)
     return f"""
 (() => {{
   const startedAt = performance.now();
@@ -46,6 +48,7 @@ def snapshot_expression(options: SnapshotOptions) -> str:
   const shopOrders = {shops} ? ({_READ_SHOP_ORDERS_EXPRESSION}) : null;
   const marketplace = {marketplace} ? ({_READ_MARKETPLACE_EXPRESSION}) : null;
   const buildingRepairs = {building_repairs} ? ({_READ_BUILDING_REPAIRS_EXPRESSION}) : null;
+  const upgradeProgress = {upgrade_progress} ? ({_READ_UPGRADE_PROGRESS_EXPRESSION}) : null;
   const rendererDurationMs = performance.now() - startedAt;
   return {{
     health,
@@ -60,6 +63,7 @@ def snapshot_expression(options: SnapshotOptions) -> str:
     eventRewards,
     landExpansions,
     buildingRepairs,
+    upgradeProgress,
     rendererDurationMs,
     cellCount: Array.isArray(cells) ? cells.length : 0,
     occupiedCellCount: Array.isArray(cells)

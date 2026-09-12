@@ -121,6 +121,62 @@ def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
     app.processEvents()
 
 
+def test_upgrade_card_fallback_uses_one_authoritative_target_per_producer(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    base = _catalog().items["wheat_1"]
+    cow_1 = replace(
+        base,
+        game_id="cow_1",
+        family_id="cow",
+        policy_key="animals/cow",
+        category="animals",
+        display_name="Cow",
+        upgrade_target_id=None,
+    )
+    cow_4 = replace(
+        cow_1,
+        game_id="cow_4",
+        tier=4,
+        mergeable=False,
+        merge_target=None,
+        upgrade_target_id="milk",
+        capabilities=frozenset({"merge-result", "harvestable"}),
+    )
+    card = replace(
+        base,
+        game_id="upgrade_card_1",
+        family_id="upgrade_card",
+        policy_key="upgrade_cards/upgrade_card",
+        category="upgrade_cards",
+        display_name="Upgrade Card",
+        mergeable=False,
+        merge_target=None,
+        capabilities=frozenset({"upgradeCard"}),
+    )
+    write_item_catalog(
+        catalog_dir / "catalog.json",
+        ItemCatalog({"cow_1": cow_1, "cow_4": cow_4, "upgrade_card_1": card}),
+    )
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+
+    cow = window.items_page.table.topLevelItem(0)
+    card_rows = [
+        cow.child(index)
+        for index in range(cow.childCount())
+        if "Upgrade" in cow.child(index).text(0)
+    ]
+
+    assert cow.text(0) == "Cow"
+    assert len(card_rows) == 1
+    assert card_rows[0].data(0, Qt.ItemDataRole.UserRole).endswith("/milk")
+
+    window.quit_application()
+    app.processEvents()
+
+
 def test_reward_container_exposes_open_policy_control(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     catalog_dir = tmp_path / "catalog"

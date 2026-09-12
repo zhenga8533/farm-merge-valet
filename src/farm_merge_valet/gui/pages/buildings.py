@@ -435,8 +435,6 @@ class BuildingsPage(AppPage):
     def _repair_status(state: BuildingRepairState) -> str:
         if state.active:
             return "Repaired"
-        if state.upgrading:
-            return "Repairing"
         if not state.placed or not state.requirements:
             return "Unavailable"
         if all(requirement.missing == 0 for requirement in state.requirements):

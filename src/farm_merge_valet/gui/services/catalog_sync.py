@@ -82,12 +82,12 @@ class CatalogSyncService:
 
     def synchronize(self) -> str:
         self._callbacks.raise_if_cancelled()
-        target_count = self.refresh_upgrade_progress(source="manual synchronization")
-        self.refresh_building_repairs(source="manual synchronization")
-        self._callbacks.raise_if_cancelled()
         self._dependencies.catalog_synchronizer_factory(self._config).sync(force=True)
         self._callbacks.raise_if_cancelled()
         catalog = self._dependencies.catalog_loader(self._config.catalog_dir / "catalog.json")
+        target_count, _building_count = self.refresh_live_progress(
+            source="manual synchronization"
+        )
         self.check_catalog_freshness()
         progress = (
             f"Upgrade targets: {target_count}"
@@ -113,8 +113,7 @@ class CatalogSyncService:
         self._callbacks.status_changed(
             f"Catalog ready · {len(catalog.items)} entries · Synchronizing icons…"
         )
-        self.refresh_upgrade_progress(source="initial synchronization")
-        self.refresh_building_repairs(source="initial synchronization")
+        self.refresh_live_progress(source="initial synchronization")
         self._callbacks.raise_if_cancelled()
         try:
             self._dependencies.catalog_synchronizer_factory(self._config).sync(force=True)
@@ -124,6 +123,13 @@ class CatalogSyncService:
         refreshed = self._dependencies.catalog_loader(self._config.catalog_dir / "catalog.json")
         self.check_catalog_freshness()
         return f"Game catalog ready · Entries: {len(refreshed.items)} · Icons synchronized"
+
+    def refresh_live_progress(self, *, source: str) -> tuple[int | None, int | None]:
+        """Refresh the persistent live-game data displayed by the GUI."""
+        return (
+            self.refresh_upgrade_progress(source=source),
+            self.refresh_building_repairs(source=source),
+        )
 
     def check_catalog_freshness(self, cached: CatalogFreshness | None = None) -> CatalogFreshness:
         catalog_path = self._config.catalog_dir / "catalog.json"

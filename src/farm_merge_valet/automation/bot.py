@@ -86,6 +86,7 @@ from farm_merge_valet.core.shops import (
     ShopPolicy,
     required_shop_claim_empty_cells,
 )
+from farm_merge_valet.core.upgrade_progress import UpgradeProgress
 from farm_merge_valet.observability.logging import log_event
 
 logger = logging.getLogger(__name__)
@@ -137,6 +138,7 @@ class Bot:
         self._marketplace_catalog: tuple[MarketplaceOffer, ...] = ()
         self._land_expansions: tuple[LandExpansionCandidate, ...] | None = None
         self._building_repairs: tuple[BuildingRepairState, ...] | None = None
+        self._upgrade_progress: UpgradeProgress | None = None
         self._obstacle_focus: tuple[GridCoord, int | None] | None = None
         self._merge_workflow = MergeWorkflow()
         self._interaction_workflow = InteractionWorkflow()
@@ -480,6 +482,7 @@ class Bot:
                 or self._land_expansion_workflow.pending is not None
             ),
             include_building_repairs=True,
+            include_upgrade_progress=True,
         )
 
     def _apply_runtime_snapshot(self, snapshot: RuntimeSnapshot) -> None:
@@ -499,6 +502,7 @@ class Bot:
         self._marketplace_offers = snapshot.marketplace_offers
         self._land_expansions = snapshot.land_expansions
         self._building_repairs = snapshot.building_repairs
+        self._upgrade_progress = snapshot.upgrade_progress
         self._state = AutomationState(
             board=perceived.board,
             live_cells=perceived.live_cells,
@@ -521,6 +525,11 @@ class Bot:
     def building_repairs(self) -> tuple[BuildingRepairState, ...] | None:
         """Latest immutable building repair state from the live snapshot."""
         return self._building_repairs
+
+    @property
+    def upgrade_progress(self) -> UpgradeProgress | None:
+        """Latest immutable upgrade-card progress from the live snapshot."""
+        return self._upgrade_progress
 
     _MERGE_ACTION_PRIORITY = {
         MergeActionKind.TRIGGER: 0,
@@ -615,7 +624,6 @@ class Bot:
             for state in (self._building_repairs or ())
             if state.placed
             and not state.active
-            and not state.upgrading
             and state.requirements
             and self.config.building_repair_enabled(state.building_id)
         ]
@@ -817,7 +825,14 @@ class Bot:
             and missing_ids
             and self._obstacle_focus is None
         ):
-            matching = [candidate for candidate in candidates if candidate.output_ids & missing_ids]
+            matching = [
+                candidate
+                for candidate in candidates
+                if any(
+                    self._contributes_to_repair(output_id, missing_ids)
+                    for output_id in candidate.output_ids
+                )
+            ]
             if matching:
                 prioritized = matching
         focused = self._focused_obstacle(prioritized)
@@ -839,6 +854,20 @@ class Bot:
         if selected is not None:
             self._obstacle_focus = selected.coord, selected.object_id
         return selected
+
+    def _contributes_to_repair(self, output_id: str, missing_ids: set[str]) -> bool:
+        if output_id in missing_ids:
+            return True
+        output = self._blueprint_items.get(output_id)
+        if output is None:
+            return False
+        return any(
+            required is not None
+            and output.identity == required.identity
+            and output.tier <= required.tier
+            for required_id in missing_ids
+            if (required := self._blueprint_items.get(required_id)) is not None
+        )
 
     def _interaction_actions(
         self,

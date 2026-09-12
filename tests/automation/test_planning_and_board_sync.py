@@ -36,6 +36,7 @@ from farm_merge_valet.core.items import (
     ItemRef,
 )
 from farm_merge_valet.core.merge_planner import MergeAction, MergeActionKind, MoveEffect
+from farm_merge_valet.core.obstacles import ObstacleCandidate, ObstacleState, WorkerState
 from farm_merge_valet.core.shops import ShopOrder
 
 
@@ -183,7 +184,7 @@ def test_repair_reservation_protects_exact_items_for_best_placed_shop() -> None:
             True,
             True,
             False,
-            False,
+            True,
             (BuildingRequirement("wood_2", 3, 3),),
         ),
     )
@@ -224,6 +225,44 @@ def test_absent_buildings_never_reserve_resources() -> None:
     assert bot._repair_reserves() == {}
 
 
+def test_missing_repair_item_prioritizes_lower_tier_output_over_fixed_obstacle() -> None:
+    bot = bare_bot()
+    bot._blueprint_items = {
+        "tool_1": ItemRef("resources", "tool", 1),
+        "tool_6": ItemRef("resources", "tool", 6),
+        "stone_1": ItemRef("resources", "stone", 1),
+    }
+    bot._building_repairs = (
+        BuildingRepairState(
+            "bbq",
+            0,
+            True,
+            True,
+            False,
+            False,
+            (BuildingRequirement("tool_6", 2, 0),),
+        ),
+    )
+    bot._energy = 50
+    bot._workers = WorkerState(2, 2)
+    fixed_rock = ObstacleCandidate(
+        (0, 0),
+        "rock_small",
+        1,
+        ObstacleState(3, 3, 5, False, required_workers=1),
+        frozenset({"stone_1"}),
+    )
+    movable_toolbox = ObstacleCandidate(
+        (1, 0),
+        "toolbox_small",
+        2,
+        ObstacleState(3, 3, 5, True, required_workers=1),
+        frozenset({"tool_1"}),
+    )
+
+    assert bot._obstacle_to_clear([fixed_rock, movable_toolbox]) == movable_toolbox
+
+
 def test_live_sync_uses_one_atomic_snapshot_and_suppresses_disabled_sections() -> None:
     class SnapshotRuntime(FakeRuntime):
         def __init__(self) -> None:
@@ -256,6 +295,8 @@ def test_live_sync_uses_one_atomic_snapshot_and_suppresses_disabled_sections() -
     assert not runtime.options[0].include_obstacle_resources
     assert not runtime.options[0].include_storage_bubbles
     assert not runtime.options[0].include_shop_orders
+    assert runtime.options[0].include_building_repairs
+    assert runtime.options[0].include_upgrade_progress
 
 
 def action(item: ItemRef) -> MergeAction:

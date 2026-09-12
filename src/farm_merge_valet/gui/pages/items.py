@@ -308,14 +308,15 @@ class ItemsPage(AppPage):
                 fallback_targets: dict[str, tuple[str, str]] = {}
                 for target in catalog.items.values():
                     if target.category in {"animals", "crops"}:
-                        target_id = target.upgrade_target_id or target.family_id
-                        fallback_targets.setdefault(
-                            target_id,
-                            (target.display_name, target.family_id),
-                        )
+                        current = fallback_targets.get(target.family_id)
+                        if current is None or target.upgrade_target_id is not None:
+                            fallback_targets[target.family_id] = (
+                                target.upgrade_target_id or target.family_id,
+                                target.display_name,
+                            )
                 targets.extend(
                     (target_id, target_name, producer_family_id, None)
-                    for target_id, (target_name, producer_family_id) in fallback_targets.items()
+                    for producer_family_id, (target_id, target_name) in fallback_targets.items()
                 )
             for target_id, target_name, producer_family_id, maybe_progress in targets:
                 variant_key = f"{key}/{target_id}"

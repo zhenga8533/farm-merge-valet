@@ -22,7 +22,7 @@ _READ_BUILDING_REPAIRS_EXPRESSION = r"""
     if (typeof id !== 'string' || id.endsWith('_test')) continue;
     const active = buildings.isBuildingActive?.(id) === true;
     const upgrading = buildings.isBuildingUpgrading?.(id) === true;
-    const requirements = active || upgrading ? [] :
+    const requirements = active ? [] :
       (buildings.getUpgradeCost?.(id) || []).flatMap((entry) =>
         typeof entry?.blueprintID === 'string' && Number.isInteger(entry.amount) && entry.amount > 0
           ? [{blueprintID: entry.blueprintID, amount: entry.amount,

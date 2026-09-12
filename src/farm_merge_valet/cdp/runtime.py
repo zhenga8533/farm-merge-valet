@@ -67,6 +67,7 @@ from farm_merge_valet.cdp.targets import (
     read_background_flag_status,
 )
 from farm_merge_valet.cdp.transport import CdpConnectionError
+from farm_merge_valet.cdp.upgrade_progress import parse_upgrade_progress
 from farm_merge_valet.core.items import GridCoord, InteractionTargetKind
 from farm_merge_valet.core.land_expansion import (
     ExpansionRequirement,
@@ -612,6 +613,7 @@ class GameRuntimeAdapter:
             building_repairs=parse_building_repairs(raw.get("buildingRepairs")),
             event=self._parse_event(raw.get("event")),
             event_rewards=self._parse_event_rewards(raw.get("eventRewards")),
+            upgrade_progress=parse_upgrade_progress(raw.get("upgradeProgress")),
             metrics=metrics,
         )
 

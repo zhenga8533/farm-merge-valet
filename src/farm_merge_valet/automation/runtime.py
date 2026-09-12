@@ -18,6 +18,7 @@ from farm_merge_valet.core.land_expansion import LandExpansionCandidate
 from farm_merge_valet.core.marketplace import MarketplaceAction, MarketplaceLiveOffer
 from farm_merge_valet.core.obstacles import ObstacleState, WorkerState
 from farm_merge_valet.core.shops import ShopOrder
+from farm_merge_valet.core.upgrade_progress import UpgradeProgress
 
 
 class ActionStatus(StrEnum):
@@ -251,6 +252,7 @@ class SnapshotOptions:
     include_farm_visit: bool = False
     include_land_expansion: bool = False
     include_building_repairs: bool = False
+    include_upgrade_progress: bool = False
 
 
 @dataclass(frozen=True)
@@ -277,6 +279,7 @@ class RuntimeSnapshot:
     building_repairs: tuple[BuildingRepairState, ...] | None = None
     event: EventState | None = None
     event_rewards: tuple[EventRewardState, ...] = ()
+    upgrade_progress: UpgradeProgress | None = None
 
 
 @dataclass(frozen=True)

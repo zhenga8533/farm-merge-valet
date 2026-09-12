@@ -10,11 +10,19 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from farm_merge_valet.automation.runtime import RuntimeRecoveryRequired
+from farm_merge_valet.automation.runtime import (
+    BuildingRepairState,
+    BuildingRequirement,
+    RuntimeRecoveryRequired,
+)
 from farm_merge_valet.browser.manager import BrowserKind, BrowserStatus
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.core.upgrade_progress import UpgradeProgress, UpgradeTargetProgress
 from farm_merge_valet.gui.controller import ApplicationController
+from farm_merge_valet.gui.services.live_progress_cache import (
+    load_live_progress_cache,
+    write_live_progress_cache,
+)
 from farm_merge_valet.observability.logging import FMV_CONTEXT_ATTRIBUTE, FMV_EVENT_ATTRIBUTE
 
 
@@ -28,6 +36,47 @@ def test_saved_config_is_forwarded_to_running_bot(tmp_path) -> None:
     saved = store.update(loop_interval=0.25, auto_pop_storage_bubbles=False)
 
     assert updates == [saved]
+    controller._bot = None
+    controller.shutdown()
+    app.processEvents()
+
+
+def test_controller_loads_and_refreshes_cached_live_progress(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir))
+    initial_upgrades = UpgradeProgress((UpgradeTargetProgress("milk", "cow_4", 1),))
+    initial_buildings = (BuildingRepairState("bbq", 1, True, True, False, True, ()),)
+    write_live_progress_cache(catalog_dir, initial_upgrades, initial_buildings)
+    controller = ApplicationController(store)
+
+    assert controller.cached_upgrade_progress == initial_upgrades
+    assert controller.cached_building_repairs == initial_buildings
+
+    updated_upgrades = UpgradeProgress((UpgradeTargetProgress("milk", "cow_4", 2),))
+    updated_buildings = (
+        BuildingRepairState(
+            "bbq",
+            1,
+            True,
+            True,
+            False,
+            True,
+            (BuildingRequirement("tool_6", 2, 0),),
+        ),
+    )
+    controller._bot = SimpleNamespace(
+        upgrade_progress=updated_upgrades,
+        building_repairs=updated_buildings,
+        paused=False,
+    )
+
+    controller._poll_workers()
+
+    cached = load_live_progress_cache(catalog_dir)
+    assert cached.upgrades == updated_upgrades
+    assert cached.buildings == updated_buildings
     controller._bot = None
     controller.shutdown()
     app.processEvents()
@@ -120,11 +169,17 @@ def test_game_sync_refreshes_assets_and_upgrade_progress_in_background(
     statuses: list[str] = []
     progress = UpgradeProgress((UpgradeTargetProgress("milk", "cow_4", 2),))
     progress_updates: list[object] = []
+    synchronization_order: list[str] = []
 
     def refresh(*, force: bool = False) -> None:
         assert force
+        synchronization_order.append("catalog")
         worker_threads.append(threading.get_ident())
         release.wait(2)
+
+    def read_progress(*_args: object) -> UpgradeProgress:
+        synchronization_order.append("progress")
+        return progress
 
     monkeypatch.setattr(
         "farm_merge_valet.composition.create_catalog_synchronizer",
@@ -136,7 +191,7 @@ def test_game_sync_refreshes_assets_and_upgrade_progress_in_background(
     )
     monkeypatch.setattr(
         "farm_merge_valet.composition.read_upgrade_progress",
-        lambda *_args: progress,
+        read_progress,
     )
     monkeypatch.setattr(
         "farm_merge_valet.composition.read_building_repairs",
@@ -162,6 +217,7 @@ def test_game_sync_refreshes_assets_and_upgrade_progress_in_background(
     assert worker_threads and worker_threads[0] != threading.get_ident()
     assert busy_states == [True, False]
     assert progress_updates == [progress]
+    assert synchronization_order == ["catalog", "progress"]
     assert statuses[-1] == (
         "Game data and assets synchronized · Catalog entries: 1 · Upgrade targets: 1"
     )

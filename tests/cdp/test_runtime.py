@@ -1117,6 +1117,13 @@ def test_atomic_snapshot_reads_requested_state_once_without_retry(monkeypatch) -
             "workers": None,
             "storageBubbles": None,
             "shopOrders": None,
+            "upgradeProgress": [
+                {
+                    "targetID": "milk",
+                    "producerBlueprintID": "cow_4",
+                    "appliedTier": 2,
+                }
+            ],
             "rendererDurationMs": 2.5,
             "cellCount": 1,
             "occupiedCellCount": 1,
@@ -1135,6 +1142,9 @@ def test_atomic_snapshot_reads_requested_state_once_without_retry(monkeypatch) -
     assert snapshot.cells[(1, 2)].blueprint_id == "wheat_1"
     assert snapshot.metrics is not None
     assert snapshot.metrics.renderer_duration_ms == 2.5
+    assert snapshot.upgrade_progress is not None
+    assert snapshot.upgrade_progress.target("milk") is not None
+    assert snapshot.upgrade_progress.target("milk").applied_tier == 2
     assert len(calls) == 1
     assert calls[0][1]["retry"] is False
     assert "const energy = false" in calls[0][0]

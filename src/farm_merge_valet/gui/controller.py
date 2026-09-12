@@ -13,13 +13,14 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from farm_merge_valet.automation.bot import Bot
-from farm_merge_valet.automation.runtime import RuntimeRecoveryRequired
+from farm_merge_valet.automation.runtime import BuildingRepairState, RuntimeRecoveryRequired
 from farm_merge_valet.browser import BrowserManager, BrowserManagerError, BrowserStatus
 from farm_merge_valet.cdp.capture import capture_game_screenshot
 from farm_merge_valet.composition import create_bot, create_catalog_sync_service
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.config.change_policy import BOT_RESTART_FIELDS, BROWSER_RESTART_FIELDS
 from farm_merge_valet.config.hotkeys import HotkeyBindings
+from farm_merge_valet.core.upgrade_progress import UpgradeProgress
 from farm_merge_valet.gui.services.background_operation import (
     BackgroundOperationCancelled,
     BackgroundOperationRunner,
@@ -30,6 +31,10 @@ from farm_merge_valet.gui.services.catalog_freshness import (
 )
 from farm_merge_valet.gui.services.catalog_sync import CatalogSyncCallbacks, CatalogSyncService
 from farm_merge_valet.gui.services.hotkeys import HotkeyManager
+from farm_merge_valet.gui.services.live_progress_cache import (
+    load_live_progress_cache,
+    write_live_progress_cache,
+)
 from farm_merge_valet.observability.discord import discord_webhook_sink
 from farm_merge_valet.observability.logging import (
     FMV_CONTEXT_ATTRIBUTE,
@@ -117,7 +122,9 @@ class ApplicationController(QObject):
         self._shutdown_browser_worker: threading.Thread | None = None
         self._shutdown_browser_error: str | None = None
         self._shutdown_browser_complete = False
-        self._last_building_repairs: object = None
+        cached_progress = load_live_progress_cache(self.config.catalog_dir)
+        self._last_upgrade_progress = cached_progress.upgrades
+        self._last_building_repairs = cached_progress.buildings
         self.hotkeys = HotkeyManager()
         self.hotkeys.setParent(self)
         self.hotkeys.start_stop_requested.connect(self.toggle_running)
@@ -138,6 +145,12 @@ class ApplicationController(QObject):
     def _config_updated(self, config: AppConfig) -> None:
         previous = self.config
         self.config = config
+        if previous.catalog_dir != config.catalog_dir:
+            cached_progress = load_live_progress_cache(config.catalog_dir)
+            self._last_upgrade_progress = cached_progress.upgrades
+            self._last_building_repairs = cached_progress.buildings
+            self.upgrade_progress_changed.emit(self._last_upgrade_progress)
+            self.building_repairs_changed.emit(self._last_building_repairs)
         browser_changed = any(
             getattr(previous, name) != getattr(config, name) for name in BROWSER_RESTART_FIELDS
         )
@@ -251,8 +264,7 @@ class ApplicationController(QObject):
             def refresh_startup_data() -> None:
                 service = self._catalog_sync_service(config)
                 service.check_catalog_freshness(cached_freshness)
-                service.refresh_upgrade_progress(source="bot startup")
-                service.refresh_building_repairs(source="bot startup")
+                service.refresh_live_progress(source="bot startup")
 
             with discord_webhook_sink(
                 webhook,
@@ -465,15 +477,50 @@ class ApplicationController(QObject):
                 status_changed=self.game_sync_status_changed.emit,
                 browser_changed=self._catalog_browser_changed,
                 catalog_refreshed=self.catalog_refreshed.emit,
-                upgrade_progress_changed=self.upgrade_progress_changed.emit,
+                upgrade_progress_changed=self._upgrade_progress_updated,
                 catalog_freshness_changed=self.catalog_freshness_changed.emit,
                 building_repairs_changed=self._building_repairs_updated,
             ),
         )
 
-    def _building_repairs_updated(self, repairs: object) -> None:
+    @property
+    def cached_upgrade_progress(self) -> UpgradeProgress | None:
+        return self._last_upgrade_progress
+
+    @property
+    def cached_building_repairs(self) -> tuple[BuildingRepairState, ...] | None:
+        return self._last_building_repairs
+
+    def _upgrade_progress_updated(self, progress: UpgradeProgress | None) -> None:
+        if progress is None:
+            return
+        self._last_upgrade_progress = progress
+        self._persist_live_progress()
+        self.upgrade_progress_changed.emit(progress)
+
+    def _building_repairs_updated(self, repairs: tuple[BuildingRepairState, ...] | None) -> None:
+        if repairs is None:
+            return
         self._last_building_repairs = repairs
+        self._persist_live_progress()
         self.building_repairs_changed.emit(repairs)
+
+    def _persist_live_progress(self) -> None:
+        try:
+            write_live_progress_cache(
+                self.config.catalog_dir,
+                self._last_upgrade_progress,
+                self._last_building_repairs,
+            )
+        except OSError as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "live_progress.cache_failed",
+                "Could not cache live building and upgrade progress: %s",
+                exc,
+                detail=str(exc),
+            )
 
     def _catalog_browser_changed(self, status: BrowserStatus) -> None:
         self.browser_status_changed.emit(self._browser_status_text(status))
@@ -583,8 +630,11 @@ class ApplicationController(QObject):
     def _poll_workers(self) -> None:
         bot = self._bot
         if bot is not None and not self._stopping:
+            upgrade_progress = getattr(bot, "upgrade_progress", None)
+            if upgrade_progress is not None and upgrade_progress != self._last_upgrade_progress:
+                self._upgrade_progress_updated(upgrade_progress)
             repairs = bot.building_repairs
-            if repairs != self._last_building_repairs:
+            if repairs is not None and repairs != self._last_building_repairs:
                 self._building_repairs_updated(repairs)
             if bot.paused and self.status.state not in {
                 ApplicationState.PAUSED,

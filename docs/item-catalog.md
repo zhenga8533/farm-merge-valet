@@ -124,6 +124,13 @@ target's authoritative applied tier. The runtime repeats that check immediately
 before using the game's upgrade service, so duplicate cards and stale board
 snapshots cannot reapply a claimed tier.
 
+The GUI persists the last authoritative upgrade progress and building repair
+requirements beside the generated catalog. This supplies a stable initial view
+before the browser runtime is available. Successful synchronization and ongoing
+bot snapshots replace the cache; unavailable reads leave the previous snapshot
+intact. The cache is display and planning input only—actions still revalidate
+against the live game immediately before submission.
+
 ## GUI policy
 
 The catalog describes what an item is and what the game permits. User choices

@@ -1,4 +1,8 @@
-from farm_merge_valet.cdp.buildings import parse_building_repairs, read_building_repairs
+from farm_merge_valet.cdp.buildings import (
+    _READ_BUILDING_REPAIRS_EXPRESSION,
+    parse_building_repairs,
+    read_building_repairs,
+)
 
 
 def test_building_repairs_preserve_placement_status_and_requirements() -> None:
@@ -33,6 +37,11 @@ def test_invalid_building_requirements_fail_closed() -> None:
 
     assert states is not None
     assert states[0].requirements == ()
+
+
+def test_repairable_buildings_keep_requirements_in_the_upgrading_visual_state() -> None:
+    assert "const requirements = active ? []" in _READ_BUILDING_REPAIRS_EXPRESSION
+    assert "active || upgrading ? []" not in _READ_BUILDING_REPAIRS_EXPRESSION
 
 
 def test_building_reader_arms_board_when_cached_reference_is_missing(monkeypatch) -> None:
