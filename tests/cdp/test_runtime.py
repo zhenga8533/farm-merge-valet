@@ -198,7 +198,9 @@ def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) ->
     assert "notNowLink.emit(dismissEvent)" in expressions[0]
     assert "submitOverlayAction(stickerRaffleProposal, 'recovery'" in expressions[0]
     assert "sticker-raffle-proposal-closing" in expressions[0]
-    assert "window.__fmvOverlaySubmissions" in expressions[0]
+    assert "window.__fmvOverlaySubmissionTimes" in expressions[0]
+    assert "performance.now() - previous >= 10000" in expressions[0]
+    assert "`${waitingDetail}-timeout`" in expressions[0]
     assert "stickerRaffleProposal._close(undefined)" not in expressions[0]
     assert "services?.specialOfferService" in expressions[0]
     assert "services?.recurringConversionService" in expressions[0]
@@ -937,6 +939,7 @@ def test_discovery_rearms_a_stale_cached_board(monkeypatch) -> None:
     responses = iter(
         [
             False,
+            False,
             True,
             False,
             True,
@@ -976,6 +979,7 @@ def test_discovery_defers_heap_recovery_until_runtime_bootstrap_settles(monkeypa
     responses = iter(
         [
             False,
+            False,
             True,
             {"frame": 1, "ageMs": 0},
             {
@@ -1006,6 +1010,7 @@ def test_discovery_defers_heap_recovery_until_runtime_bootstrap_settles(monkeypa
 def test_failed_board_recovery_preserves_the_specific_status(monkeypatch) -> None:
     responses = iter(
         [
+            False,
             False,
             True,
             False,

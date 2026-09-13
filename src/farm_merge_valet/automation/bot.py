@@ -323,6 +323,12 @@ class Bot:
                     startup_grace_seconds=_RUNTIME_STARTUP_GRACE_SECONDS,
                 )
                 self._runtime_initializing_reported = True
+            if initialization_elapsed >= _RUNTIME_STARTUP_GRACE_SECONDS:
+                raise RuntimeRecoveryRequired(
+                    "game action runtime did not initialize within "
+                    f"{_RUNTIME_STARTUP_GRACE_SECONDS:.0f} seconds "
+                    f"({self._last_health.detail or 'no diagnostic detail'})"
+                )
             return False
         if self._last_health.detail:
             log_event(
@@ -1414,6 +1420,10 @@ class Bot:
                 )
             elif result.status is ActionStatus.BUSY:
                 self._report_wait(result.detail or "reward overlay transition in progress")
+            elif result.detail and result.detail.endswith("-timeout"):
+                raise RuntimeRecoveryRequired(
+                    f"The {health.transient_overlay.value} overlay did not close."
+                )
             else:
                 log_event(
                     logger,

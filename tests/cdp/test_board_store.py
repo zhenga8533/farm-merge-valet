@@ -7,6 +7,7 @@ import pytest
 
 from farm_merge_valet.automation.runtime import LiveCellState, RewardRequirement
 from farm_merge_valet.cdp.board_store import (
+    _ARM_BOARD_FROM_REGISTRY_EXPRESSION,
     _FIND_CELLS_MAP_EXPRESSION,
     _READ_EXPRESSION,
     _arm_board_store_target,
@@ -84,6 +85,15 @@ def test_board_recovery_yields_during_large_heap_and_board_scans() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_transition_board_recovery_uses_active_hud_registry() -> None:
+    assert "window.__fmvRootServices" in _ARM_BOARD_FROM_REGISTRY_EXPRESSION
+    assert "hudServiceRegistry?._activeService?._services" in (
+        _ARM_BOARD_FROM_REGISTRY_EXPRESSION
+    )
+    assert "mapGrid._isActive === false" in _ARM_BOARD_FROM_REGISTRY_EXPRESSION
+    assert "window.__fmvBoardCells = cells" in _ARM_BOARD_FROM_REGISTRY_EXPRESSION
 
 
 def test_board_reader_omits_inert_clouds_and_unused_behavior_names() -> None:

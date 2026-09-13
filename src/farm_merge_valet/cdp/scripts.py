@@ -130,6 +130,7 @@ _DISCOVER_EXPRESSION = r"""
   const orders = services?.ordersService;
   const rootServices = orders?._autoSaveService?.services ||
     orders?._autoSaveService?._services;
+  if (rootServices) window.__fmvRootServices = rootServices;
   const farmVisitTransition = rootServices?.transition;
   const validFarmVisitTransition = Boolean(rootServices && farmVisitTransition &&
     farmVisitTransition._services === rootServices &&
@@ -320,7 +321,7 @@ _HEARTBEAT_EXPRESSION = r"""
 def _overlay_context_expression() -> str:
     return r"""let stage = scene;
   while (stage?.parent) stage = stage.parent;
-  const overlaySubmissions = window.__fmvOverlaySubmissions ||= new WeakMap();
+  const overlaySubmissions = window.__fmvOverlaySubmissionTimes ||= new WeakMap();
   const overlaySubmitted = (target, phase = 'dismiss') =>
     Boolean(target && overlaySubmissions.get(target)?.has(phase));
   const layerRoot = stage?.children?.[0];
@@ -1173,10 +1174,13 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
 
   {_overlay_context_expression()}
   const submitOverlayAction = (target, phase, action, detail, waitingDetail = detail) => {{
-    if (overlaySubmitted(target, phase))
+    const previous = overlaySubmissions.get(target)?.get(phase);
+    if (Number.isFinite(previous) && performance.now() - previous >= 10000)
+      return {{status: 'rejected', detail: `${{waitingDetail}}-timeout`}};
+    if (Number.isFinite(previous))
       return {{status: 'busy', detail: waitingDetail}};
-    const phases = overlaySubmissions.get(target) || new Set();
-    phases.add(phase);
+    const phases = overlaySubmissions.get(target) || new Map();
+    phases.set(phase, performance.now());
     overlaySubmissions.set(target, phases);
     try {{
       action();

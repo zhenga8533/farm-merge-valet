@@ -91,7 +91,9 @@ Before heap recovery, a bounded bootstrap check waits for the game document,
 JavaScript bundle, and render canvas to become ready and stable. Heap recovery
 then verifies that the renderer can produce a frame. It locates
 the exact active board through its map-grid service owner instead of measuring
-render bounds across candidate maps. The board search yields between batches
+render bounds across candidate maps. After a farm or event transition, the
+stable HUD-service registry provides the new active board directly, avoiding a
+whole-heap query during normal travel. The fallback board search yields between batches
 of candidate maps and cells so the game loop and backend heartbeat can continue
 during scene transitions. Failed scans use a 5, 15, 60, then
 300-second cooldown. Expected startup probes, failed scans, and cooldowns are
@@ -117,7 +119,8 @@ subsequent Collect transitions. Explicitly non-interactive, non-dismissible
 popup-layer elements are treated as passive notifications; unknown interactive
 popups still pause automation. One-shot overlay actions share a per-instance
 submission guard, so a popup that remains visible while closing is not
-dismissed again. Optional high-rank duplicate raffle proposals
+dismissed again. A one-shot action that remains stuck for ten seconds requests
+managed-game recovery instead of blocking automation indefinitely. Optional high-rank duplicate raffle proposals
 are declined through their registered
 "Not now" interaction after its animation resolver is ready. The push-notification
 opt-in popup likewise uses its native dismiss handler, preserving the game's
@@ -462,10 +465,13 @@ the 20-second startup timeout expires. Direct integrations require no host-page
 action; Reddit may request Play. Three consecutive submitted actions with no
 authoritative progress classify the action pipeline as unresponsive even when
 browser animation frames continue. A backend single-session replacement requests
-the same recovery immediately. Default-enabled recovery restarts the verified
-managed game page once, with a short disconnect grace period before reopening
-the configured portal in the same tab, and rebuilds bot state. A repeated
-failure stops automation, and recovery never restarts an unowned browser.
+the same recovery immediately. A loaded game frame whose action runtime remains
+unavailable for 30 seconds also requests recovery; this covers fatal startup
+screens such as E002 without depending on canvas-rendered error text.
+Default-enabled recovery restarts the verified managed game page once, with a
+short disconnect grace period before reopening the configured portal in the same
+tab, and rebuilds bot state. A repeated failure stops automation, and recovery
+never restarts an unowned browser.
 
 Future phases, supporting work, and non-blocking research are tracked in
 [Open Items](open-items.md).

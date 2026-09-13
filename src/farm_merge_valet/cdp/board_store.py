@@ -28,6 +28,22 @@ _CELL_SHAPE_KEYS = ("column", "row", "_content", "_neighbors")
 _CELL_MAP_MIN_SIZE = 50
 _CELL_MAP_MAX_SIZE = 5000
 
+_ARM_BOARD_FROM_REGISTRY_EXPRESSION = r"""
+(() => {
+  const rootServices = window.__fmvRootServices;
+  const activeServices = rootServices?.hudServiceRegistry?._activeService?._services;
+  const mapGrid = activeServices?.mapGrid;
+  const cells = mapGrid?._cells;
+  if (!(cells instanceof Map) || mapGrid._isActive === false ||
+      !activeServices?.interactionService) return false;
+  const first = cells.values().next().value;
+  if (!first || !['column', 'row', '_content', '_neighbors']
+      .every((key) => key in first)) return false;
+  window.__fmvBoardCells = cells;
+  return true;
+})()
+"""
+
 _FIND_CELLS_MAP_EXPRESSION = f"""
 async function() {{
   const subscribers = (signal) => Array.isArray(signal?._subscribers)

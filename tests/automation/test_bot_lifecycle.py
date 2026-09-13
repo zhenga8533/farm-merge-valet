@@ -220,7 +220,9 @@ def test_bot_construction_does_not_load_catalog_eagerly() -> None:
     assert bot._blueprint_items == {}
 
 
-def test_initial_runtime_loading_warns_once_only_after_grace_period(monkeypatch, caplog) -> None:
+def test_initial_runtime_loading_requests_recovery_after_grace_period(
+    monkeypatch, caplog
+) -> None:
     class LoadingRuntime(FakeRuntime):
         def discover(self) -> RuntimeHealth:
             return RuntimeHealth(
@@ -237,12 +239,14 @@ def test_initial_runtime_loading_warns_once_only_after_grace_period(monkeypatch,
             )
 
     bot = Bot(AppConfig(), LoadingRuntime(), FakeCatalogProvider())
-    clock = iter((100.0, 101.0, 110.0, 111.0, 131.0, 132.0, 140.0, 141.0))
+    clock = iter((100.0, 101.0, 110.0, 111.0, 131.0, 132.0))
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: next(clock))
 
     with caplog.at_level(logging.INFO):
-        for _ in range(4):
-            assert not bot.initialize()
+        assert not bot.initialize()
+        assert not bot.initialize()
+        with pytest.raises(RuntimeRecoveryRequired, match="did not initialize within 30 seconds"):
+            bot.initialize()
 
     events = [getattr(record, "fmv_event", None) for record in caplog.records]
     assert events.count("runtime.initializing") == 1
@@ -686,6 +690,24 @@ def test_replaced_backend_session_requests_runtime_recovery() -> None:
     bot.runtime = ReplacedSessionRuntime()
 
     with pytest.raises(RuntimeRecoveryRequired, match="replaced this session"):
+        bot.step()
+
+
+def test_stalled_overlay_requests_runtime_recovery() -> None:
+    class StalledOverlayRuntime(FakeRuntime):
+        def read_runtime_health(self):
+            return health(
+                advancing=True,
+                transient_overlay=TransientOverlayKind.TRAVEL_SUMMARY_REWARD,
+            )
+
+        def dismiss_transient_overlay(self):
+            return ActionResult(ActionStatus.REJECTED, "travel-summary-reward-timeout")
+
+    bot = bare_bot()
+    bot.runtime = StalledOverlayRuntime()
+
+    with pytest.raises(RuntimeRecoveryRequired, match="did not close"):
         bot.step()
 
 

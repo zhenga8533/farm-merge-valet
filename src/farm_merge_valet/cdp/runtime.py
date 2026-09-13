@@ -26,7 +26,12 @@ from farm_merge_valet.automation.runtime import (
     TransientOverlayKind,
     VisitorActionState,
 )
-from farm_merge_valet.cdp.board_store import arm_board_store, parse_board_state, read_board_state
+from farm_merge_valet.cdp.board_store import (
+    _ARM_BOARD_FROM_REGISTRY_EXPRESSION,
+    arm_board_store,
+    parse_board_state,
+    read_board_state,
+)
 from farm_merge_valet.cdp.buildings import parse_building_repairs
 from farm_merge_valet.cdp.evaluation import apply_background_overrides, evaluate
 from farm_merge_valet.cdp.inventory_store import read_energy
@@ -260,6 +265,10 @@ class GameRuntimeAdapter:
             return self.read_runtime_health()
         raw: object = None
         discovery_attempted = False
+        if not cached_board_is_current and not is_cancelled():
+            cached_board_is_current = (
+                self._evaluate(_ARM_BOARD_FROM_REGISTRY_EXPRESSION, retry=False) is True
+            )
         if not cached_board_is_current and not is_cancelled():
             bootstrap_ready = self._runtime_bootstrap_ready()
             recovered = False
