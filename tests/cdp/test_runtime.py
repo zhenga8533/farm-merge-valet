@@ -401,12 +401,13 @@ def test_event_discovery_replaces_destroyed_scene_references() -> None:
     assert "window.__fmvGameplayMapScreen = scene" in _READ_EVENT_EXPRESSION
 
 
-def test_event_discovery_can_use_active_timed_event_service_without_launcher() -> None:
+def test_event_discovery_can_use_active_event_service_without_launcher() -> None:
     from farm_merge_valet.cdp.scripts import _READ_EVENT_EXPRESSION, _event_action_expression
 
     assert "gameplayServices?.mapGrid?._isActive === false" in _READ_EVENT_EXPRESSION
-    assert "timedEvent?._services === rootServices" in _READ_EVENT_EXPRESSION
-    assert "typeof timedEvent.goToEventMap === 'function'" in _READ_EVENT_EXPRESSION
+    assert "eventInstance?._eventActive === true" in _READ_EVENT_EXPRESSION
+    assert "typeof eventService?._goToEventMap === 'function'" in _READ_EVENT_EXPRESSION
+    assert "typeof eventService?.goToEventMap === 'function'" in _READ_EVENT_EXPRESSION
     assert "const sharedInventory = gameplayServices?.ordersService?._inventory" in (
         _READ_EVENT_EXPRESSION
     )

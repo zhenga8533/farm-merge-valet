@@ -215,6 +215,7 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     assert "Dismiss routine game popups automatically" in labels
     assert "Automatically pop stored items" in labels
     assert "Automatically claim supply crates" in labels
+    assert "Emergency merge-3 maximum tier" in labels
     assert "Allow obstacle energy spending" in labels
     assert "Preserve resources for building repairs" in labels
     assert "Prioritize shops over other repairs" in labels
@@ -278,7 +279,11 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         "event_visit_energy_threshold",
     ):
         assert section_groups["Event islands"].isAncestorOf(window.settings_page.controls[field])
-    for field in ("merge_empty_cell_reserve", "producer_interact_min_empty_cells"):
+    for field in (
+        "merge_empty_cell_reserve",
+        "emergency_merge_three_max_tier",
+        "producer_interact_min_empty_cells",
+    ):
         assert window.settings_page.planning_advanced_section.isAncestorOf(
             window.settings_page.controls[field]
         )

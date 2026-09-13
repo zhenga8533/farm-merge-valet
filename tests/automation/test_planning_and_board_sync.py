@@ -7,7 +7,7 @@ from threading import Event, Lock
 import pytest
 
 from farm_merge_valet.automation.action_control import OperationKind
-from farm_merge_valet.automation.board_space import BoardSpaceRequest
+from farm_merge_valet.automation.board_space import BoardSpaceRequest, BoardSpaceStatus
 from farm_merge_valet.automation.bot import Bot, Phase
 from farm_merge_valet.automation.runtime import (
     ActionResult,
@@ -703,6 +703,61 @@ def test_merge_five_policy_does_not_fall_back_while_space_remains() -> None:
         bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
     bot.board.set_cell((10, 10), Cell(CellKind.EMPTY))
     assert bot._merge_actions_for_policy() == []
+
+
+def test_merge_five_policy_falls_back_for_requested_space_shortfall() -> None:
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    bot._max_item_tiers[("crops", "wheat")] = 4
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+    for x in range(4):
+        bot.board.set_cell((x, 1), Cell(CellKind.EMPTY))
+
+    ordinary = bot._assess_board_space()
+    recovery = bot._assess_board_space(required_empty_cells=5)
+
+    assert ordinary.merge_actions == ()
+    assert recovery.status_for(5) is BoardSpaceStatus.RECOVERABLE
+    assert recovery.merge_actions[0].target_size == 3
+    assert recovery.merge_actions[0].effect is MoveEffect.MERGE
+
+
+def test_emergency_merge_three_respects_maximum_tier() -> None:
+    bot = bare_bot()
+    low = ItemRef("crops", "wheat", 3)
+    high = ItemRef("crops", "carrot", 4)
+    bot._max_item_tiers.update({low.identity: 5, high.identity: 5})
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, low))
+        bot.board.set_cell((x, 1), Cell(CellKind.ITEM, high))
+
+    actions = bot._assess_board_space(required_empty_cells=1).merge_actions
+
+    assert actions
+    assert {action.item for action in actions} == {low}
+
+
+def test_disabling_emergency_merge_three_does_not_disable_explicit_merge_three(
+    monkeypatch,
+) -> None:
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 4)
+    bot._max_item_tiers[wheat.identity] = 5
+    bot.config.emergency_merge_three_max_tier = 0
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"crops/wheat": ItemPolicyOverride(prefer_merge_five=False)},
+    )
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+
+    actions = bot._merge_actions_for_policy()
+
+    assert actions
+    assert actions[0].target_size == 3
+    assert actions[0].item == wheat
 
 
 def test_item_master_switch_disables_merge_planning() -> None:

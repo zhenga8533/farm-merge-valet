@@ -380,7 +380,10 @@ The existing board planner remains coordinate-based and viewport-neutral. It
 prioritizes trigger, degroup, and gather actions; prefers exact merge-5 work;
 uses merge-3 only for the configured policy/deadlock fallback; excludes the
 highest known tier; and preserves the empty-cell reserve when productive work
-exists. Occupied-item swaps can recover a full board. The game may relocate the
+exists. The fallback applies whenever a pending action needs more open cells
+than are available, including a partially open board, and only through the
+configured maximum item tier; zero disables it. Explicit per-item merge-3
+policies are unaffected. Occupied-item swaps can recover a full board. The game may relocate the
 displaced item to any available empty cell rather than exchanging the two cells
 literally, so success is based on the dragged item reaching its destination;
 the next authoritative board read discovers the displaced item's location.

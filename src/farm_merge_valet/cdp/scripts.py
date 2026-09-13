@@ -756,11 +756,6 @@ _READ_EVENT_EXPRESSION = r"""
   const rootServices = gameplayServices?.ordersService?._autoSaveService?.services ||
     gameplayServices?.ordersService?._autoSaveService?._services;
   const timedEvent = rootServices?.timeLimitedEvent;
-  const directEnter = !eventHud && window.__fmvFarmSceneKind === 'own' &&
-    timedEvent?._services === rootServices &&
-    typeof timedEvent.goToEventMap === 'function' &&
-    typeof timedEvent.activeTheme === 'string' && Boolean(timedEvent.activeTheme);
-  if (!eventHud && !introduction && !launcher && !directEnter) return null;
   const level = eventHud?._levelDisplay?._levelItem;
   const eventInstances =
     gameplayServices?.timedEventService?._eventInstances?.values?.() || [];
@@ -768,9 +763,14 @@ _READ_EVENT_EXPRESSION = r"""
     .find((candidate) => candidate?._eventActive === true &&
       candidate?.eventType === 'timelimitedevent' &&
       (!launcher || candidate?._button === launcher));
-  const eventService = timedEvent || gameplayServices?.timeLimitedEvent ||
-    eventHud?._eventEnergyCounter?._resourceService?.services?.timeLimitedEvent ||
-    eventInstance;
+  const eventService = eventHud?._eventEnergyCounter?._resourceService?.services
+    ?.timeLimitedEvent || timedEvent || gameplayServices?.timeLimitedEvent || eventInstance;
+  const directEnter = !eventHud && window.__fmvFarmSceneKind === 'own' &&
+    (typeof eventService?._goToEventMap === 'function' ||
+      typeof eventService?.goToEventMap === 'function') &&
+    (Boolean(timedEvent?._activeTheme || timedEvent?.activeTheme) ||
+      eventInstance?._eventActive === true);
+  if (!eventHud && !introduction && !launcher && !directEnter) return null;
   const sharedInventory = gameplayServices?.ordersService?._inventory;
   const sharedEnergy = sharedInventory?.getInventoryItem?.('time_limited_event_energy');
   const energy = eventHud?._eventEnergyCounter?._eventEnergyItem || sharedEnergy;

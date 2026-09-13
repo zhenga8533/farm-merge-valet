@@ -167,6 +167,8 @@ def test_legacy_event_revisit_interval_is_discarded() -> None:
         ("cdp_port", 0),
         ("merge_empty_cell_reserve", -1),
         ("merge_empty_cell_reserve", 51),
+        ("emergency_merge_three_max_tier", -1),
+        ("emergency_merge_three_max_tier", 51),
         ("producer_interact_min_empty_cells", 0),
         ("producer_interact_min_empty_cells", 51),
         ("loop_interval", 0),
@@ -231,6 +233,11 @@ def test_settings_reject_removed_legacy_keys(field: str) -> None:
 
 def test_merge_space_reserve_can_be_disabled() -> None:
     assert AppConfig(merge_empty_cell_reserve=0).merge_empty_cell_reserve == 0
+
+
+def test_emergency_merge_three_defaults_to_tier_three_and_can_be_disabled() -> None:
+    assert AppConfig().emergency_merge_three_max_tier == 3
+    assert AppConfig(emergency_merge_three_max_tier=0).emergency_merge_three_max_tier == 0
 
 
 def test_merge_five_is_enabled_by_default() -> None:

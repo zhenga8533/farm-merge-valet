@@ -140,6 +140,16 @@ class SettingsPage(ConfigFormPage):
         self._add_int(form, "Merge-space reserve", "merge_empty_cell_reserve", 0, 50)
         self._add_int(
             form,
+            "Emergency merge-3 maximum tier",
+            "emergency_merge_three_max_tier",
+            0,
+            50,
+        )
+        self.controls["emergency_merge_three_max_tier"].setToolTip(
+            "Zero disables emergency merge-3. Explicit item merge-3 policies are unaffected."
+        )
+        self._add_int(
+            form,
             "Fallback producer open cells",
             "producer_interact_min_empty_cells",
             1,

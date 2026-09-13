@@ -718,18 +718,35 @@ class Bot:
         ]
         if actions or self.board.find_empty():
             return actions
-        return self._plan_merge_actions(
-            3,
-            prefer_smallest_trigger=True,
-            prefer_merge_five=True,
-        )
+        return self._space_recovery_merge_actions()
 
-    def _assess_board_space(self) -> BoardSpaceAssessment:
+    def _space_recovery_merge_actions(self) -> list[MergeAction]:
+        maximum_tier = self.config.emergency_merge_three_max_tier
+        if maximum_tier == 0:
+            return []
+        return [
+            action
+            for action in self._plan_merge_actions(
+                3,
+                prefer_smallest_trigger=True,
+                prefer_merge_five=True,
+            )
+            if action.item.tier <= maximum_tier
+        ]
+
+    def _assess_board_space(self, required_empty_cells: int | None = None) -> BoardSpaceAssessment:
         empty_cells = len(self.board.find_empty())
+        merge_actions = self._merge_actions_for_policy()
+        if (
+            not merge_actions
+            and required_empty_cells is not None
+            and empty_cells < required_empty_cells
+        ):
+            merge_actions = self._space_recovery_merge_actions()
         return BoardSpaceAssessment(
             empty_cells=empty_cells,
             reserve=self.config.merge_empty_cell_reserve,
-            merge_actions=tuple(self._merge_actions_for_policy()),
+            merge_actions=tuple(merge_actions),
         )
 
     def _action_signature(self, action: MergeAction) -> tuple[tuple[GridCoord, Cell | None], ...]:
@@ -1247,6 +1264,7 @@ class Bot:
         resume_phase: Phase,
         action_key: tuple[object, ...] = (),
     ) -> bool:
+        board_space = self._assess_board_space(required_empty_cells)
         if board_space.status_for(required_empty_cells) is BoardSpaceStatus.AVAILABLE:
             if (
                 self._board_space_request is not None
@@ -1280,6 +1298,7 @@ class Bot:
         request = self._board_space_request
         if request is None:
             return False
+        board_space = self._assess_board_space(request.required_empty_cells)
         if not self._board_space_request_is_current(
             request, board_space, immediate, depleted, ready
         ):
