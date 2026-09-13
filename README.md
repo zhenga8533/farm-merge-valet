@@ -111,12 +111,12 @@ another action is sent. Automation pauses when renderer or backend health cannot
 be confirmed. Unknown capabilities, balances, costs, targets, and overlays fail
 closed; physical mouse input is never used as a fallback.
 
-If repeated submitted actions produce no authoritative progress, or the game
-reports that its backend session was replaced, automatic recovery may restart
-the verified managed game page once and rebuild runtime state. Recovery first
-closes the old game document and briefly allows its backend socket to disconnect
-before reopening the configured portal in the same tab. A repeated failure
-stops the run instead of creating a restart loop.
+If submitted actions repeatedly produce no authoritative progress, the game
+reports that its backend session was replaced, or the action runtime does not
+initialize within 30 seconds, automatic recovery may restart the verified
+managed game page once and rebuild runtime state. Recovery briefly closes the
+old game document before reopening the configured portal in the same tab. A
+repeated failure stops the run instead of creating a restart loop.
 Connection recovery preserves pending intent so an ambiguous action is checked
 against fresh state rather than blindly repeated.
 

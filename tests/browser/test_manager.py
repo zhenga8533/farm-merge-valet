@@ -448,9 +448,7 @@ def test_recover_game_restarts_loaded_managed_page(monkeypatch) -> None:
     monkeypatch.setattr("farm_merge_valet.browser.manager.time.sleep", lambda _seconds: None)
 
     assert manager.recover_game() is loaded
-    assert restarted == [
-        (9222, "https://www.reddit.com/r/FarmMergeValley/", "game title", False)
-    ]
+    assert restarted == [(9222, "https://www.reddit.com/r/FarmMergeValley/", "game title", False)]
 
 
 def test_recover_game_allows_observation_portal_restart(monkeypatch) -> None:
@@ -468,9 +466,7 @@ def test_recover_game_allows_observation_portal_restart(monkeypatch) -> None:
     restarted = []
     monkeypatch.setattr(
         "farm_merge_valet.browser.manager.restart_game_page",
-        lambda port, url, title, *, allow_observation=False: restarted.append(
-            allow_observation
-        ),
+        lambda port, url, title, *, allow_observation=False: restarted.append(allow_observation),
     )
     monkeypatch.setattr("farm_merge_valet.browser.manager.time.sleep", lambda _seconds: None)
 

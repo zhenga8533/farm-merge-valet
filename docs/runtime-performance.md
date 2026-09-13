@@ -30,27 +30,21 @@ are not immediately replayed. An action with an ambiguous transport result is
 replanned from a later authoritative snapshot.
 
 The animation-frame heartbeat proves renderer availability, not that the game's
-own action pipeline is responsive. A cross-workflow progress watchdog therefore
-counts submitted actions that settle without any authoritative state change.
-Confirmed actions and successful supply-crate spawns reset the count. Three
-consecutive no-progress submissions request runtime recovery. The game-reported
-single-session replacement state requests the same recovery immediately. When
-automatic game recovery is enabled, the application navigates the verified game
-tab away, allows the prior backend socket two seconds to close, reopens the
-configured trusted portal in that tab, and creates a fresh bot/runtime. A
-repeated failure ends the run; unowned browser processes and pages are never
-restarted automatically.
+own action pipeline is responsive. Three consecutive submitted actions without
+authoritative progress request runtime recovery; confirmed actions and supply-
+crate spawns reset the count. A game-reported session replacement requests
+recovery immediately, while a missing action runtime receives a 30-second grace
+period for normal loading and scene transitions. Automatic recovery briefly
+navigates the verified managed game tab away before reopening the trusted portal
+and creating a fresh bot/runtime. A repeated failure ends the run; unowned
+browsers and pages are never restarted automatically.
 
-Board discovery normally uses the cached active map. If that reference is lost,
-recovery first confirms that the renderer can produce a frame, performs one
-heap query, and identifies the map through its active map-grid owner. Failed
-initial searches are expected while the game scene is loading and remain
-informational during a 30-second startup grace period. One warning is emitted if
-the action runtime is still unavailable after that period; losing a runtime that
-was previously ready warns immediately.
-
-Failed recovery attempts cool down for 5, 15, 60, and then 300 seconds.
-Recovery never uses render bounds to score every cell.
+Board discovery normally uses the cached active map. After a scene transition,
+the stable HUD registry can bind the replacement map directly. If both references
+are unavailable, recovery confirms that the renderer can produce a frame, then
+runs one yielding heap query and identifies the map through its active map-grid
+owner. Failed searches cool down for 5, 15, 60, and then 300 seconds. Recovery
+never scores cells by render bounds.
 
 ## Diagnostics
 

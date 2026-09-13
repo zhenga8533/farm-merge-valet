@@ -60,9 +60,7 @@ from farm_merge_valet.cdp.scripts import (
         _drop_expression((0, 0), (1, 0), 7),
         _crate_expression(1, 7),
         _interaction_expression((0, 0), InteractionTargetKind.IMMEDIATE, "milk", 11, 7),
-        _interaction_expression(
-            (0, 0), InteractionTargetKind.FRIEND_REWARD, "building_bbq", 11, 7
-        ),
+        _interaction_expression((0, 0), InteractionTargetKind.FRIEND_REWARD, "building_bbq", 11, 7),
         _removal_expression((0, 0), "rock", 11, 7),
         _shop_start_expression("bakery", "bread", 7),
         _shop_claim_expression("bakery", "bread", 7),

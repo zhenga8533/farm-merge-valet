@@ -71,9 +71,7 @@ def test_board_recovery_yields_during_large_heap_and_board_scans() -> None:
     assert _FIND_CELLS_MAP_EXPRESSION.startswith("\nasync function()")
     assert "inspected % 32 === 0" in _FIND_CELLS_MAP_EXPRESSION
     assert "inspectedCells % 128 === 0" in _FIND_CELLS_MAP_EXPRESSION
-    assert "await new Promise((resolve) => setTimeout(resolve, 0))" in (
-        _FIND_CELLS_MAP_EXPRESSION
-    )
+    assert "await new Promise((resolve) => setTimeout(resolve, 0))" in (_FIND_CELLS_MAP_EXPRESSION)
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js is required for JavaScript syntax checks")
@@ -89,9 +87,7 @@ def test_board_recovery_yields_during_large_heap_and_board_scans() -> None:
 
 def test_transition_board_recovery_uses_active_hud_registry() -> None:
     assert "window.__fmvRootServices" in _ARM_BOARD_FROM_REGISTRY_EXPRESSION
-    assert "hudServiceRegistry?._activeService?._services" in (
-        _ARM_BOARD_FROM_REGISTRY_EXPRESSION
-    )
+    assert "hudServiceRegistry?._activeService?._services" in (_ARM_BOARD_FROM_REGISTRY_EXPRESSION)
     assert "mapGrid._isActive === false" in _ARM_BOARD_FROM_REGISTRY_EXPRESSION
     assert "window.__fmvBoardCells = cells" in _ARM_BOARD_FROM_REGISTRY_EXPRESSION
 

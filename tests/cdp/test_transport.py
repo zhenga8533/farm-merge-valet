@@ -107,9 +107,7 @@ def test_restart_game_page_allows_the_previous_socket_to_close(monkeypatch) -> N
 
     monkeypatch.setattr(
         "farm_merge_valet.cdp.targets._run_top_page_operation",
-        lambda _port, _title, operation, *, allow_observation=False: operation(
-            "ws://page/game"
-        ),
+        lambda _port, _title, operation, *, allow_observation=False: operation("ws://page/game"),
     )
     monkeypatch.setattr(
         "farm_merge_valet.cdp.targets._command_target",
@@ -143,9 +141,7 @@ def test_restart_game_page_rejects_an_unrecognized_url(monkeypatch) -> None:
         nonlocal operated
         operated = True
 
-    monkeypatch.setattr(
-        "farm_merge_valet.cdp.targets._run_top_page_operation", record_operation
-    )
+    monkeypatch.setattr("farm_merge_valet.cdp.targets._run_top_page_operation", record_operation)
 
     with pytest.raises(CdpConnectionError, match="unrecognized game page URL"):
         restart_game_page(9222, "https://example.com/")

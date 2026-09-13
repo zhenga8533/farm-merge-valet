@@ -85,9 +85,7 @@ class CatalogSyncService:
         self._dependencies.catalog_synchronizer_factory(self._config).sync(force=True)
         self._callbacks.raise_if_cancelled()
         catalog = self._dependencies.catalog_loader(self._config.catalog_dir / "catalog.json")
-        target_count, _building_count = self.refresh_live_progress(
-            source="manual synchronization"
-        )
+        target_count, _building_count = self.refresh_live_progress(source="manual synchronization")
         self.check_catalog_freshness()
         progress = (
             f"Upgrade targets: {target_count}"

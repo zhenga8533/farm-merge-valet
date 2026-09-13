@@ -372,9 +372,7 @@ class Bot:
                 item.game_id: resource_name
                 for item in catalog.items.values()
                 if (
-                    resource_name := obstacle_resource_name(
-                        item.traits, item.presentation_group_id
-                    )
+                    resource_name := obstacle_resource_name(item.traits, item.presentation_group_id)
                 )
                 is not None
             }
@@ -662,12 +660,8 @@ class Bot:
         return min(
             candidates,
             key=lambda state: (
-                self._building_repair_priority(state)
-                if self.config.prioritize_repair_shops
-                else 0,
-                self._remaining_repair_cost(state)
-                if self.config.prioritize_cheaper_repairs
-                else 0,
+                self._building_repair_priority(state) if self.config.prioritize_repair_shops else 0,
+                self._remaining_repair_cost(state) if self.config.prioritize_cheaper_repairs else 0,
                 state.building_id,
             ),
         )

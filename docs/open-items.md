@@ -6,23 +6,10 @@ This document tracks work that still requires a concrete live-game contract.
 
 ### Additional event workflows
 
-Event-island navigation, level-gated Explore actions, board automation,
-event-energy obstacle costs, and return-to-farm transitions are supported
-through the active event's native runtime handlers. Automation remains opt-in
-and can be controlled by event theme. While on the main farm, the bot reads the
-shared event-energy inventory and visits an enabled event only when its configured
-minimum energy threshold is met.
-
-Enabled events expose their authoritative unclaimed reward tracks in the atomic
-runtime snapshot. When automatic event reward claiming is enabled and the bot is
-on the player's main farm, it claims one unlocked reward per iteration through
-the event's native grant-and-confirm pipeline. Free rewards are always eligible;
-premium or VIP rewards are included only when the live pass model reports that
-their paid track has been purchased. Each claim revalidates the event, track,
-level, reward identity, amount, and claimable state immediately before granting.
-
-Future event-specific actions beyond the shared board workflow still require
-separate validation because event scenes and rules can change.
+The shared event workflow already covers navigation, Explore actions, board
+automation, event energy, return transitions, and main-farm reward claiming for
+live free and purchased tracks. Future event-specific actions still require a
+concrete live contract because event scenes and rules can change.
 
 ### Building repair submission
 

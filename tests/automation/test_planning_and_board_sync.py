@@ -242,9 +242,7 @@ def test_unclaimed_likes_use_visitor_reward_setting() -> None:
     bot = bare_bot()
     bot.config = AppConfig(item_automation_enabled=False)
     bot._last_health = replace(health(advancing=True), farm_scene=FarmSceneKind.OWN)
-    bot._live_cells = {
-        (3, 4): LiveCellState(True, "likes_billboard", 81, unclaimed_likes=True)
-    }
+    bot._live_cells = {(3, 4): LiveCellState(True, "likes_billboard", 81, unclaimed_likes=True)}
 
     immediate, _, _ = bot._interaction_actions()
 
@@ -484,7 +482,12 @@ def test_clearing_toolbox_does_not_fall_through_to_unneeded_rock() -> None:
     bot._obstacle_resource_names = {"rock_large": "stone", "toolbox_medium": "tool"}
     bot._building_repairs = (
         BuildingRepairState(
-            "bbq", 0, True, True, False, False,
+            "bbq",
+            0,
+            True,
+            True,
+            False,
+            False,
             (BuildingRequirement("tool_6", 2, 0),),
         ),
     )
@@ -507,7 +510,12 @@ def test_new_repair_need_replaces_focus_on_unneeded_rock() -> None:
     bot._obstacle_resource_names = {"rock_large": "stone", "toolbox_medium": "tool"}
     bot._building_repairs = (
         BuildingRepairState(
-            "bbq", 0, True, True, False, False,
+            "bbq",
+            0,
+            True,
+            True,
+            False,
+            False,
             (BuildingRequirement("tool_6", 2, 0),),
         ),
     )

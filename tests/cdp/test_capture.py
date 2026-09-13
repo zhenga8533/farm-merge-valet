@@ -77,7 +77,7 @@ def test_capture_game_screenshot_uses_verified_game_target(monkeypatch) -> None:
                     "scale": 1,
                 },
             },
-        )
+        ),
     ]
 
 
