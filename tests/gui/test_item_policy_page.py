@@ -479,7 +479,7 @@ def test_policy_table_headers_fit_controls_and_sort_indicators(tmp_path) -> None
         ("Items", window.items_page.bulk_header),
         ("Shops", window.shops_page.bulk_header),
     ):
-        window.navigation.setCurrentRow(window._NAVIGATION.index(page_name))
+        window.navigation.setCurrentRow(window._navigation_rows[page_name])
         app.processEvents()
         for column, control in header._controls.items():
             assert control.width() >= control.sizeHint().width()

@@ -561,7 +561,7 @@ def test_catalog_pages_populate_lazily_and_ignore_hidden_refreshes(tmp_path, mon
     assert window.items_page.table.topLevelItemCount() == 0
     assert window.shops_page.tree.topLevelItemCount() == 0
 
-    window.navigation.setCurrentRow(window._NAVIGATION.index("Items"))
+    window.navigation.setCurrentRow(window._navigation_rows["Items"])
     assert not window.items_page.loading_state.isHidden()
     deadline = time.monotonic() + 1
     while not window.items_page.loading_state.isHidden() and time.monotonic() < deadline:
@@ -570,14 +570,14 @@ def test_catalog_pages_populate_lazily_and_ignore_hidden_refreshes(tmp_path, mon
     assert window.shops_page.tree.topLevelItemCount() == 0
     assert progress_reads == []
 
-    window.navigation.setCurrentRow(window._NAVIGATION.index("Shops"))
+    window.navigation.setCurrentRow(window._navigation_rows["Shops"])
     assert not window.shops_page.loading_state.isHidden()
     deadline = time.monotonic() + 1
     while not window.shops_page.loading_state.isHidden() and time.monotonic() < deadline:
         QTest.qWait(10)
     assert window.shops_page.loading_state.isHidden()
 
-    window.navigation.setCurrentRow(window._NAVIGATION.index("Buildings"))
+    window.navigation.setCurrentRow(window._navigation_rows["Buildings"])
     assert not window.buildings_page.loading_state.isHidden()
     deadline = time.monotonic() + 1
     while not window.buildings_page.loading_state.isHidden() and time.monotonic() < deadline:
@@ -585,7 +585,7 @@ def test_catalog_pages_populate_lazily_and_ignore_hidden_refreshes(tmp_path, mon
     assert window.buildings_page._populated
     assert window.buildings_page.loading_state.isHidden()
 
-    window.navigation.setCurrentRow(window._NAVIGATION.index("Marketplace"))
+    window.navigation.setCurrentRow(window._navigation_rows["Marketplace"])
     assert not window.marketplace_page.loading_state.isHidden()
     deadline = time.monotonic() + 1
     while not window.marketplace_page.loading_state.isHidden() and time.monotonic() < deadline:

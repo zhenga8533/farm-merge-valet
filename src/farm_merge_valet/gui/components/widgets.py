@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QPushButton, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget
 
 
 def set_styled_property(widget: QWidget, name: str, value: object) -> None:
@@ -53,6 +53,20 @@ def secondary_button(text: str) -> QPushButton:
     button = QPushButton(text)
     button.setProperty("secondary", True)
     return button
+
+
+def metric_card(title: str, value: str = "0") -> tuple[QFrame, QLabel]:
+    card = QFrame()
+    card.setObjectName("metricCard")
+    layout = QVBoxLayout(card)
+    label = QLabel(title)
+    label.setObjectName("metricLabel")
+    output = QLabel(value)
+    output.setObjectName("metricValue")
+    output.setWordWrap(True)
+    layout.addWidget(label)
+    layout.addWidget(output)
+    return card, output
 
 
 def set_validation_state(widget: QWidget, message: str = "") -> None:

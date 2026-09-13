@@ -49,6 +49,8 @@ class StatisticsSnapshot:
     rows: tuple[StatisticsRow, ...]
     trend: tuple[TrendBucket, ...]
     session_started_at: datetime | None = None
+    range_start_at: datetime | None = None
+    range_end_at: datetime | None = None
 
     def total(self, *prefixes: str) -> float:
         return sum(row.value for row in self.rows if row.metric.startswith(prefixes))
@@ -286,7 +288,7 @@ class StatisticsService(logging.Handler):
             parameters.append(session_id)
         elif duration := _RANGES[range_key]:
             clauses.append("bucket_start >= ?")
-            parameters.append(now - duration.total_seconds())
+            parameters.append(int((now - duration.total_seconds()) // 3600) * 3600)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         self._flush()
         with self._connect() as connection:
@@ -335,7 +337,20 @@ class StatisticsService(logging.Handler):
             if range_key == "session" and session_started is not None
             else None
         )
-        return StatisticsSnapshot(range_key, rows, trend, started)
+        if range_key == "session":
+            range_start = session_started
+        elif duration := _RANGES[range_key]:
+            range_start = now - duration.total_seconds()
+        else:
+            range_start = trend_rows[0][0] if trend_rows else now
+        return StatisticsSnapshot(
+            range_key,
+            rows,
+            trend,
+            started,
+            datetime.fromtimestamp(range_start, UTC) if range_start is not None else None,
+            datetime.fromtimestamp(now, UTC),
+        )
 
     def export(self, path: Path, range_key: str) -> Path:
         snapshot = self.query(range_key)

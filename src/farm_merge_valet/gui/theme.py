@@ -74,6 +74,13 @@ _LIGHT = _Colors(
     scroll_pressed="#6e7781",
 )
 
+
+def warning_color(palette: QPalette) -> QColor:
+    """Return a legible warning accent for the active light or dark palette."""
+    dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+    return QColor("#d29922" if dark else "#9a6700")
+
+
 _PALETTE_COLORS = _Colors(
     window="palette(window)",
     surface="palette(button)",
@@ -292,9 +299,13 @@ QSlider:disabled::handle:horizontal {{
 }}
 QListWidget#navigation {{
     background: {colors.window}; border: none; border-right: 1px solid {colors.border};
-    padding: 8px; outline: none;
+    padding: 12px 8px; outline: none;
 }}
-QListWidget#navigation::item {{ padding: 10px; border-radius: 6px; }}
+QListWidget#navigation::item {{ padding: 9px 12px; border-radius: 6px; }}
+QListWidget#navigation::item:disabled {{
+    color: {colors.muted}; background: transparent;
+    padding-top: 18px; padding-bottom: 5px; font-weight: 600;
+}}
 QListWidget#navigation::item:hover {{ background: {colors.surface}; }}
 QListWidget#navigation::item:selected {{ background: {colors.selected}; color: white; }}
 QTableWidget, QTreeWidget, QPlainTextEdit {{

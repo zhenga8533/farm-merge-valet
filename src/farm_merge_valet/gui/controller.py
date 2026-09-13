@@ -36,6 +36,7 @@ from farm_merge_valet.gui.services.live_progress_cache import (
     load_live_progress_cache,
     write_live_progress_cache,
 )
+from farm_merge_valet.gui.services.statistics_operations import StatisticsOperations
 from farm_merge_valet.observability.discord import discord_webhook_sink
 from farm_merge_valet.observability.logging import (
     FMV_CONTEXT_ATTRIBUTE,
@@ -107,6 +108,8 @@ class ApplicationController(QObject):
     building_repairs_changed = Signal(object)
     catalog_freshness_changed = Signal(object)
     statistics_changed = Signal(object)
+    statistics_exported = Signal(object)
+    statistics_reset = Signal(object)
     shutdown_complete = Signal()
     _utility_operation_finished = Signal(str, object)
     _bot_finished = Signal(object)
@@ -117,6 +120,14 @@ class ApplicationController(QObject):
         self.config = store.current
         self.status = ApplicationStatus()
         self.statistics = statistics
+        self._statistics_operations = (
+            StatisticsOperations(statistics, self) if statistics is not None else None
+        )
+        if self._statistics_operations is not None:
+            self._statistics_operations.snapshot_ready.connect(self.statistics_changed)
+            self._statistics_operations.export_finished.connect(self.statistics_exported)
+            self._statistics_operations.reset_finished.connect(self.statistics_reset)
+            self._statistics_operations.failed.connect(self.error)
         self._bot: Bot | None = None
         self._worker: threading.Thread | None = None
         self._operations = BackgroundOperationRunner(self._utility_operation_finished.emit)
@@ -372,6 +383,8 @@ class ApplicationController(QObject):
         if self._shutting_down:
             return
         self._shutting_down = True
+        if self._statistics_operations is not None:
+            self._statistics_operations.close()
         self._operations.cancel()
         self.hotkeys.stop()
         if self._bot is None and self._worker is not None and self._worker.is_alive():
@@ -392,34 +405,21 @@ class ApplicationController(QObject):
         self._set_status(state=state, phase="—")
 
     def refresh_statistics(self, range_key: str) -> None:
-        if self.statistics is None:
+        if self._statistics_operations is None:
             self.statistics_changed.emit(None)
             return
-        try:
-            snapshot = self.statistics.query(range_key)
-        except (OSError, sqlite3.Error, ValueError) as exc:
-            self.error.emit(f"Could not read statistics: {exc}")
-            self.statistics_changed.emit(None)
-            return
-        self.statistics_changed.emit(snapshot)
+        self._statistics_operations.refresh(range_key)
 
-    def export_statistics(self, path: Path, range_key: str) -> Path:
-        if self.statistics is None:
-            raise OSError("Statistics storage is unavailable.")
-        try:
-            return self.statistics.export(path, range_key)
-        except sqlite3.Error as exc:
-            raise OSError(f"Statistics storage failed: {exc}") from exc
+    def export_statistics(self, path: Path, range_key: str) -> None:
+        if self._statistics_operations is None:
+            self.error.emit("Statistics storage is unavailable.")
+            return
+        self._statistics_operations.export(path, range_key)
 
     def reset_statistics(self, range_key: str = "session") -> None:
-        if self.statistics is None:
+        if self._statistics_operations is None:
             return
-        try:
-            self.statistics.reset()
-        except (OSError, sqlite3.Error) as exc:
-            self.error.emit(f"Could not reset statistics: {exc}")
-            return
-        self.refresh_statistics(range_key)
+        self._statistics_operations.reset(range_key)
 
     @staticmethod
     def _browser_status_text(status: BrowserStatus) -> str:

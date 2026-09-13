@@ -55,6 +55,8 @@ URL and page target are migrated automatically.
 The dashboard provides Start/Stop and Pause/Resume controls, browser and runtime
 status, recent activity, and links to configuration. The same controls are
 available from the compact overlay, tray, and global shortcuts.
+The desktop sidebar groups Dashboard and Statistics under Overview, item and
+shop policies under Automation, and Browser, Settings, and Logs under System.
 
 Default shortcuts are:
 
@@ -178,6 +180,9 @@ session, 24-hour, 7-day, 30-day, and all-time views. It includes item-family and
 tier breakdowns, workflow progress, resource use, and reliability without
 storing board coordinates or runtime object IDs. The selected range can be
 exported as JSON or CSV, and statistics can be reset independently of logs.
+The trend groups activity and reliability into bounded time bars; exact counts
+are available by hovering, and all Statistics file operations run in the
+background so the desktop remains responsive.
 
 ## Development
 

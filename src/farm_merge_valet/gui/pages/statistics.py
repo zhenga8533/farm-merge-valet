@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPalette
+from datetime import datetime, timedelta
+from math import ceil
+
+from PySide6.QtCore import QRect, Qt, Signal
+from PySide6.QtGui import QMouseEvent, QPainter, QPalette
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -21,8 +24,9 @@ from farm_merge_valet.gui.components.bulk_header import BulkToggleHeader
 from farm_merge_valet.gui.components.input_controls import FocusAwareComboBox
 from farm_merge_valet.gui.components.policy_view import configure_policy_view
 from farm_merge_valet.gui.components.status import StatusLabel
-from farm_merge_valet.gui.components.widgets import secondary_button
+from farm_merge_valet.gui.components.widgets import metric_card, secondary_button
 from farm_merge_valet.gui.pages.base import AppPage
+from farm_merge_valet.gui.theme import warning_color
 from farm_merge_valet.observability.statistics import StatisticsSnapshot, TrendBucket
 
 _RANGES = (
@@ -38,43 +42,155 @@ class ActivityTrend(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._buckets: tuple[TrendBucket, ...] = ()
-        self.setMinimumHeight(150)
+        self._range_key = "session"
+        self._range_start: datetime | None = None
+        self._range_end: datetime | None = None
+        self.setMinimumHeight(170)
         self.setAccessibleName("Activity and reliability trend")
+        self.setMouseTracking(True)
 
-    def set_buckets(self, buckets: tuple[TrendBucket, ...]) -> None:
+    def set_buckets(
+        self,
+        buckets: tuple[TrendBucket, ...],
+        range_key: str = "session",
+        range_start: datetime | None = None,
+        range_end: datetime | None = None,
+    ) -> None:
         self._buckets = buckets
+        self._range_key = range_key
+        self._range_start = range_start or (buckets[0].started_at if buckets else None)
+        self._range_end = range_end or (
+            buckets[-1].started_at + timedelta(hours=1) if buckets else None
+        )
+        self.setAccessibleDescription(
+            f"{sum(bucket.activity for bucket in buckets):g} activity events and "
+            f"{sum(bucket.reliability for bucket in buckets):g} reliability events"
+        )
         self.update()
+
+    def _display_buckets(self) -> tuple[TrendBucket, ...]:
+        if self._range_start is None or self._range_end is None:
+            return ()
+        span = max(1.0, (self._range_end - self._range_start).total_seconds())
+        if self._range_key == "24h":
+            count = 24
+        elif self._range_key == "7d":
+            count = 7
+        elif self._range_key == "30d":
+            count = 30
+        else:
+            count = min(40, max(1, ceil(span / 3600)))
+        totals = [[0.0, 0.0] for _ in range(count)]
+        for bucket in self._buckets:
+            # Hourly storage cannot split a bucket at a rolling-range boundary.
+            offset = (bucket.started_at - self._range_start).total_seconds()
+            index = min(count - 1, max(0, int(offset / span * count)))
+            totals[index][0] += bucket.activity
+            totals[index][1] += bucket.reliability
+        return tuple(
+            TrendBucket(
+                self._range_start + timedelta(seconds=span * index / count),
+                activity,
+                reliability,
+            )
+            for index, (activity, reliability) in enumerate(totals)
+        )
+
+    def _plot_rect(self) -> QRect:
+        return self.rect().adjusted(48, 12, -12, -32)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        rect = self._plot_rect()
+        buckets = self._display_buckets()
+        if (
+            rect.width() > 0
+            and rect.contains(event.position().toPoint())
+            and buckets
+            and self._range_end is not None
+        ):
+            index = min(
+                len(buckets) - 1,
+                int((event.position().x() - rect.left()) / rect.width() * len(buckets)),
+            )
+            bucket = buckets[index]
+            end = (
+                self._range_start
+                + (self._range_end - self._range_start) * (index + 1) / len(buckets)
+                if self._range_start is not None
+                else self._range_end
+            )
+            self.setToolTip(
+                f"{bucket.started_at.astimezone():%b %d %H:%M} - "
+                f"{end.astimezone():%b %d %H:%M}\n"
+                f"Activity: {bucket.activity:g}\nReliability: {bucket.reliability:g}"
+            )
+        else:
+            self.setToolTip("")
+        super().mouseMoveEvent(event)
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = self.rect().adjusted(12, 12, -12, -24)
+        rect = self._plot_rect()
         painter.fillRect(rect, self.palette().alternateBase())
-        if not self._buckets:
+        buckets = self._display_buckets()
+        if not buckets:
             painter.setPen(self.palette().text().color())
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "No activity in this range")
             return
-        maximum = max(1.0, max(bucket.activity + bucket.reliability for bucket in self._buckets))
-        width = max(2.0, rect.width() / len(self._buckets))
+        maximum = max(1.0, max(max(bucket.activity, bucket.reliability) for bucket in buckets))
+        width = rect.width() / len(buckets)
         activity_color = self.palette().color(QPalette.ColorRole.Link)
-        for index, bucket in enumerate(self._buckets):
+        reliability_color = warning_color(self.palette())
+        painter.setPen(self.palette().mid().color())
+        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+        painter.setPen(self.palette().text().color())
+        painter.drawText(2, rect.top() + 10, 42, 16, Qt.AlignmentFlag.AlignRight, f"{maximum:g}")
+        painter.drawText(2, rect.bottom() - 8, 42, 16, Qt.AlignmentFlag.AlignRight, "0")
+        for index, bucket in enumerate(buckets):
             x = rect.left() + index * width
             activity_height = rect.height() * bucket.activity / maximum
             reliability_height = rect.height() * bucket.reliability / maximum
+            bar_width = max(1, int((width - 2) / 2))
             painter.fillRect(
                 int(x),
                 int(rect.bottom() - activity_height),
-                max(1, int(width - 2)),
+                bar_width,
                 int(activity_height),
                 activity_color,
             )
             painter.fillRect(
-                int(x),
-                int(rect.bottom() - activity_height - reliability_height),
-                max(1, int(width - 2)),
+                int(x) + bar_width,
+                int(rect.bottom() - reliability_height),
+                bar_width,
                 int(reliability_height),
-                QColor("#e67e22"),
+                reliability_color,
             )
+        label_format = (
+            "%b %d %Y"
+            if self._range_key == "all"
+            else "%b %d"
+            if self._range_key in {"7d", "30d"}
+            else "%b %d %H:%M"
+        )
+        first = (self._range_start or buckets[0].started_at).astimezone()
+        last = (self._range_end or buckets[-1].started_at).astimezone()
+        painter.drawText(
+            rect.left(),
+            rect.bottom() + 4,
+            rect.width() // 2,
+            20,
+            Qt.AlignmentFlag.AlignLeft,
+            first.strftime(label_format),
+        )
+        painter.drawText(
+            rect.center().x(),
+            rect.bottom() + 4,
+            rect.width() // 2,
+            20,
+            Qt.AlignmentFlag.AlignRight,
+            last.strftime(label_format),
+        )
 
 
 class _NumericItem(QTableWidgetItem):
@@ -118,6 +234,10 @@ class StatisticsPage(AppPage):
         trend_card.setObjectName("card")
         trend_layout = QVBoxLayout(trend_card)
         trend_layout.addWidget(QLabel("Activity trend"))
+        self.trend_hint = QLabel("Green: activity    Amber: reliability events")
+        self.trend_hint.setObjectName("pageSubtitle")
+        self.trend_hint.setWordWrap(True)
+        trend_layout.addWidget(self.trend_hint)
         self.trend = ActivityTrend()
         trend_layout.addWidget(self.trend)
         self.page_layout.addWidget(trend_card)
@@ -149,16 +269,7 @@ class StatisticsPage(AppPage):
 
     @staticmethod
     def _card(layout: QGridLayout, column: int, title: str) -> QLabel:
-        card = QFrame()
-        card.setObjectName("metricCard")
-        card_layout = QVBoxLayout(card)
-        label = QLabel(title)
-        label.setObjectName("metricLabel")
-        value = QLabel("0")
-        value.setObjectName("metricValue")
-        value.setWordWrap(True)
-        card_layout.addWidget(label)
-        card_layout.addWidget(value)
+        card, value = metric_card(title)
         layout.addWidget(card, 0, column)
         return value
 
@@ -187,7 +298,22 @@ class StatisticsPage(AppPage):
         self.interactions_value.setText(self._number(interactions))
         self.workflows_value.setText(self._number(workflows))
         self.reliability_value.setText(f"{self._number(warnings)} / {self._number(errors)}")
-        self.trend.set_buckets(snapshot.trend)
+        self.trend.set_buckets(
+            snapshot.trend,
+            snapshot.range_key,
+            snapshot.range_start_at,
+            snapshot.range_end_at,
+        )
+        interval = {
+            "24h": "one hour",
+            "7d": "one day",
+            "30d": "one day",
+            "all": "a proportional time span",
+            "session": "an hour or a proportional time span",
+        }[snapshot.range_key]
+        self.trend_hint.setText(
+            f"Green: activity    Amber: reliability events    Each bar: {interval}"
+        )
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(snapshot.rows))
         for row_index, row in enumerate(snapshot.rows):

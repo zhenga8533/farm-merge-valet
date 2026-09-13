@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from PySide6.QtGui import QColor, QFontDatabase, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit
 
+from farm_merge_valet.gui.theme import warning_color
+
 
 @dataclass(frozen=True)
 class LogEntry:
@@ -76,7 +78,7 @@ def _level_color(view: QPlainTextEdit, levelno: int) -> QColor:
     if levelno >= logging.ERROR:
         return QColor("#f85149" if dark else "#cf222e")
     if levelno >= logging.WARNING:
-        return QColor("#d29922" if dark else "#9a6700")
+        return warning_color(view.palette())
     if levelno >= logging.INFO:
         return view.palette().highlight().color()
     return view.palette().placeholderText().color()

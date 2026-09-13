@@ -15,7 +15,11 @@ from PySide6.QtWidgets import (
 
 from farm_merge_valet import __version__
 from farm_merge_valet.gui.components.action_button import ActionButton
-from farm_merge_valet.gui.components.widgets import secondary_button, set_styled_property
+from farm_merge_valet.gui.components.widgets import (
+    metric_card,
+    secondary_button,
+    set_styled_property,
+)
 from farm_merge_valet.gui.controller import ApplicationState, ApplicationStatus
 from farm_merge_valet.gui.pages.base import AppPage
 
@@ -85,16 +89,7 @@ class DashboardPage(AppPage):
 
     @staticmethod
     def _metric(layout: QGridLayout, row: int, column: int, title: str, value: str) -> QLabel:
-        card = QFrame()
-        card.setObjectName("metricCard")
-        card_layout = QVBoxLayout(card)
-        label = QLabel(title)
-        label.setObjectName("metricLabel")
-        output = QLabel(value)
-        output.setObjectName("metricValue")
-        output.setWordWrap(True)
-        card_layout.addWidget(label)
-        card_layout.addWidget(output)
+        card, output = metric_card(title, value)
         layout.addWidget(card, row, column)
         return output
 

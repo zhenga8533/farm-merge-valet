@@ -47,6 +47,9 @@ GUI / CLI -> automation and catalog services -> core
   native-window integration, and log export. Catalog-backed policy pages defer
   first population until selected and share one incremental-population lifecycle
   so large caches do not block initial window creation or Qt event processing.
+  The grouped sidebar maps stable page IDs independently of display rows.
+  Statistics reads, exports, and resets use a dedicated serialized GUI worker;
+  stale refresh results do not replace the selected range.
 - `observability` owns structured logging, persistent aggregate statistics, and
   Discord event delivery. Shared metric definitions keep GUI, diagnostics, and
   webhook totals consistent. Discord queue orchestration, status reduction,

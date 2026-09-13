@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QStackedWidget,
@@ -89,18 +90,17 @@ def _menu_action_text(label: str, hotkey: str | None) -> str:
     return f"{label}\t{display_hotkey(hotkey)}"
 
 
+def _page_names(groups: tuple[tuple[str, tuple[str, ...]], ...]) -> tuple[str, ...]:
+    return tuple(name for _, pages in groups for name in pages)
+
+
 class MainWindow(QMainWindow):
-    _NAVIGATION = (
-        "Dashboard",
-        "Statistics",
-        "Items",
-        "Shops",
-        "Buildings",
-        "Marketplace",
-        "Browser",
-        "Settings",
-        "Logs",
+    _NAVIGATION_GROUPS = (
+        ("OVERVIEW", ("Dashboard", "Statistics")),
+        ("AUTOMATION", ("Items", "Shops", "Buildings", "Marketplace")),
+        ("SYSTEM", ("Browser", "Settings", "Logs")),
     )
+    _NAVIGATION = _page_names(_NAVIGATION_GROUPS)
 
     def __init__(
         self,
@@ -139,8 +139,20 @@ class MainWindow(QMainWindow):
         shell.setSpacing(0)
         self.navigation = QListWidget()
         self.navigation.setObjectName("navigation")
-        self.navigation.setFixedWidth(176)
-        self.navigation.addItems(self._NAVIGATION)
+        self.navigation.setFixedWidth(192)
+        self._navigation_rows: dict[str, int] = {}
+        for group, pages in self._NAVIGATION_GROUPS:
+            heading = QListWidgetItem(group)
+            heading.setFlags(Qt.ItemFlag.NoItemFlags)
+            heading.setData(Qt.ItemDataRole.UserRole, None)
+            heading.setData(Qt.ItemDataRole.UserRole + 1, "group")
+            heading.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.navigation.addItem(heading)
+            for name in pages:
+                item = QListWidgetItem(name)
+                item.setData(Qt.ItemDataRole.UserRole, self._NAVIGATION.index(name))
+                self.navigation.addItem(item)
+                self._navigation_rows[name] = self.navigation.count() - 1
         self.navigation.setAccessibleName("Application sections")
         self.pages = QStackedWidget()
         shell.addWidget(self.navigation)
@@ -186,7 +198,7 @@ class MainWindow(QMainWindow):
         ):
             self.pages.addWidget(page)
         self.navigation.currentRowChanged.connect(self._set_current_page)
-        self.navigation.setCurrentRow(0)
+        self.navigation.setCurrentRow(self._navigation_rows["Dashboard"])
         self.overlay = CompactOverlay(self._draft)
         self._connect_pages()
         self._setup_tray()
@@ -208,6 +220,12 @@ class MainWindow(QMainWindow):
         controller.building_repairs_changed.connect(self.shops_page.set_building_repairs)
         controller.building_repairs_changed.connect(self.buildings_page.set_building_repairs)
         controller.statistics_changed.connect(self.statistics_page.set_snapshot)
+        controller.statistics_exported.connect(
+            lambda path: self.statistics_page.status_label.set_success(f"Exported to {path}")
+        )
+        controller.statistics_reset.connect(
+            lambda _result: self.statistics_page.status_label.set_success("Statistics reset")
+        )
         self.items_page.set_upgrade_progress(controller.cached_upgrade_progress)
         self.shops_page.set_building_repairs(controller.cached_building_repairs)
         self.buildings_page.set_building_repairs(controller.cached_building_repairs)
@@ -222,7 +240,10 @@ class MainWindow(QMainWindow):
         self._statistics_timer.start()
 
     def _set_current_page(self, index: int) -> None:
-        self.pages.setCurrentIndex(index)
+        item = self.navigation.item(index)
+        if item is None or item.data(Qt.ItemDataRole.UserRole) is None:
+            return
+        self.pages.setCurrentIndex(int(item.data(Qt.ItemDataRole.UserRole)))
         page = self.pages.currentWidget()
         if page is self.statistics_page:
             self.controller.refresh_statistics(self.statistics_page.range_key)
@@ -297,12 +318,8 @@ class MainWindow(QMainWindow):
         target = Path(path)
         if not target.suffix:
             target = target.with_suffix(".csv" if selected_filter.startswith("CSV") else ".json")
-        try:
-            saved = self.controller.export_statistics(target, range_key)
-        except OSError as exc:
-            self._show_error(f"Could not export statistics: {exc}")
-            return
-        self.statistics_page.status_label.set_success(f"Exported to {saved}")
+        self.statistics_page.status_label.set_status("Exporting statistics")
+        self.controller.export_statistics(target, range_key)
 
     def _reset_statistics(self) -> None:
         if self._confirm_reset(

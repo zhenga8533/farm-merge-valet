@@ -10,7 +10,7 @@ from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton
 
 from farm_merge_valet.gui.components.action_button import ActionButton
-from farm_merge_valet.gui.theme import apply_theme
+from farm_merge_valet.gui.theme import apply_theme, warning_color
 
 
 @pytest.mark.parametrize(
@@ -119,6 +119,15 @@ def test_theme_switches_reuse_one_palette_driven_stylesheet() -> None:
     assert "palette(window)" in stylesheet
     assert app.palette().color(QPalette.ColorRole.Window).name() == "#0d1117"
 
+    app.setStyleSheet("")
+
+
+def test_warning_accent_follows_owned_theme() -> None:
+    app = QApplication.instance() or QApplication([])
+    apply_theme(app, "light")
+    assert warning_color(app.palette()).name() == "#9a6700"
+    apply_theme(app, "dark")
+    assert warning_color(app.palette()).name() == "#d29922"
     app.setStyleSheet("")
 
 

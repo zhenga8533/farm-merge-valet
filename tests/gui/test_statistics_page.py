@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
 from farm_merge_valet.gui.components.bulk_header import BulkToggleHeader
-from farm_merge_valet.gui.pages.statistics import StatisticsPage
+from farm_merge_valet.gui.pages.statistics import ActivityTrend, StatisticsPage
 from farm_merge_valet.observability.statistics import (
     StatisticsRow,
     StatisticsSnapshot,
@@ -70,3 +70,46 @@ def test_statistics_page_emits_selected_range_and_actions() -> None:
     assert ranges == ["7d"]
     assert exports == ["7d"]
     assert resets == [True]
+
+
+def test_activity_trend_groups_long_ranges_and_keeps_empty_days() -> None:
+    _app = QApplication.instance() or QApplication([])
+    trend = ActivityTrend()
+    start = datetime(2026, 9, 10, 12, tzinfo=UTC)
+    trend.set_buckets(
+        (
+            TrendBucket(start, 3, 1),
+            TrendBucket(start + timedelta(hours=1), 2, 4),
+            TrendBucket(start + timedelta(days=2), 5, 0),
+        ),
+        "7d",
+        start,
+        start + timedelta(days=7),
+    )
+
+    buckets = trend._display_buckets()
+
+    assert [(bucket.activity, bucket.reliability) for bucket in buckets[:3]] == [
+        (5, 5),
+        (0, 0),
+        (5, 0),
+    ]
+    assert len(buckets) == 7
+
+
+def test_activity_trend_bounds_all_time_history() -> None:
+    _app = QApplication.instance() or QApplication([])
+    trend = ActivityTrend()
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    trend.set_buckets(
+        (TrendBucket(start, 1, 2), TrendBucket(start + timedelta(days=500), 3, 4)),
+        "all",
+        start,
+        start + timedelta(days=501),
+    )
+
+    buckets = trend._display_buckets()
+
+    assert len(buckets) == 40
+    assert sum(bucket.activity for bucket in buckets) == 4
+    assert sum(bucket.reliability for bucket in buckets) == 6

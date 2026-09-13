@@ -72,6 +72,22 @@ def _catalog() -> ItemCatalog:
     )
 
 
+def test_grouped_navigation_maps_to_pages(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    window = MainWindow(ApplicationController(store), eager_catalog_pages=False)
+
+    assert window.navigation.count() == len(window._NAVIGATION) + 3
+    assert window.navigation.item(0).text() == "OVERVIEW"
+    assert not window.navigation.item(0).flags() & Qt.ItemFlag.ItemIsSelectable
+    for name in window._NAVIGATION:
+        window.navigation.setCurrentRow(window._navigation_rows[name])
+        assert window.pages.currentIndex() == window._NAVIGATION.index(name)
+
+    window.quit_application()
+    app.processEvents()
+
+
 def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     store = ConfigStore(tmp_path / "config.json")
