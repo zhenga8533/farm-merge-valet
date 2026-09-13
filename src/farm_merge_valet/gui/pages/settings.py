@@ -72,38 +72,11 @@ class SettingsPage(ConfigFormPage):
         )
         self._add_toggle(
             workflows_form,
-            "Visit other farms automatically",
-            "farm_visit_automation_enabled",
+            "Dismiss routine game popups automatically",
+            "auto_dismiss_overlays",
         )
-        self._add_toggle(
-            workflows_form,
-            "Automatically claim visitor rewards",
-            "auto_claim_friend_rewards",
-        )
-        self.land_expansion_toggle = self._add_toggle(
-            workflows_form,
-            "Expand farm land automatically",
-            "land_expansion_automation_enabled",
-        )
-        self._add_int(
-            workflows_form,
-            "Maximum coins per expansion",
-            "land_expansion_max_coin_cost",
-            0,
-            1_000_000_000,
-        )
-        self.controls["land_expansion_max_coin_cost"].setToolTip(
-            "Zero allows only expansions that cost no coins."
-        )
-        self._add_int(
-            workflows_form,
-            "Maximum crystals per expansion",
-            "land_expansion_max_gem_cost",
-            0,
-            1_000_000_000,
-        )
-        self.controls["land_expansion_max_gem_cost"].setToolTip(
-            "Zero allows only expansions that cost no crystals."
+        self.controls["auto_dismiss_overlays"].setToolTip(
+            "Unknown or interactive popups without a verified handler still pause automation."
         )
         timing, timing_form = disclosure_section("Advanced automation timing")
         self._add_float(timing_form, "Idle polling (seconds)", "idle_wait_seconds", 0, 3600, 0.1)
@@ -127,39 +100,7 @@ class SettingsPage(ConfigFormPage):
         workflows_form.addRow(timing)
         sections.addWidget(workflows)
 
-        events, events_form = settings_section("Event islands")
-        self.event_automation_toggle = self._add_toggle(
-            events_form, "Automate event islands", "event_automation_enabled"
-        )
-        self._add_toggle(
-            events_form,
-            "Enable newly supported events by default",
-            "event_default_enabled",
-        )
-        self._add_toggle(
-            events_form,
-            "Automatically claim event rewards",
-            "auto_claim_event_rewards",
-        )
-        self._add_int(
-            events_form,
-            "Minimum energy before visiting",
-            "event_visit_energy_threshold",
-            0,
-            1_000_000_000,
-        )
-        events_hint = QLabel("Event item merging and interaction behavior is configured in Items.")
-        events_hint.setObjectName("settingsHint")
-        events_hint.setWordWrap(True)
-        events_form.addRow(events_hint)
-        sections.addWidget(events)
-
         automation, automation_form = settings_section("Board behavior")
-        self._add_toggle(
-            automation_form,
-            "Automatically dismiss reward overlays",
-            "auto_dismiss_overlays",
-        )
         self._add_toggle(
             automation_form,
             "Automatically pop stored items",
@@ -169,6 +110,31 @@ class SettingsPage(ConfigFormPage):
             automation_form,
             "Automatically claim supply crates",
             "auto_claim_supply_crates",
+        )
+        self.land_expansion_toggle = self._add_toggle(
+            automation_form,
+            "Expand farm land automatically",
+            "land_expansion_automation_enabled",
+        )
+        self._add_int(
+            automation_form,
+            "Maximum coins per expansion",
+            "land_expansion_max_coin_cost",
+            0,
+            1_000_000_000,
+        )
+        self.controls["land_expansion_max_coin_cost"].setToolTip(
+            "Zero allows only expansions that cost no coins."
+        )
+        self._add_int(
+            automation_form,
+            "Maximum crystals per expansion",
+            "land_expansion_max_gem_cost",
+            0,
+            1_000_000_000,
+        )
+        self.controls["land_expansion_max_gem_cost"].setToolTip(
+            "Zero allows only expansions that cost no crystals."
         )
         planning_advanced, form = disclosure_section("Advanced board planning")
         self._add_int(form, "Merge-space reserve", "merge_empty_cell_reserve", 0, 50)
@@ -221,21 +187,48 @@ class SettingsPage(ConfigFormPage):
         self._building_repair_fields = tuple(field for _label, field in repair_priority_fields)
         sections.addWidget(repairs)
 
-        controls, form = settings_section("Keyboard shortcuts")
-        self._add_hotkey(form, "Start / stop", "start_stop_hotkey")
-        self._add_hotkey(form, "Pause / resume", "pause_hotkey")
-        self._add_hotkey(form, "Quit application", "quit_hotkey")
-        sections.addWidget(controls)
+        visits, visits_form = settings_section("Farm visits and visitors")
+        self._add_toggle(
+            visits_form,
+            "Visit other farms automatically",
+            "farm_visit_automation_enabled",
+        )
+        self._add_toggle(
+            visits_form,
+            "Claim rewards left by visitors",
+            "auto_claim_friend_rewards",
+        )
+        self.controls["auto_claim_friend_rewards"].setToolTip(
+            "Claims visitor-assisted tiles and unclaimed likes on your own farm."
+        )
+        sections.addWidget(visits)
 
-        lifecycle, form = settings_section("Startup and shutdown")
-        for field, label in (
-            ("start_paused", "Start each bot run paused"),
-            ("start_minimized", "Start minimized to tray"),
-            ("bot_autostart", "Start bot with application"),
-            ("close_to_tray", "Close window to tray"),
-        ):
-            self._add_toggle(form, label, field)
-        sections.addWidget(lifecycle)
+        events, events_form = settings_section("Event islands")
+        self.event_automation_toggle = self._add_toggle(
+            events_form, "Automate event islands", "event_automation_enabled"
+        )
+        self._add_toggle(
+            events_form,
+            "Enable newly supported events by default",
+            "event_default_enabled",
+        )
+        self._add_toggle(
+            events_form,
+            "Automatically claim event rewards",
+            "auto_claim_event_rewards",
+        )
+        self._add_int(
+            events_form,
+            "Minimum energy before visiting",
+            "event_visit_energy_threshold",
+            0,
+            1_000_000_000,
+        )
+        events_hint = QLabel("Event item merging and interaction behavior is configured in Items.")
+        events_hint.setObjectName("settingsHint")
+        events_hint.setWordWrap(True)
+        events_form.addRow(events_hint)
+        sections.addWidget(events)
 
         notifications, notifications_form = settings_section("Notifications")
         webhook = QLineEdit()
@@ -311,6 +304,22 @@ class SettingsPage(ConfigFormPage):
         self.notifications_advanced_section = notifications_advanced
         notifications_form.addRow(notifications_advanced)
         sections.addWidget(notifications)
+
+        lifecycle, form = settings_section("Startup and shutdown")
+        for field, label in (
+            ("start_paused", "Start each bot run paused"),
+            ("start_minimized", "Start minimized to tray"),
+            ("bot_autostart", "Start bot with application"),
+            ("close_to_tray", "Close window to tray"),
+        ):
+            self._add_toggle(form, label, field)
+        sections.addWidget(lifecycle)
+
+        controls, form = settings_section("Keyboard shortcuts")
+        self._add_hotkey(form, "Start / stop", "start_stop_hotkey")
+        self._add_hotkey(form, "Pause / resume", "pause_hotkey")
+        self._add_hotkey(form, "Quit application", "quit_hotkey")
+        sections.addWidget(controls)
 
         appearance, appearance_form = settings_section("Appearance")
         theme = FocusAwareComboBox()

@@ -182,6 +182,7 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
 
     section_groups = {group.title(): group for group in settings_page.findChildren(QGroupBox)}
     section_titles = set(section_groups)
+    ordered_sections = [group.title() for group in settings_page.findChildren(QGroupBox)]
     labels = {label.text() for label in settings_page.findChildren(QLabel)}
 
     assert section_titles == {
@@ -190,15 +191,28 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         "Board behavior",
         "Resource safeguards",
         "Building repairs",
+        "Farm visits and visitors",
         "Keyboard shortcuts",
         "Startup and shutdown",
         "Notifications",
         "Appearance",
     }
+    assert ordered_sections == [
+        "Automation",
+        "Board behavior",
+        "Resource safeguards",
+        "Building repairs",
+        "Farm visits and visitors",
+        "Event islands",
+        "Notifications",
+        "Startup and shutdown",
+        "Keyboard shortcuts",
+        "Appearance",
+    ]
     assert window.settings_page.findChild(QLabel, "settingsVersion") is None
     assert window.dashboard_page.version_label.text().startswith("Farm Merge Valet ")
     assert "Start each bot run paused" in labels
-    assert "Automatically dismiss reward overlays" in labels
+    assert "Dismiss routine game popups automatically" in labels
     assert "Automatically pop stored items" in labels
     assert "Automatically claim supply crates" in labels
     assert "Allow obstacle energy spending" in labels
@@ -209,7 +223,7 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     assert "Automate item actions" in labels
     assert "Automate shops" in labels
     assert "Automate marketplace purchases" in labels
-    assert "Automatically claim visitor rewards" in labels
+    assert "Claim rewards left by visitors" in labels
     assert "Automate event islands" in labels
     assert "Enable newly supported events by default" in labels
     assert "Automatically claim event rewards" in labels
@@ -236,22 +250,27 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         section.toggle.click()
         assert section.expanded
         assert not section.content.isHidden()
-    assert section_groups["Automation"].isAncestorOf(
+    assert section_groups["Board behavior"].isAncestorOf(
         window.settings_page.controls["land_expansion_max_coin_cost"]
     )
-    assert section_groups["Automation"].isAncestorOf(
+    assert section_groups["Board behavior"].isAncestorOf(
         window.settings_page.controls["land_expansion_max_gem_cost"]
     )
     for field in (
         "item_automation_enabled",
         "shop_automation_enabled",
         "marketplace_automation_enabled",
-        "farm_visit_automation_enabled",
-        "auto_claim_friend_rewards",
-        "land_expansion_automation_enabled",
+        "auto_dismiss_overlays",
     ):
         assert section_groups["Automation"].isAncestorOf(window.settings_page.controls[field])
     assert section_groups["Automation"].isAncestorOf(window.settings_page.timing_advanced_section)
+    for field in ("farm_visit_automation_enabled", "auto_claim_friend_rewards"):
+        assert section_groups["Farm visits and visitors"].isAncestorOf(
+            window.settings_page.controls[field]
+        )
+    assert section_groups["Board behavior"].isAncestorOf(
+        window.settings_page.controls["land_expansion_automation_enabled"]
+    )
     for field in (
         "event_automation_enabled",
         "event_default_enabled",
