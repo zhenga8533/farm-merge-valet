@@ -829,6 +829,11 @@ class Bot:
                 if candidate.coord == focused_coord and candidate.object_id == focused_object_id:
                     return candidate
 
+            for candidate in candidates:
+                if candidate.coord == focused_coord:
+                    self._obstacle_focus = candidate.coord, candidate.object_id
+                    return candidate
+
             current = self._live_cells.get(focused_coord)
             current_blueprint_id = current.blueprint_id if current is not None else None
             if (
@@ -870,8 +875,7 @@ class Bot:
             if matching:
                 prioritized = matching
                 if self._obstacle_focus is not None and not any(
-                    (candidate.coord, candidate.object_id) == self._obstacle_focus
-                    for candidate in matching
+                    candidate.coord == self._obstacle_focus[0] for candidate in matching
                 ):
                     self._obstacle_focus = None
         focused = self._focused_obstacle(prioritized)

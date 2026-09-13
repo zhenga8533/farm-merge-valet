@@ -533,6 +533,22 @@ def test_new_repair_need_replaces_focus_on_unneeded_rock() -> None:
     assert bot._obstacle_focus == ((1, 0), 2)
 
 
+def test_obstacle_focus_rebinds_when_stage_replaces_runtime_object() -> None:
+    bot = bare_bot()
+    bot._energy = 50
+    bot._workers = WorkerState(1, 1)
+    bot._obstacle_focus = ((1, 0), 2)
+    continued = ObstacleCandidate(
+        (1, 0), "toolbox_medium", 12, ObstacleState(4, 5, 5, True, required_workers=1)
+    )
+    competing = ObstacleCandidate(
+        (0, 0), "rock_large", 1, ObstacleState(10, 10, 5, False, required_workers=1)
+    )
+
+    assert bot._obstacle_to_clear([competing, continued]) == continued
+    assert bot._obstacle_focus == ((1, 0), 12)
+
+
 def test_live_sync_uses_one_atomic_snapshot_and_suppresses_disabled_sections() -> None:
     class SnapshotRuntime(FakeRuntime):
         def __init__(self) -> None:
