@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from threading import Lock
 
 from farm_merge_valet.observability.discord.charts import ActivityChart
+from farm_merge_valet.observability.metrics import metrics_for_event
 
 _INFO_COLOR = 0x3498DB
 _WARNING_COLOR = 0xF39C12
@@ -34,6 +35,11 @@ _DETAILED_EVENTS = frozenset(
         "marketplace.purchase_confirmed",
     }
 )
+
+
+def _metric_line(metrics: Counter[str], values: tuple[tuple[str, str], ...]) -> str:
+    parts = [f"{label} {metrics[key]}" for label, key in values if metrics[key]]
+    return " · ".join(parts) if parts else "None recorded"
 
 
 @dataclass
@@ -167,42 +173,9 @@ class DiscordStatusMixin:
                 self._status.mode = "Error"
 
     def _record_metric(self, event: str, context: dict[str, object], level: int) -> None:
-        metric_updates: Counter[str] = Counter()
-        if event == "action.confirmed":
-            effect = str(context.get("effect", "item_action"))
-            metric_updates[f"action.{effect}"] += 1
-        elif event == "interaction.confirmed":
-            kind = str(context.get("interaction_kind", "board_interaction"))
-            metric_updates[f"interaction.{kind}"] += 1
-        elif event == "crate.claim_completed":
-            spawned = context.get("spawned", 0)
-            if isinstance(spawned, int):
-                metric_updates["crates"] += spawned
-        elif event == "shop.order_started":
-            metric_updates["shop.started"] += 1
-        elif event == "shop.order_claimed":
-            metric_updates["shop.claimed"] += 1
-        elif event == "marketplace.purchase_confirmed":
-            metric_updates["workflow.marketplace"] += 1
-            payment_type = context.get("payment_key")
-            payment_amount = context.get("payment_amount")
-            if isinstance(payment_type, str) and isinstance(payment_amount, int):
-                metric_updates[f"spent.{payment_type}"] += payment_amount
-        elif event.startswith("farm_visit.") and event.endswith("_confirmed"):
-            kind = event.removeprefix("farm_visit.").removesuffix("_confirmed")
-            metric_updates[f"workflow.{kind}"] += 1
-        elif event == "land_expansion.confirmed":
-            metric_updates["workflow.land_expansion"] += 1
-            currency = context.get("currency")
-            cost = context.get("cost")
-            if isinstance(currency, str) and isinstance(cost, int):
-                metric_updates[f"spent.{currency}"] += cost
-        elif event == "storage_bubble.confirmed":
-            metric_updates["workflow.storage_bubble"] += 1
-        if logging.WARNING <= level < logging.ERROR:
-            metric_updates["warnings"] += 1
-        if level >= logging.ERROR:
-            metric_updates["errors"] += 1
+        metric_updates = Counter[str]()
+        for update in metrics_for_event(event, context, level):
+            metric_updates[update.name] += int(update.value)
         with self._metrics_lock:
             self._metrics.update(metric_updates)
         with self._status_lock:
@@ -262,8 +235,54 @@ class DiscordStatusMixin:
         elapsed = max(0.0, now - self._started_at)
         period = "Final" if final else "Periodic"
         actions = sum(metrics[f"action.{effect}"] for effect in ("move", "swap", "merge"))
-        immediate_interactions = metrics["interaction.immediate"]
+        interactions = sum(
+            value for key, value in metrics.items() if key.startswith("interaction.")
+        )
         producers = metrics["interaction.producer"] + metrics["interaction.depleted-producer"]
+        activity = _metric_line(
+            metrics,
+            (
+                ("Merges", "action.merge"),
+                ("Moves", "action.move"),
+                ("Swaps", "action.swap"),
+                ("Crates", "crates"),
+            ),
+        )
+        if interactions:
+            activity += f"\nTile interactions {interactions}"
+            if producers:
+                activity += f" · Producers {producers}"
+        progress = _metric_line(
+            metrics,
+            (
+                ("Shop starts", "shop.started"),
+                ("Shop claims", "shop.claimed"),
+                ("Marketplace", "workflow.marketplace"),
+                ("Farm visits", "workflow.farm_visit_return"),
+                ("Visitor actions", "workflow.farm_visit_claim"),
+                ("Event trips", "workflow.event_enter"),
+                ("Event rewards", "workflow.event_reward"),
+                ("Land expansions", "workflow.land_expansion"),
+                ("Storage bubbles", "workflow.storage_bubble"),
+            ),
+        )
+        resources = _metric_line(
+            metrics,
+            (
+                ("Energy spent", "spent.energy"),
+                ("Coins spent", "spent.coins"),
+                ("Gems spent", "spent.gems"),
+            ),
+        )
+        reliability = _metric_line(
+            metrics,
+            (
+                ("Warnings", "warnings"),
+                ("Errors", "errors"),
+                ("Recoveries", "reliability.recovery"),
+                ("Board blocks", "reliability.board_blocked"),
+            ),
+        )
         hours, remainder = divmod(int(elapsed), 3600)
         minutes = remainder // 60
         uptime = f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
@@ -278,55 +297,27 @@ class DiscordStatusMixin:
                     "timestamp": datetime.now(UTC).isoformat(),
                     "fields": [
                         {
-                            "name": "Item actions",
+                            "name": "Activity",
                             "value": (
-                                f"**{actions} total**\n"
-                                f"Merges {metrics['action.merge']} · "
-                                f"Moves {metrics['action.move']} · "
-                                f"Swaps {metrics['action.swap']}"
+                                f"**{actions + interactions + metrics['crates']} completed**\n"
+                                f"{activity}"
                             ),
                             "inline": False,
                         },
                         {
-                            "name": "Board activity",
-                            "value": (
-                                f"Tile interactions {immediate_interactions} · "
-                                f"Producers {producers} · "
-                                f"Crates {metrics['crates']}"
-                            ),
+                            "name": "Progress",
+                            "value": progress,
+                            "inline": False,
+                        },
+                        {
+                            "name": "Resources",
+                            "value": resources,
                             "inline": False,
                         },
                         {
                             "name": "Reliability",
-                            "value": (
-                                f"Warnings {metrics['warnings']} · Errors {metrics['errors']}"
-                            ),
+                            "value": reliability,
                             "inline": False,
-                        },
-                        {
-                            "name": "Shop activity",
-                            "value": (
-                                f"Started {metrics['shop.started']} / "
-                                f"Claimed {metrics['shop.claimed']}"
-                            ),
-                            "inline": False,
-                        },
-                        {
-                            "name": "Automated workflows",
-                            "value": (
-                                f"Marketplace {metrics['workflow.marketplace']} · "
-                                f"Farm visits {metrics['workflow.return']} · "
-                                f"Land {metrics['workflow.land_expansion']} · "
-                                f"Bubbles {metrics['workflow.storage_bubble']}"
-                            ),
-                            "inline": False,
-                        },
-                        {
-                            "name": "Recorded spending",
-                            "value": (
-                                f"Coins {metrics['spent.coins']} · Gems {metrics['spent.gems']}"
-                            ),
-                            "inline": True,
                         },
                     ],
                     "footer": {"text": "farm-merge-valet.summary"},
@@ -357,10 +348,8 @@ class DiscordStatusMixin:
         minutes = remainder // 60
         uptime = f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
         actions = sum(metrics[f"action.{effect}"] for effect in ("move", "swap", "merge"))
-        interactions = (
-            metrics["interaction.immediate"]
-            + metrics["interaction.producer"]
-            + metrics["interaction.depleted-producer"]
+        interactions = sum(
+            value for key, value in metrics.items() if key.startswith("interaction.")
         )
         board_activity = f"Interactions {interactions} · Crates {metrics['crates']}"
         if status.remaining_crates is not None:
@@ -368,6 +357,14 @@ class DiscordStatusMixin:
         mode_detail = status.mode
         if status.wait_reason and status.mode == "Waiting":
             mode_detail = f"Waiting — {status.wait_reason[:120]}"
+        health = _metric_line(
+            metrics,
+            (
+                ("Warnings", "warnings"),
+                ("Errors", "errors"),
+                ("Recoveries", "reliability.recovery"),
+            ),
+        )
         return {
             "username": "Farm Merge Valet",
             "allowed_mentions": {"parse": []},
@@ -392,21 +389,9 @@ class DiscordStatusMixin:
                             "inline": False,
                         },
                         {
-                            "name": "Shops",
-                            "value": (
-                                f"Started {metrics['shop.started']} / "
-                                f"Claimed {metrics['shop.claimed']}"
-                            ),
-                            "inline": True,
-                        },
-                        {
-                            "name": "Workflows",
-                            "value": (
-                                f"Marketplace {metrics['workflow.marketplace']} · "
-                                f"Visits {metrics['workflow.return']} · "
-                                f"Land {metrics['workflow.land_expansion']}"
-                            ),
-                            "inline": True,
+                            "name": "Session health",
+                            "value": health,
+                            "inline": False,
                         },
                     ],
                     "footer": {"text": "farm-merge-valet.status"},

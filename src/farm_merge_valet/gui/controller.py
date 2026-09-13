@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import sqlite3
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -41,6 +42,7 @@ from farm_merge_valet.observability.logging import (
     FMV_EVENT_ATTRIBUTE,
     log_event,
 )
+from farm_merge_valet.observability.statistics import StatisticsService
 
 logger = logging.getLogger(__name__)
 
@@ -104,15 +106,17 @@ class ApplicationController(QObject):
     upgrade_progress_changed = Signal(object)
     building_repairs_changed = Signal(object)
     catalog_freshness_changed = Signal(object)
+    statistics_changed = Signal(object)
     shutdown_complete = Signal()
     _utility_operation_finished = Signal(str, object)
     _bot_finished = Signal(object)
 
-    def __init__(self, store: ConfigStore) -> None:
+    def __init__(self, store: ConfigStore, statistics: StatisticsService | None = None) -> None:
         super().__init__()
         self.store = store
         self.config = store.current
         self.status = ApplicationStatus()
+        self.statistics = statistics
         self._bot: Bot | None = None
         self._worker: threading.Thread | None = None
         self._operations = BackgroundOperationRunner(self._utility_operation_finished.emit)
@@ -217,6 +221,11 @@ class ApplicationController(QObject):
         if self._shutting_down or (self._worker is not None and self._worker.is_alive()):
             return
         self._stopping = False
+        if self.statistics is not None:
+            try:
+                self.statistics.start_session()
+            except (OSError, sqlite3.Error) as exc:
+                self.error.emit(f"Could not start statistics collection: {exc}")
         self._set_status(
             state=ApplicationState.STARTING,
             last_activity="Starting managed browser",
@@ -373,9 +382,44 @@ class ApplicationController(QObject):
         self._poll_workers()
 
     def _finish_bot(self, failure: object) -> None:
+        if self.statistics is not None:
+            try:
+                self.statistics.end_session()
+            except (OSError, sqlite3.Error) as exc:
+                self.error.emit(f"Could not finish statistics collection: {exc}")
         self._stopping = False
         state = ApplicationState.ERROR if failure is not None else ApplicationState.STOPPED
         self._set_status(state=state, phase="—")
+
+    def refresh_statistics(self, range_key: str) -> None:
+        if self.statistics is None:
+            self.statistics_changed.emit(None)
+            return
+        try:
+            snapshot = self.statistics.query(range_key)
+        except (OSError, sqlite3.Error, ValueError) as exc:
+            self.error.emit(f"Could not read statistics: {exc}")
+            self.statistics_changed.emit(None)
+            return
+        self.statistics_changed.emit(snapshot)
+
+    def export_statistics(self, path: Path, range_key: str) -> Path:
+        if self.statistics is None:
+            raise OSError("Statistics storage is unavailable.")
+        try:
+            return self.statistics.export(path, range_key)
+        except sqlite3.Error as exc:
+            raise OSError(f"Statistics storage failed: {exc}") from exc
+
+    def reset_statistics(self, range_key: str = "session") -> None:
+        if self.statistics is None:
+            return
+        try:
+            self.statistics.reset()
+        except (OSError, sqlite3.Error) as exc:
+            self.error.emit(f"Could not reset statistics: {exc}")
+            return
+        self.refresh_statistics(range_key)
 
     @staticmethod
     def _browser_status_text(status: BrowserStatus) -> str:

@@ -46,7 +46,7 @@ class CatalogOnboarding(StatePanel):
     def set_busy(self, busy: bool) -> None:
         self.progress.setVisible(busy)
         self.setup_button.setEnabled(not busy)
-        self.setup_button.setText("Synchronizing…" if busy else "Open game and synchronize")
+        self.setup_button.setText("Synchronizing" if busy else "Open game and synchronize")
 
     def set_status(self, message: str, *, error: bool = False) -> None:
         self.status_label.set_status(message, "error" if error else "normal")

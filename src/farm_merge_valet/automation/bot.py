@@ -778,6 +778,7 @@ class Bot:
             "item_category": action.item.category,
             "item_name": action.item.name,
             "item_tier": action.item.tier,
+            "target_size": action.target_size,
             "start": action.start,
             "end": action.end,
         }

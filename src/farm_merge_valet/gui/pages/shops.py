@@ -168,7 +168,7 @@ class ShopsPage(AppPage):
         self.configuration_header = ConfigurationHeader("Reset shop policies")
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
-        self.reserves_button = self.configuration_header.add_action("Ingredient reserves…")
+        self.reserves_button = self.configuration_header.add_action("Ingredient reserves")
         self.reserves_button.clicked.connect(self._edit_ingredient_reserves)
         self.page_layout.addWidget(self.configuration_header)
         self.catalog_onboarding = CatalogOnboarding()

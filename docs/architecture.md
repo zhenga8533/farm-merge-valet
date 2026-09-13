@@ -47,9 +47,10 @@ GUI / CLI -> automation and catalog services -> core
   native-window integration, and log export. Catalog-backed policy pages defer
   first population until selected and share one incremental-population lifecycle
   so large caches do not block initial window creation or Qt event processing.
-- `observability` owns logging and Discord event delivery. Discord queue
-  orchestration, status reduction/payloads, and webhook transport/persisted
-  message identity are separate modules.
+- `observability` owns structured logging, persistent aggregate statistics, and
+  Discord event delivery. Shared metric definitions keep GUI, diagnostics, and
+  webhook totals consistent. Discord queue orchestration, status reduction,
+  payloads, transport, and persisted message identity are separate modules.
 
 ## Composition roots and dependency rules
 

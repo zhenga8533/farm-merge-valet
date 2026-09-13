@@ -166,23 +166,23 @@ def test_webhook_routes_lifecycle_and_summarizes_actions(monkeypatch, tmp_path) 
     assert any(embed["title"] == "Game runtime ready" for embed in embeds)
     assert any(
         any(
-            field["name"] == "Item actions" and "Merges 1" in field["value"]
+            field["name"] == "Activity" and "Merges 1" in field["value"]
             for field in embed.get("fields", [])
         )
         for embed in embeds
     )
     assert any(
         any(
-            field["name"] == "Shop activity"
-            and "Started 1" in field["value"]
-            and "Claimed 1" in field["value"]
+            field["name"] == "Progress"
+            and "Shop starts 1" in field["value"]
+            and "Shop claims 1" in field["value"]
             for field in embed.get("fields", [])
         )
         for embed in embeds
     )
     assert any(
         any(
-            field["name"] == "Board activity"
+            field["name"] == "Activity"
             and "Tile interactions 1" in field["value"]
             and "Crates 2" in field["value"]
             for field in embed.get("fields", [])

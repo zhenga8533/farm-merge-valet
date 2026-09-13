@@ -36,6 +36,6 @@ def test_session_history_aggregates_rotated_structured_logs(tmp_path) -> None:
     summary = summarize_history(path, now - timedelta(hours=1))
 
     assert summary.events == 2
-    assert summary.metrics["action.confirmed"] == 1
-    assert summary.metrics["items.crates_spawned"] == 3
+    assert summary.metrics["action.item_action"] == 1
+    assert summary.metrics["crates"] == 3
     assert "old.event" not in summary.metrics

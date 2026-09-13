@@ -173,6 +173,12 @@ visible in-game account information. Notification failures never block
 automation. Secrets, authentication values, URL query strings, raw CDP
 expressions, and game-state payloads are not written to diagnostic logs.
 
+The Statistics tab keeps sanitized hourly aggregates across sessions for
+session, 24-hour, 7-day, 30-day, and all-time views. It includes item-family and
+tier breakdowns, workflow progress, resource use, and reliability without
+storing board coordinates or runtime object IDs. The selected range can be
+exported as JSON or CSV, and statistics can be reset independently of logs.
+
 ## Development
 
 Run the standard checks with:

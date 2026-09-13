@@ -8,6 +8,7 @@ from farm_merge_valet.gui.pages.logs import LogsPage
 from farm_merge_valet.gui.pages.marketplace import MarketplacePage
 from farm_merge_valet.gui.pages.settings import SettingsPage
 from farm_merge_valet.gui.pages.shops import ShopsPage
+from farm_merge_valet.gui.pages.statistics import StatisticsPage
 
 __all__ = [
     "BrowserPage",
@@ -18,4 +19,5 @@ __all__ = [
     "MarketplacePage",
     "SettingsPage",
     "ShopsPage",
+    "StatisticsPage",
 ]

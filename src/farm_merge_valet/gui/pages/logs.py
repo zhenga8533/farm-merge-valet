@@ -45,7 +45,7 @@ class LogsPage(AppPage):
         self.filter.currentIndexChanged.connect(self._filter_changed)
         clear = secondary_button("Clear")
         clear.clicked.connect(self.clear)
-        self.save_button = QPushButton("Save logs…")
+        self.save_button = QPushButton("Save logs")
         self.save_button.clicked.connect(self.save_requested)
         minimum_level_label = QLabel("Minimum level")
         minimum_level_label.setBuddy(self.filter)

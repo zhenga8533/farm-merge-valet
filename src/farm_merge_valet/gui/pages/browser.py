@@ -277,7 +277,7 @@ class BrowserPage(ConfigFormPage):
         value = getattr(self._config, field)
         control = QLineEdit(str(value) if value is not None else "")
         control.setAccessibleName(label)
-        browse = secondary_button("Browse…")
+        browse = secondary_button("Browse")
         browse.setAccessibleName(f"Choose {label.lower()}")
         row = QWidget()
         layout = QHBoxLayout(row)

@@ -38,6 +38,7 @@ from farm_merge_valet.gui.pages import (
     MarketplacePage,
     SettingsPage,
     ShopsPage,
+    StatisticsPage,
 )
 from farm_merge_valet.gui.pages.base import ConfigEdit
 from farm_merge_valet.gui.services.assets import CatalogIconLoader
@@ -91,6 +92,7 @@ def _menu_action_text(label: str, hotkey: str | None) -> str:
 class MainWindow(QMainWindow):
     _NAVIGATION = (
         "Dashboard",
+        "Statistics",
         "Items",
         "Shops",
         "Buildings",
@@ -146,6 +148,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
         self.dashboard_page = DashboardPage()
+        self.statistics_page = StatisticsPage()
         self._catalog_icons = CatalogIconLoader(self._draft.catalog_dir)
         self.items_page = ItemsPage(
             self._draft,
@@ -172,6 +175,7 @@ class MainWindow(QMainWindow):
         self.logs_page = LogsPage(self._draft.log_level)
         for page in (
             self.dashboard_page,
+            self.statistics_page,
             self.items_page,
             self.shops_page,
             self.buildings_page,
@@ -203,6 +207,7 @@ class MainWindow(QMainWindow):
         controller.upgrade_progress_changed.connect(self.items_page.set_upgrade_progress)
         controller.building_repairs_changed.connect(self.shops_page.set_building_repairs)
         controller.building_repairs_changed.connect(self.buildings_page.set_building_repairs)
+        controller.statistics_changed.connect(self.statistics_page.set_snapshot)
         self.items_page.set_upgrade_progress(controller.cached_upgrade_progress)
         self.shops_page.set_building_repairs(controller.cached_building_repairs)
         self.buildings_page.set_building_repairs(controller.cached_building_repairs)
@@ -211,11 +216,17 @@ class MainWindow(QMainWindow):
         self.dashboard_page.set_overlay_visible(self._draft.overlay_visible)
         self._apply_hotkey_hints(self._draft)
         self._apply_appearance()
+        self._statistics_timer = QTimer(self)
+        self._statistics_timer.setInterval(5000)
+        self._statistics_timer.timeout.connect(self._refresh_statistics_if_visible)
+        self._statistics_timer.start()
 
     def _set_current_page(self, index: int) -> None:
         self.pages.setCurrentIndex(index)
         page = self.pages.currentWidget()
-        if page is self.items_page:
+        if page is self.statistics_page:
+            self.controller.refresh_statistics(self.statistics_page.range_key)
+        elif page is self.items_page:
             self.items_page.ensure_populated(deferred=True)
         elif page is self.shops_page:
             self.shops_page.ensure_populated(deferred=True)
@@ -264,8 +275,42 @@ class MainWindow(QMainWindow):
         self.settings_page.hotkey_recording_changed.connect(self.controller.set_hotkey_recording)
         self.settings_page.reset_requested.connect(self._reset_general_settings)
         self.settings_page.reset_all_requested.connect(self._reset_all_settings)
+        self.statistics_page.range_changed.connect(self.controller.refresh_statistics)
+        self.statistics_page.export_requested.connect(self._export_statistics)
+        self.statistics_page.reset_requested.connect(self._reset_statistics)
         self.logs_page.log_level_changed.connect(lambda value: self._queue_config(log_level=value))
         self.logs_page.save_requested.connect(self._save_logs)
+
+    def _refresh_statistics_if_visible(self) -> None:
+        if self.pages.currentWidget() is self.statistics_page:
+            self.controller.refresh_statistics(self.statistics_page.range_key)
+
+    def _export_statistics(self, range_key: str) -> None:
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Export statistics",
+            "farm-merge-valet-statistics.json",
+            "JSON files (*.json);;CSV files (*.csv)",
+        )
+        if not path:
+            return
+        target = Path(path)
+        if not target.suffix:
+            target = target.with_suffix(".csv" if selected_filter.startswith("CSV") else ".json")
+        try:
+            saved = self.controller.export_statistics(target, range_key)
+        except OSError as exc:
+            self._show_error(f"Could not export statistics: {exc}")
+            return
+        self.statistics_page.status_label.set_success(f"Exported to {saved}")
+
+    def _reset_statistics(self) -> None:
+        if self._confirm_reset(
+            "Reset statistics?",
+            "Permanently erase all locally stored statistics? "
+            "This does not remove diagnostic logs.",
+        ):
+            self.controller.reset_statistics(self.statistics_page.range_key)
 
     def _confirm_browser_stop(self) -> None:
         if (

@@ -441,11 +441,15 @@ unmet requirements reports the required objects instead of being resubmitted.
 
 Operational records are emitted once with readable text, a stable `fmv_event`
 identifier, and structured `fmv_context`. The console and GUI subscribe as
-separate sinks through the central logging configuration. Each sink filters
-independently, so the Discord sink can count diagnostic action events without
-delivering each one. Its bounded worker queue sends selected lifecycle/failure
-events as severity-colored embeds and aggregated activity on the configured
-summary interval; network work never runs on the automation or GUI thread.
+separate sinks through the central logging configuration. A shared event-to-
+metric mapping keeps session summaries, Discord summaries, and the GUI's
+Statistics tab consistent. Sanitized hourly aggregates persist locally across
+sessions; selected ranges can be exported as JSON or CSV or reset independently
+of diagnostic logs. Each sink filters independently, so Discord can count
+diagnostic action events without delivering each one. Its bounded worker queue
+sends selected lifecycle/failure events as severity-colored embeds and compact,
+curated activity on the configured summary interval; network work never runs on
+the automation or GUI thread.
 It also reduces structured events into a current-status embed. Periodic status
 refreshes edit the existing message, while a newly posted alert or summary is
 followed by deleting and recreating the status so it remains last in the

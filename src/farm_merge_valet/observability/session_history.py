@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+
+from farm_merge_valet.observability.metrics import metrics_for_event
 
 
 @dataclass(frozen=True)
@@ -45,11 +48,11 @@ def summarize_history(path: Path, since: datetime) -> SessionHistorySummary:
             event = payload.get("event")
             if not isinstance(event, str) or not event:
                 continue
-            events += 1
-            metrics[event] += 1
             context = payload.get("context")
-            if event == "crate.claim_completed" and isinstance(context, dict):
-                spawned = context.get("spawned")
-                if isinstance(spawned, int) and not isinstance(spawned, bool):
-                    metrics["items.crates_spawned"] += spawned
+            level_name = payload.get("level", "INFO")
+            level = logging.getLevelNamesMapping().get(level_name, logging.INFO)
+            updates = metrics_for_event(event, context if isinstance(context, dict) else {}, level)
+            events += 1
+            for update in updates:
+                metrics[update.name] += int(update.value)
     return SessionHistorySummary(since, events, metrics)

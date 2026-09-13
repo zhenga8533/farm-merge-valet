@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import signal
+import sqlite3
 import sys
+from contextlib import nullcontext
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -14,6 +17,9 @@ from farm_merge_valet.gui.controller import ApplicationController
 from farm_merge_valet.gui.main_window import MainWindow as _MainWindow
 from farm_merge_valet.gui.theme import apply_theme
 from farm_merge_valet.observability.logging import configure_logging, logging_sink
+from farm_merge_valet.observability.statistics import StatisticsService
+
+logger = logging.getLogger(__name__)
 
 
 def run_application(store: ConfigStore | None = None) -> int:
@@ -39,14 +45,22 @@ def run_application(store: ConfigStore | None = None) -> int:
         config = config_store.reset()
     configure_logging(config.log_level)
     apply_theme(app, config.theme)
-    controller = ApplicationController(config_store)
+    try:
+        statistics = StatisticsService()
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        logger.warning("Statistics storage is unavailable: %s", exc)
+        statistics = None
+    controller = ApplicationController(config_store, statistics)
     window = _MainWindow(controller, eager_catalog_pages=False)
     signal.signal(signal.SIGINT, lambda *_args: window.quit_application())
     timer = QTimer()
     timer.setInterval(100)
     timer.timeout.connect(lambda: None)
     timer.start()
-    with logging_sink(controller.log_handler):
+    with (
+        logging_sink(statistics) if statistics is not None else nullcontext(),
+        logging_sink(controller.log_handler),
+    ):
         if config.start_minimized and window.tray.isVisible():
             window.hide()
         else:
@@ -61,3 +75,8 @@ def run_application(store: ConfigStore | None = None) -> int:
             return app.exec()
         finally:
             app.setProperty("fmvEventLoopRunning", False)
+            if statistics is not None:
+                try:
+                    statistics.close()
+                except OSError as exc:
+                    logger.warning("Statistics storage could not close cleanly: %s", exc)
