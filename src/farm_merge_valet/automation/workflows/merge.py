@@ -14,6 +14,7 @@ from farm_merge_valet.automation.board_space import (
 from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.automation.runtime import ActionStatus, RuntimeHealth
 from farm_merge_valet.automation.timing import DEFAULT_ACTION_TIMING
+from farm_merge_valet.automation.workflows.lucky_merge import LuckyMergeError, run_lucky_merge
 from farm_merge_valet.core.board import Cell
 from farm_merge_valet.core.items import GridCoord, ItemRef
 from farm_merge_valet.core.merge_planner import MergeAction, MoveEffect
@@ -306,7 +307,27 @@ class MergeWorkflow:
                 candidate_count=len(eligible_actions),
                 **bot._action_event_context(selected),
             )
-            bot._submit_merge(selected, health)
+            if (
+                selected.effect is MoveEffect.MERGE
+                and selected.target_size == 3
+                and bot.config.item_policy(selected.item.tier_policy_key).force_lucky_merge
+            ):
+                try:
+                    run_lucky_merge(bot, selected)
+                except LuckyMergeError as exc:
+                    bot.paused = True
+                    bot._interrupt_event.set()
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        "lucky_merge.paused",
+                        "Force lucky merge paused: %s",
+                        exc,
+                        item_policy_key=selected.item.tier_policy_key,
+                        detail=str(exc),
+                    )
+            else:
+                bot._submit_merge(selected, health)
         elif actions:
             self.blocked_requirement = None
             bot._report_wait("failed item actions are cooling down before retry")

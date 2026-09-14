@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from threading import Event
 from typing import Any, Protocol
 
 from farm_merge_valet.automation.action_control import ActionCoordinator
@@ -10,6 +11,7 @@ from farm_merge_valet.automation.phases import Phase
 from farm_merge_valet.automation.runtime import GameRuntime, RuntimeCapability, RuntimeHealth
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.core.board import BoardGrid
+from farm_merge_valet.core.items import ItemRef
 
 
 class WorkflowContext(Protocol):
@@ -19,7 +21,10 @@ class WorkflowContext(Protocol):
     runtime: GameRuntime
     board: BoardGrid
     phase: Phase
+    paused: bool
     _live_cells: dict[Any, Any]
+    _blueprint_items: dict[str, ItemRef]
+    _interrupt_event: Event
     _storage_bubbles: tuple[Any, ...] | None
     _marketplace_catalog: tuple[Any, ...]
 

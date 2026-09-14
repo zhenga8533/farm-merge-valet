@@ -760,6 +760,134 @@ def test_disabling_emergency_merge_three_does_not_disable_explicit_merge_three(
     assert actions[0].item == wheat
 
 
+def test_force_lucky_merge_overrides_merge_five_preference(monkeypatch) -> None:
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    bot._max_item_tiers[wheat.identity] = 2
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"crops/wheat/tier/1": ItemPolicyOverride(force_lucky_merge=True)},
+    )
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+
+    actions = bot._merge_actions_for_policy()
+
+    assert actions
+    assert actions[0].target_size == 3
+    assert actions[0].effect is MoveEffect.MERGE
+    assert bot.config.item_policy(wheat.tier_policy_key).prefer_merge_five
+
+
+def test_force_lucky_merge_follows_ordinary_merges_even_for_higher_priority_item(
+    monkeypatch,
+) -> None:
+    bot = bare_bot()
+    cow = ItemRef("animals", "cow", 1)
+    gem = ItemRef("currencies", "gem", 1)
+    bot._max_item_tiers.update({cow.identity: 2, gem.identity: 2})
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {cow.tier_policy_key: ItemPolicyOverride(force_lucky_merge=True)},
+    )
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, cow))
+    for x in range(5):
+        bot.board.set_cell((x, 2), Cell(CellKind.ITEM, gem))
+
+    actions = bot._assess_board_space(required_empty_cells=1).merge_actions
+
+    assert actions[0].item == gem
+    assert any(action.item == cow and action.effect is MoveEffect.MERGE for action in actions)
+
+
+def test_urgent_space_request_can_use_only_available_force_lucky_merge(monkeypatch) -> None:
+    bot = bare_bot()
+    cow = ItemRef("animals", "cow", 1)
+    bot._max_item_tiers[cow.identity] = 2
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {cow.tier_policy_key: ItemPolicyOverride(force_lucky_merge=True)},
+    )
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, cow))
+
+    actions = bot._assess_board_space(required_empty_cells=1).merge_actions
+
+    assert actions
+    assert actions[0].item == cow
+    assert actions[0].effect is MoveEffect.MERGE
+    assert actions[0].target_size == 3
+
+
+def test_urgent_space_request_uses_ordinary_emergency_merge_before_lucky(
+    monkeypatch,
+) -> None:
+    bot = bare_bot()
+    cow = ItemRef("animals", "cow", 1)
+    gem = ItemRef("currencies", "gem", 1)
+    bot._max_item_tiers.update({cow.identity: 2, gem.identity: 2})
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {cow.tier_policy_key: ItemPolicyOverride(force_lucky_merge=True)},
+    )
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, cow))
+        bot.board.set_cell((x, 2), Cell(CellKind.ITEM, gem))
+
+    actions = bot._assess_board_space(required_empty_cells=1).merge_actions
+
+    assert actions[0].item == gem
+    assert actions[0].target_size == 3
+    assert actions[0].effect is MoveEffect.MERGE
+    assert any(action.item == cow and action.effect is MoveEffect.MERGE for action in actions)
+
+
+def test_force_lucky_merge_never_accepts_five_item_trigger_as_lucky(monkeypatch) -> None:
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    bot._max_item_tiers[wheat.identity] = 2
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"crops/wheat/tier/1": ItemPolicyOverride(force_lucky_merge=True)},
+    )
+    for x in range(5):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+
+    assert not any(action.effect is MoveEffect.MERGE for action in bot._merge_actions_for_policy())
+
+
+def test_unavailable_lucky_isolation_pauses_without_submitting_merge(monkeypatch) -> None:
+    from farm_merge_valet.automation.workflows.lucky_merge import LuckyMergeError
+
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    bot._max_item_tiers[wheat.identity] = 2
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"crops/wheat/tier/1": ItemPolicyOverride(force_lucky_merge=True)},
+    )
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+
+    def unavailable(_bot, _action):
+        raise LuckyMergeError("backend socket stayed connected")
+
+    monkeypatch.setattr("farm_merge_valet.automation.workflows.merge.run_lucky_merge", unavailable)
+
+    bot._merge_workflow._step_merge(bot, health(advancing=True), bot._assess_board_space())
+
+    assert bot.paused
+    assert bot._interrupt_event.is_set()
+    assert bot.runtime.drops == []
+
+
 def test_item_master_switch_disables_merge_planning() -> None:
     bot = bare_bot()
     wheat = ItemRef("crops", "wheat", 1)

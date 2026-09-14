@@ -65,8 +65,9 @@ _ITEM_SORT_COLUMNS = {
     "enabled": 2,
     "merge": 3,
     "merge_five": 4,
-    "interact": 5,
-    "remove": 6,
+    "lucky_merge": 5,
+    "interact": 6,
+    "remove": 7,
 }
 
 
@@ -82,7 +83,7 @@ class _ItemPolicyRow:
     def supports(self, field: str) -> bool:
         return (
             field == "enabled"
-            or field in {"merge", "prefer_merge_five"}
+            or field in {"merge", "prefer_merge_five", "force_lucky_merge"}
             and self.supports_merge
             or field == "interact"
             and self.supports_interact
@@ -132,13 +133,14 @@ class ItemsPage(AppPage):
         )
 
         scaffold = create_policy_tree(
-            header_labels=("Item / tier", "Category", "", "", "", "", ""),
+            header_labels=("Item / tier", "Category", "", "", "", "", "", ""),
             bulk_labels={
                 2: "Enabled",
                 3: "Merge",
                 4: "Merge 5",
-                5: "Interact",
-                6: "Remove",
+                5: "Force lucky",
+                6: "Interact",
+                7: "Remove",
             },
             accessible_name="Item automation policies",
             search_placeholder="Search item families and tiers\u2026",
@@ -153,7 +155,7 @@ class ItemsPage(AppPage):
         self.bulk_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.bulk_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self.bulk_header.resizeSection(1, 108)
-        for column in range(2, 7):
+        for column in range(2, 8):
             self.bulk_header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self._apply_sort_preference()
 
@@ -784,16 +786,17 @@ class ItemsPage(AppPage):
             2: "enabled",
             3: "merge",
             4: "prefer_merge_five",
-            5: "interact",
-            6: "always_remove",
+            5: "force_lucky_merge",
+            6: "interact",
+            7: "always_remove",
         }
 
     def _show_empty(self, message: str) -> None:
-        item = QTreeWidgetItem((message, "", "", "", "", "", ""))
+        item = QTreeWidgetItem((message, "", "", "", "", "", "", ""))
         item.setFlags(Qt.ItemFlag.NoItemFlags)
         item.setSizeHint(0, QSize(0, POLICY_COMPACT_ROW_HEIGHT))
         self.table.addTopLevelItem(item)
-        for column in range(2, 7):
+        for column in range(2, 8):
             self.bulk_header.set_state(column, Qt.CheckState.Unchecked, enabled=False)
 
     def _show_catalog_onboarding(self) -> None:

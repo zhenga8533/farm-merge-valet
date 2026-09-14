@@ -22,6 +22,7 @@ class ItemPolicy(BaseModel):
     enabled: bool = True
     merge: bool = True
     prefer_merge_five: bool = True
+    force_lucky_merge: bool = False
     interact: bool = False
     always_remove: bool = False
 
@@ -31,6 +32,7 @@ class ItemPolicyOverride(BaseModel):
     enabled: bool | None = None
     merge: bool | None = None
     prefer_merge_five: bool | None = None
+    force_lucky_merge: bool | None = None
     interact: bool | None = None
     always_remove: bool | None = None
 
@@ -128,7 +130,7 @@ class AppConfig(BaseModel):
     land_expansion_max_coin_cost: int = Field(default=0, ge=0, le=1_000_000_000)
     land_expansion_max_gem_cost: int = Field(default=0, ge=0, le=1_000_000_000)
     items_sort_column: Literal[
-        "item", "category", "enabled", "merge", "merge_five", "interact", "remove"
+        "item", "category", "enabled", "merge", "merge_five", "lucky_merge", "interact", "remove"
     ] = "item"
     items_sort_descending: bool = False
     shops_sort_column: Literal["item", "type", "repair", "enabled"] = "item"

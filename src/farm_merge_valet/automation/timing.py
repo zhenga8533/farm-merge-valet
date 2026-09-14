@@ -15,3 +15,7 @@ class ActionTiming:
 DEFAULT_ACTION_TIMING = ActionTiming()
 MARKETPLACE_ACTION_TIMING = ActionTiming(maximum_pending_seconds=10.0, retry_seconds=60.0)
 FARM_VISIT_ACTION_TIMING = ActionTiming(maximum_pending_seconds=30.0, retry_seconds=5.0)
+
+
+def next_recovery_delay(current: float, initial: float, maximum: float = 10.0) -> float:
+    return min(maximum, max(initial, current * 2))

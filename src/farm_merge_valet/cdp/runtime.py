@@ -36,6 +36,7 @@ from farm_merge_valet.cdp.buildings import parse_building_repairs
 from farm_merge_valet.cdp.evaluation import apply_background_overrides, evaluate
 from farm_merge_valet.cdp.inventory_store import read_energy
 from farm_merge_valet.cdp.land_expansion import land_expansion_action_expression
+from farm_merge_valet.cdp.lucky_merge import LuckyMergeNetwork
 from farm_merge_valet.cdp.marketplace import (
     _READ_MARKETPLACE_EXPRESSION,
     marketplace_purchase_expression,
@@ -144,6 +145,28 @@ class GameRuntimeAdapter:
             raise ValueError("crate delay range is invalid")
         self._crate_delay_min = minimum
         self._crate_delay_max = maximum
+
+    def save_game(self) -> bool:
+        return (
+            evaluate(
+                self.port,
+                """(async () => {
+              const save = window.__fmvGameplayServices?.ordersService?._autoSaveService;
+              if (typeof save?.forceSave !== 'function') return false;
+              await save.forceSave();
+              return true;
+            })()""",
+                self.page_title,
+                timeout=15,
+                cancel_event=self._cancel_event,
+            )
+            is True
+        )
+
+    def lucky_merge_network(self) -> LuckyMergeNetwork:
+        if self.observation_only:
+            raise CdpConnectionError("Lucky merge is unavailable in observation mode.")
+        return LuckyMergeNetwork.for_game(self.port, self.page_title, self._cancel_event)
 
     def read_board_state(self):
         return read_board_state(

@@ -171,6 +171,21 @@ Removal validates the scene, coordinate, blueprint, object identity, and capabil
 before calling the same removal callback used by the confirmation dialog, then
 confirms the authoritative board change.
 
+`force_lucky_merge` is a default-off per-item/tier policy for mergeable items.
+It overrides merge-5 preference and retries exact three-item merges while the managed game is
+offline until at least two new next-tier items are observed. These actions run
+after ordinary merge actions, but remain eligible for urgent board-space recovery
+when no ordinary action can make room. Retries also apply
+to emergency merge-3. Normal results are discarded by reloading the last saved
+board and reopening the game through the portal launcher when needed; pause or
+stop discards the current offline attempt. Larger connected
+clusters are not treated as lucky merge candidates. Isolation blocks new game
+requests and closes the current game backend socket before any merge is sent.
+The full-page reload is part of this rollback, not ordinary board discovery.
+If network isolation, the merge result, or persistence cannot be verified,
+automation pauses rather than saving an uncertain result. This never changes
+system Wi-Fi settings.
+
 Shop automation similarly uses global defaults plus per-ID overrides. Shop and
 recipe policies are independent and both are required, allowing the GUI to
 expose global toggles alongside individual shop and recipe toggles. Enabled

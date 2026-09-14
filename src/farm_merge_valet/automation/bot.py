@@ -40,7 +40,7 @@ from farm_merge_valet.automation.runtime import (
 )
 from farm_merge_valet.automation.scheduler import AdaptiveScheduler
 from farm_merge_valet.automation.state import AutomationState
-from farm_merge_valet.automation.timing import DEFAULT_ACTION_TIMING
+from farm_merge_valet.automation.timing import DEFAULT_ACTION_TIMING, next_recovery_delay
 from farm_merge_valet.automation.workflows import (
     CrateWorkflow,
     FarmVisitWorkflow,
@@ -74,6 +74,7 @@ from farm_merge_valet.core.marketplace import MarketplaceLiveOffer, MarketplaceO
 from farm_merge_valet.core.merge_planner import (
     MergeAction,
     MergeActionKind,
+    MoveEffect,
     plan_merge_actions,
 )
 from farm_merge_valet.core.obstacles import (
@@ -587,6 +588,7 @@ class Bot:
         self, action: MergeAction, rank: int, *, prefer_smallest_trigger: bool
     ) -> tuple:
         return (
+            self.config.item_policy(action.item.tier_policy_key).force_lucky_merge,
             self._MERGE_ACTION_PRIORITY[action.kind],
             len(action.cluster)
             if prefer_smallest_trigger and action.kind is MergeActionKind.TRIGGER
@@ -622,7 +624,10 @@ class Bot:
             and self.config.item_policy(item.tier_policy_key).merge
             and (
                 prefer_merge_five is None
-                or self.config.item_policy(item.tier_policy_key).prefer_merge_five
+                or (
+                    self.config.item_policy(item.tier_policy_key).prefer_merge_five
+                    and not self.config.item_policy(item.tier_policy_key).force_lucky_merge
+                )
                 is prefer_merge_five
             )
             for rank, action in enumerate(
@@ -632,6 +637,12 @@ class Bot:
                     target_size=target_size,
                     prefer_smallest_trigger=prefer_smallest_trigger,
                 )
+            )
+            if not (
+                target_size == 3
+                and self.config.item_policy(item.tier_policy_key).force_lucky_merge
+                and action.effect is MoveEffect.MERGE
+                and len(action.cluster) != 3
             )
         ]
         return [
@@ -729,20 +740,30 @@ class Bot:
             for action in self._plan_merge_actions(
                 3,
                 prefer_smallest_trigger=True,
-                prefer_merge_five=True,
+                prefer_merge_five=None,
             )
             if action.item.tier <= maximum_tier
+            and (
+                self.config.item_policy(action.item.tier_policy_key).prefer_merge_five
+                or self.config.item_policy(action.item.tier_policy_key).force_lucky_merge
+            )
         ]
 
     def _assess_board_space(self, required_empty_cells: int | None = None) -> BoardSpaceAssessment:
         empty_cells = len(self.board.find_empty())
+        need_space = empty_cells == 0 or (
+            required_empty_cells is not None and empty_cells < required_empty_cells
+        )
         merge_actions = self._merge_actions_for_policy()
-        if (
-            not merge_actions
-            and required_empty_cells is not None
-            and empty_cells < required_empty_cells
-        ):
-            merge_actions = self._space_recovery_merge_actions()
+        if need_space:
+            recovery_actions = self._space_recovery_merge_actions()
+            if recovery_actions:
+                merge_actions = list(dict.fromkeys((*merge_actions, *recovery_actions)))
+                merge_actions.sort(
+                    key=lambda action: self._action_sort_key(
+                        action, 0, prefer_smallest_trigger=False
+                    )
+                )
         return BoardSpaceAssessment(
             empty_cells=empty_cells,
             reserve=self.config.merge_empty_cell_reserve,
@@ -1800,7 +1821,7 @@ class Bot:
         else:
             retries[capability] = (
                 time.monotonic() + retry_delay,
-                min(10.0, retry_delay * 2),
+                next_recovery_delay(retry_delay, self.config.loop_interval),
             )
             self._report_wait(refreshed.detail or f"{name} capability unavailable")
         # Discovery can replace every scene-bound reference. Replan from a new
@@ -1986,7 +2007,7 @@ class Bot:
                     if not initialized:
                         if self._interrupt_event.wait(retry_delay):
                             continue
-                        retry_delay = min(10.0, max(self.config.loop_interval, retry_delay * 2))
+                        retry_delay = next_recovery_delay(retry_delay, self.config.loop_interval)
                         continue
                     needs_initialization = False
                     retry_delay = self.config.loop_interval
@@ -2012,7 +2033,7 @@ class Bot:
                     needs_initialization = True
                     if self._interrupt_event.wait(retry_delay):
                         continue
-                    retry_delay = min(10.0, max(self.config.loop_interval, retry_delay * 2))
+                    retry_delay = next_recovery_delay(retry_delay, self.config.loop_interval)
                     continue
                 delay = self._effective_loop_delay(self._next_loop_delay)
                 self._next_loop_delay = self.config.loop_interval

@@ -529,7 +529,7 @@ def test_policy_sort_preferences_are_loaded_and_persisted(tmp_path) -> None:
     assert not window.shops_page.bulk_header.isSortIndicatorShown()
     assert window.shops_page.bulk_header.sortIndicatorOrder() is Qt.SortOrder.DescendingOrder
 
-    window.items_page.bulk_header.setSortIndicator(5, Qt.SortOrder.AscendingOrder)
+    window.items_page.bulk_header.setSortIndicator(6, Qt.SortOrder.AscendingOrder)
     window.shops_page.bulk_header.setSortIndicator(1, Qt.SortOrder.AscendingOrder)
     window._flush_config()
 

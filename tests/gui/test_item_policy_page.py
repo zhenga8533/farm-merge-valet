@@ -82,7 +82,7 @@ def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
     item_automation_toggle = window.settings_page.controls["item_automation_enabled"]
     assert item_automation_toggle.isChecked()
     assert window.items_page.table.topLevelItemCount() == 3
-    assert window.items_page.table.columnCount() == 7
+    assert window.items_page.table.columnCount() == 8
     assert "Use default" not in {
         button.text() for button in window.items_page.findChildren(QPushButton)
     }
@@ -91,12 +91,14 @@ def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
         for row in range(window.items_page.table.topLevelItemCount())
     }
     wheat_merge = window.items_page.table.itemWidget(rows["Wheat"], 3).findChild(QCheckBox)
-    wheat_interact = window.items_page.table.itemWidget(rows["Wheat"], 5).findChild(QCheckBox)
+    wheat_lucky = window.items_page.table.itemWidget(rows["Wheat"], 5).findChild(QCheckBox)
+    wheat_interact = window.items_page.table.itemWidget(rows["Wheat"], 6).findChild(QCheckBox)
     milk_merge = window.items_page.table.itemWidget(rows["Milk"], 3).findChild(QCheckBox)
-    milk_interact = window.items_page.table.itemWidget(rows["Milk"], 5).findChild(QCheckBox)
-    coin_interact = window.items_page.table.itemWidget(rows["Coin"], 5).findChild(QCheckBox)
+    milk_interact = window.items_page.table.itemWidget(rows["Milk"], 6).findChild(QCheckBox)
+    coin_interact = window.items_page.table.itemWidget(rows["Coin"], 6).findChild(QCheckBox)
 
     assert wheat_merge is not None and wheat_merge.isEnabled()
+    assert wheat_lucky is not None and wheat_lucky.isEnabled() and not wheat_lucky.isChecked()
     assert wheat_interact is None
     assert milk_merge is None
     assert milk_interact is not None and milk_interact.isEnabled() and milk_interact.isChecked()
@@ -105,7 +107,7 @@ def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
     item_automation_toggle.click()
     assert not window._draft.item_automation_enabled
     assert window.items_page._config.item_policy_overrides == selected_policies
-    assert window.items_page.table.itemWidget(rows["Wheat"], 5).findChild(QLabel).text() == "—"
+    assert window.items_page.table.itemWidget(rows["Wheat"], 6).findChild(QLabel).text() == "—"
     window.items_page.table.setCurrentItem(rows["Wheat"])
     assert all(rows["Wheat"].text(column) == "" for column in range(1, 7))
     assert rows["Wheat"].data(3, POLICY_SORT_ROLE) is True
@@ -200,7 +202,7 @@ def test_reward_container_exposes_open_policy_control(tmp_path) -> None:
     window = MainWindow(ApplicationController(store))
 
     row = window.items_page.table.topLevelItem(0)
-    interact = window.items_page.table.itemWidget(row, 5).findChild(QCheckBox)
+    interact = window.items_page.table.itemWidget(row, 6).findChild(QCheckBox)
 
     assert interact is not None and interact.isEnabled() and interact.isChecked()
     assert interact.accessibleName().endswith(": open")
@@ -281,16 +283,16 @@ def test_item_families_expand_into_independent_tier_policies(tmp_path) -> None:
     assert cards.childCount() == 2
     assert [wheat.child(index).text(0) for index in range(2)] == ["Tier 1", "Tier 2"]
     assert [cards.child(index).text(0) for index in range(2)] == ["Tier 1", "Tier 2"]
-    assert window.items_page.table.itemWidget(cards, 5).findChild(QLabel).text() == "Applied"
+    assert window.items_page.table.itemWidget(cards, 6).findChild(QLabel).text() == "Applied"
     assert (
-        window.items_page.table.itemWidget(cards.child(0), 5).findChild(QLabel).text() == "Applied"
+        window.items_page.table.itemWidget(cards.child(0), 6).findChild(QLabel).text() == "Applied"
     )
     assert (
-        window.items_page.table.itemWidget(cards.child(1), 5).findChild(QLabel).text() == "Applied"
+        window.items_page.table.itemWidget(cards.child(1), 6).findChild(QLabel).text() == "Applied"
     )
-    assert window.items_page.table.itemWidget(cards.child(0), 5).findChild(QCheckBox) is None
+    assert window.items_page.table.itemWidget(cards.child(0), 6).findChild(QCheckBox) is None
     assert window.items_page.table.itemWidget(wheat.child(1), 3).findChild(QLabel).text() == "—"
-    remove = window.items_page.table.itemWidget(wheat.child(0), 6).findChild(QCheckBox)
+    remove = window.items_page.table.itemWidget(wheat.child(0), 7).findChild(QCheckBox)
     assert remove is not None
     remove.setChecked(True)
     window._flush_config()
@@ -352,10 +354,10 @@ def test_obstacle_variants_group_and_expose_clear_interaction_only(tmp_path) -> 
         "Small · Movable",
     ]
     for index in range(root.childCount()):
-        interact = window.items_page.table.itemWidget(root.child(index), 5).findChild(QCheckBox)
+        interact = window.items_page.table.itemWidget(root.child(index), 6).findChild(QCheckBox)
         assert interact is not None and interact.isChecked()
         assert interact.accessibleName().endswith(": clear")
-        remove_cell = window.items_page.table.itemWidget(root.child(index), 6)
+        remove_cell = window.items_page.table.itemWidget(root.child(index), 7)
         assert remove_cell.findChild(QCheckBox) is None
         assert remove_cell.findChild(QLabel).text() == "—"
 
@@ -420,11 +422,11 @@ def test_animal_upgrade_progress_uses_product_identity_but_nests_under_producer(
     cards.setExpanded(True)
     assert cards.data(0, Qt.ItemDataRole.UserRole) == "upgrade_cards/upgrade_card/milk"
     assert (
-        window.items_page.table.itemWidget(cards.child(0), 5).findChild(QLabel).text() == "Applied"
+        window.items_page.table.itemWidget(cards.child(0), 6).findChild(QLabel).text() == "Applied"
     )
-    pending_interact = window.items_page.table.itemWidget(cards.child(1), 5).findChild(QCheckBox)
+    pending_interact = window.items_page.table.itemWidget(cards.child(1), 6).findChild(QCheckBox)
     assert pending_interact is not None and not pending_interact.isChecked()
-    tier_three_interact = window.items_page.table.itemWidget(cards.child(2), 5).findChild(QCheckBox)
+    tier_three_interact = window.items_page.table.itemWidget(cards.child(2), 6).findChild(QCheckBox)
     assert tier_three_interact is not None and tier_three_interact.isChecked()
     pending_interact.setChecked(True)
     window._flush_config()
