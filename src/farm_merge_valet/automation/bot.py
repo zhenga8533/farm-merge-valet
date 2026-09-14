@@ -595,6 +595,7 @@ class Bot:
             else 0,
             self._item_priority(action.item),
             action.item.tier,
+            -action.target_size,
             rank,
             abs(action.start[0] - action.end[0]) + abs(action.start[1] - action.end[1]),
             action.item.category,

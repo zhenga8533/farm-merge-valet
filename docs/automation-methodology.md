@@ -385,7 +385,9 @@ highest known tier; and preserves the empty-cell reserve when productive work
 exists. The fallback applies whenever a pending action needs more open cells
 than are available, including a partially open board, and only through the
 configured maximum item tier; zero disables it. Explicit per-item merge-3
-policies are unaffected. Occupied-item swaps can recover a full board. The game may relocate the
+policies are unaffected. When both merge sizes can trigger for the same item,
+the preferred merge-5 wins; an immediate emergency merge-3 can still precede
+merge-5 gathering moves. Occupied-item swaps can recover a full board. The game may relocate the
 displaced item to any available empty cell rather than exchanging the two cells
 literally, so success is based on the dragged item reaching its destination;
 the next authoritative board read discovers the displaced item's location.

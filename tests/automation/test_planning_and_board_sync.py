@@ -723,6 +723,41 @@ def test_merge_five_policy_falls_back_for_requested_space_shortfall() -> None:
     assert recovery.merge_actions[0].effect is MoveEffect.MERGE
 
 
+def test_emergency_space_prefers_available_five_merge_of_same_item() -> None:
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    bot._max_item_tiers[wheat.identity] = 2
+    for x in range(4):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+    bot.board.set_cell((10, 0), Cell(CellKind.ITEM, wheat))
+
+    actions = bot._assess_board_space(required_empty_cells=1).merge_actions
+
+    assert any(action.target_size == 3 for action in actions)
+    assert actions[0].item == wheat
+    assert actions[0].target_size == 5
+    assert actions[0].effect is MoveEffect.MERGE
+
+
+def test_emergency_space_prefers_immediate_three_merge_to_five_gather() -> None:
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    bot._max_item_tiers[wheat.identity] = 2
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+    bot.board.set_cell((3, 0), Cell(CellKind.ITEM, ItemRef("currencies", "coin", 1)))
+    bot.board.set_cell((10, 0), Cell(CellKind.ITEM, wheat))
+    bot.board.set_cell((12, 0), Cell(CellKind.ITEM, wheat))
+
+    actions = bot._assess_board_space(required_empty_cells=1).merge_actions
+
+    assert any(
+        action.target_size == 5 and action.kind is MergeActionKind.GATHER for action in actions
+    )
+    assert actions[0].target_size == 3
+    assert actions[0].effect is MoveEffect.MERGE
+
+
 def test_emergency_merge_three_respects_maximum_tier() -> None:
     bot = bare_bot()
     low = ItemRef("crops", "wheat", 3)
