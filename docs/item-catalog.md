@@ -165,7 +165,9 @@ primary interaction ignore `interact`. The GUI uses these facts to disable contr
 an item.
 The `always_remove` field defaults to false and independently authorizes shovel
 actions for catalog items with the game's `shovelable` capability. The runtime
-validates the scene, coordinate, blueprint, object identity, and capability
+prefers an eligible interaction on the same tile and removes it only when no
+interaction is currently eligible; an obstacle already clearing is not removed.
+Removal validates the scene, coordinate, blueprint, object identity, and capability
 before calling the same removal callback used by the confirmation dialog, then
 confirms the authoritative board change.
 

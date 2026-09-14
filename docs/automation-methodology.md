@@ -214,7 +214,9 @@ stages, and board coordinate. All paid stages exposing `lootable` output are
 claimed through the normal tile-interaction pipeline before another stage is
 started. The global obstacle-spending control prevents new stages from being paid
 without blocking loot collection from an already-paid stage. While no worker is
-available, the focused obstacle remains unchanged.
+available, the focused obstacle remains unchanged. After loot is claimed, the
+focused obstacle gets a brief state-settle window before an available worker
+may start a different obstacle.
 When building-resource preservation is enabled, the repair target is selected
 from placed, inactive, non-event buildings. Configured priority first favors
 workshops, then other structures, then decorative buildings; within a class it

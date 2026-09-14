@@ -908,6 +908,14 @@ class Bot:
             )
         if workers is None or workers.available == 0:
             return None
+        recent_loot = self._interaction_workflow.last_obstacle_loot
+        if (
+            recent_loot is not None
+            and focused.coord == recent_loot[0]
+            and focused.object_id == recent_loot[1]
+            and self._now() - recent_loot[2] < DEFAULT_ACTION_TIMING.settle_seconds
+        ):
+            return None
 
         selected = plan_obstacle_clear(
             prioritized, energy, workers, self.config.minimum_energy_reserve
@@ -960,6 +968,7 @@ class Bot:
         obstacles: list[ObstacleCandidate] = []
         depleted: list[InteractionAction] = []
         ready: list[InteractionAction] = []
+        removable: list[tuple[InteractionAction, LiveCellState]] = []
         for coord, state in sorted(self._live_cells.items()):
             if state.blueprint_id is None:
                 continue
@@ -992,15 +1001,14 @@ class Bot:
             if not policy.enabled:
                 continue
             if state.blueprint_id in self._shovelable_ids and policy.always_remove:
-                immediate.append(
-                    InteractionAction(
-                        InteractionTargetKind.REMOVE,
-                        coord,
-                        state.blueprint_id,
-                        state.object_id,
+                removable.append(
+                    (
+                        InteractionAction(
+                            InteractionTargetKind.REMOVE, coord, state.blueprint_id, state.object_id
+                        ),
+                        state,
                     )
                 )
-                continue
             if not policy.interact:
                 continue
             if state.blueprint_id in self._reward_container_ids:
@@ -1132,9 +1140,16 @@ class Bot:
                         obstacle=clear_candidate.state,
                     )
                 )
+        interaction_coords = {action.coord for action in (*immediate, *depleted, *ready)}
+        immediate.extend(
+            action
+            for action, state in removable
+            if action.coord not in interaction_coords
+            and not (state.obstacle is not None and state.obstacle.clearing)
+        )
         producer_order = {ProducerKind.ANIMAL: 0, ProducerKind.CROP: 1, None: 2}
         immediate_order = {
-            InteractionTargetKind.REMOVE: 0,
+            InteractionTargetKind.REMOVE: 3,
             InteractionTargetKind.FRIEND_REWARD: 1,
             InteractionTargetKind.LIKE_REWARD: 1,
             InteractionTargetKind.IMMEDIATE: 1,

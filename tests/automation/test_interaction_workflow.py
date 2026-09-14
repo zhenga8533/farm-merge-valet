@@ -546,6 +546,42 @@ def test_remove_policy_plans_shovelable_item_without_interact_policy(monkeypatch
     assert bot._interaction_workflow.pending is not None
 
 
+def test_interaction_precedes_removal_for_same_shovelable_item(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._shovelable_ids = frozenset({"milk"})
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"ingredients/milk": ItemPolicyOverride(interact=True, always_remove=True)},
+    )
+    bot._live_cells = {(3, 4): LiveCellState(True, "milk", 91, collectable=True)}
+
+    immediate, depleted, ready = bot._interaction_actions()
+
+    assert [action.kind for action in immediate] == [InteractionTargetKind.IMMEDIATE]
+    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+    assert bot.runtime.interactions == [((3, 4), InteractionTargetKind.IMMEDIATE, "milk", 91)]
+    assert bot.runtime.removals == []
+
+
+def test_removal_follows_when_same_item_cannot_be_interacted_with(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._shovelable_ids = frozenset({"milk"})
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"ingredients/milk": ItemPolicyOverride(interact=True, always_remove=True)},
+    )
+    bot._live_cells = {(3, 4): LiveCellState(True, "milk", 91, collectable=False)}
+
+    immediate, depleted, ready = bot._interaction_actions()
+
+    assert [action.kind for action in immediate] == [InteractionTargetKind.REMOVE]
+    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+    assert bot.runtime.removals == [((3, 4), "milk", 91)]
+    assert bot.runtime.interactions == []
+
+
 def test_remove_policy_never_targets_non_shovelable_item(monkeypatch) -> None:
     bot = bare_bot()
     bot._blueprint_policy_keys = {"statue": "decorations/statue"}
@@ -809,6 +845,62 @@ def test_paid_obstacle_does_not_block_an_available_worker(monkeypatch) -> None:
         (InteractionTargetKind.CLEAR, (5, 6))
     ]
     assert bot._obstacle_focus == ((5, 6), 92)
+
+
+def test_recently_looted_obstacle_keeps_focus_until_stage_settles(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._clearable_ids = frozenset({"tree_medium"})
+    bot._blueprint_policy_keys = {"tree_medium": "obstacles/tree_medium"}
+    bot._energy = 50
+    bot._workers = WorkerState(1, 1)
+    bot._obstacle_focus = ((3, 4), 91)
+    bot._interaction_workflow.last_obstacle_loot = ((3, 4), 91, 100.0)
+    monkeypatch.setattr(bot, "_now", lambda: 101.0)
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"obstacles/tree_medium": ItemPolicyOverride(interact=True)},
+    )
+    bot._live_cells = {
+        (3, 4): LiveCellState(
+            True,
+            "tree_medium",
+            91,
+            obstacle=ObstacleState(2, 5, None, False, clearing=True),
+        ),
+        (5, 6): LiveCellState(
+            True,
+            "tree_medium",
+            92,
+            obstacle=ObstacleState(5, 5, 5, False, required_workers=1),
+        ),
+    }
+
+    assert bot._interaction_actions() == ([], [], [])
+    assert bot._obstacle_focus == ((3, 4), 91)
+
+    bot._live_cells[(3, 4)] = LiveCellState(
+        True,
+        "tree_medium",
+        91,
+        obstacle=ObstacleState(1, 5, 25, False, required_workers=1),
+    )
+    immediate, _, _ = bot._interaction_actions()
+    assert [(action.kind, action.coord) for action in immediate] == [
+        (InteractionTargetKind.CLEAR, (3, 4))
+    ]
+
+    bot._live_cells[(3, 4)] = LiveCellState(
+        True,
+        "tree_medium",
+        91,
+        obstacle=ObstacleState(1, 5, None, False, clearing=True),
+    )
+    monkeypatch.setattr(bot, "_now", lambda: 104.0)
+    immediate, _, _ = bot._interaction_actions()
+    assert [(action.kind, action.coord) for action in immediate] == [
+        (InteractionTargetKind.CLEAR, (5, 6))
+    ]
 
 
 def test_all_lootable_obstacles_are_planned_before_another_clear(monkeypatch) -> None:

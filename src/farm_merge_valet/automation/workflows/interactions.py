@@ -67,6 +67,7 @@ class InteractionWorkflow:
     pending: PendingInteraction | None = None
     output_space_request: InteractionAction | None = None
     remaining_output_capacity: dict[tuple[GridCoord, int | None], int] = field(default_factory=dict)
+    last_obstacle_loot: tuple[GridCoord, int | None, float] | None = None
 
     @staticmethod
     def _output_key(action: InteractionAction) -> tuple[GridCoord, int | None]:
@@ -271,6 +272,12 @@ class InteractionWorkflow:
                 )
             self.pending = None
             bot._actions().complete(OperationKind.INTERACTION, action_key)
+            if completed and pending.action.kind is InteractionTargetKind.OBSTACLE_LOOT:
+                self.last_obstacle_loot = (
+                    pending.action.coord,
+                    pending.action.object_id,
+                    now,
+                )
             bot.clear_wait_state()
             log_event(
                 logger,
