@@ -170,6 +170,7 @@ def test_runtime_asset_sync_uses_cdp_resources_and_local_cache(monkeypatch, tmp_
     catalog_dir = tmp_path / "catalog"
     atlases = {"game": ({"frames": {}}, np.zeros((1, 1, 4), dtype=np.uint8))}
     compiled: list[tuple[object, Path]] = []
+    statuses: list[str] = []
     synchronizer = CatalogSynchronizer(
         atlas_cache_dir=atlas_cache,
         catalog_dir=catalog_dir,
@@ -177,6 +178,7 @@ def test_runtime_asset_sync_uses_cdp_resources_and_local_cache(monkeypatch, tmp_
         binary_resource_reader=lambda _urls: {},
         text_resource_reader=lambda _urls: {},
         catalog_loader=lambda: ItemCatalog({}),
+        progress_callback=statuses.append,
     )
     monkeypatch.setattr(
         CatalogSynchronizer,
@@ -196,6 +198,11 @@ def test_runtime_asset_sync_uses_cdp_resources_and_local_cache(monkeypatch, tmp_
     synchronizer.sync()
 
     assert compiled == [(atlases, catalog_dir)]
+    assert statuses == [
+        "Discovering game atlas sheets…",
+        "Downloading game atlas sheets (0/1)…",
+        "Compiling game catalog and icons…",
+    ]
 
 
 def test_runtime_asset_cache_refreshes_when_the_source_version_changes(tmp_path: Path) -> None:
@@ -204,6 +211,7 @@ def test_runtime_asset_cache_refreshes_when_the_source_version_changes(tmp_path:
     image_ok, encoded = cv2.imencode(".png", np.zeros((1, 1, 4), dtype=np.uint8))
     assert image_ok
     reads: list[list[str]] = []
+    statuses: list[str] = []
     current_url = "https://cdn.test/atlases/low/map.png?v=2"
     synchronizer = CatalogSynchronizer(
         atlas_cache_dir=atlas_cache,
@@ -212,6 +220,7 @@ def test_runtime_asset_cache_refreshes_when_the_source_version_changes(tmp_path:
         binary_resource_reader=lambda urls: reads.append(urls) or {urls[0]: encoded.tobytes()},
         text_resource_reader=lambda urls: {urls[0]: '{"frames": {}}'},
         catalog_loader=lambda: ItemCatalog({}),
+        progress_callback=statuses.append,
     )
     cached_png = atlas_cache / "atlases_low_map.png"
     cached_json = atlas_cache / "atlases_low_map.json"
@@ -228,6 +237,7 @@ def test_runtime_asset_cache_refreshes_when_the_source_version_changes(tmp_path:
     assert reads == [[current_url]]
     source_index = json.loads((atlas_cache / ".atlas-sources.json").read_text(encoding="utf-8"))
     assert source_index[cached_png.name] == current_url
+    assert statuses == ["Downloading game atlas sheets (1/1)…"]
 
 
 def test_runtime_sync_excludes_cached_sheets_from_another_integration(tmp_path: Path) -> None:

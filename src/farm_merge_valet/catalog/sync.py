@@ -37,9 +37,15 @@ class CatalogSynchronizer:
     text_resource_reader: Callable[[list[str]], dict[str, str]]
     catalog_loader: Callable[[], ItemCatalog]
     marketplace_catalog_reader: Callable[[], tuple[MarketplaceOffer, ...] | None] | None = None
+    progress_callback: Callable[[str], None] | None = None
+
+    def _report_progress(self, message: str) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(message)
 
     def sync(self, *, force: bool = False) -> None:
         """Discover current game atlases and refresh the local catalog cache."""
+        self._report_progress("Discovering game atlas sheets…")
         urls = self.atlas_url_reader()
         if not urls:
             raise RuntimeError(
@@ -50,9 +56,13 @@ class CatalogSynchronizer:
         preferred_urls = self._discover_high_quality_atlases(urls)
         if preferred_urls:
             print(f"Discovered {len(preferred_urls)} high-quality atlas sheets.")
+        self._report_progress(
+            f"Downloading game atlas sheets (0/{len(preferred_urls) + len(urls)})…"
+        )
         atlases = self._fetch_runtime_atlases([*preferred_urls, *urls], force=force)
         if not atlases:
             raise RuntimeError("The current game atlas resources could not be downloaded.")
+        self._report_progress("Compiling game catalog and icons…")
         self._compile_assets(atlases)
 
     def _discover_high_quality_atlases(self, loaded_urls: list[str]) -> list[str]:
@@ -130,6 +140,8 @@ class CatalogSynchronizer:
                 source_index[_cache_path_for(self.atlas_cache_dir, png_url, ".png").name] = png_url
                 current_names.add(_cache_path_for(self.atlas_cache_dir, png_url, ".png").name)
             print(f"Cached {min(offset + len(batch), len(pending))}/{len(pending)} atlas sheets.")
+            completed = min(offset + len(batch), len(pending))
+            self._report_progress(f"Downloading game atlas sheets ({completed}/{len(pending)})…")
         self._write_source_index(source_index)
         return load_cached_atlases(self.atlas_cache_dir, atlas_names=current_names)
 

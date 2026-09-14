@@ -552,6 +552,8 @@ _HEALTH_EXPRESSION = (
       activePopup?._rewardService === services?.rewardService);
   const travelSummaryRewardPopup = activePopup?._name === 'TravelSummaryRewardPopup' &&
     typeof activePopup.close === 'function';
+  const likeClaimPopup = activePopup?._name === 'LikeClaimOverlay' &&
+    typeof activePopup.close === 'function';
   const pushNotificationOptInPopup =
     activePopup?._name === 'PushNotificationOptInPopup' &&
     typeof activePopup._onDismiss === 'function' &&
@@ -582,6 +584,7 @@ _HEALTH_EXPRESSION = (
       activePopup !== window.__fmvTrainPopup && activePopup !== trainPopup &&
       !dailyChallengePopup && !timedEventPopup && !dailyBonusPopup &&
       !albumStartedPopup && !rewardPopup && !travelSummaryRewardPopup &&
+      !likeClaimPopup &&
       !pushNotificationOptInPopup && !promotionalPopup
     ? `popup:${activePopup._name || activePopup.name || activePopup.constructor?.name || 'unknown'}`
     : blockingLayer
@@ -603,6 +606,7 @@ _HEALTH_EXPRESSION = (
     : dailyBonusPopup ? 'daily-bonus-collect'
     : albumStartedPopup ? 'sticker-album-started'
     : travelSummaryRewardPopup ? 'travel-summary-reward'
+    : likeClaimPopup ? 'like-claim'
     : pushNotificationOptInPopup ? 'push-notification-opt-in'
     : rewardPopup ? 'reward-popup'
     : promotionalPopup ? 'promotional-popup'
@@ -1229,6 +1233,8 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     typeof activePopup.awaitPopupClosed === 'function';
   const travelSummaryRewardPopup = activePopup?._name === 'TravelSummaryRewardPopup' &&
     typeof activePopup.close === 'function';
+  const likeClaimPopup = activePopup?._name === 'LikeClaimOverlay' &&
+    typeof activePopup.close === 'function';
   const pushNotificationOptInPopup =
     activePopup?._name === 'PushNotificationOptInPopup' &&
     typeof activePopup._onDismiss === 'function' &&
@@ -1243,11 +1249,12 @@ def _dismiss_overlay_expression(scene_id: int | None) -> str:
     }}, detail);
   }}
   if (dailyChallengePopup || timedEventPopup || dailyBonusPopup || albumStartedPopup ||
-      travelSummaryRewardPopup) {{
+      travelSummaryRewardPopup || likeClaimPopup) {{
     const detail = dailyChallengePopup ? 'daily-challenge'
       : timedEventPopup ? 'timed-event'
       : dailyBonusPopup ? 'daily-bonus-collect'
-      : albumStartedPopup ? 'sticker-album-started' : 'travel-summary-reward';
+      : albumStartedPopup ? 'sticker-album-started'
+      : likeClaimPopup ? 'like-claim' : 'travel-summary-reward';
     if (timedEventPopup && overlaySubmitted(activePopup))
       return {{status: 'busy', detail: 'timed-event-transition'}};
     if (dailyBonusPopup && activePopup._rewardCollected)

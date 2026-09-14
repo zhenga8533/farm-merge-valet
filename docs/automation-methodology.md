@@ -113,7 +113,7 @@ mistaken for an action failure.
 
 A strict, default-enabled transient-overlay
 step runs before this gate. It handles level-up, daily bonus/challenge, timed-event,
-ordinary reward, travel-summary, promotional, sticker album/set, and sticker-pack
+ordinary reward, travel-summary, like-claim, promotional, sticker album/set, and sticker-pack
 transitions through their native callbacks. Sticker packs use their native Skip and
 subsequent Collect transitions. Explicitly non-interactive, non-dismissible
 popup-layer elements are treated as passive notifications; unknown interactive

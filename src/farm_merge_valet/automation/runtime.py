@@ -48,6 +48,7 @@ class TransientOverlayKind(StrEnum):
     STICKER_ALBUM_TRANSITION = "sticker-album-transition"
     REWARD_POPUP = "reward-popup"
     TRAVEL_SUMMARY_REWARD = "travel-summary-reward"
+    LIKE_CLAIM = "like-claim"
     PROMOTIONAL_POPUP = "promotional-popup"
     PUSH_NOTIFICATION_OPT_IN = "push-notification-opt-in"
     SESSION_REPLACED = "session-replaced"

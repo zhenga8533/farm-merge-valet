@@ -188,6 +188,8 @@ def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) ->
     assert "activePopup?._name === 'AlbumStartedPopup'" in expressions[0]
     assert "activePopup?._name === 'TravelSummaryRewardPopup'" in expressions[0]
     assert "travel-summary-reward" in expressions[0]
+    assert "activePopup?._name === 'LikeClaimOverlay'" in expressions[0]
+    assert "likeClaimPopup ? 'like-claim'" in expressions[0]
     assert "activePopup?._name === 'PushNotificationOptInPopup'" in expressions[0]
     assert "activePopup._onDismiss()" in expressions[0]
     assert "push-notification-opt-in" in expressions[0]
@@ -236,6 +238,8 @@ def test_health_detects_each_supported_reward_overlay_phase() -> None:
     assert "activePopup?._name === 'AlbumStartedPopup'" in _HEALTH_EXPRESSION
     assert "activePopup?._name === 'TravelSummaryRewardPopup'" in _HEALTH_EXPRESSION
     assert "travel-summary-reward" in _HEALTH_EXPRESSION
+    assert "activePopup?._name === 'LikeClaimOverlay'" in _HEALTH_EXPRESSION
+    assert "likeClaimPopup ? 'like-claim'" in _HEALTH_EXPRESSION
     assert "activePopup?._name === 'PushNotificationOptInPopup'" in _HEALTH_EXPRESSION
     assert "push-notification-opt-in" in _HEALTH_EXPRESSION
     assert "activePopup?._name === 'TrainstationPopup'" in _HEALTH_EXPRESSION

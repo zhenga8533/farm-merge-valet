@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -83,8 +83,13 @@ class CatalogSyncService:
 
     def synchronize(self) -> str:
         self._callbacks.raise_if_cancelled()
-        self._dependencies.catalog_synchronizer_factory(self._config).sync(force=True)
+        synchronizer = replace(
+            self._dependencies.catalog_synchronizer_factory(self._config),
+            progress_callback=self._callbacks.status_changed,
+        )
+        synchronizer.sync(force=True)
         self._callbacks.raise_if_cancelled()
+        self._callbacks.status_changed("Refreshing upgrade-card and building progress…")
         catalog = self._dependencies.catalog_loader(self._config.catalog_dir / "catalog.json")
         target_count, _building_count = self.refresh_live_progress(source="manual synchronization")
         self.check_catalog_freshness()
@@ -115,7 +120,11 @@ class CatalogSyncService:
         self.refresh_live_progress(source="initial synchronization")
         self._callbacks.raise_if_cancelled()
         try:
-            self._dependencies.catalog_synchronizer_factory(self._config).sync(force=True)
+            synchronizer = replace(
+                self._dependencies.catalog_synchronizer_factory(self._config),
+                progress_callback=self._callbacks.status_changed,
+            )
+            synchronizer.sync(force=True)
         except (RuntimeConnectionError, OSError, RuntimeError, ValueError) as exc:
             return f"Catalog ready · Icons were not synchronized: {exc}"
         self._callbacks.raise_if_cancelled()

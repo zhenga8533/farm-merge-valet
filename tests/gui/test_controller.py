@@ -4,6 +4,8 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -24,6 +26,15 @@ from farm_merge_valet.gui.services.live_progress_cache import (
     write_live_progress_cache,
 )
 from farm_merge_valet.observability.logging import FMV_CONTEXT_ATTRIBUTE, FMV_EVENT_ATTRIBUTE
+
+
+@dataclass(frozen=True)
+class _SynchronizerStub:
+    action: Callable[..., object]
+    progress_callback: Callable[[str], None] | None = None
+
+    def sync(self, *, force: bool = False) -> None:
+        self.action(force=force)
 
 
 def test_saved_config_is_forwarded_to_running_bot(tmp_path) -> None:
@@ -183,7 +194,7 @@ def test_game_sync_refreshes_assets_and_upgrade_progress_in_background(
 
     monkeypatch.setattr(
         "farm_merge_valet.composition.create_catalog_synchronizer",
-        lambda _config: SimpleNamespace(sync=refresh),
+        lambda _config: _SynchronizerStub(refresh),
     )
     monkeypatch.setattr(
         "farm_merge_valet.composition.load_item_catalog",
@@ -377,7 +388,7 @@ def test_catalog_setup_launches_game_and_publishes_catalog_before_icons(
     monkeypatch.setattr("farm_merge_valet.composition.GameRuntimeAdapter", RuntimeStub)
     monkeypatch.setattr(
         "farm_merge_valet.composition.read_upgrade_progress",
-        lambda *_args: None,
+        lambda *_args: UpgradeProgress(()),
     )
     monkeypatch.setattr(
         "farm_merge_valet.composition.read_building_repairs",
@@ -393,7 +404,7 @@ def test_catalog_setup_launches_game_and_publishes_catalog_before_icons(
     )
     monkeypatch.setattr(
         "farm_merge_valet.composition.create_catalog_synchronizer",
-        lambda _config: SimpleNamespace(sync=lambda **_kwargs: release_icons.wait(2)),
+        lambda _config: _SynchronizerStub(lambda **_kwargs: release_icons.wait(2)),
     )
     monkeypatch.setattr(
         "farm_merge_valet.composition.load_item_catalog",
@@ -498,7 +509,7 @@ def test_catalog_setup_keeps_catalog_available_when_icon_sync_fails(tmp_path, mo
     monkeypatch.setattr("farm_merge_valet.composition.GameRuntimeAdapter", RuntimeStub)
     monkeypatch.setattr(
         "farm_merge_valet.composition.read_upgrade_progress",
-        lambda *_args: None,
+        lambda *_args: UpgradeProgress(()),
     )
     monkeypatch.setattr(
         "farm_merge_valet.composition.read_building_repairs",
@@ -514,7 +525,7 @@ def test_catalog_setup_keeps_catalog_available_when_icon_sync_fails(tmp_path, mo
 
     monkeypatch.setattr(
         "farm_merge_valet.composition.create_catalog_synchronizer",
-        lambda _config: SimpleNamespace(sync=fail_icon_sync),
+        lambda _config: _SynchronizerStub(fail_icon_sync),
     )
     controller.game_sync_status_changed.connect(statuses.append)
     controller.catalog_setup_failed.connect(failures.append)
