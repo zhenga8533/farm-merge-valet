@@ -230,6 +230,56 @@ def test_runtime_asset_cache_refreshes_when_the_source_version_changes(tmp_path:
     assert source_index[cached_png.name] == current_url
 
 
+def test_runtime_sync_excludes_cached_sheets_from_another_integration(tmp_path: Path) -> None:
+    atlas_cache = tmp_path / "atlases"
+    atlas_cache.mkdir()
+    old_image = np.full((1, 1, 4), 25, dtype=np.uint8)
+    assert cv2.imwrite(str(atlas_cache / "atlases_high_currency.png"), old_image)
+    (atlas_cache / "atlases_high_currency.json").write_text(
+        '{"frames": {"crystal": {"frame": {"x": 0, "y": 0, "w": 1, "h": 1}}}}',
+        encoding="utf-8",
+    )
+    current_image = np.full((1, 1, 4), 200, dtype=np.uint8)
+    ok, encoded = cv2.imencode(".png", current_image)
+    assert ok
+    current_url = "https://current.test/atlases/low/currency.png"
+    synchronizer = CatalogSynchronizer(
+        atlas_cache_dir=atlas_cache,
+        catalog_dir=tmp_path / "catalog",
+        atlas_url_reader=lambda: [current_url],
+        binary_resource_reader=lambda urls: {url: encoded.tobytes() for url in urls},
+        text_resource_reader=lambda urls: {
+            url: '{"frames": {"crystal": {"frame": {"x": 0, "y": 0, "w": 1, "h": 1}}}}'
+            for url in urls
+        },
+        catalog_loader=lambda: ItemCatalog({}),
+    )
+
+    atlases = synchronizer._fetch_runtime_atlases([current_url], force=True)
+
+    assert list(atlases) == ["atlases_low_currency"]
+    assert int(atlases["atlases_low_currency"][1][0, 0, 0]) == 200
+
+
+def test_failed_runtime_refresh_does_not_reuse_stale_sheet(tmp_path: Path) -> None:
+    atlas_cache = tmp_path / "atlases"
+    atlas_cache.mkdir()
+    image = np.zeros((1, 1, 4), dtype=np.uint8)
+    assert cv2.imwrite(str(atlas_cache / "atlases_low_currency.png"), image)
+    (atlas_cache / "atlases_low_currency.json").write_text('{"frames": {}}', encoding="utf-8")
+    url = "https://current.test/atlases/low/currency.png"
+    synchronizer = CatalogSynchronizer(
+        atlas_cache_dir=atlas_cache,
+        catalog_dir=tmp_path / "catalog",
+        atlas_url_reader=lambda: [url],
+        binary_resource_reader=lambda _urls: {},
+        text_resource_reader=lambda _urls: {},
+        catalog_loader=lambda: ItemCatalog({}),
+    )
+
+    assert synchronizer._fetch_runtime_atlases([url], force=True) == {}
+
+
 def test_failed_asset_compile_does_not_publish_the_new_catalog(monkeypatch, tmp_path: Path) -> None:
     catalog_dir = tmp_path / "catalog"
     catalog_dir.mkdir()

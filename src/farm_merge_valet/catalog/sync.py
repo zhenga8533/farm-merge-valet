@@ -97,6 +97,7 @@ class CatalogSynchronizer:
 
     def _fetch_runtime_atlases(self, png_urls: list[str], *, force: bool) -> Atlases:
         source_index = self._load_source_index()
+        current_names: set[str] = set()
         pending = [
             url
             for url in png_urls
@@ -105,6 +106,10 @@ class CatalogSynchronizer:
             or not _cache_path_for(self.atlas_cache_dir, _manifest_url(url), ".json").is_file()
             or source_index.get(_cache_path_for(self.atlas_cache_dir, url, ".png").name) != url
         ]
+        pending_urls = set(pending)
+        for url in png_urls:
+            if url not in pending_urls:
+                current_names.add(_cache_path_for(self.atlas_cache_dir, url, ".png").name)
         self.atlas_cache_dir.mkdir(parents=True, exist_ok=True)
         for offset in range(0, len(pending), 20):
             batch = pending[offset : offset + 20]
@@ -123,9 +128,10 @@ class CatalogSynchronizer:
                     manifest, encoding="utf-8"
                 )
                 source_index[_cache_path_for(self.atlas_cache_dir, png_url, ".png").name] = png_url
+                current_names.add(_cache_path_for(self.atlas_cache_dir, png_url, ".png").name)
             print(f"Cached {min(offset + len(batch), len(pending))}/{len(pending)} atlas sheets.")
         self._write_source_index(source_index)
-        return load_cached_atlases(self.atlas_cache_dir)
+        return load_cached_atlases(self.atlas_cache_dir, atlas_names=current_names)
 
     def _load_source_index(self) -> dict[str, str]:
         path = self.atlas_cache_dir / _SOURCE_INDEX_NAME

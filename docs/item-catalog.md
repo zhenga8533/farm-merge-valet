@@ -51,7 +51,9 @@ Important current distinctions:
 
 `farm-merge-valet assets sync` discovers atlas resources from the loaded game
 through CDP, discovers the corresponding high-quality atlas multipacks,
-refreshes the local atlas cache, and compiles the catalog and frames. High
+refreshes the local atlas cache, and compiles only sheets verified for the
+current game sync, so cached sheets from another integration cannot supply
+duplicate sprite names. High
 quality frames are preferred, with the loaded game quality retained as a
 fallback when a matching high-quality sheet is unavailable. `farm-merge-valet
 assets compile` rebuilds from that local cache.
@@ -126,9 +128,10 @@ snapshots cannot reapply a claimed tier.
 
 The GUI persists the last authoritative upgrade progress and building repair
 requirements beside the generated catalog. This supplies a stable initial view
-before the browser runtime is available. Successful synchronization and ongoing
-bot snapshots replace the cache; unavailable reads leave the previous snapshot
-intact. The cache is display and planning input only—actions still revalidate
+before the browser runtime is available. Manual synchronization and bot startup
+retry runtime discovery for both progress types before reporting them unavailable.
+Successful reads and ongoing bot snapshots replace the cache; unavailable reads
+leave the previous snapshot intact. The cache is display and planning input only—actions still revalidate
 against the live game immediately before submission.
 
 ## GUI policy

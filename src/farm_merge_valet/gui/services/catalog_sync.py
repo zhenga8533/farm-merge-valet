@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 _SETUP_TIMEOUT_SECONDS = 120.0
 _SETUP_POLL_SECONDS = 1.0
+_LIVE_PROGRESS_TIMEOUT_SECONDS = 12.0
 
 
 @dataclass(frozen=True)
@@ -124,9 +125,34 @@ class CatalogSyncService:
 
     def refresh_live_progress(self, *, source: str) -> tuple[int | None, int | None]:
         """Refresh the persistent live-game data displayed by the GUI."""
+        started = time.monotonic()
+        upgrades, upgrade_error = self._read_upgrade_progress()
+        buildings, building_error = self._read_building_repairs()
+        if upgrades is None or (
+            self._dependencies.building_repairs_reader is not None and buildings is None
+        ):
+            runtime = self._dependencies.runtime_factory(self._config)
+            deadline = time.monotonic() + _LIVE_PROGRESS_TIMEOUT_SECONDS
+            while time.monotonic() < deadline:
+                self._callbacks.raise_if_cancelled()
+                try:
+                    runtime.discover()
+                except RuntimeConnectionError:
+                    pass
+                if upgrades is None:
+                    upgrades, upgrade_error = self._read_upgrade_progress()
+                if buildings is None:
+                    buildings, building_error = self._read_building_repairs()
+                if upgrades is not None and (
+                    self._dependencies.building_repairs_reader is None or buildings is not None
+                ):
+                    break
+                self._callbacks.wait(
+                    min(_SETUP_POLL_SECONDS, max(0.0, deadline - time.monotonic()))
+                )
         return (
-            self.refresh_upgrade_progress(source=source),
-            self.refresh_building_repairs(source=source),
+            self._publish_upgrade_progress(upgrades, upgrade_error, source, started),
+            self._publish_building_repairs(buildings, building_error, source, started),
         )
 
     def check_catalog_freshness(self, cached: CatalogFreshness | None = None) -> CatalogFreshness:
@@ -184,35 +210,38 @@ class CatalogSyncService:
             f"and finish any sign-in or loading steps, then try again.{detail}"
         )
 
-    def refresh_upgrade_progress(self, *, source: str) -> int | None:
-        started = time.monotonic()
+    def _read_upgrade_progress(self) -> tuple[UpgradeProgress | None, str | None]:
         try:
             progress = self._dependencies.upgrade_progress_reader(
                 self._config.cdp_port, self._config.window_title
             )
         except RuntimeConnectionError as exc:
-            log_event(
-                logger,
-                logging.WARNING,
-                "upgrade_progress.unavailable",
-                "Upgrade progress unavailable during %s: %s",
-                source,
-                exc,
-                source=source,
-                detail=str(exc),
-                elapsed_seconds=time.monotonic() - started,
-            )
-            self._callbacks.upgrade_progress_changed(None)
-            return None
+            return None, str(exc)
+        return progress, None
+
+    def _read_building_repairs(self) -> tuple[tuple[BuildingRepairState, ...] | None, str | None]:
+        reader = self._dependencies.building_repairs_reader
+        if reader is None:
+            return None, None
+        try:
+            return reader(self._config.cdp_port, self._config.window_title), None
+        except RuntimeConnectionError as exc:
+            return None, str(exc)
+
+    def _publish_upgrade_progress(
+        self, progress: UpgradeProgress | None, error: str | None, source: str, started: float
+    ) -> int | None:
         self._callbacks.upgrade_progress_changed(progress)
         if progress is None:
             log_event(
                 logger,
                 logging.WARNING,
                 "upgrade_progress.unavailable",
-                "Upgrade progress unavailable during %s.",
+                "Upgrade progress unavailable during %s%s.",
                 source,
+                f": {error}" if error else "",
                 source=source,
+                detail=error,
                 elapsed_seconds=time.monotonic() - started,
             )
             return None
@@ -230,32 +259,28 @@ class CatalogSyncService:
         )
         return target_count
 
-    def refresh_building_repairs(self, *, source: str) -> int | None:
-        reader = self._dependencies.building_repairs_reader
-        if reader is None:
+    def _publish_building_repairs(
+        self,
+        states: tuple[BuildingRepairState, ...] | None,
+        error: str | None,
+        source: str,
+        started: float,
+    ) -> int | None:
+        if self._dependencies.building_repairs_reader is None:
             return None
-        started = time.monotonic()
-        try:
-            states = reader(self._config.cdp_port, self._config.window_title)
-            if states is None:
-                self._dependencies.runtime_factory(self._config).discover()
-                states = reader(self._config.cdp_port, self._config.window_title)
-        except RuntimeConnectionError as exc:
+        self._callbacks.building_repairs_changed(states)
+        if states is None:
             log_event(
                 logger,
                 logging.WARNING,
                 "building_repairs.unavailable",
-                "Building repair state unavailable during %s: %s",
+                "Building repair state unavailable during %s%s.",
                 source,
-                exc,
+                f": {error}" if error else "",
                 source=source,
-                detail=str(exc),
+                detail=error,
                 elapsed_seconds=time.monotonic() - started,
             )
-            self._callbacks.building_repairs_changed(None)
-            return None
-        self._callbacks.building_repairs_changed(states)
-        if states is None:
             return None
         log_event(
             logger,

@@ -86,10 +86,12 @@ def fetch_atlas_urls(png_urls: list[str], cache_dir: Path, *, force: bool = Fals
     return atlases
 
 
-def load_cached_atlases(cache_dir: Path) -> Atlases:
+def load_cached_atlases(cache_dir: Path, *, atlas_names: set[str] | None = None) -> Atlases:
     atlases: Atlases = {}
     for json_path in sorted(cache_dir.glob("*.json"), key=_atlas_cache_priority):
         png_path = json_path.with_suffix(".png")
+        if atlas_names is not None and png_path.name not in atlas_names:
+            continue
         if not png_path.exists():
             continue
         with open(json_path, encoding="utf-8") as file:
