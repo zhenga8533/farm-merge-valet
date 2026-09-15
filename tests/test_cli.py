@@ -12,6 +12,7 @@ def test_cli_imports_in_a_fresh_process(tmp_path) -> None:
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=30,
         check=False,
     )
