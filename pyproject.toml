@@ -45,6 +45,19 @@ farm-merge-valet-gui = "farm_merge_valet.gui.application:run_application"
 [tool.hatch.build.targets.wheel]
 packages = ["src/farm_merge_valet"]
 
+[tool.hatch.build.targets.sdist]
+only-include = [
+    ".github",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md",
+    "docs",
+    "pyproject.toml",
+    "src",
+    "tests",
+    "uv.lock",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
