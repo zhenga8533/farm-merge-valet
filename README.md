@@ -13,9 +13,14 @@ is selected and the platform exposes the required runtime capability.
 
 ## Setup
 
-Python 3.11+ and a Chromium-family browser are required. Google Chrome and
-Microsoft Edge are supported. Brave and Chromium are experimental; Firefox is
-not supported.
+A Chromium-family browser is required. Google Chrome and Microsoft Edge are
+supported. Brave and Chromium are experimental; Firefox is not supported.
+
+Most users should download `farm-merge-valet.exe` from the
+[latest release](https://github.com/zhenga8533/farm-merge-valet/releases/latest)
+and run it directly; no Python installation is required.
+
+To run from source instead, Python 3.11+ is required:
 
 ```powershell
 uv sync --locked --all-extras --dev
