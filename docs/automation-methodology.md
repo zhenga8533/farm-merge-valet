@@ -221,7 +221,12 @@ When building-resource preservation is enabled, the repair target is selected
 from placed, inactive, non-event buildings. Configured priority first favors
 workshops, then other structures, then decorative buildings; within a class it
 favors the lowest remaining tier-weighted material cost. Existing repair
-materials are reserved from merges and policy-authorized removals. The optional repair-material priority
+materials are reserved from merges and policy-authorized removals. Once every
+requirement for an enabled building is present, repair runs as an atomic,
+highest-priority main-farm action through the game's own resource-consumption
+handler. The runtime revalidates the scene, building level, exact cost, placed
+object, matching repair popout, and board availability before submission, then
+confirms the active building state from a later snapshot. The optional repair-material priority
 narrows candidates to trees, rocks, or toolboxes that produce a material still
 missing from that target, including every size variant. It also applies when a
 focused obstacle is clearing and another stage can be started. Focus is retained

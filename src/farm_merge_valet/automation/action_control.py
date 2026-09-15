@@ -17,6 +17,7 @@ class OperationKind(StrEnum):
     EVENT = "event"
     CRATE = "crate"
     LAND_EXPANSION = "land-expansion"
+    BUILDING_REPAIR = "building-repair"
 
 
 OperationKey = tuple[Hashable, ...]

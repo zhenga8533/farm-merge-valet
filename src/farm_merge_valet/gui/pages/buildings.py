@@ -57,7 +57,7 @@ class BuildingsPage(AppPage):
     ) -> None:
         super().__init__(
             "Building policies",
-            "Choose which placed buildings may reserve materials for future repairs.",
+            "Choose which placed buildings may be repaired automatically.",
         )
         self._config = config
         self._icons = icons or CatalogIconLoader(config.catalog_dir)
@@ -84,7 +84,7 @@ class BuildingsPage(AppPage):
         self.page_layout.addWidget(self.loading_state, 1, Qt.AlignmentFlag.AlignCenter)
         scaffold = create_policy_tree(
             header_labels=("Building / requirement", "Type", "Availability", "Repair", ""),
-            bulk_labels={4: "Preserve"},
+            bulk_labels={4: "Repair"},
             accessible_name="Building repair policies",
             search_placeholder="Search buildings and requirements…",
             search_accessible_name="Search buildings and requirements",

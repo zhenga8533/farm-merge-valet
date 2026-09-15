@@ -153,6 +153,24 @@ def test_health_parses_visit_transition_and_travel_summary(monkeypatch) -> None:
     assert health.transient_overlay is TransientOverlayKind.TRAVEL_SUMMARY_REWARD
 
 
+def test_health_parses_building_upgrade_overlay(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.evaluate",
+        lambda *_, **__: {
+            "sceneId": 3,
+            "board": True,
+            "itemDrop": True,
+            "heartbeat": 10,
+            "heartbeatAgeMs": 1,
+            "transientOverlay": "building-upgrade",
+        },
+    )
+
+    health = GameRuntimeAdapter(9222, "Farm").read_runtime_health()
+
+    assert health.transient_overlay is TransientOverlayKind.BUILDING_UPGRADE
+
+
 def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) -> None:
     expressions: list[str] = []
 
@@ -190,6 +208,8 @@ def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) ->
     assert "travel-summary-reward" in expressions[0]
     assert "activePopup?._name === 'LikeClaimOverlay'" in expressions[0]
     assert "likeClaimPopup ? 'like-claim'" in expressions[0]
+    assert "activePopup?._name === 'BuildingUpgradePopup'" in expressions[0]
+    assert "buildingUpgradePopup ? 'building-upgrade'" in expressions[0]
     assert "activePopup?._name === 'PushNotificationOptInPopup'" in expressions[0]
     assert "activePopup._onDismiss()" in expressions[0]
     assert "push-notification-opt-in" in expressions[0]
@@ -240,6 +260,8 @@ def test_health_detects_each_supported_reward_overlay_phase() -> None:
     assert "travel-summary-reward" in _HEALTH_EXPRESSION
     assert "activePopup?._name === 'LikeClaimOverlay'" in _HEALTH_EXPRESSION
     assert "likeClaimPopup ? 'like-claim'" in _HEALTH_EXPRESSION
+    assert "activePopup?._name === 'BuildingUpgradePopup'" in _HEALTH_EXPRESSION
+    assert "buildingUpgradePopup ? 'building-upgrade'" in _HEALTH_EXPRESSION
     assert "activePopup?._name === 'PushNotificationOptInPopup'" in _HEALTH_EXPRESSION
     assert "push-notification-opt-in" in _HEALTH_EXPRESSION
     assert "activePopup?._name === 'TrainstationPopup'" in _HEALTH_EXPRESSION

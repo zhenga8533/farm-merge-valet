@@ -49,6 +49,7 @@ class TransientOverlayKind(StrEnum):
     REWARD_POPUP = "reward-popup"
     TRAVEL_SUMMARY_REWARD = "travel-summary-reward"
     LIKE_CLAIM = "like-claim"
+    BUILDING_UPGRADE = "building-upgrade"
     PROMOTIONAL_POPUP = "promotional-popup"
     PUSH_NOTIFICATION_OPT_IN = "push-notification-opt-in"
     SESSION_REPLACED = "session-replaced"
@@ -395,3 +396,5 @@ class GameRuntime(Protocol):
     def submit_land_expansion(
         self, candidate: LandExpansionCandidate, minimum_balance_after: int
     ) -> ActionResult: ...
+
+    def submit_building_repair(self, state: BuildingRepairState) -> ActionResult: ...

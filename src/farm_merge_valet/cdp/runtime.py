@@ -13,6 +13,7 @@ from threading import Event, Lock
 from farm_merge_valet.automation.runtime import (
     ActionResult,
     ActionStatus,
+    BuildingRepairState,
     CrateSpawnResult,
     EventRewardState,
     EventState,
@@ -32,7 +33,7 @@ from farm_merge_valet.cdp.board_store import (
     parse_board_state,
     read_board_state,
 )
-from farm_merge_valet.cdp.buildings import parse_building_repairs
+from farm_merge_valet.cdp.buildings import building_repair_action_expression, parse_building_repairs
 from farm_merge_valet.cdp.evaluation import apply_background_overrides, evaluate
 from farm_merge_valet.cdp.inventory_store import read_energy
 from farm_merge_valet.cdp.land_expansion import land_expansion_action_expression
@@ -1136,6 +1137,11 @@ class GameRuntimeAdapter:
             ),
         )
         return self._action_result(raw)
+
+    def submit_building_repair(self, state: BuildingRepairState) -> ActionResult:
+        return self._action_result(
+            self._evaluate_action(building_repair_action_expression(state, self._scene_id))
+        )
 
     def open_farm_visit(self) -> ActionResult:
         return self._action_result(

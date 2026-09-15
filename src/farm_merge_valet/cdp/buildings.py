@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from farm_merge_valet.automation.runtime import BuildingRepairState, BuildingRequirement
 from farm_merge_valet.cdp.board_store import arm_board_store
 from farm_merge_valet.cdp.evaluation import evaluate
@@ -36,6 +38,90 @@ _READ_BUILDING_REPAIRS_EXPRESSION = r"""
   }
   return result;
 })()
+"""
+
+
+def building_repair_action_expression(state: BuildingRepairState, scene_id: int | None) -> str:
+    expected = {
+        "buildingID": state.building_id,
+        "level": state.level,
+        "requirements": [
+            {"blueprintID": requirement.blueprint_id, "amount": requirement.amount}
+            for requirement in state.requirements
+        ],
+    }
+    return f"""
+(() => {{
+  const expected = {json.dumps(expected)};
+  const services = window.__fmvGameplayServices;
+  const board = window.__fmvBoardCells;
+  if (window.__fmvRuntimeSceneIdentity !== {json.dumps(scene_id)} ||
+      window.__fmvFarmSceneKind !== 'own')
+    return {{status: 'stale-source', detail: 'runtime-scene-changed'}};
+  if (!(board instanceof Map) || services?.mapGrid?._cells !== board)
+    return {{status: 'unavailable', detail: 'board-map-not-found'}};
+  const buildings = services?.ordersService?._buildings;
+  const gridFilter = services?.gridFilter;
+  if (!buildings || typeof gridFilter?.hasEnoughItems !== 'function')
+    return {{status: 'unavailable', detail: 'building-repair-services-not-found'}};
+  if (buildings.isBuildingActive?.(expected.buildingID) === true)
+    return {{status: 'stale-source', detail: 'building-already-active'}};
+  if (buildings.getBuildingLevel?.(expected.buildingID) !== expected.level)
+    return {{status: 'stale-source', detail: 'building-level-changed'}};
+  const cost = buildings.getUpgradeCost?.(expected.buildingID);
+  const normalized = (entries) => (Array.isArray(entries) ? entries : [])
+    .filter((entry) => typeof entry?.blueprintID === 'string' &&
+      Number.isInteger(entry.amount) && entry.amount > 0)
+    .map((entry) => [entry.blueprintID, entry.amount])
+    .sort((left, right) => left[0].localeCompare(right[0]));
+  if (JSON.stringify(normalized(cost)) !== JSON.stringify(normalized(expected.requirements)))
+    return {{status: 'stale-source', detail: 'building-cost-changed'}};
+  if (!cost?.length || gridFilter.hasEnoughItems(cost) !== true)
+    return {{status: 'rejected', detail: 'building-resources-unavailable'}};
+  let content = null;
+  for (const cell of board.values()) {{
+    const candidate = cell?._content;
+    const blueprintID = candidate?.getBlueprintID?.() ?? candidate?._blueprintID;
+    if (blueprintID === expected.buildingID &&
+        candidate?.getBehavior?.('building')?.ID === expected.buildingID &&
+        candidate?.getBehavior?.('upgrade')) {{
+      content = candidate;
+      break;
+    }}
+  }}
+  if (!content) return {{status: 'stale-source', detail: 'building-not-found'}};
+  const subscribers = (signal) => Array.isArray(signal?._subscribers)
+    ? signal._subscribers : [];
+  let handler = null;
+  let popout = null;
+  for (const candidate of services?.popout?._popouts?.values?.() || []) {{
+    const popoutRequirements = (candidate?._requirements || []).map((entry) => ({{
+      blueprintID: entry?.objectName,
+      amount: entry?.totalRequired,
+    }}));
+    if (JSON.stringify(normalized(popoutRequirements)) !==
+        JSON.stringify(normalized(expected.requirements))) continue;
+    const subscriber = subscribers(candidate?.onButtonAction).find((entry) => {{
+      const context = entry?.context;
+      return context?._buildingsService === buildings &&
+        typeof context._onRepairPopoutPressed === 'function' &&
+        typeof context._checkItemsOnTheField === 'function' &&
+        typeof context._removeItemsFromGrid === 'function';
+    }});
+    if (subscriber) {{
+      handler = subscriber.context;
+      popout = candidate;
+      break;
+    }}
+  }}
+  if (!handler || !popout)
+    return {{status: 'unavailable', detail: 'building-repair-handler-not-found'}};
+  handler._onRepairPopoutPressed(content, popout);
+  const repaired = buildings.isBuildingActive?.(expected.buildingID) === true;
+  return repaired
+    ? {{status: 'submitted'}}
+    : {{status: 'rejected', detail: 'building-repair-not-applied'}};
+}})()
 """
 
 

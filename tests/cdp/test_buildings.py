@@ -1,5 +1,7 @@
+from farm_merge_valet.automation.runtime import BuildingRepairState, BuildingRequirement
 from farm_merge_valet.cdp.buildings import (
     _READ_BUILDING_REPAIRS_EXPRESSION,
+    building_repair_action_expression,
     parse_building_repairs,
     read_building_repairs,
 )
@@ -58,3 +60,25 @@ def test_building_reader_arms_board_when_cached_reference_is_missing(monkeypatch
 
     assert read_building_repairs(9222, "Farm") == ()
     assert armed == [(9222, "Farm")]
+
+
+def test_building_repair_action_is_bound_to_authoritative_state() -> None:
+    expression = building_repair_action_expression(
+        BuildingRepairState(
+            "bbq",
+            1,
+            True,
+            True,
+            False,
+            True,
+            (BuildingRequirement("wood_7", 2, 2), BuildingRequirement("tool_6", 2, 2)),
+        ),
+        17,
+    )
+
+    assert "window.__fmvRuntimeSceneIdentity !== 17" in expression
+    assert "buildings.getBuildingLevel" in expression
+    assert "building-cost-changed" in expression
+    assert "gridFilter.hasEnoughItems(cost)" in expression
+    assert "candidate?._requirements" in expression
+    assert "handler._onRepairPopoutPressed(content, popout)" in expression

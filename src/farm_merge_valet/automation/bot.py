@@ -43,6 +43,7 @@ from farm_merge_valet.automation.scheduler import AdaptiveScheduler
 from farm_merge_valet.automation.state import AutomationState
 from farm_merge_valet.automation.timing import DEFAULT_ACTION_TIMING, next_recovery_delay
 from farm_merge_valet.automation.workflows import (
+    BuildingRepairWorkflow,
     CrateWorkflow,
     FarmVisitWorkflow,
     InteractionAction,
@@ -155,6 +156,7 @@ class Bot:
         self._storage_bubble_workflow = StorageBubbleWorkflow()
         self._farm_visit_workflow = FarmVisitWorkflow()
         self._land_expansion_workflow = LandExpansionWorkflow()
+        self._building_repair_workflow = BuildingRepairWorkflow()
         self._action_control = ActionCoordinator()
         self._board_space_request: BoardSpaceRequest | None = None
         self._last_health: RuntimeHealth | None = None
@@ -1543,6 +1545,9 @@ class Bot:
         land_expansions = None if on_event_map else self._land_expansions
         if not land_expansion_workflow.verify_pending(self, health, land_expansions):
             return
+        building_repairs = None if on_event_map else self._building_repairs
+        if not self._building_repair_workflow.verify_pending(self, health, building_repairs):
+            return
         shop_policy_enabled = self._shop_policy().may_enable_orders and not on_event_map
         shop_orders: tuple[ShopOrder, ...] | None = self._shop_orders
         if not self._verify_pending_shop_action(health, shop_orders):
@@ -1552,6 +1557,8 @@ class Bot:
                 "game heartbeat is not advancing",
                 heartbeat_age_ms=health.heartbeat_age_ms,
             )
+            return
+        if self._building_repair_workflow.step(self, health, self._repair_target()):
             return
         if (
             self.config.auto_claim_event_rewards
