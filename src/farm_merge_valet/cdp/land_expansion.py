@@ -16,7 +16,7 @@ _READ_LAND_EXPANSION_EXPRESSION = r"""
         typeof service.canUnlockArea !== 'function' ||
         typeof service.unlockArea !== 'function') return null;
     const area = service.getNextAreaToUnlock();
-    if (!area || typeof area.id !== 'string' || area.state !== 1 ||
+    if (!area || typeof area.id !== 'string' || !Number.isInteger(area.state) ||
         !Array.isArray(area.cells) || !Array.isArray(area.requirements?.buy)) return null;
     const requirements = area.requirements.buy.flatMap((requirement) =>
       typeof requirement?.key === 'string' && Number.isInteger(requirement?.amount) &&
@@ -29,6 +29,7 @@ _READ_LAND_EXPANSION_EXPRESSION = r"""
     if (requirements.length !== area.requirements.buy.length) return null;
     return {
       areaID: area.id,
+      sourceState: area.state,
       premium,
       cellCount: area.cells.length,
       requirements,
@@ -49,6 +50,7 @@ def land_expansion_action_expression(
     requirements: tuple[tuple[str, int], ...],
     minimum_balance_after: int,
     scene_id: int | None,
+    source_state: int | None,
 ) -> str:
     expected = json.dumps(
         {
@@ -57,6 +59,7 @@ def land_expansion_action_expression(
             "requirements": [{"key": key, "amount": amount} for key, amount in requirements],
             "minimumBalanceAfter": minimum_balance_after,
             "sceneID": scene_id,
+            "sourceState": source_state,
         }
     )
     return f"""
@@ -73,7 +76,7 @@ def land_expansion_action_expression(
       typeof service.canUnlockArea !== 'function' || typeof service.unlockArea !== 'function')
     return {{status: 'unavailable', detail: 'land-expansion-handler-not-current'}};
   const area = service.getNextAreaToUnlock();
-  if (!area || area.id !== expected.areaID || area.state !== 1)
+  if (!area || area.id !== expected.areaID || area.state !== expected.sourceState)
     return {{status: 'stale-source', detail: 'land-expansion-changed'}};
   const actual = area.requirements?.buy;
   if (!Array.isArray(actual) || actual.length !== expected.requirements.length ||
@@ -90,7 +93,7 @@ def land_expansion_action_expression(
     return {{status: 'rejected', detail: 'land-expansion-reserve-not-met'}};
   try {{
     service.unlockArea(area);
-    return area.state === 2
+    return area.state !== expected.sourceState
       ? {{status: 'submitted'}}
       : {{status: 'rejected', detail: 'land-expansion-did-not-unlock'}};
   }} catch (error) {{

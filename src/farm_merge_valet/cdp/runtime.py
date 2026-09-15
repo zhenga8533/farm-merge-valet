@@ -771,6 +771,7 @@ class GameRuntimeAdapter:
             premium = entry.get("premium")
             cell_count = entry.get("cellCount")
             affordable = entry.get("affordable")
+            source_state = entry.get("sourceState")
             raw_requirements = entry.get("requirements")
             if (
                 not isinstance(area_id, str)
@@ -779,6 +780,8 @@ class GameRuntimeAdapter:
                 or isinstance(cell_count, bool)
                 or cell_count <= 0
                 or not isinstance(affordable, bool)
+                or not isinstance(source_state, int)
+                or isinstance(source_state, bool)
                 or not isinstance(raw_requirements, list)
             ):
                 continue
@@ -812,6 +815,7 @@ class GameRuntimeAdapter:
                         cell_count,
                         tuple(requirements),
                         affordable,
+                        source_state,
                     )
                 )
         return tuple(candidates)
@@ -1134,6 +1138,7 @@ class GameRuntimeAdapter:
                 ),
                 minimum_balance_after,
                 self._scene_id,
+                candidate.source_state,
             ),
         )
         return self._action_result(raw)

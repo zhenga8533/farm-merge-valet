@@ -13,6 +13,7 @@ def test_live_land_expansion_state_is_parsed_strictly() -> None:
             {
                 "areaID": "A19",
                 "premium": False,
+                "sourceState": 3,
                 "cellCount": 11,
                 "requirements": [
                     {"key": "level", "amount": 18},
@@ -27,11 +28,12 @@ def test_live_land_expansion_state_is_parsed_strictly() -> None:
     assert candidates is not None and len(candidates) == 1
     assert candidates[0].area_id == "A19"
     assert candidates[0].requirements[1].amount == 3545
+    assert candidates[0].source_state == 3
 
 
 def test_land_expansion_expressions_use_native_revalidated_handler() -> None:
     action = land_expansion_action_expression(
-        "A19", False, (("level", 18), ("coins", 3545)), 1000, 7
+        "A19", False, (("level", 18), ("coins", 3545)), 1000, 7, 3
     )
 
     assert "service.getNextAreaToUnlock()" in _READ_LAND_EXPANSION_EXPRESSION
@@ -41,6 +43,7 @@ def test_land_expansion_expressions_use_native_revalidated_handler() -> None:
     assert "land-expansion-reserve-not-met" in action
     assert '"minimumBalanceAfter": 1000' in action
     assert '"sceneID": 7' in action
+    assert '"sourceState": 3' in action
 
 
 def test_runtime_submits_land_expansion_with_scene_and_exact_requirements(monkeypatch) -> None:
@@ -59,6 +62,7 @@ def test_runtime_submits_land_expansion_with_scene_and_exact_requirements(monkey
         11,
         (ExpansionRequirement("level", 18), ExpansionRequirement("coins", 3545)),
         True,
+        3,
     )
 
     result = adapter.submit_land_expansion(candidate, 1000)
@@ -68,3 +72,4 @@ def test_runtime_submits_land_expansion_with_scene_and_exact_requirements(monkey
     assert '"amount": 3545' in expressions[0]
     assert '"minimumBalanceAfter": 1000' in expressions[0]
     assert '"sceneID": 7' in expressions[0]
+    assert '"sourceState": 3' in expressions[0]

@@ -25,6 +25,7 @@ class LandExpansionCandidate:
     cell_count: int
     requirements: tuple[ExpansionRequirement, ...]
     affordable: bool
+    source_state: int | None = None
 
     def cost(self, currency: ExpansionCurrency) -> int | None:
         return next(
