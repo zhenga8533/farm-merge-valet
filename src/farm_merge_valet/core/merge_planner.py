@@ -178,10 +178,15 @@ def _trigger_actions(
     *,
     prefer_smallest: bool,
     board_has_open_space: bool,
+    exact_target_size: bool,
 ) -> list[MergeAction]:
     candidates: list[tuple[tuple, MergeAction]] = []
     for cluster in clusters:
-        can_trigger_internally = len(cluster) == 5 if target_size == 5 else len(cluster) >= 3
+        can_trigger_internally = (
+            len(cluster) == target_size
+            if exact_target_size or target_size == 5
+            else len(cluster) >= target_size
+        )
         if not can_trigger_internally:
             continue
         for start, end in _merge_trigger_pairs(cluster):
@@ -268,7 +273,7 @@ def _plan_oversize_repairs(
     board: BoardGrid,
     item: ItemRef,
     positions: set[GridCoord],
-    target_size: Literal[5],
+    target_size: Literal[3, 5],
 ) -> list[MergeAction]:
     current_sizes = _cluster_sizes(positions)
     current_oversize = (
@@ -392,6 +397,7 @@ def plan_merge_actions(
     *,
     target_size: Literal[3, 5],
     prefer_smallest_trigger: bool = False,
+    exact_target_size: bool = False,
 ) -> list[MergeAction]:
     """Rank every productive next action for one item and merge policy."""
     if target_size not in (3, 5):
@@ -409,11 +415,14 @@ def plan_merge_actions(
         target_size,
         prefer_smallest=prefer_smallest_trigger,
         board_has_open_space=bool(board.find_empty()),
+        exact_target_size=exact_target_size,
     )
     if triggers:
         return triggers
-    if target_size == 5 and any(len(cluster) > 5 for cluster in clusters):
-        return _plan_oversize_repairs(board, item, positions, 5)
+    if (exact_target_size or target_size == 5) and any(
+        len(cluster) > target_size for cluster in clusters
+    ):
+        return _plan_oversize_repairs(board, item, positions, target_size)
     if len(positions) < target_size:
         return []
     return _plan_gathers(board, item, positions, target_size)

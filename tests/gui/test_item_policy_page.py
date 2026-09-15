@@ -154,12 +154,16 @@ def test_removal_minimum_uses_compact_remove_cell_button_and_persists(
     page.show()
     app.processEvents()
     removal_controls.relayout()
-    header_left = page.bulk_header.viewport().mapToGlobal(
-        QPoint(page.bulk_header.sectionViewportPosition(7), 0)
-    ).x()
-    header_center = header_left + (
-        page.bulk_header.sectionSize(7) - remove.width()
-    ) // 2 + remove.rect().center().x()
+    header_left = (
+        page.bulk_header.viewport()
+        .mapToGlobal(QPoint(page.bulk_header.sectionViewportPosition(7), 0))
+        .x()
+    )
+    header_center = (
+        header_left
+        + (page.bulk_header.sectionSize(7) - remove.width()) // 2
+        + remove.rect().center().x()
+    )
     row_center = remove.mapToGlobal(remove.rect().center()).x()
     assert row_center == header_center
     remove.click()

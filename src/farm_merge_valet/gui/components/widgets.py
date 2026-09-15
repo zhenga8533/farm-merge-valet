@@ -72,9 +72,7 @@ class EditButton(QToolButton):
         super().paintEvent(event)
         palette = self.palette()
         color_group = (
-            QPalette.ColorGroup.Active
-            if self.isEnabled()
-            else QPalette.ColorGroup.Disabled
+            QPalette.ColorGroup.Active if self.isEnabled() else QPalette.ColorGroup.Disabled
         )
         color = palette.color(color_group, QPalette.ColorRole.ButtonText)
         painter = QPainter(self)

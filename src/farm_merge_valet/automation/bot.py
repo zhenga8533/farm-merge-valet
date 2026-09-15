@@ -76,7 +76,6 @@ from farm_merge_valet.core.marketplace import MarketplaceLiveOffer, MarketplaceO
 from farm_merge_valet.core.merge_planner import (
     MergeAction,
     MergeActionKind,
-    MoveEffect,
     plan_merge_actions,
 )
 from farm_merge_valet.core.obstacles import (
@@ -640,13 +639,11 @@ class Bot:
                     item,
                     target_size=target_size,
                     prefer_smallest_trigger=prefer_smallest_trigger,
+                    exact_target_size=(
+                        target_size == 3
+                        and self.config.item_policy(item.tier_policy_key).force_lucky_merge
+                    ),
                 )
-            )
-            if not (
-                target_size == 3
-                and self.config.item_policy(item.tier_policy_key).force_lucky_merge
-                and action.effect is MoveEffect.MERGE
-                and len(action.cluster) != 3
             )
         ]
         return [

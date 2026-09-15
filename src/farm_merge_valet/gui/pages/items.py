@@ -133,9 +133,9 @@ class _RemovalControlCell(QWidget):
     def _align_with_header(self) -> None:
         section_left = self._header.sectionViewportPosition(self._column)
         header_left = self._header.viewport().mapToGlobal(QPoint(section_left, 0)).x()
-        target_left = header_left + (
-            self._header.sectionSize(self._column) - self._remove.width()
-        ) // 2
+        target_left = (
+            header_left + (self._header.sectionSize(self._column) - self._remove.width()) // 2
+        )
         cell_left = self.mapToGlobal(QPoint()).x()
         top = (self.height() - self._remove.height()) // 2
         remove_position = QPoint(target_left - cell_left, top)
@@ -763,7 +763,7 @@ class ItemsPage(AppPage):
                 lambda checked, rows=definitions: self._set_family(
                     rows[0].family_key, list(rows), "always_remove", checked
                 )
-        )
+            )
         content = _RemovalControlCell(control, self.bulk_header, column)
         minimum = EditButton(f"Edit minimum copies to keep for {label}", content)
         content.set_edit_button(minimum)

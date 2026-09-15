@@ -6,9 +6,10 @@ game state and submits actions without moving the mouse, typing into the game,
 or taking control of the foreground application.
 
 Automation includes item collection, producer harvesting, shop orders, supply
-crates, obstacle clearing, land expansion, marketplace offers, and merge-3 or
-merge-5 planning. Optional workflows, such as farm visits and event islands, are
-enabled only when the selected platform exposes the required runtime capability.
+crates, obstacle clearing, building repairs, land expansion, marketplace offers,
+event rewards, and merge-3 or merge-5 planning. Optional workflows, such as farm
+visits, event islands, and force-lucky merges, are enabled only when their policy
+is selected and the platform exposes the required runtime capability.
 
 ## Setup
 

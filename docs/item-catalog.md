@@ -183,7 +183,9 @@ It overrides merge-5 preference and retries exact three-item merges while the ma
 offline until at least two new next-tier items are observed. These actions run
 after ordinary merge actions, but remain eligible for urgent board-space recovery
 when no ordinary action can make room. Retries also apply
-to emergency merge-3. Normal results are discarded by reloading the last saved
+to emergency merge-3. A connected group larger than three is first split with a
+safe move or swap; ordinary merge-3 retains the game's three-or-more behavior.
+Normal results are discarded by reloading the last saved
 board and reopening the game through the portal launcher when needed; pause or
 stop discards the current offline attempt. Larger connected
 clusters are not treated as lucky merge candidates. Isolation blocks new game

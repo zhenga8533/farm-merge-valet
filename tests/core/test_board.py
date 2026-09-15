@@ -249,13 +249,30 @@ def test_merge_three_mode_triggers_any_connected_group_of_three_or_more() -> Non
     cluster = {(x, 0) for x in range(6)}
     for coord in cluster:
         grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
-
     action = plan_merge_action(grid, WHEAT_1, target_size=3)
 
     assert action is not None
     assert action.kind is MergeActionKind.TRIGGER
     assert action.effect is MoveEffect.MERGE
     assert action.cluster == cluster
+
+
+def test_merge_three_splits_four_into_an_exact_group_and_single() -> None:
+    grid = BoardGrid()
+    cluster = {(x, 0) for x in range(4)}
+    for coord in cluster:
+        grid.set_cell(coord, Cell(kind=CellKind.ITEM, item=WHEAT_1))
+    grid.set_cell((10, 10), Cell(kind=CellKind.EMPTY))
+
+    actions = plan_merge_actions(grid, WHEAT_1, target_size=3, exact_target_size=True)
+
+    assert actions
+    action = actions[0]
+    assert action.kind is MergeActionKind.DEGROUP
+    assert action.effect is MoveEffect.MOVE
+    assert sorted(
+        len(group) for group in _clusters_for(cluster - {action.start} | {action.end})
+    ) == [1, 3]
 
 
 def test_smallest_trigger_preference_chooses_the_smallest_merge_group() -> None:

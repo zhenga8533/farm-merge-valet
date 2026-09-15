@@ -14,7 +14,12 @@ from farm_merge_valet.automation.workflows.building_repairs import BuildingRepai
 
 def repair_state(*, active: bool = False, available: int = 2) -> BuildingRepairState:
     return BuildingRepairState(
-        "bbq", 1, True, True, active, not active,
+        "bbq",
+        1,
+        True,
+        True,
+        active,
+        not active,
         () if active else (BuildingRequirement("wood_7", 2, available),),
     )
 

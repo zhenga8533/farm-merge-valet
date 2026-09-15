@@ -58,7 +58,10 @@ class BuildingRepairWorkflow:
             self.pending = None
             bot._actions().complete(OperationKind.BUILDING_REPAIR, key)
             log_event(
-                logger, logging.INFO, "building_repair.confirmed", "Repaired %s.",
+                logger,
+                logging.INFO,
+                "building_repair.confirmed",
+                "Repaired %s.",
                 pending.state.building_id,
                 building_id=pending.state.building_id,
                 building_level=pending.state.level,
@@ -69,7 +72,9 @@ class BuildingRepairWorkflow:
             return False
         self.pending = None
         bot._actions().fail(
-            OperationKind.BUILDING_REPAIR, key, bot._now(),
+            OperationKind.BUILDING_REPAIR,
+            key,
+            bot._now(),
             base_delay=_ACTION_MAX_PENDING_SECONDS,
         )
         bot._record_action_no_progress("building repair", building_id=pending.state.building_id)
@@ -93,7 +98,10 @@ class BuildingRepairWorkflow:
         if result.status is ActionStatus.SUBMITTED:
             self.pending = PendingBuildingRepair(state, bot._now())
             log_event(
-                logger, logging.INFO, "building_repair.submitted", "Submitted repair for %s.",
+                logger,
+                logging.INFO,
+                "building_repair.submitted",
+                "Submitted repair for %s.",
                 state.building_id,
                 building_id=state.building_id,
                 building_level=state.level,
@@ -104,13 +112,19 @@ class BuildingRepairWorkflow:
             bot._report_wait(result.detail or "building repair unavailable")
         else:
             bot._actions().fail(
-                OperationKind.BUILDING_REPAIR, key, bot._now(),
+                OperationKind.BUILDING_REPAIR,
+                key,
+                bot._now(),
                 base_delay=_ACTION_MAX_PENDING_SECONDS,
             )
             log_event(
-                logger, logging.WARNING, "building_repair.rejected",
-                "Could not repair %s: %s.", state.building_id,
+                logger,
+                logging.WARNING,
+                "building_repair.rejected",
+                "Could not repair %s: %s.",
+                state.building_id,
                 result.detail or result.status.value,
-                building_id=state.building_id, detail=result.detail,
+                building_id=state.building_id,
+                detail=result.detail,
             )
         return True

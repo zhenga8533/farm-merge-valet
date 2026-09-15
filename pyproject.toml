@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Internal-API automation tool for Farm Merge Valley"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 authors = [{ name = "Allen Zheng" }]
 
 dependencies = [

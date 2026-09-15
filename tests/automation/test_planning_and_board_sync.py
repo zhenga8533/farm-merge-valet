@@ -817,6 +817,27 @@ def test_force_lucky_merge_overrides_merge_five_preference(monkeypatch) -> None:
     assert bot.config.item_policy(wheat.tier_policy_key).prefer_merge_five
 
 
+def test_force_lucky_merge_degroups_four_before_exact_trigger(monkeypatch) -> None:
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    bot._max_item_tiers[wheat.identity] = 2
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {wheat.tier_policy_key: ItemPolicyOverride(force_lucky_merge=True)},
+    )
+    for x in range(4):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+    bot.board.set_cell((10, 10), Cell(CellKind.EMPTY))
+
+    actions = bot._merge_actions_for_policy()
+
+    assert actions
+    assert actions[0].kind is MergeActionKind.DEGROUP
+    assert actions[0].target_size == 3
+    assert actions[0].effect is MoveEffect.MOVE
+
+
 def test_force_lucky_merge_follows_ordinary_merges_even_for_higher_priority_item(
     monkeypatch,
 ) -> None:
