@@ -33,7 +33,11 @@ jobs:
           uv run --locked farm-merge-valet --help
           if ((uv run --locked python -c "import farm_merge_valet; print(farm_merge_valet.__version__)") -ne $packageVersion) { throw "Displayed version mismatch" }
       - name: Build desktop executable
-        run: uv run --locked pyinstaller --clean --noconfirm --onefile --windowed --name farm-merge-valet --workpath .tmp/pyinstaller/work --specpath .tmp/pyinstaller/spec --distpath .tmp/dist src/farm_merge_valet/__main__.py
+        shell: pwsh
+        run: |
+          $executableIcon = (Resolve-Path assets/branding/farm-merge-valet.ico).Path
+          $runtimeIcon = (Resolve-Path src/farm_merge_valet/gui/assets/app-icon.png).Path
+          uv run --locked pyinstaller --clean --noconfirm --onefile --windowed --name farm-merge-valet --icon $executableIcon --add-data "${runtimeIcon}:farm_merge_valet/gui/assets" --workpath .tmp/pyinstaller/work --specpath .tmp/pyinstaller/spec --distpath .tmp/dist src/farm_merge_valet/__main__.py
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.3
         with:
           name: farm-merge-valet-release

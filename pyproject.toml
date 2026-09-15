@@ -48,6 +48,7 @@ packages = ["src/farm_merge_valet"]
 [tool.hatch.build.targets.sdist]
 only-include = [
     ".github",
+    "assets",
     "CHANGELOG.md",
     "LICENSE",
     "README.md",
