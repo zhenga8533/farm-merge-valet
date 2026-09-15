@@ -264,7 +264,8 @@ QSpinBox[invalid="true"], QDoubleSpinBox[invalid="true"] {{ border: 2px solid #c
 QPushButton[keyboardFocus="true"], QLineEdit[keyboardFocus="true"],
 QComboBox[keyboardFocus="true"], QSpinBox[keyboardFocus="true"],
 QDoubleSpinBox[keyboardFocus="true"], QAbstractItemView[keyboardFocus="true"],
-QToolButton#disclosureButton[keyboardFocus="true"] {{
+QToolButton#disclosureButton[keyboardFocus="true"],
+QToolButton#editButton[keyboardFocus="true"] {{
     border: 2px solid {colors.selected};
 }}
 QToolButton#disclosureButton {{
@@ -272,6 +273,13 @@ QToolButton#disclosureButton {{
     border-radius: 7px; padding: 10px 12px; text-align: left; font-weight: 600;
 }}
 QToolButton#disclosureButton:hover {{ background: {colors.surface_subtle}; }}
+QToolButton#editButton {{
+    background: transparent; color: {colors.text};
+    border: 1px solid transparent; border-radius: 4px; padding: 0;
+}}
+QToolButton#editButton:hover {{
+    background: {colors.surface_subtle}; border-color: {colors.border};
+}}
 QFrame#advancedSection {{
     background: {colors.surface}; border: 1px solid {colors.border}; border-radius: 8px;
 }}

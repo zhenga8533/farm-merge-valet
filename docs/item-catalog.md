@@ -167,10 +167,14 @@ items ignore `merge` and `prefer_merge_five`, while items without a supported
 primary interaction ignore `interact`. The GUI uses these facts to disable controls that are not relevant to
 an item.
 The `always_remove` field defaults to false and independently authorizes shovel
-actions for catalog items with the game's `shovelable` capability. The runtime
+actions for catalog items with the game's `shovelable` capability. A per-item/tier
+`keep_minimum` (default 0) limits removal to excess copies. When Remove is enabled,
+the adjacent pencil button edits the minimum; its tooltip shows the current value.
+Building-repair requirements can impose a higher effective minimum. The runtime
 prefers an eligible interaction on the same tile and removes it only when no
 interaction is currently eligible; an obstacle already clearing is not removed.
-Removal validates the scene, coordinate, blueprint, object identity, and capability
+Removal validates the scene, coordinate, blueprint, object identity, capability,
+and remaining count
 before calling the same removal callback used by the confirmation dialog, then
 confirms the authoritative board change.
 

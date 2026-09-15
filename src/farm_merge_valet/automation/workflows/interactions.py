@@ -368,8 +368,16 @@ class InteractionWorkflow:
             initial_output_object_ids,
         )
         if action.kind is InteractionTargetKind.REMOVE:
+            policy_key = bot._live_policy_key(initial_state)
+            if policy_key is None:
+                self.pending = None
+                bot._actions().release(OperationKind.INTERACTION, action_key)
+                return False
             result = bot.runtime.submit_item_removal(
-                action.coord, action.blueprint_id, action.object_id
+                action.coord,
+                action.blueprint_id,
+                action.object_id,
+                bot._removal_minimum(action.blueprint_id, policy_key),
             )
         else:
             result = bot.runtime.submit_board_interaction(

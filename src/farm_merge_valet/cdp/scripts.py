@@ -1793,12 +1793,14 @@ def _removal_expression(
     expected_blueprint_id: str,
     expected_object_id: int | None,
     scene_id: int | None,
+    minimum_remaining: int = 0,
 ) -> str:
     return f"""
 (() => {{
   const coord = {_coord(coord)};
   const expectedBlueprintID = {json.dumps(expected_blueprint_id)};
   const expectedObjectID = {json.dumps(expected_object_id)};
+  const minimumRemaining = {json.dumps(minimum_remaining)};
   const board = window.__fmvBoardCells;
   const services = window.__fmvGameplayServices;
   const handler = window.__fmvShovelHandler;
@@ -1823,6 +1825,16 @@ def _removal_expression(
     return {{status: 'stale-source'}};
   if (!content.hasBehavior?.('shovelable'))
     return {{status: 'invalid-target'}};
+  let matchingCount = 0;
+  for (const candidate of board.values()) {{
+    const candidateContent = candidate?._content;
+    const candidateBlueprintID = candidateContent?.getBlueprintID?.() ??
+      candidateContent?._blueprintID;
+    if (candidateBlueprintID === expectedBlueprintID)
+      matchingCount += 1;
+  }}
+  if (matchingCount <= minimumRemaining)
+    return {{status: 'stale-source', detail: 'removal-minimum-reached'}};
   if (itemHandler?.busy || itemHandler?.isBusy?.() || itemHandler?.dragging ||
       itemHandler?._dragging || itemHandler?._currentObject || itemHandler?._originCell)
     return {{status: 'busy'}};

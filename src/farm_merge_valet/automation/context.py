@@ -8,7 +8,12 @@ from typing import Any, Protocol
 from farm_merge_valet.automation.action_control import ActionCoordinator
 from farm_merge_valet.automation.board_space import BoardSpaceAssessment
 from farm_merge_valet.automation.phases import Phase
-from farm_merge_valet.automation.runtime import GameRuntime, RuntimeCapability, RuntimeHealth
+from farm_merge_valet.automation.runtime import (
+    GameRuntime,
+    LiveCellState,
+    RuntimeCapability,
+    RuntimeHealth,
+)
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.core.board import BoardGrid
 from farm_merge_valet.core.items import ItemRef
@@ -74,3 +79,5 @@ class WorkflowContext(Protocol):
     ) -> bool: ...
     def _schedule_next_item_action(self, now: float) -> None: ...
     def _record_action_no_progress(self, action: str, **context: object) -> None: ...
+    def _live_policy_key(self, state: LiveCellState) -> str | None: ...
+    def _removal_minimum(self, blueprint_id: str, policy_key: str) -> int: ...

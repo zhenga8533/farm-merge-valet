@@ -5,10 +5,11 @@ from dataclasses import replace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QInputDialog,
     QLabel,
     QPushButton,
 )
@@ -18,10 +19,12 @@ from farm_merge_valet.catalog.store import write_item_catalog
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.core.upgrade_progress import UpgradeProgress, UpgradeTargetProgress
 from farm_merge_valet.gui.components.policy_view import POLICY_SORT_ROLE
+from farm_merge_valet.gui.components.widgets import EditButton
 from farm_merge_valet.gui.controller import (
     ApplicationController,
 )
 from farm_merge_valet.gui.main_window import MainWindow
+from farm_merge_valet.gui.pages.items import ItemsPage
 
 
 def _catalog() -> ItemCatalog:
@@ -120,6 +123,64 @@ def test_item_policy_table_only_enables_applicable_controls(tmp_path) -> None:
             assert rows["Wheat"].sizeHint(column).width() >= widget.sizeHint().width()
 
     window.quit_application()
+    app.processEvents()
+
+
+def test_removal_minimum_uses_compact_remove_cell_button_and_persists(
+    tmp_path, monkeypatch
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    milk = replace(_catalog().items["milk"], capabilities=frozenset({"shovelable"}))
+    write_item_catalog(catalog_dir / "catalog.json", ItemCatalog({"milk": milk}))
+    page = ItemsPage(AppConfig(catalog_dir=catalog_dir))
+    row = page.table.topLevelItem(0)
+    removal_cell = page.table.itemWidget(row, 7)
+    remove = removal_cell.findChild(QCheckBox)
+    minimum = removal_cell.findChild(EditButton)
+
+    assert page.table.columnCount() == 8
+    assert remove is not None
+    assert minimum is not None
+    assert minimum.parentWidget() is not None
+    assert minimum.parentWidget() is not page
+    removal_controls = minimum.parentWidget()
+    assert remove.parentWidget() is removal_controls
+    assert removal_controls.sizeHint() == QSize(90, 22)
+    assert minimum.isHidden()
+    assert minimum.text() == ""
+    assert minimum.size() == QSize(22, 22)
+    page.resize(1100, 600)
+    page.show()
+    app.processEvents()
+    removal_controls.relayout()
+    header_left = page.bulk_header.viewport().mapToGlobal(
+        QPoint(page.bulk_header.sectionViewportPosition(7), 0)
+    ).x()
+    header_center = header_left + (
+        page.bulk_header.sectionSize(7) - remove.width()
+    ) // 2 + remove.rect().center().x()
+    row_center = remove.mapToGlobal(remove.rect().center()).x()
+    assert row_center == header_center
+    remove.click()
+    removal_controls.relayout()
+    assert not minimum.isHidden()
+    assert remove.mapToGlobal(remove.rect().center()).x() == header_center
+    assert minimum.pos().x() == remove.pos().x() + remove.width() + 4
+    assert "currently 0" in minimum.toolTip()
+    app.processEvents()
+    assert page.table.columnWidth(7) >= removal_cell.sizeHint().width()
+    monkeypatch.setattr(QInputDialog, "getInt", lambda *_args: (2, True))
+    minimum.click()
+    assert page._config.item_policy("ingredients/milk").always_remove
+    assert page._config.item_policy("ingredients/milk").keep_minimum == 2
+    assert "currently 2" in minimum.toolTip()
+    remove.click()
+    assert minimum.isHidden()
+    removal_controls.relayout()
+    assert remove.mapToGlobal(remove.rect().center()).x() == header_center
+    assert page._config.item_policy("ingredients/milk").keep_minimum == 2
+    page.close()
     app.processEvents()
 
 

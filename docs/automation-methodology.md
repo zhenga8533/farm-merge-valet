@@ -221,7 +221,7 @@ When building-resource preservation is enabled, the repair target is selected
 from placed, inactive, non-event buildings. Configured priority first favors
 workshops, then other structures, then decorative buildings; within a class it
 favors the lowest remaining tier-weighted material cost. Existing repair
-materials are reserved from merges. The optional repair-material priority
+materials are reserved from merges and policy-authorized removals. The optional repair-material priority
 narrows candidates to trees, rocks, or toolboxes that produce a material still
 missing from that target, including every size variant. It also applies when a
 focused obstacle is clearing and another stage can be started. Focus is retained

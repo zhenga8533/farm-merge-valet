@@ -7,11 +7,13 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import partial
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
+from PySide6.QtGui import QFont, QPaintEvent
 from PySide6.QtWidgets import (
     QHeaderView,
+    QInputDialog,
     QTreeWidgetItem,
+    QWidget,
 )
 
 from farm_merge_valet.catalog.models import (
@@ -55,6 +57,7 @@ from farm_merge_valet.gui.components.policy_view import (
     set_policy_value,
     set_policy_widget,
 )
+from farm_merge_valet.gui.components.widgets import EditButton
 from farm_merge_valet.gui.pages.base import AppPage, ConfigEdit
 from farm_merge_valet.gui.services.assets import CatalogIconLoader
 from farm_merge_valet.gui.services.catalog import load_gui_catalog
@@ -90,6 +93,61 @@ class _ItemPolicyRow:
             or field == "always_remove"
             and self.supports_remove
         )
+
+
+class _RemovalControlCell(QWidget):
+    _CONTROL_SIZE = 22
+    _CONTROL_GAP = 4
+
+    def __init__(self, remove: PolicyCheckBox, header: QHeaderView, column: int) -> None:
+        super().__init__()
+        self.setProperty("policyCell", True)
+        self._remove = remove
+        self._header = header
+        self._column = column
+        self._remove.setParent(self)
+        self._remove.setFixedSize(self._remove.sizeHint())
+        self._edit: EditButton | None = None
+
+    def sizeHint(self) -> QSize:
+        return QSize(90, self._CONTROL_SIZE)
+
+    def set_edit_button(self, edit: EditButton) -> None:
+        self._edit = edit
+        edit.setParent(self)
+        self.relayout()
+
+    def set_edit_visible(self, visible: bool) -> None:
+        if self._edit is None:
+            return
+        self._edit.setVisible(visible)
+        self.relayout()
+
+    def relayout(self) -> None:
+        self._align_with_header()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        self._align_with_header()
+        super().paintEvent(event)
+
+    def _align_with_header(self) -> None:
+        section_left = self._header.sectionViewportPosition(self._column)
+        header_left = self._header.viewport().mapToGlobal(QPoint(section_left, 0)).x()
+        target_left = header_left + (
+            self._header.sectionSize(self._column) - self._remove.width()
+        ) // 2
+        cell_left = self.mapToGlobal(QPoint()).x()
+        top = (self.height() - self._remove.height()) // 2
+        remove_position = QPoint(target_left - cell_left, top)
+        if self._remove.pos() != remove_position:
+            self._remove.move(remove_position)
+        if self._edit is not None:
+            edit_position = QPoint(
+                self._remove.x() + self._CONTROL_SIZE + self._CONTROL_GAP,
+                self._remove.y(),
+            )
+            if self._edit.pos() != edit_position:
+                self._edit.move(edit_position)
 
 
 class ItemsPage(AppPage):
@@ -175,6 +233,7 @@ class ItemsPage(AppPage):
         self._policy_controls: list[
             tuple[QTreeWidgetItem, PolicyCheckBox, tuple[_ItemPolicyRow, ...], str]
         ] = []
+        self._minimum_controls: list[tuple[EditButton, tuple[_ItemPolicyRow, ...]]] = []
         self._lazy_branches = LazyPolicyBranches(self.table)
         if populate_immediately:
             self.populate()
@@ -274,6 +333,7 @@ class ItemsPage(AppPage):
         self._row_definitions = []
         self._search_text_by_policy_key = {}
         self._policy_controls = []
+        self._minimum_controls = []
         self._lazy_branches.reset()
         self._upgrade_targets = {}
         catalog = load_gui_catalog(self._config)
@@ -431,6 +491,11 @@ class ItemsPage(AppPage):
             1,
             minimum=POLICY_COMPACT_BADGE_COLUMN_WIDTH,
         )
+        fit_policy_widget_column(self.table, 7, minimum=90)
+        for edit, _definitions in self._minimum_controls:
+            container = edit.parentWidget()
+            if isinstance(container, _RemovalControlCell):
+                container.relayout()
         self.table.setSortingEnabled(True)
         self.bulk_header.setSortIndicatorShown(False)
         self.table.sortByColumn(sort_column, sort_order)
@@ -594,6 +659,9 @@ class ItemsPage(AppPage):
                     search_text="Not applicable",
                 )
                 continue
+            if field == "always_remove":
+                self._add_removal_control(item, column, (definition,), label)
+                continue
             value = getattr(policy, field)
             field_label = self._policy_field_label(definition.item, field)
             control = self._policy_checkbox(value, f"{label}: {field_label}")
@@ -638,6 +706,9 @@ class ItemsPage(AppPage):
                     search_text="Not applicable",
                 )
                 continue
+            if field == "always_remove":
+                self._add_removal_control(item, column, tuple(applicable), label)
+                continue
             values = [
                 getattr(self._config.item_policy(definition.policy_key), field)
                 for definition in applicable
@@ -662,6 +733,90 @@ class ItemsPage(AppPage):
                 sort_value=state.value,
             )
             self._policy_controls.append((item, control, tuple(applicable), field))
+
+    def _add_removal_control(
+        self,
+        item: QTreeWidgetItem,
+        column: int,
+        definitions: tuple[_ItemPolicyRow, ...],
+        label: str,
+    ) -> None:
+        remove_values = [
+            self._config.item_policy(definition.policy_key).always_remove
+            for definition in definitions
+        ]
+        state = aggregate_check_state(remove_values)
+        control = self._policy_checkbox(
+            state if len(definitions) > 1 else remove_values[0],
+            f"{label}: remove" if len(definitions) == 1 else f"{label}: remove for all tiers",
+            tristate=len(definitions) > 1,
+        )
+        if len(definitions) == 1:
+            definition = definitions[0]
+            control.toggled.connect(
+                lambda checked, row=definition: self.set_override(
+                    row.policy_key, row.family_key, "always_remove", checked
+                )
+            )
+        else:
+            control.clicked.connect(
+                lambda checked, rows=definitions: self._set_family(
+                    rows[0].family_key, list(rows), "always_remove", checked
+                )
+        )
+        content = _RemovalControlCell(control, self.bulk_header, column)
+        minimum = EditButton(f"Edit minimum copies to keep for {label}", content)
+        content.set_edit_button(minimum)
+        minimum.clicked.connect(
+            lambda _checked=False, rows=definitions, name=label: self._edit_minimum(rows, name)
+        )
+        self._update_minimum_control(minimum, definitions)
+        set_policy_widget(
+            self.table,
+            item,
+            column,
+            content,
+            sort_value=state.value,
+        )
+        self._policy_controls.append((item, control, definitions, "always_remove"))
+        self._minimum_controls.append((minimum, definitions))
+
+    def _update_minimum_control(
+        self,
+        edit: EditButton,
+        definitions: tuple[_ItemPolicyRow, ...],
+    ) -> None:
+        remove_values = [
+            self._config.item_policy(row.policy_key).always_remove for row in definitions
+        ]
+        container = edit.parentWidget()
+        if isinstance(container, _RemovalControlCell):
+            container.set_edit_visible(any(remove_values))
+        values = {self._config.item_policy(row.policy_key).keep_minimum for row in definitions}
+        value_label = str(next(iter(values))) if len(values) == 1 else "Mixed"
+        edit.setToolTip(f"Set minimum copies to keep before removal (currently {value_label})")
+        edit.setAccessibleName(f"Set minimum copies to keep (currently {value_label})")
+
+    def _edit_minimum(self, definitions: tuple[_ItemPolicyRow, ...], label: str) -> None:
+        values = [
+            self._config.item_policy(definition.policy_key).keep_minimum
+            for definition in definitions
+        ]
+        value, accepted = QInputDialog.getInt(
+            self,
+            "Minimum to keep",
+            f"{label}: copies to keep before removing excess",
+            values[0] if len(set(values)) == 1 else 0,
+            0,
+            1_000_000_000,
+        )
+        if not accepted:
+            return
+        if len(definitions) == 1:
+            definition = definitions[0]
+            self.set_override(definition.policy_key, definition.family_key, "keep_minimum", value)
+        else:
+            self._set_family(definitions[0].family_key, list(definitions), "keep_minimum", value)
 
     def _add_upgrade_family_status(
         self,
@@ -746,6 +901,8 @@ class ItemsPage(AppPage):
                 self._column_for_field(field),
                 state.value,
             )
+        for minimum, definitions in self._minimum_controls:
+            self._update_minimum_control(minimum, definitions)
         self._sync_bulk_header()
 
     def _column_for_field(self, field: str) -> int:
@@ -837,7 +994,7 @@ class ItemsPage(AppPage):
             if query in self._search_text_by_policy_key[definition.policy_key]
         ]
 
-    def set_override(self, key: str, family_key: str, field: str, value: bool) -> None:
+    def set_override(self, key: str, family_key: str, field: str, value: bool | int) -> None:
         overrides = dict(self._config.item_policy_overrides)
         values = overrides.get(key, ItemPolicyOverride()).model_dump(exclude_none=True)
         inherited_value = getattr(self._config.item_policy(family_key), field)
@@ -857,7 +1014,7 @@ class ItemsPage(AppPage):
         _family_key: str,
         definitions: list[_ItemPolicyRow],
         field: str,
-        value: bool,
+        value: bool | int,
     ) -> None:
         overrides = dict(self._config.item_policy_overrides)
         for definition in definitions:

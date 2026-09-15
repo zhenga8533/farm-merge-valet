@@ -856,7 +856,7 @@ def test_removal_uses_game_shovel_callback_without_confirmation_popup(monkeypatc
 
     monkeypatch.setattr("farm_merge_valet.cdp.runtime.evaluate", capture_expression)
 
-    result = GameRuntimeAdapter(9222, "Farm").submit_item_removal((8, 13), "rock_2", 144)
+    result = GameRuntimeAdapter(9222, "Farm").submit_item_removal((8, 13), "rock_2", 144, 2)
 
     assert result.status is ActionStatus.SUBMITTED
     assert "content.hasBehavior?.('shovelable')" in expression
@@ -867,6 +867,9 @@ def test_removal_uses_game_shovel_callback_without_confirmation_popup(monkeypatc
     assert "handler._contentToRemove ||" not in expression
     assert "rock_2" in expression
     assert "144" in expression
+    assert "const minimumRemaining = 2" in expression
+    assert "matchingCount <= minimumRemaining" in expression
+    assert "candidateContent?.getBlueprintID?.()" in expression
     assert "showPopup" not in expression
     assert "shovel_confirmation" not in expression
 

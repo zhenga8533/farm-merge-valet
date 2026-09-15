@@ -11,6 +11,8 @@ from farm_merge_valet.automation.bot import Bot, Phase
 from farm_merge_valet.automation.runtime import (
     ActionResult,
     ActionStatus,
+    BuildingRepairState,
+    BuildingRequirement,
     CrateSpawnResult,
     LiveCellState,
     RewardRequirement,
@@ -50,6 +52,7 @@ class FakeRuntime:
         self.spawn_limits: list[int] = []
         self.interactions: list[tuple[tuple[int, int], InteractionTargetKind, str, int | None]] = []
         self.removals: list[tuple[tuple[int, int], str, int | None]] = []
+        self.removal_minimums: list[int] = []
         self.started_orders: list[tuple[str, str]] = []
         self.claimed_orders: list[tuple[str, str]] = []
         self.shop_orders: tuple[ShopOrder, ...] = ()
@@ -98,8 +101,11 @@ class FakeRuntime:
         self.interactions.append((coord, expected_kind, expected_blueprint_id, expected_object_id))
         return ActionResult(ActionStatus.SUBMITTED)
 
-    def submit_item_removal(self, coord, expected_blueprint_id, expected_object_id):
+    def submit_item_removal(
+        self, coord, expected_blueprint_id, expected_object_id, minimum_remaining=0
+    ):
         self.removals.append((coord, expected_blueprint_id, expected_object_id))
+        self.removal_minimums.append(minimum_remaining)
         return ActionResult(ActionStatus.SUBMITTED)
 
     def read_shop_orders(self):
@@ -544,6 +550,59 @@ def test_remove_policy_plans_shovelable_item_without_interact_policy(monkeypatch
     assert bot.runtime.removals == [((3, 4), "rock_1", 91)]
     assert bot.runtime.interactions == []
     assert bot._interaction_workflow.pending is not None
+
+
+def test_remove_policy_keeps_configured_minimum(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._blueprint_policy_keys = {"rock_1": "obstacles/rock/tier/1"}
+    bot._shovelable_ids = frozenset({"rock_1"})
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"obstacles/rock/tier/1": ItemPolicyOverride(always_remove=True, keep_minimum=1)},
+    )
+    bot._live_cells = {
+        (3, 4): LiveCellState(True, "rock_1", 91),
+        (4, 4): LiveCellState(True, "rock_1", 92),
+    }
+
+    actions, _, _ = bot._interaction_actions()
+
+    assert len(actions) == 1
+    assert actions[0].kind is InteractionTargetKind.REMOVE
+    bot._step_interact_tiles(health(advancing=True), actions, [], [])
+    assert bot.runtime.removal_minimums == [1]
+    bot._live_cells = {(4, 4): LiveCellState(True, "rock_1", 92)}
+    assert bot._interaction_actions() == ([], [], [])
+
+
+def test_removal_preserves_higher_building_repair_requirement(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._blueprint_policy_keys = {"wood_2": "resources/wood/tier/2"}
+    bot._shovelable_ids = frozenset({"wood_2"})
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"resources/wood/tier/2": ItemPolicyOverride(always_remove=True, keep_minimum=1)},
+    )
+    bot._building_repairs = (
+        BuildingRepairState(
+            "bbq",
+            0,
+            True,
+            True,
+            False,
+            False,
+            (BuildingRequirement("wood_2", 2, 2),),
+        ),
+    )
+    bot._live_cells = {(x, 0): LiveCellState(True, "wood_2", x + 1) for x in range(3)}
+
+    actions, _, _ = bot._interaction_actions()
+
+    assert len(actions) == 1
+    bot._step_interact_tiles(health(advancing=True), actions, [], [])
+    assert bot.runtime.removal_minimums == [2]
 
 
 def test_interaction_precedes_removal_for_same_shovelable_item(monkeypatch) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import random
 import time
+from collections import Counter
 from collections.abc import Callable
 from fractions import Fraction
 from queue import Empty, Queue
@@ -715,6 +716,16 @@ class Bot:
         available = self.board.item_count(action.item)
         return available - len(action.cluster) < reserve
 
+    def _removal_minimum(self, blueprint_id: str, policy_key: str) -> int:
+        minimum = self.config.item_policy(policy_key).keep_minimum
+        if self.config.preserve_building_repair_resources:
+            target = self._repair_target()
+            if target is not None:
+                for requirement in target.requirements:
+                    if requirement.blueprint_id == blueprint_id:
+                        minimum = max(minimum, requirement.amount)
+        return minimum
+
     def _merge_actions_for_policy(self) -> list[MergeAction]:
         actions = self._plan_merge_actions(5, prefer_merge_five=True)
         actions.extend(self._plan_merge_actions(3, prefer_merge_five=False))
@@ -1163,12 +1174,24 @@ class Bot:
                     )
                 )
         interaction_coords = {action.coord for action in (*immediate, *depleted, *ready)}
-        immediate.extend(
-            action
-            for action, state in removable
-            if action.coord not in interaction_coords
-            and not (state.obstacle is not None and state.obstacle.clearing)
+        remaining_counts = Counter(
+            state.blueprint_id for state in self._live_cells.values() if state.blueprint_id
         )
+        removal_minimums = {
+            action.blueprint_id: self._removal_minimum(action.blueprint_id, policy_key)
+            for action, state in removable
+            if (policy_key := self._live_policy_key(state)) is not None
+        }
+        for action, state in removable:
+            if (
+                action.coord in interaction_coords
+                or (state.obstacle is not None and state.obstacle.clearing)
+                or remaining_counts[action.blueprint_id]
+                <= removal_minimums.get(action.blueprint_id, 0)
+            ):
+                continue
+            immediate.append(action)
+            remaining_counts[action.blueprint_id] -= 1
         producer_order = {ProducerKind.ANIMAL: 0, ProducerKind.CROP: 1, None: 2}
         immediate_order = {
             InteractionTargetKind.REMOVE: 3,

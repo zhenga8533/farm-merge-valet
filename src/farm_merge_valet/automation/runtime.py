@@ -361,6 +361,7 @@ class GameRuntime(Protocol):
         coord: GridCoord,
         expected_blueprint_id: str,
         expected_object_id: int | None,
+        minimum_remaining: int = 0,
     ) -> ActionResult: ...
 
     def spawn_supply_crates(self, limit: int) -> CrateSpawnResult: ...

@@ -993,6 +993,7 @@ class GameRuntimeAdapter:
         coord: GridCoord,
         expected_blueprint_id: str,
         expected_object_id: int | None,
+        minimum_remaining: int = 0,
     ) -> ActionResult:
         return self._action_result(
             self._evaluate_action(
@@ -1001,6 +1002,7 @@ class GameRuntimeAdapter:
                     expected_blueprint_id,
                     expected_object_id,
                     self._scene_id,
+                    minimum_remaining,
                 ),
             )
         )

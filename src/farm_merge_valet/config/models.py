@@ -25,6 +25,7 @@ class ItemPolicy(BaseModel):
     force_lucky_merge: bool = False
     interact: bool = False
     always_remove: bool = False
+    keep_minimum: int = Field(default=0, ge=0, le=1_000_000_000, strict=True)
 
 
 class ItemPolicyOverride(BaseModel):
@@ -35,6 +36,7 @@ class ItemPolicyOverride(BaseModel):
     force_lucky_merge: bool | None = None
     interact: bool | None = None
     always_remove: bool | None = None
+    keep_minimum: int | None = Field(default=None, ge=0, le=1_000_000_000, strict=True)
 
 
 _INTERACT_BY_DEFAULT = ItemPolicyOverride(interact=True)

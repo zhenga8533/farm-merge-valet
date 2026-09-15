@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.config import AppConfig, ConfigStore, ItemPolicyOverride
 from farm_merge_valet.integrations import GamePortal
 
 
@@ -248,6 +248,21 @@ def test_merge_five_is_enabled_by_default() -> None:
     assert settings.item_policy("crops/wheat").prefer_merge_five
     assert settings.item_policy("crops/wheat").interact
     assert not settings.item_policy("crops/wheat").always_remove
+    assert settings.item_policy("crops/wheat").keep_minimum == 0
+
+
+def test_removal_minimum_inherits_by_family_and_can_be_overridden_per_tier() -> None:
+    settings = AppConfig(
+        item_policy_overrides={
+            "resources/wood": ItemPolicyOverride(always_remove=True, keep_minimum=2),
+            "resources/wood/tier/3": ItemPolicyOverride(keep_minimum=1),
+        }
+    )
+
+    assert settings.item_policy("resources/wood/tier/2").keep_minimum == 2
+    assert settings.item_policy("resources/wood/tier/3").keep_minimum == 1
+    with pytest.raises(ValidationError):
+        ItemPolicyOverride(keep_minimum=True)
 
 
 def test_interaction_defaults_support_category_and_item_specific_policies() -> None:

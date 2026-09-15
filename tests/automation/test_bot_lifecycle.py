@@ -119,7 +119,9 @@ class FakeRuntime:
         self.interactions.append((coord, expected_kind, expected_blueprint_id, expected_object_id))
         return ActionResult(ActionStatus.SUBMITTED)
 
-    def submit_item_removal(self, coord, expected_blueprint_id, expected_object_id):
+    def submit_item_removal(
+        self, coord, expected_blueprint_id, expected_object_id, minimum_remaining=0
+    ):
         self.removals.append((coord, expected_blueprint_id, expected_object_id))
         return ActionResult(ActionStatus.SUBMITTED)
 
