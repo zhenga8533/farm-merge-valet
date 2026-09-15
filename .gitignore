@@ -22,6 +22,8 @@ env/
 Thumbs.db
 
 # Testing / coverage
+/.tmp/
+/test-temp-*/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -32,3 +34,10 @@ htmlcov/
 logs/
 *.log
 captures/
+.atlas_cache/
+assets/catalog/
+.browser-profile/
+.fmv-state/
+
+# Local agent state
+/.claude/

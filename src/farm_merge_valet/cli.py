@@ -2,72 +2,175 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import json
+import logging
+import sys
+import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import cv2
 import typer
 from rich import print as rprint
 
-from farm_merge_valet.capture.screen import capture_region
-from farm_merge_valet.capture.window import find_window, list_window_titles
-from farm_merge_valet.config import settings
-from farm_merge_valet.core.bot import Bot
-from farm_merge_valet.logging_setup import configure_logging
+from farm_merge_valet.browser import BrowserKind, BrowserManager, BrowserManagerError
+from farm_merge_valet.cdp.feature_diagnostics import read_feature_diagnostics
+from farm_merge_valet.cdp.profiling import profile_runtime, write_profile
+from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
+from farm_merge_valet.composition import create_catalog_synchronizer
+from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.observability.logging import configure_logging, diagnostic_log_path
+from farm_merge_valet.observability.session_history import summarize_history
 
-app = typer.Typer(help="Automation tool for Farm Merge Valley.")
+app = typer.Typer(help="Automation tool for Farm Merge Valley.", invoke_without_command=True)
+browser_app = typer.Typer(help="Manage the dedicated Chromium-family browser.")
+assets_app = typer.Typer(help="Synchronize and rebuild cached game assets.")
+diagnostics_app = typer.Typer(help="Run read-only runtime diagnostics.")
+app.add_typer(browser_app, name="browser")
+app.add_typer(assets_app, name="assets")
+app.add_typer(diagnostics_app, name="diagnostics")
+
+
+def _discover_observation_runtime(runtime: GameRuntimeAdapter, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        health = runtime.discover()
+        if health.available or time.monotonic() >= deadline:
+            return
+        time.sleep(0.25)
+
+
+logger = logging.getLogger(__name__)
+_config_store = ConfigStore()
 
 
 @app.callback()
-def main() -> None:
-    configure_logging(settings.log_level)
+def main(ctx: typer.Context) -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
+    if ctx.invoked_subcommand is None:
+        from farm_merge_valet.gui.application import run_application
+
+        raise typer.Exit(run_application(_config_store))
+    if any(argument in {"--help", "-h"} for argument in sys.argv[1:]):
+        return
+    config = _config_store.load()
+    configure_logging(config.log_level)
 
 
-@app.command()
-def run() -> None:
-    """Start the automation loop."""
-    Bot().run_forever()
-
-
-@app.command("list-windows")
-def list_windows() -> None:
-    """List open window titles, to help pick a value for FMV_WINDOW_TITLE."""
-    for title in list_window_titles():
-        typer.echo(title)
-
-
-@app.command()
-def calibrate() -> None:
-    """Locate the configured target window and report its region."""
+def _browser_manager(browser: str | None) -> BrowserManager:
     try:
-        region = find_window(settings.window_title)
-    except LookupError as exc:
-        rprint(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1) from exc
-    rprint(f"[green]Found window[/green]: {region}")
+        return BrowserManager(_config(), BrowserKind(browser) if browser else None)
+    except (ValueError, BrowserManagerError) as exc:
+        raise typer.BadParameter(str(exc), param_hint="--browser") from exc
 
 
-@app.command()
-def capture(
-    output: Path = typer.Option(  # noqa: B008
-        None, "--output", "-o", help="Where to save the PNG (default: captures/<timestamp>.png)."
-    ),
+def _catalog_synchronizer():
+    return create_catalog_synchronizer(_config())
+
+
+def _config() -> AppConfig:
+    return _config_store.current
+
+
+def _print_browser_status(manager: BrowserManager) -> None:
+    typer.echo(json.dumps(manager.status_dict(manager.status()), indent=2))
+
+
+@browser_app.command("list")
+def browser_list_cmd() -> None:
+    """List installed supported and experimental browser candidates."""
+    installations = BrowserManager(_config()).installations()
+    if not installations:
+        typer.echo("No compatible Chromium-family browser was detected.")
+        return
+    for installation in installations:
+        typer.echo(
+            f"{installation.kind.value:<9} {installation.support.value:<12} "
+            f"{installation.executable}"
+        )
+
+
+@browser_app.command("status")
+def browser_status_cmd(
+    browser: str | None = typer.Option(None, "--browser"),  # noqa: B008
 ) -> None:
-    """Save a screenshot of the configured target window, e.g. for building templates."""
+    """Inspect the browser currently exposed on the configured CDP port."""
+    _print_browser_status(_browser_manager(browser))
+
+
+@browser_app.command("launch")
+def browser_launch_cmd(
+    browser: str | None = typer.Option(None, "--browser"),  # noqa: B008
+) -> None:
+    """Launch or reuse a compatible dedicated browser profile."""
+    manager = _browser_manager(browser)
     try:
-        region = find_window(settings.window_title)
-    except LookupError as exc:
+        status = manager.launch()
+    except BrowserManagerError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(manager.status_dict(status), indent=2))
+
+
+@browser_app.command("restart")
+def browser_restart_cmd(
+    browser: str | None = typer.Option(None, "--browser"),  # noqa: B008
+) -> None:
+    """Restart only a verified Farm Merge Valet-managed browser."""
+    manager = _browser_manager(browser)
+    try:
+        status = manager.restart()
+    except BrowserManagerError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    typer.echo(json.dumps(manager.status_dict(status), indent=2))
+
+
+@browser_app.command("stop")
+def browser_stop_cmd(
+    browser: str | None = typer.Option(None, "--browser"),  # noqa: B008
+) -> None:
+    """Stop only a verified Farm Merge Valet-managed browser."""
+    manager = _browser_manager(browser)
+    try:
+        manager.stop()
+    except BrowserManagerError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    rprint("[green]Managed browser stopped.[/green]")
+
+
+@assets_app.command("extract")
+def extract_templates_cmd(
+    har: Path = typer.Argument(...),  # noqa: B008
+    force: bool = False,
+) -> None:
+    try:
+        _catalog_synchronizer().extract(har, force=force)
+    except RuntimeError as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
 
-    if output is None:
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        output = Path("captures") / f"{timestamp}.png"
-    output.parent.mkdir(parents=True, exist_ok=True)
 
-    frame = capture_region(region)
-    cv2.imwrite(str(output), frame)
-    rprint(f"[green]Saved[/green] {frame.shape[1]}x{frame.shape[0]} capture to {output}")
+@assets_app.command("compile")
+def compile_assets_cmd() -> None:
+    """Rebuild the item catalog and assets from the cached game atlases."""
+    try:
+        _catalog_synchronizer().compile_cached()
+    except RuntimeError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+
+@assets_app.command("sync")
+def sync_assets_cmd(force: bool = False) -> None:
+    """Discover and compile current game assets into the per-user cache."""
+    try:
+        _catalog_synchronizer().sync(force=force)
+    except RuntimeError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
 
 
 @app.command()
@@ -75,6 +178,72 @@ def version() -> None:
     from farm_merge_valet import __version__
 
     rprint(__version__)
+
+
+@diagnostics_app.command("profile-runtime")
+def profile_runtime_cmd(
+    duration: float = typer.Option(120.0, min=1.0),  # noqa: B008
+    output: Path = typer.Option(Path(".tmp/runtime-profile.json")),  # noqa: B008
+    observation_only: bool = typer.Option(False, help="Allow recognized non-actionable portals."),
+    page_title: str | None = typer.Option(None, help="Override the configured page target."),
+) -> None:
+    """Profile live-state reads without game actions."""
+    config = _config()
+    runtime = GameRuntimeAdapter(
+        config.cdp_port,
+        page_title or config.window_title,
+        observation_only=observation_only,
+    )
+    try:
+        if observation_only:
+            _discover_observation_runtime(runtime)
+        report = profile_runtime(runtime, duration_seconds=duration)
+    except RuntimeError as exc:
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    serialized = json.dumps(report, indent=2)
+    write_profile(output, serialized)
+    typer.echo(serialized)
+
+
+@diagnostics_app.command("session-summary")
+def session_summary_cmd(
+    hours: float = typer.Option(24.0, min=0.01, max=24 * 365),
+) -> None:
+    """Summarize persisted structured activity without contacting the game."""
+    since = datetime.now(UTC) - timedelta(hours=hours)
+    rprint(json.dumps(summarize_history(diagnostic_log_path(), since).as_dict(), indent=2))
+
+
+@diagnostics_app.command("inspect-features")
+def inspect_features_cmd(
+    output: Path | None = typer.Option(None),  # noqa: B008
+    observation_only: bool = typer.Option(False, help="Allow recognized non-actionable portals."),
+    page_title: str | None = typer.Option(None, help="Override the configured page target."),
+) -> None:
+    """Inspect sanitized building, event, and marketplace metadata read-only."""
+    config = _config()
+    target = page_title or config.window_title
+    runtime = GameRuntimeAdapter(
+        config.cdp_port,
+        target,
+        observation_only=observation_only,
+    )
+    if observation_only:
+        _discover_observation_runtime(runtime)
+    else:
+        runtime.discover()
+    serialized = json.dumps(
+        read_feature_diagnostics(
+            config.cdp_port,
+            target,
+            allow_observation=observation_only,
+        ),
+        indent=2,
+    )
+    if output is not None:
+        write_profile(output, serialized)
+    typer.echo(serialized)
 
 
 if __name__ == "__main__":
