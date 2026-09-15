@@ -9,4 +9,6 @@
 - Added a desktop policy editor, browser lifecycle controls, statistics,
   diagnostics, structured logging, and Discord summaries.
 - Added consistent application, tray, taskbar, and Windows executable branding.
+- Added optional startup notifications for newer public GitHub releases.
+- Added explicit recovery for the game's disconnection layer.
 - Added platform-aware catalog synchronization and generated asset caching.

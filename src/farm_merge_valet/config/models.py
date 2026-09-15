@@ -162,6 +162,7 @@ class AppConfig(BaseModel):
     webhook_notification_profile: Literal["minimal", "balanced", "detailed"] = "balanced"
     webhook_include_charts: bool = True
     webhook_include_screenshots: bool = False
+    check_for_updates: bool = True
 
     theme: Literal["system", "dark", "light"] = "system"
     start_minimized: bool = False

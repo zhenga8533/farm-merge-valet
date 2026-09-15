@@ -500,6 +500,7 @@ def test_idle_and_webhook_summary_defaults() -> None:
     assert settings.webhook_status_interval == 60.0
     assert settings.webhook_include_charts
     assert not settings.webhook_include_screenshots
+    assert settings.check_for_updates
 
 
 def test_empty_webhook_url_disables_notifications() -> None:

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from pydantic import ValidationError
-from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtCore import QEvent, Qt, QTimer, QUrl
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from farm_merge_valet import __version__
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.config.hotkeys import display_hotkey
 from farm_merge_valet.gui.branding import app_icon
@@ -49,8 +51,11 @@ from farm_merge_valet.gui.services.catalog_freshness import (
 )
 from farm_merge_valet.gui.services.config_saver import ConfigSaver
 from farm_merge_valet.gui.services.log_export import save_visible_log
+from farm_merge_valet.gui.services.update_checker import AvailableUpdate, UpdateChecker
 from farm_merge_valet.gui.theme import apply_theme, refresh_widget_theme
 from farm_merge_valet.observability.logging import configure_logging
+
+logger = logging.getLogger(__name__)
 
 _APPEARANCE_FIELDS = {
     "theme",
@@ -119,6 +124,7 @@ class MainWindow(QMainWindow):
                 apply_theme(app, self._draft.theme)
         self._really_quit = False
         self._freshness_notification_shown = False
+        self._pending_update_url: str | None = None
         self._pending_save_sections: set[str] = set()
         self._configured_log_level = controller.config.log_level
         self._config_saver = ConfigSaver(controller.store, self)
@@ -202,6 +208,11 @@ class MainWindow(QMainWindow):
         self.overlay = CompactOverlay(self._draft)
         self._connect_pages()
         self._setup_tray()
+        self._update_checker = UpdateChecker(self)
+        self._update_checker.update_available.connect(self._show_update_available)
+        self._update_checker.failed.connect(
+            lambda message: logger.debug("Application update check failed: %s", message)
+        )
         controller.status_changed.connect(self._status_changed)
         controller.log_received.connect(self._append_log)
         controller.config_changed.connect(self._config_changed)
@@ -238,6 +249,11 @@ class MainWindow(QMainWindow):
         self._statistics_timer.setInterval(5000)
         self._statistics_timer.timeout.connect(self._refresh_statistics_if_visible)
         self._statistics_timer.start()
+
+    def start_update_check(self) -> bool:
+        if not self._draft.check_for_updates:
+            return False
+        return self._update_checker.start(__version__)
 
     def _set_current_page(self, index: int) -> None:
         item = self.navigation.item(index)
@@ -668,8 +684,27 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction(self.quit_action)
         self.tray.activated.connect(self._tray_activated)
+        self.tray.messageClicked.connect(self._open_pending_update)
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray.show()
+
+    def _show_update_available(self, update: AvailableUpdate) -> None:
+        if self._really_quit:
+            return
+        self._pending_update_url = update.url
+        self.tray.showMessage(
+            f"Farm Merge Valet {update.version} is available",
+            "Click to view the release on GitHub.",
+            QSystemTrayIcon.MessageIcon.Information,
+            10000,
+        )
+
+    def _open_pending_update(self) -> None:
+        if self._pending_update_url is None:
+            return
+        url = self._pending_update_url
+        self._pending_update_url = None
+        QDesktopServices.openUrl(QUrl(url))
 
     def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason in {
@@ -701,6 +736,7 @@ class MainWindow(QMainWindow):
         ):
             self._freshness_notification_shown = True
             if self.tray.isVisible():
+                self._pending_update_url = None
                 self.tray.showMessage(
                     "Game data update available",
                     "Open Browser and select Update to refresh cached game data and assets.",

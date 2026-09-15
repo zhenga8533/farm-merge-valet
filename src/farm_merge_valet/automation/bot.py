@@ -1448,6 +1448,8 @@ class Bot:
                 raise RuntimeRecoveryRequired(
                     "The game backend replaced this session with another connection."
                 )
+            if health.transient_overlay is TransientOverlayKind.DISCONNECTED:
+                raise RuntimeRecoveryRequired("The game displayed its disconnection screen.")
             if health.backend_connected is False:
                 self._report_wait(
                     "game backend connection is unavailable",
@@ -1786,6 +1788,10 @@ class Bot:
                 "Event %s submitted.",
                 kind,
                 event_key=state.key,
+                event_energy=state.energy,
+                event_visit_energy_threshold=(
+                    self.config.event_visit_energy_threshold if kind == "enter" else None
+                ),
             )
             return True
         self._actions().release(OperationKind.EVENT, key)

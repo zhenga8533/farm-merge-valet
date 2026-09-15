@@ -693,6 +693,22 @@ def test_replaced_backend_session_requests_runtime_recovery() -> None:
         bot.step()
 
 
+def test_disconnection_layer_requests_runtime_recovery() -> None:
+    class DisconnectionLayerRuntime(FakeRuntime):
+        def read_runtime_health(self):
+            return health(
+                advancing=False,
+                transient_overlay=TransientOverlayKind.DISCONNECTED,
+                transient_overlay_detail="layer:disconnection",
+            )
+
+    bot = bare_bot()
+    bot.runtime = DisconnectionLayerRuntime()
+
+    with pytest.raises(RuntimeRecoveryRequired, match="disconnection screen"):
+        bot.step()
+
+
 def test_stalled_overlay_requests_runtime_recovery() -> None:
     class StalledOverlayRuntime(FakeRuntime):
         def read_runtime_health(self):

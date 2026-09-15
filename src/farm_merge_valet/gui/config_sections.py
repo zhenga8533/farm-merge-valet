@@ -97,6 +97,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "webhook_notification_profile",
         "webhook_include_charts",
         "webhook_include_screenshots",
+        "check_for_updates",
         "theme",
         "start_minimized",
         "bot_autostart",

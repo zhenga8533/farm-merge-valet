@@ -171,6 +171,26 @@ def test_health_parses_building_upgrade_overlay(monkeypatch) -> None:
     assert health.transient_overlay is TransientOverlayKind.BUILDING_UPGRADE
 
 
+def test_health_parses_disconnection_layer(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.evaluate",
+        lambda *_, **__: {
+            "sceneId": 3,
+            "board": True,
+            "itemDrop": True,
+            "heartbeat": 10,
+            "heartbeatAgeMs": 1,
+            "transientOverlay": "disconnected",
+            "transientOverlayDetail": "layer:disconnection",
+        },
+    )
+
+    health = GameRuntimeAdapter(9222, "Farm").read_runtime_health()
+
+    assert health.transient_overlay is TransientOverlayKind.DISCONNECTED
+    assert health.transient_overlay_detail == "layer:disconnection"
+
+
 def test_transient_overlay_submission_uses_native_known_handlers(monkeypatch) -> None:
     expressions: list[str] = []
 
@@ -276,6 +296,7 @@ def test_health_detects_each_supported_reward_overlay_phase() -> None:
     assert "_singleSocketDisconnect" in _HEALTH_EXPRESSION
     assert "activePopup?._name === 'ConnectedOnDifferentDevicePopup'" in _HEALTH_EXPRESSION
     assert "session-replaced" in _HEALTH_EXPRESSION
+    assert "blockingLayer?.name === 'disconnection' ? 'disconnected'" in _HEALTH_EXPRESSION
     assert "unsupportedOverlayDetail" in _HEALTH_EXPRESSION
     assert "['disconnection', 'onboarding', 'fake_ad']" in _HEALTH_EXPRESSION
     assert "backendConnection?.isConnected" in _HEALTH_EXPRESSION

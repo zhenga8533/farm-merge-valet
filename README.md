@@ -36,6 +36,11 @@ The Browser page selects the game integration and manages browser startup.
 Supported integrations are Reddit, CrazyGames, Pogo, MSN, Discord Activities, Agame,
 Facebook Gaming, and Yahoo Games.
 
+By default, the desktop application checks this repository's public GitHub releases
+once at startup and displays a system notification when a newer version is available.
+It does not download or install updates automatically. The check can be disabled in
+Settings under Notifications.
+
 Each platform supplies a verified default game page. The Browser page allows an
 advanced user to override that URL when a platform changes its route, but the URL
 must remain HTTPS and on the selected platform's trusted host. Target discovery

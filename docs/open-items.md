@@ -11,6 +11,11 @@ automation, event energy, return transitions, and main-farm reward claiming for
 live free and purchased tracks. Future event-specific actions still require a
 concrete live contract because event scenes and rules can change.
 
+Event entry requires both the configured energy threshold and a live launcher
+or active event service. Some platform sessions may not expose that state until
+the event has been opened; entry submission and destination confirmation are
+logged separately.
+
 ## Known constraints, not scheduled work
 
 - The managed game browser must remain open. Bot startup can open the configured

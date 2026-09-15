@@ -241,6 +241,14 @@ class SettingsPage(ConfigFormPage):
         sections.addWidget(events)
 
         notifications, notifications_form = settings_section("Notifications")
+        self._add_toggle(
+            notifications_form,
+            "Check for application updates",
+            "check_for_updates",
+        )
+        self.controls["check_for_updates"].setToolTip(
+            "Checks the public GitHub release page once when the application starts."
+        )
         webhook = QLineEdit()
         webhook.setEchoMode(QLineEdit.EchoMode.Password)
         webhook.setPlaceholderText("Optional Discord webhook URL")

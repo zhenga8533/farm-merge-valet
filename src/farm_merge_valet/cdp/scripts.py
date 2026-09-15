@@ -621,6 +621,7 @@ _HEALTH_EXPRESSION = (
     : stickerSetActive && stickerSetButton ? 'sticker-set-collect'
     : stickerSetActive ? 'sticker-set-transition'
     : stickerAlbumTransition ? 'sticker-album-transition'
+    : blockingLayer?.name === 'disconnection' ? 'disconnected'
     : onboardingLayer ? 'onboarding'
     : unsupportedOverlayDetail ? 'unsupported'
     : null;

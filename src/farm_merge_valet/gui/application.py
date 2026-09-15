@@ -65,6 +65,7 @@ def run_application(store: ConfigStore | None = None) -> int:
             window.hide()
         else:
             window.show()
+        window.start_update_check()
         if config.overlay_visible:
             window.overlay.show()
         controller.start_hotkeys()

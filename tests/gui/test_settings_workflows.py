@@ -229,6 +229,7 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
     assert "Enable newly supported events by default" in labels
     assert "Automatically claim event rewards" in labels
     assert "Minimum energy before visiting" in labels
+    assert "Check for application updates" in labels
     assert "Expand farm land automatically" in labels
     assert "Maximum coins per expansion" in labels
     assert "Maximum crystals per expansion" in labels
@@ -296,6 +297,9 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         assert section_groups["Building repairs"].isAncestorOf(window.settings_page.controls[field])
     assert section_groups["Notifications"].isAncestorOf(
         window.settings_page.notifications_advanced_section
+    )
+    assert section_groups["Notifications"].isAncestorOf(
+        window.settings_page.controls["check_for_updates"]
     )
     assert not window.settings_page.notifications_advanced_section.isAncestorOf(
         window.settings_page.controls["webhook_notification_profile"]

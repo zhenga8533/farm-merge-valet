@@ -131,7 +131,9 @@ resolver at most once. Each
 transition is handled in a separate loop iteration, and intermediate sticker
 animation states block board actions until Collect becomes available. Sticker
 pack state is read from its dedicated top-level navigation view rather than the
-gameplay popup layers. Other popups and navigation screens are not dismissed.
+gameplay popup layers. The game's disconnection layer requests managed-game
+recovery rather than being dismissed or treated as an unknown overlay. Other
+popups and navigation screens are not dismissed.
 
 ## Interact with tiles and producers
 

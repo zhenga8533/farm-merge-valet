@@ -52,6 +52,7 @@ class TransientOverlayKind(StrEnum):
     BUILDING_UPGRADE = "building-upgrade"
     PROMOTIONAL_POPUP = "promotional-popup"
     PUSH_NOTIFICATION_OPT_IN = "push-notification-opt-in"
+    DISCONNECTED = "disconnected"
     SESSION_REPLACED = "session-replaced"
     ONBOARDING = "onboarding"
     UNSUPPORTED = "unsupported"

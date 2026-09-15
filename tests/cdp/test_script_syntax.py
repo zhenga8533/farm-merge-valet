@@ -88,6 +88,7 @@ def test_health_and_dismissal_share_overlay_contract() -> None:
     for kind in TransientOverlayKind:
         if kind in {
             TransientOverlayKind.SESSION_REPLACED,
+            TransientOverlayKind.DISCONNECTED,
             TransientOverlayKind.ONBOARDING,
             TransientOverlayKind.UNSUPPORTED,
         }:
