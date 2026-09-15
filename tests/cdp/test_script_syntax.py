@@ -53,7 +53,7 @@ from farm_merge_valet.cdp.scripts import (
                 "rewardAmount": 50,
             }
         ),
-        land_expansion_action_expression("A1", False, (("coins", 10),), 0, 7),
+        land_expansion_action_expression("A1", False, (("coins", 10),), 0, 7, 3),
         _farm_visit_action_expression("open", 7),
         _storage_bubble_pop_expression(11, 7),
         _dismiss_overlay_expression(7),
