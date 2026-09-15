@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
 
@@ -53,8 +53,8 @@ class ShopAction:
 class ShopPolicy:
     shop_default_enabled: bool = True
     recipe_default_enabled: bool = True
-    shop_overrides: Mapping[str, bool] = MappingProxyType({})
-    recipe_overrides: Mapping[str, bool] = MappingProxyType({})
+    shop_overrides: Mapping[str, bool] = field(default_factory=lambda: MappingProxyType({}))
+    recipe_overrides: Mapping[str, bool] = field(default_factory=lambda: MappingProxyType({}))
     automation_enabled: bool = True
 
     def enables(self, order: ShopOrder) -> bool:
