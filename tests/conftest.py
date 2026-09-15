@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +22,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    # pytest creates --basetemp itself but not its parent, so a fresh checkout
+    # without a pre-existing .tmp/ directory fails before any test can run.
+    Path(config.rootpath, ".tmp").mkdir(parents=True, exist_ok=True)
     config.addinivalue_line(
         "markers",
         "live_game: requires the configured managed browser and a loaded game",
