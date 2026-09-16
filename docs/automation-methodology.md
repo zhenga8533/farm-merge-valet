@@ -492,7 +492,14 @@ authoritative progress classify the action pipeline as unresponsive even when
 browser animation frames continue. A backend single-session replacement requests
 the same recovery immediately. A loaded game frame whose action runtime remains
 unavailable for 30 seconds also requests recovery; this covers fatal startup
-screens such as E002 without depending on canvas-rendered error text.
+screens such as E002 without depending on canvas-rendered error text. A
+separate 300-second grace period applies whenever the board becomes
+unavailable again mid-session, such as after a lucky-merge reload lands on
+that same fatal screen instead of the saved game, so the automation does not
+idle indefinitely against a page that will never recover on its own; this
+window is longer than the 30-second startup grace because it must not
+preempt the board heap recovery's own legitimate backoff schedule, which can
+take a couple of minutes to cycle through on its own.
 A CDP target that can no longer be reached (for example, a transient wifi
 drop) also requests recovery once that condition persists for 60 seconds,
 rather than waiting indefinitely.

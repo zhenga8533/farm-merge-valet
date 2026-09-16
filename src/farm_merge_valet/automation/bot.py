@@ -98,6 +98,7 @@ logger = logging.getLogger(__name__)
 _ACTION_FAILURE_LIMIT = DEFAULT_ACTION_TIMING.failure_limit
 _RUNTIME_STARTUP_GRACE_SECONDS = 30.0
 _CONNECTION_LOSS_GRACE_SECONDS = 60.0
+_BOARD_UNAVAILABLE_GRACE_SECONDS = 300.0
 
 
 class Bot:
@@ -165,6 +166,7 @@ class Bot:
         self._runtime_unavailable_warned = False
         self._runtime_ready_once = False
         self._connection_loss_started_at: float | None = None
+        self._board_unavailable_started_at: float | None = None
         self._last_wait_reason: str | None = None
         self._last_wait_log_at = 0.0
         self._idle_active = False
@@ -1466,7 +1468,24 @@ class Bot:
             if not self._handle_event_state(snapshot.event):
                 return
             if not self._ensure_capability(health, RuntimeCapability.BOARD):
+                # A board that never comes back mid-session (e.g. a lucky-merge
+                # reload landing on the platform's fatal E002 screen) looks
+                # identical to a slow board heap recovery, which is expected to
+                # legitimately retry for a while: it backs off up to 300s
+                # between search attempts (_RECOVERY_COOLDOWNS in
+                # cdp/runtime.py), so give it a full cycle through that
+                # schedule before concluding it is actually stuck.
+                now = self._now()
+                if self._board_unavailable_started_at is None:
+                    self._board_unavailable_started_at = now
+                elif now - self._board_unavailable_started_at >= _BOARD_UNAVAILABLE_GRACE_SECONDS:
+                    raise RuntimeRecoveryRequired(
+                        "game board remained unavailable for over "
+                        f"{_BOARD_UNAVAILABLE_GRACE_SECONDS:.0f} seconds mid-session "
+                        f"({health.detail or 'no diagnostic detail'})"
+                    )
                 return
+            self._board_unavailable_started_at = None
         except RuntimeConnectionError as exc:
             if self._interrupt_event.is_set():
                 return

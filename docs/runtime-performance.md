@@ -34,13 +34,17 @@ own action pipeline is responsive. Three consecutive submitted actions without
 authoritative progress request runtime recovery; confirmed actions and supply-
 crate spawns reset the count. A game-reported session replacement requests
 recovery immediately, while a missing action runtime receives a 30-second grace
-period for normal loading and scene transitions, and a CDP connection that
-cannot be reached at all (for example, a transient wifi drop) receives a
-60-second grace period. Automatic recovery briefly navigates the verified
-managed game tab away before reopening the trusted portal and creating a fresh
-bot/runtime; the tab lookup itself retries with backoff in case the same kind
-of transient disconnect happens right as recovery starts. The number of
-recovery attempts allowed before the run ends is configurable
+period for normal loading and scene transitions. A separate, longer 300-second
+grace period applies if the board becomes unavailable again mid-session (for
+example, after a lucky-merge reload lands on a fatal startup screen instead of
+the saved game), since it must not preempt the board heap recovery's own
+legitimate backoff schedule, which can take a couple of minutes on its own.
+A CDP connection that cannot be reached at all (for example, a transient wifi
+drop) receives a 60-second grace period. Automatic recovery briefly navigates
+the verified managed game tab away before reopening the trusted portal and
+creating a fresh bot/runtime; the tab lookup itself retries with backoff in
+case the same kind of transient disconnect happens right as recovery starts.
+The number of recovery attempts allowed before the run ends is configurable
 (`max_game_recovery_attempts`, 0 for unlimited) and resets after an hour of
 healthy running; unowned browsers and pages are never restarted automatically.
 
