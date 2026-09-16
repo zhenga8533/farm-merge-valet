@@ -46,6 +46,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "browser_profile_dir",
         "browser_auto_launch",
         "auto_recover_game",
+        "max_game_recovery_attempts",
         "game_url",
         "cdp_port",
         "catalog_dir",

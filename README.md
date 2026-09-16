@@ -127,11 +127,13 @@ closed; physical mouse input is never used as a fallback.
 If submitted actions repeatedly produce no authoritative progress, the game
 reports that its backend session was replaced, or the action runtime does not
 initialize within 30 seconds, automatic recovery may restart the verified
-managed game page once and rebuild runtime state. Recovery briefly closes the
-old game document before reopening the configured portal in the same tab. A
-repeated failure stops the run instead of creating a restart loop.
-Connection recovery preserves pending intent so an ambiguous action is checked
-against fresh state rather than blindly repeated.
+managed game page and rebuild runtime state. Recovery briefly closes the old
+game document before reopening the configured portal in the same tab. The
+number of recovery attempts allowed before the run stops is configurable
+(`max_game_recovery_attempts`, 0 for unlimited); the counter resets once the
+game has run healthily for an hour, so an old failure doesn't count against a
+later, unrelated one. Connection recovery preserves pending intent so an
+ambiguous action is checked against fresh state rather than blindly repeated.
 
 Known reward and notification overlays can be dismissed through their native
 callbacks. Shops, settings, missions, confirmations, and unknown popups are not
