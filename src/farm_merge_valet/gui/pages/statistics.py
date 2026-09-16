@@ -374,8 +374,15 @@ class StatisticsPage(AppPage):
         self.table.setHorizontalHeaderLabels(("Metric", "Breakdown", "Value"))
         self.table.setAccessibleName("Statistics breakdown")
         configure_policy_view(self.table)
+        # QTableWidget word-wraps cell text by default but never grows the row
+        # to fit it, so long breakdown text was clipped mid-line instead of
+        # eliding cleanly to "...". Disable wrapping so ElideRight (set by
+        # configure_policy_view) actually applies.
+        self.table.setWordWrap(False)
         self.table.setHorizontalHeader(BulkToggleHeader({}, self.table))
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(
             2, QHeaderView.ResizeMode.ResizeToContents
