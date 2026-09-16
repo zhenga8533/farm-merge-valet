@@ -34,10 +34,15 @@ own action pipeline is responsive. Three consecutive submitted actions without
 authoritative progress request runtime recovery; confirmed actions and supply-
 crate spawns reset the count. A game-reported session replacement requests
 recovery immediately, while a missing action runtime receives a 30-second grace
-period for normal loading and scene transitions. Automatic recovery briefly
-navigates the verified managed game tab away before reopening the trusted portal
-and creating a fresh bot/runtime. A repeated failure ends the run; unowned
-browsers and pages are never restarted automatically.
+period for normal loading and scene transitions, and a CDP connection that
+cannot be reached at all (for example, a transient wifi drop) receives a
+60-second grace period. Automatic recovery briefly navigates the verified
+managed game tab away before reopening the trusted portal and creating a fresh
+bot/runtime; the tab lookup itself retries with backoff in case the same kind
+of transient disconnect happens right as recovery starts. The number of
+recovery attempts allowed before the run ends is configurable
+(`max_game_recovery_attempts`, 0 for unlimited) and resets after an hour of
+healthy running; unowned browsers and pages are never restarted automatically.
 
 Board discovery normally uses the cached active map. After a scene transition,
 the stable HUD registry can bind the replacement map directly. If both references
