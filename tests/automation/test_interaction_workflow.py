@@ -903,7 +903,9 @@ def test_paid_obstacle_does_not_block_an_available_worker(monkeypatch) -> None:
     assert [(action.kind, action.coord) for action in immediate] == [
         (InteractionTargetKind.CLEAR, (5, 6))
     ]
-    assert bot._obstacle_focus == ((5, 6), 92)
+    # The worker is used on the ready obstacle this tick, but focus must stay
+    # on the paid one so progress on it resumes once it becomes clearable.
+    assert bot._obstacle_focus == ((3, 4), 91)
 
 
 def test_recently_looted_obstacle_keeps_focus_until_stage_settles(monkeypatch) -> None:

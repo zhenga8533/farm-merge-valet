@@ -551,6 +551,34 @@ def test_obstacle_focus_rebinds_when_stage_replaces_runtime_object() -> None:
     assert bot._obstacle_focus == ((1, 0), 12)
 
 
+def test_substituting_for_a_clearing_obstacle_does_not_abandon_its_focus() -> None:
+    bot = bare_bot()
+    bot._energy = 50
+    bot._workers = WorkerState(1, 1)
+    bot._obstacle_focus = ((0, 0), 1)
+    # The focused obstacle is between stages (loot pending) and cannot be
+    # reselected until claimed; a fresh obstacle is the only other candidate.
+    in_progress = ObstacleCandidate(
+        (0, 0), "tree_medium", 1, ObstacleState(3, 5, 5, False, clearing=True, required_workers=1)
+    )
+    fresh = ObstacleCandidate(
+        (1, 0), "tree_medium", 2, ObstacleState(5, 5, 5, False, required_workers=1)
+    )
+
+    assert bot._obstacle_to_clear([in_progress, fresh]) == fresh
+    # Substituting a filler action must not steal focus from the more
+    # advanced obstacle that is merely waiting on its loot claim.
+    assert bot._obstacle_focus == ((0, 0), 1)
+
+    # Once its loot is claimed, the original obstacle is clearable again and
+    # must resume ahead of the fresh one, matching its remaining priority.
+    resumed = ObstacleCandidate(
+        (0, 0), "tree_medium", 1, ObstacleState(3, 5, 5, False, required_workers=1)
+    )
+    assert bot._obstacle_to_clear([resumed, fresh]) == resumed
+    assert bot._obstacle_focus == ((0, 0), 1)
+
+
 def test_live_sync_uses_one_atomic_snapshot_and_suppresses_disabled_sections() -> None:
     class SnapshotRuntime(FakeRuntime):
         def __init__(self) -> None:

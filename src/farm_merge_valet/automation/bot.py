@@ -949,12 +949,12 @@ class Bot:
         ):
             return None
 
-        selected = plan_obstacle_clear(
-            prioritized, energy, workers, self.config.minimum_energy_reserve
-        )
-        if selected is not None:
-            self._obstacle_focus = selected.coord, selected.object_id
-        return selected
+        # `focused` is mid its own clear/loot cycle and cannot be reselected until
+        # its loot is claimed (plan_obstacle_clear excludes any clearing obstacle).
+        # Substituting another obstacle for this tick must not overwrite the
+        # persisted focus, or progress on `focused` is abandoned permanently
+        # instead of being resumed once it is clearable again.
+        return plan_obstacle_clear(prioritized, energy, workers, self.config.minimum_energy_reserve)
 
     def _obstacle_contributes_to_repair(
         self, candidate: ObstacleCandidate, missing_ids: set[str]
