@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3 - 2026-09-16
+
+- Fixed the bot waiting indefinitely, with no recovery, when the game's
+  iframe could no longer be paired with a supported portal page mid-session
+  (for example, a page overlay interfering with the managed tab). It now
+  requests the existing automatic recovery (reloading the managed game page)
+  after the condition persists for 60 seconds.
+
 ## 0.1.2 - 2026-09-16
 
 - Fixed obstacle-clearing automation abandoning a partially cleared obstacle
