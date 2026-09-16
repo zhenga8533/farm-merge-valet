@@ -20,6 +20,7 @@ def test_live_land_expansion_state_is_parsed_strictly() -> None:
                     {"key": "coins", "amount": 3545},
                 ],
                 "affordable": True,
+                "maxRow": 42,
             },
             {"areaID": "bad", "premium": False, "cellCount": 0},
         ]
@@ -29,6 +30,7 @@ def test_live_land_expansion_state_is_parsed_strictly() -> None:
     assert candidates[0].area_id == "A19"
     assert candidates[0].requirements[1].amount == 3545
     assert candidates[0].source_state == 3
+    assert candidates[0].max_row == 42
 
 
 def test_land_expansion_expressions_use_native_revalidated_handler() -> None:
@@ -36,7 +38,8 @@ def test_land_expansion_expressions_use_native_revalidated_handler() -> None:
         "A19", False, (("level", 18), ("coins", 3545)), 1000, 7, 3
     )
 
-    assert "service.getNextAreaToUnlock()" in _READ_LAND_EXPANSION_EXPRESSION
+    assert "service.getMapAreasByState(1)" in _READ_LAND_EXPANSION_EXPRESSION
+    assert "service.getMapArea(expected.areaID)" in action
     assert "service.canUnlockArea(area)" in action
     assert "service.unlockArea(area)" in action
     assert "land-expansion-cost-changed" in action

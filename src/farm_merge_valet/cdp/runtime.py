@@ -772,6 +772,7 @@ class GameRuntimeAdapter:
             cell_count = entry.get("cellCount")
             affordable = entry.get("affordable")
             source_state = entry.get("sourceState")
+            max_row = entry.get("maxRow")
             raw_requirements = entry.get("requirements")
             if (
                 not isinstance(area_id, str)
@@ -782,6 +783,8 @@ class GameRuntimeAdapter:
                 or not isinstance(affordable, bool)
                 or not isinstance(source_state, int)
                 or isinstance(source_state, bool)
+                or not isinstance(max_row, int)
+                or isinstance(max_row, bool)
                 or not isinstance(raw_requirements, list)
             ):
                 continue
@@ -816,6 +819,7 @@ class GameRuntimeAdapter:
                         tuple(requirements),
                         affordable,
                         source_state,
+                        max_row,
                     )
                 )
         return tuple(candidates)

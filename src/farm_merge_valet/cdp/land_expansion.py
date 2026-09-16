@@ -4,43 +4,53 @@ from __future__ import annotations
 
 import json
 
-_READ_LAND_EXPANSION_EXPRESSION = r"""
-(() => {
+_UNLOCKABLE_AREA_STATE = 1
+
+_READ_LAND_EXPANSION_EXPRESSION = f"""
+(() => {{
   const board = window.__fmvBoardCells;
   const services = window.__fmvGameplayServices;
   if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
       services?.mapGrid?._cells !== board) return null;
-  const readCandidate = (service, premium) => {
+  const readCandidates = (service, premium) => {{
     if (service?._services !== services || service._isActive === false ||
-        typeof service.getNextAreaToUnlock !== 'function' ||
+        typeof service.getMapAreasByState !== 'function' ||
         typeof service.canUnlockArea !== 'function' ||
-        typeof service.unlockArea !== 'function') return null;
-    const area = service.getNextAreaToUnlock();
-    if (!area || typeof area.id !== 'string' || !Number.isInteger(area.state) ||
-        !Array.isArray(area.cells) || !Array.isArray(area.requirements?.buy)) return null;
-    const requirements = area.requirements.buy.flatMap((requirement) =>
-      typeof requirement?.key === 'string' && Number.isInteger(requirement?.amount) &&
-      requirement.amount >= 0 ? [{
-        key: requirement.key,
-        amount: requirement.amount,
-        available: services.ordersService?._inventory?.getInventoryItem?.(
-          requirement.key)?.amount ?? null,
-      }] : []);
-    if (requirements.length !== area.requirements.buy.length) return null;
-    return {
-      areaID: area.id,
-      sourceState: area.state,
-      premium,
-      cellCount: area.cells.length,
-      requirements,
-      affordable: service.canUnlockArea(area) === true,
-    };
-  };
+        typeof service.unlockArea !== 'function') return [];
+    const areas = service.getMapAreasByState({_UNLOCKABLE_AREA_STATE});
+    if (!Array.isArray(areas)) return [];
+    const results = [];
+    for (const area of areas) {{
+      if (!area || typeof area.id !== 'string' || !Number.isInteger(area.state) ||
+          !Array.isArray(area.cells) || !Array.isArray(area.requirements?.buy)) continue;
+      const requirements = area.requirements.buy.flatMap((requirement) =>
+        typeof requirement?.key === 'string' && Number.isInteger(requirement?.amount) &&
+        requirement.amount >= 0 ? [{{
+          key: requirement.key,
+          amount: requirement.amount,
+          available: services.ordersService?._inventory?.getInventoryItem?.(
+            requirement.key)?.amount ?? null,
+        }}] : []);
+      if (requirements.length !== area.requirements.buy.length) continue;
+      const rows = area.cells.map((cell) => cell?.row);
+      if (rows.some((row) => !Number.isInteger(row))) continue;
+      results.push({{
+        areaID: area.id,
+        sourceState: area.state,
+        premium,
+        cellCount: area.cells.length,
+        requirements,
+        affordable: service.canUnlockArea(area) === true,
+        maxRow: Math.max(...rows),
+      }});
+    }}
+    return results;
+  }};
   return [
-    readCandidate(services.mapAreaService, false),
-    readCandidate(services.premiumAreaService, true),
-  ].filter(Boolean);
-})()
+    ...readCandidates(services.mapAreaService, false),
+    ...readCandidates(services.premiumAreaService, true),
+  ];
+}})()
 """
 
 
@@ -72,11 +82,11 @@ def land_expansion_action_expression(
     return {{status: 'unavailable', detail: 'runtime-scene-changed'}};
   const service = expected.premium ? services?.premiumAreaService : services?.mapAreaService;
   if (service?._services !== services || service._isActive === false ||
-      typeof service.getNextAreaToUnlock !== 'function' ||
+      typeof service.getMapArea !== 'function' ||
       typeof service.canUnlockArea !== 'function' || typeof service.unlockArea !== 'function')
     return {{status: 'unavailable', detail: 'land-expansion-handler-not-current'}};
-  const area = service.getNextAreaToUnlock();
-  if (!area || area.id !== expected.areaID || area.state !== expected.sourceState)
+  const area = service.getMapArea(expected.areaID);
+  if (!area || area.state !== expected.sourceState)
     return {{status: 'stale-source', detail: 'land-expansion-changed'}};
   const actual = area.requirements?.buy;
   if (!Array.isArray(actual) || actual.length !== expected.requirements.length ||
