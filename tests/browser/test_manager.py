@@ -472,3 +472,48 @@ def test_recover_game_allows_observation_portal_restart(monkeypatch) -> None:
 
     assert manager.recover_game() is loaded
     assert restarted == [True]
+
+
+def test_recover_game_retries_a_transient_target_loss(monkeypatch) -> None:
+    manager = BrowserManager(AppConfig(window_title="game title"))
+    loaded = BrowserStatus(True, True, True, game_loaded=True)
+    monkeypatch.setattr(manager, "ensure_running", lambda: loaded)
+    monkeypatch.setattr(manager, "status", lambda: loaded)
+    attempts = 0
+
+    def flaky_restart(*_args, **_kwargs) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise CdpConnectionError("no Farm Merge Valley iframe paired")
+
+    monkeypatch.setattr("farm_merge_valet.browser.manager.restart_game_page", flaky_restart)
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.time.sleep", lambda seconds: sleeps.append(seconds)
+    )
+
+    assert manager.recover_game() is loaded
+    assert attempts == 3
+    # 2.0 and 4.0 are the retry backoff; the trailing 0.25 is recover_game's
+    # own settle pause after a successful restart.
+    assert sleeps == [2.0, 4.0, 0.25]
+
+
+def test_recover_game_gives_up_after_exhausting_target_retries(monkeypatch) -> None:
+    manager = BrowserManager(AppConfig(window_title="game title"))
+    loaded = BrowserStatus(True, True, True, game_loaded=True)
+    monkeypatch.setattr(manager, "ensure_running", lambda: loaded)
+    attempts = 0
+
+    def always_fails(*_args, **_kwargs) -> None:
+        nonlocal attempts
+        attempts += 1
+        raise CdpConnectionError("no Farm Merge Valley iframe paired")
+
+    monkeypatch.setattr("farm_merge_valet.browser.manager.restart_game_page", always_fails)
+    monkeypatch.setattr("farm_merge_valet.browser.manager.time.sleep", lambda _seconds: None)
+
+    with pytest.raises(CdpConnectionError):
+        manager.recover_game()
+    assert attempts == 5
