@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QVBoxLayout,
+    QWidget,
 )
 
 from farm_merge_valet import __version__
@@ -21,7 +22,7 @@ from farm_merge_valet.gui.components.widgets import (
     set_styled_property,
 )
 from farm_merge_valet.gui.controller import ApplicationState, ApplicationStatus
-from farm_merge_valet.gui.pages.base import AppPage
+from farm_merge_valet.gui.pages.base import CONTENT_MAX_WIDTH, AppPage
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +35,19 @@ class DashboardPage(AppPage):
     def __init__(self) -> None:
         super().__init__("Dashboard", "Control automation and review live state.")
 
+        content = QWidget()
+        content.setMaximumWidth(CONTENT_MAX_WIDTH)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+
         metrics = QGridLayout()
         metrics.setSpacing(10)
         self.mode_value = self._metric(metrics, 0, 0, "Mode", "Stopped")
         self.browser_value = self._metric(metrics, 0, 1, "Browser", "Not checked")
         self.runtime_value = self._metric(metrics, 1, 0, "Runtime", "Waiting")
         self.phase_value = self._metric(metrics, 1, 1, "Phase", "—")
-        self.page_layout.addLayout(metrics)
+        content_layout.addLayout(metrics)
 
         activity = QFrame()
         activity.setObjectName("card")
@@ -51,7 +58,7 @@ class DashboardPage(AppPage):
         self.activity_value.setWordWrap(True)
         activity_layout.addWidget(activity_label)
         activity_layout.addWidget(self.activity_value)
-        self.page_layout.addWidget(activity)
+        content_layout.addWidget(activity)
 
         guidance = QFrame()
         guidance.setObjectName("card")
@@ -62,7 +69,7 @@ class DashboardPage(AppPage):
         self.guidance_value.setWordWrap(True)
         guidance_layout.addWidget(guidance_label)
         guidance_layout.addWidget(self.guidance_value)
-        self.page_layout.addWidget(guidance)
+        content_layout.addWidget(guidance)
 
         controls = QHBoxLayout()
         self.run_button = ActionButton("Start")
@@ -75,7 +82,9 @@ class DashboardPage(AppPage):
         controls.addWidget(self.pause_button)
         controls.addStretch()
         controls.addWidget(self.overlay_button)
-        self.page_layout.addLayout(controls)
+        content_layout.addLayout(controls)
+
+        self.page_layout.addWidget(content)
         self.page_layout.addStretch()
         self.version_label = QLabel(f"Farm Merge Valet {__version__}")
         self.version_label.setObjectName("dashboardVersion")

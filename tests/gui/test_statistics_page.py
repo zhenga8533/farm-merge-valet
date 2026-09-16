@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from farm_merge_valet.gui.components.bulk_header import BulkToggleHeader
@@ -37,7 +38,7 @@ def test_statistics_page_presents_aggregate_snapshot() -> None:
     assert page.actions_value.text() == "4"
     assert page.interactions_value.text() == "3"
     assert page.workflows_value.text() == "2"
-    assert page.reliability_value.text() == "1 / 0"
+    assert page.reliability_value.text() == "1"
     assert page.table.rowCount() == 4
     assert isinstance(page.table.horizontalHeader(), BulkToggleHeader)
     assert page.table.horizontalHeader().sortIndicatorSection() == 0
@@ -49,8 +50,83 @@ def test_statistics_page_presents_aggregate_snapshot() -> None:
 
     page.set_snapshot(None)
     assert page.actions_value.text() == "0"
-    assert page.reliability_value.text() == "0 / 0"
+    assert page.reliability_value.text() == "0"
     assert page.table.rowCount() == 0
+
+
+def test_repeated_identical_snapshot_skips_the_rebuild() -> None:
+    _app = QApplication.instance() or QApplication([])
+    page = StatisticsPage()
+    now = datetime.now(UTC)
+    snapshot = StatisticsSnapshot(
+        "24h",
+        (StatisticsRow("action.merge", 4, (("item", "wheat"), ("tier", "2"))),),
+        (TrendBucket(now, 9, 1),),
+    )
+
+    page.set_snapshot(snapshot)
+    item = page.table.item(0, 2)
+    assert item is not None
+
+    # A periodic refresh that finds no new data must not touch existing cells,
+    # matching a real 5-second poll that finds an identical snapshot when idle.
+    page.set_snapshot(snapshot)
+
+    assert page.table.item(0, 2) is item
+
+
+def test_snapshot_with_same_rows_updates_values_in_place() -> None:
+    _app = QApplication.instance() or QApplication([])
+    page = StatisticsPage()
+    now = datetime.now(UTC)
+    first = StatisticsSnapshot(
+        "24h",
+        (StatisticsRow("action.merge", 4, (("item", "wheat"), ("tier", "2"))),),
+        (TrendBucket(now, 9, 1),),
+    )
+    second = StatisticsSnapshot(
+        "24h",
+        (StatisticsRow("action.merge", 7, (("item", "wheat"), ("tier", "2"))),),
+        (TrendBucket(now, 9, 1),),
+    )
+
+    page.set_snapshot(first)
+    item = page.table.item(0, 2)
+    assert item is not None
+
+    page.set_snapshot(second)
+
+    # Same breakdown row, only the value changed: the existing cell is reused
+    # rather than the table being cleared and rebuilt from scratch.
+    assert page.table.item(0, 2) is item
+    assert item.text() == "7"
+
+
+def test_in_place_update_targets_rows_by_key_not_table_position() -> None:
+    _app = QApplication.instance() or QApplication([])
+    page = StatisticsPage()
+    now = datetime.now(UTC)
+    first = StatisticsSnapshot(
+        "24h",
+        (StatisticsRow("action.merge", 1), StatisticsRow("zzz.other", 100)),
+        (TrendBucket(now, 1, 0),),
+    )
+    page.set_snapshot(first)
+
+    # A user-driven sort physically reorders which table row holds which
+    # metric; the in-place update must not assume the old positional order.
+    page.table.sortByColumn(2, Qt.SortOrder.DescendingOrder)
+    assert page.table.item(0, 0).text() == "Zzz › Other"
+
+    second = StatisticsSnapshot(
+        "24h",
+        (StatisticsRow("action.merge", 5), StatisticsRow("zzz.other", 100)),
+        (TrendBucket(now, 1, 0),),
+    )
+    page.set_snapshot(second)
+
+    rows = {page.table.item(row, 0).text(): page.table.item(row, 2).text() for row in range(2)}
+    assert rows == {"Action › Merge": "5", "Zzz › Other": "100"}
 
 
 def test_statistics_page_emits_selected_range_and_actions() -> None:
