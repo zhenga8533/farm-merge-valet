@@ -727,6 +727,26 @@ def test_stalled_overlay_requests_runtime_recovery() -> None:
         bot.step()
 
 
+def test_persistent_connection_loss_requests_recovery_after_grace_period(monkeypatch) -> None:
+    class UnmatchedTargetRuntime(FakeRuntime):
+        def read_snapshot(self, _options):
+            raise RuntimeConnectionError(
+                "no Farm Merge Valley iframe paired with a matching supported portal page is open"
+            )
+
+    bot = bare_bot()
+    bot.runtime = UnmatchedTargetRuntime()
+    current_time = [100.0]
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: current_time[0])
+
+    bot.step()
+    current_time[0] = 130.0
+    bot.step()
+    current_time[0] = 161.0
+    with pytest.raises(RuntimeRecoveryRequired, match="unavailable for over 60 seconds"):
+        bot.step()
+
+
 def test_overlay_dismissal_can_be_disabled(caplog) -> None:
     class OverlayRuntime(FakeRuntime):
         def read_runtime_health(self):

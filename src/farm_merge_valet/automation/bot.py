@@ -97,6 +97,7 @@ logger = logging.getLogger(__name__)
 
 _ACTION_FAILURE_LIMIT = DEFAULT_ACTION_TIMING.failure_limit
 _RUNTIME_STARTUP_GRACE_SECONDS = 30.0
+_CONNECTION_LOSS_GRACE_SECONDS = 60.0
 
 
 class Bot:
@@ -163,6 +164,7 @@ class Bot:
         self._runtime_initializing_reported = False
         self._runtime_unavailable_warned = False
         self._runtime_ready_once = False
+        self._connection_loss_started_at: float | None = None
         self._last_wait_reason: str | None = None
         self._last_wait_log_at = 0.0
         self._idle_active = False
@@ -1438,6 +1440,7 @@ class Bot:
         """Run one perceive -> plan -> internal action -> verify iteration."""
         try:
             snapshot = self.runtime.read_snapshot(self._snapshot_options())
+            self._connection_loss_started_at = None
             if snapshot is None:
                 self._report_wait("authoritative runtime snapshot unavailable")
                 return
@@ -1467,7 +1470,16 @@ class Bot:
         except RuntimeConnectionError as exc:
             if self._interrupt_event.is_set():
                 return
+            now = self._now()
+            if self._connection_loss_started_at is None:
+                self._connection_loss_started_at = now
+            loss_elapsed = now - self._connection_loss_started_at
             self._report_wait(str(exc))
+            if loss_elapsed >= _CONNECTION_LOSS_GRACE_SECONDS:
+                raise RuntimeRecoveryRequired(
+                    "game runtime connection was unavailable for over "
+                    f"{_CONNECTION_LOSS_GRACE_SECONDS:.0f} seconds ({exc})"
+                ) from exc
             return
         if health.transient_overlay is not None:
             overlay_detail = health.transient_overlay_detail or health.transient_overlay.value
