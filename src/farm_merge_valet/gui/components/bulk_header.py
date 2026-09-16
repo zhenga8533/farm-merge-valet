@@ -69,17 +69,26 @@ class BulkToggleHeader(QHeaderView):
     def sectionSizeFromContents(self, logical_index: int) -> QSize:
         size = super().sectionSizeFromContents(logical_index)
         control = self._controls.get(logical_index)
-        if control is None:
-            return size
-        hint = control.sizeHint()
-        label_width = self.fontMetrics().horizontalAdvance(self._labels[logical_index])
-        required_width = max(
-            hint.width() + (_CONTROL_LEFT_MARGIN * 2),
+        label_width = self.fontMetrics().horizontalAdvance(self._section_label(logical_index))
+        # Reserve room for the label plus our own hand-drawn sort indicator even
+        # for columns without a toggle checkbox: ResizeToContents undersizes an
+        # otherwise-plain column (especially with no rows yet), and paintSection
+        # steals space from whatever it's given to draw the indicator, so an
+        # unreserved column truncates its label as soon as it becomes the sort
+        # target.
+        label_required_width = (
             label_width
             + (_LABEL_HORIZONTAL_PADDING * 2)
             + _SORT_INDICATOR_GAP
-            + _SORT_INDICATOR_WIDTH,
+            + _SORT_INDICATOR_WIDTH
         )
+        if control is None:
+            required_height = self.fontMetrics().height() + (_HEADER_VERTICAL_PADDING * 2)
+            return QSize(
+                max(size.width(), label_required_width), max(size.height(), required_height)
+            )
+        hint = control.sizeHint()
+        required_width = max(hint.width() + (_CONTROL_LEFT_MARGIN * 2), label_required_width)
         required_height = (
             self.fontMetrics().height() + hint.height() + (_HEADER_VERTICAL_PADDING * 3)
         )
