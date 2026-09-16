@@ -6,6 +6,7 @@ import logging
 import shutil
 import sqlite3
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -46,6 +47,10 @@ from farm_merge_valet.observability.logging import (
 from farm_merge_valet.observability.statistics import StatisticsService
 
 logger = logging.getLogger(__name__)
+
+# A run that stays healthy this long before needing recovery again is treated
+# as a fresh start rather than a continuation of a prior failure streak.
+_RECOVERY_HEALTHY_RESET_SECONDS = 3600.0
 
 
 class ApplicationState(StrEnum):
@@ -298,25 +303,36 @@ class ApplicationController(QObject):
                 if config.webhook_include_screenshots
                 else None,
             ):
-                recovery_attempted = False
+                recovery_attempts = 0
                 while not self._shutting_down and not self._stopping:
                     self._bot = create_bot(config)
                     latest_config = self.store.current
                     if latest_config != config:
                         self._bot.update_config(latest_config)
+                    run_started_at = time.monotonic()
                     try:
                         self._bot.run_forever(on_initialized=refresh_startup_data)
                         break
                     except RuntimeRecoveryRequired as exc:
-                        if recovery_attempted or not self.store.current.auto_recover_game:
+                        if time.monotonic() - run_started_at >= _RECOVERY_HEALTHY_RESET_SECONDS:
+                            recovery_attempts = 0
+                        max_attempts = self.store.current.max_game_recovery_attempts
+                        if not self.store.current.auto_recover_game or (
+                            max_attempts and recovery_attempts >= max_attempts
+                        ):
                             raise
-                        recovery_attempted = True
+                        recovery_attempts += 1
                         log_event(
                             logger,
                             logging.WARNING,
                             "runtime.recovery_started",
-                            "Recovering the managed game after an unresponsive action pipeline.",
+                            "Recovering the managed game after an unresponsive action "
+                            "pipeline (attempt %d%s).",
+                            recovery_attempts,
+                            f"/{max_attempts}" if max_attempts else "",
                             detail=str(exc),
+                            attempt=recovery_attempts,
+                            attempt_limit=max_attempts or None,
                         )
                         manager.recover_game()
         except BrowserManagerError as exc:

@@ -101,6 +101,7 @@ def test_browser_configuration_is_consolidated_on_browser_page(tmp_path) -> None
         "browser",
         "browser_auto_launch",
         "auto_recover_game",
+        "max_game_recovery_attempts",
         "browser_executable",
         "browser_profile_dir",
         "window_title",

@@ -461,7 +461,17 @@ def test_managed_browser_defaults_to_auto_launch() -> None:
     assert settings.browser == "auto"
     assert settings.browser_auto_launch
     assert settings.auto_recover_game
+    assert settings.max_game_recovery_attempts == 1
     assert settings.browser_profile_dir is None
+
+
+def test_max_game_recovery_attempts_allows_zero_for_unlimited_retries() -> None:
+    assert AppConfig(max_game_recovery_attempts=0).max_game_recovery_attempts == 0
+
+
+def test_max_game_recovery_attempts_rejects_negative_values() -> None:
+    with pytest.raises(ValidationError):
+        AppConfig(max_game_recovery_attempts=-1)
 
 
 def test_generated_assets_default_to_the_per_user_cache(monkeypatch, tmp_path) -> None:
