@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _INITIAL_RELOAD_DISCOVERY_INTERVAL_SECONDS = 2.0
+_BOARD_SETTLE_SECONDS = 1.0
 
 
 class LuckyMergeError(RuntimeError):
@@ -108,6 +109,17 @@ def _wait_for_board(
     raise LuckyMergeError("Saved game did not become available after reload.")
 
 
+def _wait_for_settled_board(
+    bot: Bot, timeout: float = 45.0, *, event_key: str | None = None
+) -> dict[GridCoord, LiveCellState]:
+    """Like _wait_for_board, but confirms the read is unchanged after a short
+    follow-up delay so a board caught mid-recovery isn't trusted as final."""
+    board = _wait_for_board(bot, timeout=timeout, event_key=event_key)
+    bot._interrupt_event.wait(_BOARD_SETTLE_SECONDS)
+    settled = bot.runtime.read_board_state()
+    return settled if settled is not None else board
+
+
 def _wait_for_result(
     bot: Bot,
     before: dict[GridCoord, LiveCellState],
@@ -184,7 +196,7 @@ def run_lucky_merge(bot: Bot, action: MergeAction) -> None:
                 if not bot.runtime.save_game():
                     raise LuckyMergeError("Lucky merge could not be saved after reconnecting.")
                 network.reload_online()
-                persisted = _wait_for_board(bot, event_key=event_key)
+                persisted = _wait_for_settled_board(bot, event_key=event_key)
                 if (
                     classify_lucky_merge(baseline, persisted, action, bot._blueprint_items)
                     != "lucky"

@@ -200,7 +200,6 @@ def test_normal_attempt_retries_until_lucky_result_persists(monkeypatch) -> None
     first, second = FakeNetwork(), FakeNetwork()
     networks = [first, second]
     attempts = iter(("normal", "lucky"))
-    reloaded = iter((board(), board(next_tier=2)))
     drops: list[tuple[tuple[int, int], tuple[int, int]]] = []
     runtime = SimpleNamespace(
         save_game=lambda: True,
@@ -219,7 +218,10 @@ def test_normal_attempt_retries_until_lucky_result_persists(monkeypatch) -> None
     )
     monkeypatch.setattr(lucky_merge, "_verify_offline", lambda _bot: None)
     monkeypatch.setattr(lucky_merge, "_wait_for_result", lambda *_args: next(attempts))
-    monkeypatch.setattr(lucky_merge, "_wait_for_board", lambda *_args, **_kwargs: next(reloaded))
+    monkeypatch.setattr(lucky_merge, "_wait_for_board", lambda *_args, **_kwargs: board())
+    monkeypatch.setattr(
+        lucky_merge, "_wait_for_settled_board", lambda *_args, **_kwargs: board(next_tier=2)
+    )
 
     lucky_merge.run_lucky_merge(bot, merge_action())
 
@@ -248,7 +250,7 @@ def test_lucky_result_requires_saved_board_confirmation(monkeypatch) -> None:
     bot = SimpleNamespace(runtime=runtime, _interrupt_event=Event(), _blueprint_items=ITEMS)
     monkeypatch.setattr(lucky_merge, "_verify_offline", lambda _bot: None)
     monkeypatch.setattr(lucky_merge, "_wait_for_result", lambda *_args: "lucky")
-    monkeypatch.setattr(lucky_merge, "_wait_for_board", lambda *_args, **_kwargs: board())
+    monkeypatch.setattr(lucky_merge, "_wait_for_settled_board", lambda *_args, **_kwargs: board())
 
     with pytest.raises(lucky_merge.LuckyMergeError, match="did not persist"):
         lucky_merge.run_lucky_merge(bot, merge_action())
@@ -256,3 +258,11 @@ def test_lucky_result_requires_saved_board_confirmation(monkeypatch) -> None:
     assert saves == 2
     assert network.reloaded == 1
     assert not network.offline
+
+
+def test_settled_board_trusts_the_confirmation_read_over_the_initial_one(monkeypatch) -> None:
+    runtime = SimpleNamespace(read_board_state=lambda: board(next_tier=2))
+    bot = SimpleNamespace(runtime=runtime, _interrupt_event=Event())
+    monkeypatch.setattr(lucky_merge, "_wait_for_board", lambda *_args, **_kwargs: board())
+
+    assert lucky_merge._wait_for_settled_board(bot) == board(next_tier=2)

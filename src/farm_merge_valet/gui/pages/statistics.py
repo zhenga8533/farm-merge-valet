@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from math import ceil
+from typing import Literal
 
-from PySide6.QtCore import QRect, Qt, Signal
+from PySide6.QtCore import QEvent, QRect, Qt, Signal
 from PySide6.QtGui import QMouseEvent, QPainter, QPalette
 from PySide6.QtWidgets import (
     QFrame,
@@ -25,9 +26,17 @@ from farm_merge_valet.gui.components.input_controls import FocusAwareComboBox
 from farm_merge_valet.gui.components.policy_view import configure_policy_view
 from farm_merge_valet.gui.components.status import StatusLabel
 from farm_merge_valet.gui.components.widgets import metric_card, secondary_button
-from farm_merge_valet.gui.pages.base import AppPage
+from farm_merge_valet.gui.pages.base import CONTENT_MAX_WIDTH, AppPage
 from farm_merge_valet.gui.theme import warning_color
-from farm_merge_valet.observability.statistics import StatisticsSnapshot, TrendBucket
+from farm_merge_valet.observability.statistics import (
+    StatisticsRow,
+    StatisticsSnapshot,
+    TrendBucket,
+)
+
+_MIN_BUCKET_WIDTH = 10.0
+_BAR_GAP = 2.0
+_MIN_LABEL_SPACING = 90.0
 
 _RANGES = (
     ("Current session", "session"),
@@ -45,6 +54,8 @@ class ActivityTrend(QWidget):
         self._range_key = "session"
         self._range_start: datetime | None = None
         self._range_end: datetime | None = None
+        self._hover_index: int | None = None
+        self._binned: tuple[TrendBucket, ...] = ()
         self.setMinimumHeight(170)
         self.setAccessibleName("Activity and reliability trend")
         self.setMouseTracking(True)
@@ -62,24 +73,34 @@ class ActivityTrend(QWidget):
         self._range_end = range_end or (
             buckets[-1].started_at + timedelta(hours=1) if buckets else None
         )
+        self._hover_index = None
+        # Bin the raw history once here rather than on every hover/paint, which
+        # would otherwise re-scan potentially hundreds of stored hourly buckets
+        # on every mouse-move event and cause visible hover lag.
+        self._binned = self._bin_buckets()
         self.setAccessibleDescription(
             f"{sum(bucket.activity for bucket in buckets):g} activity events and "
             f"{sum(bucket.reliability for bucket in buckets):g} reliability events"
         )
         self.update()
 
-    def _display_buckets(self) -> tuple[TrendBucket, ...]:
+    def _target_count(self) -> int:
         if self._range_start is None or self._range_end is None:
-            return ()
+            return 0
         span = max(1.0, (self._range_end - self._range_start).total_seconds())
         if self._range_key == "24h":
-            count = 24
-        elif self._range_key == "7d":
-            count = 7
-        elif self._range_key == "30d":
-            count = 30
-        else:
-            count = min(40, max(1, ceil(span / 3600)))
+            return 24
+        if self._range_key == "7d":
+            return 7
+        if self._range_key == "30d":
+            return 30
+        return min(40, max(1, ceil(span / 3600)))
+
+    def _bin_buckets(self) -> tuple[TrendBucket, ...]:
+        count = self._target_count()
+        if count == 0 or self._range_start is None or self._range_end is None:
+            return ()
+        span = max(1.0, (self._range_end - self._range_start).total_seconds())
         totals = [[0.0, 0.0] for _ in range(count)]
         for bucket in self._buckets:
             # Hourly storage cannot split a bucket at a rolling-range boundary.
@@ -96,12 +117,52 @@ class ActivityTrend(QWidget):
             for index, (activity, reliability) in enumerate(totals)
         )
 
-    def _plot_rect(self) -> QRect:
-        return self.rect().adjusted(48, 12, -12, -32)
+    def _display_buckets(self, plot_width: float | None = None) -> tuple[TrendBucket, ...]:
+        binned = self._binned
+        if not binned or plot_width is None:
+            return binned
+        # Never draw bars narrower than legible, even at a small window width.
+        # This merges the already-binned buckets further; it never re-scans
+        # the raw history, so it stays cheap even during rapid mouse movement.
+        max_slots = max(1, int(plot_width // _MIN_BUCKET_WIDTH))
+        if max_slots >= len(binned):
+            return binned
+        merged = [[0.0, 0.0] for _ in range(max_slots)]
+        for index, bucket in enumerate(binned):
+            target = min(max_slots - 1, index * max_slots // len(binned))
+            merged[target][0] += bucket.activity
+            merged[target][1] += bucket.reliability
+        start = self._range_start or binned[0].started_at
+        span = (
+            (self._range_end - self._range_start).total_seconds()
+            if self._range_start is not None and self._range_end is not None
+            else 0.0
+        )
+        return tuple(
+            TrendBucket(start + timedelta(seconds=span * index / max_slots), activity, reliability)
+            for index, (activity, reliability) in enumerate(merged)
+        )
+
+    def _plot_rect(self, left_margin: float = 48.0) -> QRect:
+        return self.rect().adjusted(int(left_margin), 12, -12, -32)
+
+    @staticmethod
+    def _left_margin(maximum: float) -> float:
+        # Widen the axis gutter for larger maximums so the value label never clips.
+        return max(40.0, 18.0 + len(f"{maximum:g}") * 7.0)
+
+    def _layout(self) -> tuple[QRect, tuple[TrendBucket, ...], float]:
+        provisional_rect = self._plot_rect()
+        buckets = self._display_buckets(provisional_rect.width())
+        if not buckets:
+            return provisional_rect, buckets, 1.0
+        # Bars stack activity and reliability, so the axis scales to their sum.
+        maximum = max(1.0, max(bucket.activity + bucket.reliability for bucket in buckets))
+        return self._plot_rect(self._left_margin(maximum)), buckets, maximum
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        rect = self._plot_rect()
-        buckets = self._display_buckets()
+        rect, buckets, _maximum = self._layout()
+        hover_index: int | None = None
         if (
             rect.width() > 0
             and rect.contains(event.position().toPoint())
@@ -112,6 +173,7 @@ class ActivityTrend(QWidget):
                 len(buckets) - 1,
                 int((event.position().x() - rect.left()) / rect.width() * len(buckets)),
             )
+            hover_index = index
             bucket = buckets[index]
             end = (
                 self._range_start
@@ -126,32 +188,59 @@ class ActivityTrend(QWidget):
             )
         else:
             self.setToolTip("")
+        if hover_index != self._hover_index:
+            self._hover_index = hover_index
+            self.update()
         super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        if self._hover_index is not None:
+            self._hover_index = None
+            self.update()
+        super().leaveEvent(event)
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = self._plot_rect()
+        rect, buckets, maximum = self._layout()
         painter.fillRect(rect, self.palette().alternateBase())
-        buckets = self._display_buckets()
         if not buckets:
             painter.setPen(self.palette().text().color())
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "No activity in this range")
             return
-        maximum = max(1.0, max(max(bucket.activity, bucket.reliability) for bucket in buckets))
         width = rect.width() / len(buckets)
         activity_color = self.palette().color(QPalette.ColorRole.Link)
         reliability_color = warning_color(self.palette())
+        label_width = max(1, rect.left() - 4)
+        if self._hover_index is not None and self._hover_index < len(buckets):
+            highlight_color = self.palette().color(QPalette.ColorRole.Highlight)
+            highlight_color.setAlpha(50)
+            hover_x = rect.left() + self._hover_index * width
+            painter.fillRect(
+                int(hover_x), rect.top(), max(1, int(width) + 1), rect.height(), highlight_color
+            )
+        grid_color = self.palette().mid().color()
+        grid_color.setAlpha(90)
+        painter.setPen(grid_color)
+        for fraction in (0.25, 0.5, 0.75):
+            y = int(rect.bottom() - rect.height() * fraction)
+            painter.drawLine(rect.left(), y, rect.right(), y)
         painter.setPen(self.palette().mid().color())
         painter.drawLine(rect.bottomLeft(), rect.bottomRight())
         painter.setPen(self.palette().text().color())
-        painter.drawText(2, rect.top() + 10, 42, 16, Qt.AlignmentFlag.AlignRight, f"{maximum:g}")
-        painter.drawText(2, rect.bottom() - 8, 42, 16, Qt.AlignmentFlag.AlignRight, "0")
+        painter.drawText(
+            2, rect.top() + 10, label_width, 16, Qt.AlignmentFlag.AlignRight, f"{maximum:g}"
+        )
+        midpoint_y = int(rect.bottom() - rect.height() * 0.5)
+        painter.drawText(
+            2, midpoint_y - 8, label_width, 16, Qt.AlignmentFlag.AlignRight, f"{maximum / 2:g}"
+        )
+        painter.drawText(2, rect.bottom() - 8, label_width, 16, Qt.AlignmentFlag.AlignRight, "0")
         for index, bucket in enumerate(buckets):
             x = rect.left() + index * width
             activity_height = rect.height() * bucket.activity / maximum
-            reliability_height = rect.height() * bucket.reliability / maximum
-            bar_width = max(1, int((width - 2) / 2))
+            stack_height = rect.height() * (bucket.activity + bucket.reliability) / maximum
+            bar_width = max(1, int(width - _BAR_GAP))
             painter.fillRect(
                 int(x),
                 int(rect.bottom() - activity_height),
@@ -160,10 +249,10 @@ class ActivityTrend(QWidget):
                 activity_color,
             )
             painter.fillRect(
-                int(x) + bar_width,
-                int(rect.bottom() - reliability_height),
+                int(x),
+                int(rect.bottom() - stack_height),
                 bar_width,
-                int(reliability_height),
+                int(stack_height - activity_height),
                 reliability_color,
             )
         label_format = (
@@ -173,24 +262,46 @@ class ActivityTrend(QWidget):
             if self._range_key in {"7d", "30d"}
             else "%b %d %H:%M"
         )
-        first = (self._range_start or buckets[0].started_at).astimezone()
-        last = (self._range_end or buckets[-1].started_at).astimezone()
-        painter.drawText(
-            rect.left(),
-            rect.bottom() + 4,
-            rect.width() // 2,
-            20,
-            Qt.AlignmentFlag.AlignLeft,
-            first.strftime(label_format),
+        start = self._range_start or buckets[0].started_at
+        end = self._range_end or (buckets[-1].started_at + timedelta(hours=1))
+        span_seconds = max(1.0, (end - start).total_seconds())
+        label_count = max(2, min(6, int(rect.width() / _MIN_LABEL_SPACING) + 1))
+        label_box_width = 110
+        for tick in range(label_count):
+            fraction = tick / (label_count - 1)
+            moment = (start + timedelta(seconds=span_seconds * fraction)).astimezone()
+            text = moment.strftime(label_format)
+            if tick == 0:
+                box_left, alignment = rect.left(), Qt.AlignmentFlag.AlignLeft
+            elif tick == label_count - 1:
+                box_left = rect.right() - label_box_width
+                alignment = Qt.AlignmentFlag.AlignRight
+            else:
+                center_x = rect.left() + rect.width() * fraction
+                box_left = int(center_x - label_box_width / 2)
+                alignment = Qt.AlignmentFlag.AlignHCenter
+            painter.drawText(box_left, rect.bottom() + 4, label_box_width, 20, alignment, text)
+
+
+class _LegendSwatch(QFrame):
+    """Palette-aware color dot for the activity trend legend."""
+
+    def __init__(self, series: Literal["activity", "reliability"]) -> None:
+        super().__init__()
+        self._series = series
+        self.setFixedSize(10, 10)
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = (
+            self.palette().color(QPalette.ColorRole.Link)
+            if self._series == "activity"
+            else warning_color(self.palette())
         )
-        painter.drawText(
-            rect.center().x(),
-            rect.bottom() + 4,
-            rect.width() // 2,
-            20,
-            Qt.AlignmentFlag.AlignRight,
-            last.strftime(label_format),
-        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        painter.drawEllipse(self.rect())
 
 
 class _NumericItem(QTableWidgetItem):
@@ -207,6 +318,12 @@ class StatisticsPage(AppPage):
 
     def __init__(self) -> None:
         super().__init__("Statistics", "Review persistent automation activity and reliability.")
+        content = QWidget()
+        content.setMaximumWidth(CONTENT_MAX_WIDTH)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+
         toolbar = QHBoxLayout()
         self.range_select = FocusAwareComboBox()
         self.range_select.set_choices(_RANGES)
@@ -220,27 +337,38 @@ class StatisticsPage(AppPage):
         toolbar.addStretch()
         toolbar.addWidget(self.export_button)
         toolbar.addWidget(self.reset_button)
-        self.page_layout.addLayout(toolbar)
+        content_layout.addLayout(toolbar)
 
         cards = QGridLayout()
         cards.setSpacing(10)
         self.actions_value = self._card(cards, 0, "Item actions")
         self.interactions_value = self._card(cards, 1, "Tile interactions")
         self.workflows_value = self._card(cards, 2, "Workflows")
-        self.reliability_value = self._card(cards, 3, "Warnings / errors")
-        self.page_layout.addLayout(cards)
+        self.reliability_value = self._card(cards, 3, "Reliability events")
+        content_layout.addLayout(cards)
 
         trend_card = QFrame()
         trend_card.setObjectName("card")
         trend_layout = QVBoxLayout(trend_card)
         trend_layout.addWidget(QLabel("Activity trend"))
-        self.trend_hint = QLabel("Green: activity    Amber: reliability events")
+        legend = QHBoxLayout()
+        legend.setSpacing(6)
+        legend.addWidget(_LegendSwatch("activity"))
+        legend.addWidget(QLabel("Activity"))
+        legend.addSpacing(14)
+        legend.addWidget(_LegendSwatch("reliability"))
+        legend.addWidget(QLabel("Reliability events"))
+        legend.addStretch()
+        trend_layout.addLayout(legend)
+        self.trend_hint = QLabel()
         self.trend_hint.setObjectName("pageSubtitle")
         self.trend_hint.setWordWrap(True)
         trend_layout.addWidget(self.trend_hint)
         self.trend = ActivityTrend()
         trend_layout.addWidget(self.trend)
-        self.page_layout.addWidget(trend_card)
+        content_layout.addWidget(trend_card)
+
+        self.page_layout.addWidget(content)
 
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(("Metric", "Breakdown", "Value"))
@@ -262,6 +390,8 @@ class StatisticsPage(AppPage):
         self.range_select.currentIndexChanged.connect(self._range_selected)
         self.export_button.clicked.connect(lambda: self.export_requested.emit(self.range_key))
         self.reset_button.clicked.connect(self.reset_requested)
+        self._last_snapshot: StatisticsSnapshot | None = None
+        self._row_keys: list[tuple[str, tuple[tuple[str, str], ...]]] = []
 
     @property
     def range_key(self) -> str:
@@ -278,6 +408,8 @@ class StatisticsPage(AppPage):
 
     def set_snapshot(self, snapshot: StatisticsSnapshot | None) -> None:
         if snapshot is None:
+            self._last_snapshot = None
+            self._row_keys = []
             self.status_label.set_error("Statistics are unavailable.")
             for card_value in (
                 self.actions_value,
@@ -285,19 +417,26 @@ class StatisticsPage(AppPage):
                 self.workflows_value,
             ):
                 card_value.setText("0")
-            self.reliability_value.setText("0 / 0")
+            self.reliability_value.setText("0")
             self.table.setRowCount(0)
             self.trend.set_buckets(())
             return
+        if snapshot == self._last_snapshot:
+            # The periodic refresh (every 5s while this page is visible) often finds
+            # nothing new; skip the table/chart rebuild entirely rather than freezing
+            # the GUI thread redoing work that produces an identical result.
+            return
+        self._last_snapshot = snapshot
         actions = snapshot.total("action.")
         interactions = snapshot.total("interaction.")
         workflows = snapshot.total("workflow.") + snapshot.total("shop.")
-        warnings = snapshot.total("warnings")
-        errors = snapshot.total("errors")
+        # Matches the reliability trend's own definition (observability/statistics.py):
+        # recoveries, board-blocks, and action failures, plus literal warnings/errors.
+        reliability = snapshot.total("reliability.", "warnings", "errors")
         self.actions_value.setText(self._number(actions))
         self.interactions_value.setText(self._number(interactions))
         self.workflows_value.setText(self._number(workflows))
-        self.reliability_value.setText(f"{self._number(warnings)} / {self._number(errors)}")
+        self.reliability_value.setText(self._number(reliability))
         self.trend.set_buckets(
             snapshot.trend,
             snapshot.range_key,
@@ -311,13 +450,44 @@ class StatisticsPage(AppPage):
             "all": "a proportional time span",
             "session": "an hour or a proportional time span",
         }[snapshot.range_key]
-        self.trend_hint.setText(
-            f"Green: activity    Amber: reliability events    Each bar: {interval}"
-        )
+        self.trend_hint.setText(f"Each bar: {interval}")
+        self._update_table(snapshot.rows)
+        self.status_label.set_status(f"{len(snapshot.rows)} aggregate breakdowns")
+
+    def _update_table(self, rows: tuple[StatisticsRow, ...]) -> None:
+        new_keys = [(row.metric, row.dimensions) for row in rows]
+        if new_keys == self._row_keys:
+            # Same breakdown rows as before; update the changed values in place
+            # instead of tearing down and recreating every cell in the table.
+            # Rows must be located by their stored key, not by list position:
+            # sorting (automatic or user-triggered) physically reorders which
+            # table row holds which item, so position alignment with `rows`
+            # (always in canonical backend order) cannot be assumed.
+            position_by_key: dict[tuple[str, tuple[tuple[str, str], ...]], int] = {}
+            for row_index in range(self.table.rowCount()):
+                key_item = self.table.item(row_index, 0)
+                if key_item is not None:
+                    position_by_key[key_item.data(Qt.ItemDataRole.UserRole)] = row_index
+            changed = False
+            for row in rows:
+                position = position_by_key.get((row.metric, row.dimensions))
+                if position is None:
+                    continue
+                item = self.table.item(position, 2)
+                if item is not None and item.data(Qt.ItemDataRole.UserRole) != row.value:
+                    item.setText(self._number(row.value))
+                    item.setData(Qt.ItemDataRole.UserRole, row.value)
+                    changed = True
+            if changed:
+                header = self.table.horizontalHeader()
+                self.table.sortItems(header.sortIndicatorSection(), header.sortIndicatorOrder())
+            return
+        self._row_keys = new_keys
         self.table.setSortingEnabled(False)
-        self.table.setRowCount(len(snapshot.rows))
-        for row_index, row in enumerate(snapshot.rows):
+        self.table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
             metric = QTableWidgetItem(row.metric.replace("_", " ").replace(".", " \u203a ").title())
+            metric.setData(Qt.ItemDataRole.UserRole, (row.metric, row.dimensions))
             details = QTableWidgetItem(
                 " \u00b7 ".join(
                     f"{key.replace('_', ' ').title()}: {value.replace('_', ' ').title()}"
@@ -333,7 +503,6 @@ class StatisticsPage(AppPage):
             self.table.setItem(row_index, 2, value)
         self.table.setSortingEnabled(True)
         self.table.horizontalHeader().setSortIndicatorShown(False)
-        self.status_label.set_status(f"{len(snapshot.rows)} aggregate breakdowns")
 
     @staticmethod
     def _number(value: float) -> str:
