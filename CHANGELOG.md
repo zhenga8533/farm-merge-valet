@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 - 2026-09-16
+
+- Fixed obstacle-clearing automation abandoning a partially cleared obstacle
+  for a freshly started obstacle of the same tier. Substituting a different
+  obstacle while the focused one waited on its loot claim was permanently
+  overwriting the bot's focus instead of only borrowing that turn.
+
 ## 0.1.1 - 2026-09-15
 
 - Changed force lucky merge to retry a failed save/reload confirmation with a
