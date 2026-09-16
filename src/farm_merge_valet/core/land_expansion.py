@@ -26,6 +26,9 @@ class LandExpansionCandidate:
     requirements: tuple[ExpansionRequirement, ...]
     affordable: bool
     source_state: int | None = None
+    # Largest board row spanned by this area's cells; used to prefer the area
+    # furthest south when multiple gem-cost areas are unlockable at once.
+    max_row: int | None = None
 
     def cost(self, currency: ExpansionCurrency) -> int | None:
         return next(
@@ -73,4 +76,23 @@ class LandExpansionPolicy:
 def plan_land_expansion(
     candidates: tuple[LandExpansionCandidate, ...], policy: LandExpansionPolicy
 ) -> LandExpansionCandidate | None:
-    return next((candidate for candidate in candidates if policy.permits(candidate)), None)
+    """Coin areas prefer the cheapest option; gem areas prefer the one
+    furthest south (largest max_row), since several can be unlockable at
+    once and the game's own suggested "next" area favors neither."""
+    eligible = [candidate for candidate in candidates if policy.permits(candidate)]
+    coin_candidates = [candidate for candidate in eligible if not candidate.premium]
+    if coin_candidates:
+        return min(
+            coin_candidates,
+            key=lambda candidate: (candidate.cost(ExpansionCurrency.COINS) or 0, candidate.area_id),
+        )
+    gem_candidates = [candidate for candidate in eligible if candidate.premium]
+    if not gem_candidates:
+        return None
+    return max(
+        gem_candidates,
+        key=lambda candidate: (
+            candidate.max_row if candidate.max_row is not None else -1,
+            candidate.area_id,
+        ),
+    )

@@ -336,22 +336,29 @@ duplicated during a frozen heartbeat or reload.
 
 ## Land expansion
 
-The atomic snapshot optionally reads the next standard and premium area from
-the game's separate map-area services. Each candidate includes its stable area
-ID, cell count, exact level and currency requirements, and the service's live
-affordability result. Expansion automation and both per-purchase currency
-ceilings default to disabled or zero. Standard areas require an allowed coin
-cost; premium areas independently require an allowed crystal cost.
+The atomic snapshot optionally reads every standard and premium area currently
+unlockable from the game's separate map-area services, not just the game's own
+single suggested "next" area, since several areas can become unlockable at
+once. Each candidate includes its stable area ID, cell count, exact level and
+currency requirements, the service's live affordability result, and the
+southernmost board row spanned by its cells. Expansion automation and both
+per-purchase currency ceilings default to disabled or zero. Standard areas
+require an allowed coin cost; premium areas independently require an allowed
+crystal cost.
 
-Planning preserves the native service order and prefers the standard candidate
-when both are permitted. Immediately before submission, the runtime revalidates
-the scene, service identity, next area, purchasable state, exact requirements,
-native affordability check, live currency balance, and configured post-purchase
-reserve. Missing or stale balance data fails closed. It then calls the game's
-native unlock handler, which deducts requirements and emits normal progression
-events. The intent is recorded before dispatch so a lost response remains
-single-flight until a later snapshot confirms whether the area is still the
-current locked candidate.
+Planning prefers the standard candidate when both are permitted, and targets
+the cheapest eligible standard candidate. When only premium candidates are
+eligible, it targets the one furthest south (largest board row), since the
+game does not otherwise indicate priority among several simultaneously
+unlockable premium areas. Immediately before submission, the runtime
+revalidates the scene, service identity, the target area's own state,
+purchasable state, exact requirements, native affordability check, live
+currency balance, and configured post-purchase reserve. Missing or stale
+balance data fails closed. It then calls the game's native unlock handler,
+which deducts requirements and emits normal progression events. The intent is
+recorded before dispatch so a lost response remains single-flight until a
+later snapshot confirms whether the area is still the current locked
+candidate.
 
 ## Marketplace purchases
 
@@ -486,10 +493,19 @@ browser animation frames continue. A backend single-session replacement requests
 the same recovery immediately. A loaded game frame whose action runtime remains
 unavailable for 30 seconds also requests recovery; this covers fatal startup
 screens such as E002 without depending on canvas-rendered error text.
-Default-enabled recovery restarts the verified managed game page once, with a
-short disconnect grace period before reopening the configured portal in the same
-tab, and rebuilds bot state. A repeated failure stops automation, and recovery
-never restarts an unowned browser.
+A CDP target that can no longer be reached (for example, a transient wifi
+drop) also requests recovery once that condition persists for 60 seconds,
+rather than waiting indefinitely.
+
+Default-enabled recovery restarts the verified managed game page, with a
+short disconnect grace period before reopening the configured portal in the
+same tab, and rebuilds bot state; the tab lookup itself retries with backoff
+for a further transient disconnect right as recovery starts. The number of
+recovery attempts allowed before automation stops is configurable
+(`max_game_recovery_attempts`, 0 for unlimited), and that count resets once
+the game has run healthily for an hour so an old failure streak does not
+count against a later, unrelated one. Recovery never restarts an unowned
+browser.
 
 Future phases, supporting work, and non-blocking research are tracked in
 [Open Items](open-items.md).

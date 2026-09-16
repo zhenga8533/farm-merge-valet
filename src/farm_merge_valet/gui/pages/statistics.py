@@ -374,8 +374,15 @@ class StatisticsPage(AppPage):
         self.table.setHorizontalHeaderLabels(("Metric", "Breakdown", "Value"))
         self.table.setAccessibleName("Statistics breakdown")
         configure_policy_view(self.table)
+        # QTableWidget word-wraps cell text by default but never grows the row
+        # to fit it, so long breakdown text was clipped mid-line instead of
+        # eliding cleanly to "...". Disable wrapping so ElideRight (set by
+        # configure_policy_view) actually applies.
+        self.table.setWordWrap(False)
         self.table.setHorizontalHeader(BulkToggleHeader({}, self.table))
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(
             2, QHeaderView.ResizeMode.ResizeToContents
@@ -475,7 +482,7 @@ class StatisticsPage(AppPage):
                     continue
                 item = self.table.item(position, 2)
                 if item is not None and item.data(Qt.ItemDataRole.UserRole) != row.value:
-                    item.setText(self._number(row.value))
+                    item.setText(self._display_value(row.metric, row.value))
                     item.setData(Qt.ItemDataRole.UserRole, row.value)
                     changed = True
             if changed:
@@ -486,16 +493,20 @@ class StatisticsPage(AppPage):
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
-            metric = QTableWidgetItem(row.metric.replace("_", " ").replace(".", " \u203a ").title())
+            metric_text = row.metric.replace("_", " ").replace(".", " \u203a ").title()
+            metric = QTableWidgetItem(metric_text)
             metric.setData(Qt.ItemDataRole.UserRole, (row.metric, row.dimensions))
-            details = QTableWidgetItem(
+            metric.setToolTip(self._metric_tooltip(row.metric, metric_text))
+            details_text = (
                 " \u00b7 ".join(
                     f"{key.replace('_', ' ').title()}: {value.replace('_', ' ').title()}"
                     for key, value in row.dimensions
                 )
                 or "All"
             )
-            value = _NumericItem(self._number(row.value))
+            details = QTableWidgetItem(details_text)
+            details.setToolTip(details_text)
+            value = _NumericItem(self._display_value(row.metric, row.value))
             value.setData(Qt.ItemDataRole.UserRole, row.value)
             value.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row_index, 0, metric)
@@ -508,3 +519,37 @@ class StatisticsPage(AppPage):
     def _number(value: float) -> str:
         numeric = float(value)
         return f"{int(numeric):,}" if numeric.is_integer() else f"{numeric:,.1f}"
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        total_seconds = int(round(seconds))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, remaining_seconds = divmod(remainder, 60)
+        if hours:
+            return f"{hours}h {minutes}m"
+        if minutes:
+            return f"{minutes}m"
+        return f"{remaining_seconds}s"
+
+    @classmethod
+    def _display_value(cls, metric: str, value: float) -> str:
+        # duration.* accumulates raw seconds; every other metric is a plain
+        # occurrence/quantity count, so only durations need unit conversion.
+        if metric.startswith("duration."):
+            return cls._format_duration(value)
+        return cls._number(value)
+
+    @classmethod
+    def _metric_tooltip(cls, metric: str, metric_text: str) -> str:
+        if cls._counted_in_cards(metric):
+            return metric_text
+        return f"{metric_text}\nNot included in the summary cards above."
+
+    @staticmethod
+    def _counted_in_cards(metric: str) -> bool:
+        # Mirrors the prefixes/keys summed into the KPI cards in set_snapshot();
+        # everything else (spent./received./items./progress./duration.) is
+        # informational detail that doesn't roll up into those totals.
+        return metric.startswith(
+            ("action.", "interaction.", "workflow.", "shop.", "reliability.")
+        ) or metric in {"warnings", "errors"}

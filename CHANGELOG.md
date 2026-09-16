@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.4 - 2026-09-16
+
+- Changed land expansion to target the cheapest unlockable standard-cost area
+  and, when only premium areas are eligible, the one furthest south, instead
+  of the game's single suggested "next" area. Several areas can be
+  unlockable at once, and the game's own ordering didn't favor either cost
+  or position.
+- Fixed game-page recovery giving up immediately if the managed browser tab
+  was momentarily unreachable (for example, a transient wifi drop) right as
+  recovery started; it now retries with backoff before giving up.
+- Added a configurable limit on how many times game-page recovery is
+  attempted before automation stops (`max_game_recovery_attempts`, 0 for
+  unlimited), with the attempt count resetting after an hour of healthy
+  running so an old failure streak doesn't count against a later, unrelated
+  one.
+- Fixed the Statistics breakdown table clipping "Breakdown" column text
+  mid-line instead of eliding it, and its sorted column header label
+  sometimes losing its own text (for example, showing "Met..." for
+  "Metric") to a mis-sized column.
+- Fixed the Statistics breakdown table's duration values displaying as a raw
+  seconds count (for example, "43,200") instead of readable time
+  (for example, "12h 0m").
+
 ## 0.1.3 - 2026-09-16
 
 - Fixed the bot waiting indefinitely, with no recovery, when the game's

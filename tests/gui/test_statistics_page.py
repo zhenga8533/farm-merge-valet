@@ -129,6 +129,67 @@ def test_in_place_update_targets_rows_by_key_not_table_position() -> None:
     assert rows == {"Action › Merge": "5", "Zzz › Other": "100"}
 
 
+def test_truncated_cells_expose_full_text_via_tooltip() -> None:
+    _app = QApplication.instance() or QApplication([])
+    page = StatisticsPage()
+    now = datetime.now(UTC)
+    snapshot = StatisticsSnapshot(
+        "24h",
+        (StatisticsRow("action.merge", 4, (("item", "wheat"), ("tier", "2"))),),
+        (TrendBucket(now, 9, 1),),
+    )
+
+    page.set_snapshot(snapshot)
+
+    assert page.table.item(0, 0).toolTip() == "Action › Merge"
+    assert page.table.item(0, 1).toolTip() == "Item: Wheat · Tier: 2"
+
+
+def test_duration_metrics_are_shown_as_human_readable_time() -> None:
+    _app = QApplication.instance() or QApplication([])
+    page = StatisticsPage()
+    now = datetime.now(UTC)
+    snapshot = StatisticsSnapshot(
+        "24h",
+        (
+            StatisticsRow("duration.seconds", 5445, (("state", "running"),)),
+            StatisticsRow("duration.seconds", 45, (("state", "paused"),)),
+        ),
+        (TrendBucket(now, 0, 0),),
+    )
+
+    page.set_snapshot(snapshot)
+
+    values = {
+        page.table.item(row, 1).text(): page.table.item(row, 2).text()
+        for row in range(page.table.rowCount())
+    }
+    assert values == {"State: Running": "1h 30m", "State: Paused": "45s"}
+
+
+def test_rows_not_summarized_in_cards_are_noted_in_their_tooltip() -> None:
+    _app = QApplication.instance() or QApplication([])
+    page = StatisticsPage()
+    now = datetime.now(UTC)
+    snapshot = StatisticsSnapshot(
+        "24h",
+        (
+            StatisticsRow("action.merge", 1),
+            StatisticsRow("spent.coins", 500),
+        ),
+        (TrendBucket(now, 1, 0),),
+    )
+
+    page.set_snapshot(snapshot)
+
+    tooltips = {
+        page.table.item(row, 0).text(): page.table.item(row, 0).toolTip()
+        for row in range(page.table.rowCount())
+    }
+    assert tooltips["Action › Merge"] == "Action › Merge"
+    assert "Not included in the summary cards above." in tooltips["Spent › Coins"]
+
+
 def test_statistics_page_emits_selected_range_and_actions() -> None:
     _app = QApplication.instance() or QApplication([])
     page = StatisticsPage()

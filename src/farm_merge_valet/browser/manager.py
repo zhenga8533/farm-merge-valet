@@ -43,6 +43,9 @@ _STOP_TIMEOUT = 15.0
 _LAUNCH_ATTEMPTS = 2
 _GAME_LOAD_TIMEOUT = 20.0
 _GAME_START_RETRY_SECONDS = 2.0
+_GAME_RESTART_TARGET_ATTEMPTS = 5
+_GAME_RESTART_TARGET_INITIAL_DELAY = 2.0
+_GAME_RESTART_TARGET_MAX_DELAY = 8.0
 _MANAGED_SWITCHES = (*REQUIRED_BACKGROUND_FLAGS, "--disable-background-mode")
 
 
@@ -536,13 +539,10 @@ class BrowserManager:
             raise BrowserManagerError("Refusing to recover the game in an unowned browser.")
         if status.game_frame_available:
             portal = portal_for_page_url(self.settings.game_url)
-            restart_game_page(
-                self.settings.cdp_port,
-                self.settings.game_url,
-                self.settings.window_title,
+            self._restart_game_page_with_retry(
                 allow_observation=(
                     portal is not None and portal.support_level is PortalSupportLevel.OBSERVATION
-                ),
+                )
             )
             log_event(
                 logger,
@@ -553,6 +553,46 @@ class BrowserManager:
             time.sleep(0.25)
             return self.ensure_game_open()
         return self.ensure_game_open()
+
+    def _restart_game_page_with_retry(self, *, allow_observation: bool) -> None:
+        """Retry finding the managed tab before giving up on this recovery attempt.
+
+        A brief connectivity drop (e.g. wifi) can make the tab momentarily
+        unreachable right as recovery starts; a single immediate lookup
+        failure would otherwise abandon the whole automation run instead of
+        waiting the few seconds a reconnect typically takes.
+        """
+        delay = _GAME_RESTART_TARGET_INITIAL_DELAY
+        last_error: CdpConnectionError | None = None
+        for attempt in range(1, _GAME_RESTART_TARGET_ATTEMPTS + 1):
+            try:
+                restart_game_page(
+                    self.settings.cdp_port,
+                    self.settings.game_url,
+                    self.settings.window_title,
+                    allow_observation=allow_observation,
+                )
+                return
+            except CdpConnectionError as exc:
+                last_error = exc
+                if attempt == _GAME_RESTART_TARGET_ATTEMPTS:
+                    break
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "browser.game_restart_retry",
+                    "Could not find the managed game tab while recovering (attempt %d/%d): %s",
+                    attempt,
+                    _GAME_RESTART_TARGET_ATTEMPTS,
+                    exc,
+                    attempt=attempt,
+                    attempt_limit=_GAME_RESTART_TARGET_ATTEMPTS,
+                    detail=str(exc),
+                )
+                time.sleep(delay)
+                delay = min(_GAME_RESTART_TARGET_MAX_DELAY, delay * 2)
+        assert last_error is not None
+        raise last_error
 
     def stop(self) -> None:
         status = self.status()

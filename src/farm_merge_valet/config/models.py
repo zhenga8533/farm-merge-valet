@@ -85,6 +85,8 @@ class AppConfig(BaseModel):
     browser_profile_dir: Path | None = None
     browser_auto_launch: bool = True
     auto_recover_game: bool = True
+    # 0 means keep retrying recovery indefinitely instead of giving up.
+    max_game_recovery_attempts: int = Field(default=1, ge=0, le=100)
     game_url: str = "https://www.reddit.com/r/FarmMergeValley/"
     cdp_port: int = Field(default=9222, ge=1, le=65535)
     catalog_dir: Path = Field(default_factory=lambda: user_cache_root() / "catalog")
