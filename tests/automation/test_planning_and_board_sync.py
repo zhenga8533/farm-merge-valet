@@ -920,7 +920,7 @@ def test_force_lucky_merge_never_accepts_five_item_trigger_as_lucky(monkeypatch)
     assert not any(action.effect is MoveEffect.MERGE for action in bot._merge_actions_for_policy())
 
 
-def test_unavailable_lucky_isolation_pauses_without_submitting_merge(monkeypatch) -> None:
+def test_unavailable_lucky_isolation_cools_down_without_pausing_the_bot(monkeypatch) -> None:
     from farm_merge_valet.automation.workflows.lucky_merge import LuckyMergeError
 
     bot = bare_bot()
@@ -939,11 +939,14 @@ def test_unavailable_lucky_isolation_pauses_without_submitting_merge(monkeypatch
 
     monkeypatch.setattr("farm_merge_valet.automation.workflows.merge.run_lucky_merge", unavailable)
 
+    actions = bot._merge_actions_for_policy()
+    action_key = bot._action_key(actions[0])
     bot._merge_workflow._step_merge(bot, health(advancing=True), bot._assess_board_space())
 
-    assert bot.paused
-    assert bot._interrupt_event.is_set()
+    assert not bot.paused
+    assert not bot._interrupt_event.is_set()
     assert bot.runtime.drops == []
+    assert not bot._actions().available(OperationKind.MERGE, action_key, bot._now())
 
 
 def test_item_master_switch_disables_merge_planning() -> None:

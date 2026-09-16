@@ -315,13 +315,17 @@ class MergeWorkflow:
                 try:
                     run_lucky_merge(bot, selected)
                 except LuckyMergeError as exc:
-                    bot.paused = True
-                    bot._interrupt_event.set()
+                    bot._actions().fail(
+                        OperationKind.MERGE,
+                        bot._action_key(selected),
+                        bot._now(),
+                        base_delay=_ACTION_RETRY_SECONDS,
+                    )
                     log_event(
                         logger,
                         logging.WARNING,
-                        "lucky_merge.paused",
-                        "Force lucky merge paused: %s",
+                        "lucky_merge.failed",
+                        "Force lucky merge failed: %s; will retry after cooldown.",
                         exc,
                         item_policy_key=selected.item.tier_policy_key,
                         detail=str(exc),
