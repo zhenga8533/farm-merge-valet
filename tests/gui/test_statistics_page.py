@@ -8,6 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
+from farm_merge_valet.gui.components.bulk_header import BulkToggleHeader
 from farm_merge_valet.gui.pages.statistics import ActivityTrend, StatisticsPage
 from farm_merge_valet.observability.statistics import (
     StatisticsRow,
@@ -39,7 +40,7 @@ def test_statistics_page_presents_aggregate_snapshot() -> None:
     assert page.workflows_value.text() == "2"
     assert page.reliability_value.text() == "1"
     assert page.table.rowCount() == 4
-    assert page.table.horizontalHeader().isSortIndicatorShown()
+    assert isinstance(page.table.horizontalHeader(), BulkToggleHeader)
     assert page.table.horizontalHeader().sortIndicatorSection() == 0
     assert "Wheat" in " ".join(
         page.table.item(row, 1).text() for row in range(page.table.rowCount())

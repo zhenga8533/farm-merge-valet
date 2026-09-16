@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from farm_merge_valet.gui.components.bulk_header import BulkToggleHeader
 from farm_merge_valet.gui.components.input_controls import FocusAwareComboBox
 from farm_merge_valet.gui.components.policy_view import configure_policy_view
 from farm_merge_valet.gui.components.status import StatusLabel
@@ -378,12 +379,7 @@ class StatisticsPage(AppPage):
         # eliding cleanly to "...". Disable wrapping so ElideRight (set by
         # configure_policy_view) actually applies.
         self.table.setWordWrap(False)
-        # This is a plain sortable data grid, not a bulk-toggle policy list, so
-        # it uses the table's native header (with its native sort arrow)
-        # instead of BulkToggleHeader: that header reserves extra width only
-        # for columns with a registered toggle checkbox, so an unregistered
-        # sorted column here was losing its custom-drawn indicator's space to
-        # ResizeToContents's undersized empty-table estimate, clipping the text.
+        self.table.setHorizontalHeader(BulkToggleHeader({}, self.table))
         self.table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.ResizeToContents
         )
@@ -393,6 +389,7 @@ class StatisticsPage(AppPage):
         )
         self.table.setSortingEnabled(True)
         self.table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+        self.table.horizontalHeader().setSortIndicatorShown(False)
         self.page_layout.addWidget(self.table, 1)
         self.status_label = StatusLabel("Statistics have not been loaded.")
         self.page_layout.addWidget(self.status_label)
@@ -516,6 +513,7 @@ class StatisticsPage(AppPage):
             self.table.setItem(row_index, 1, details)
             self.table.setItem(row_index, 2, value)
         self.table.setSortingEnabled(True)
+        self.table.horizontalHeader().setSortIndicatorShown(False)
 
     @staticmethod
     def _number(value: float) -> str:
