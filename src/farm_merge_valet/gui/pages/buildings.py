@@ -34,6 +34,7 @@ from farm_merge_valet.gui.components.policy_view import (
     filter_policy_tree,
     policy_badge,
     policy_cell,
+    set_policy_value,
     set_policy_widget,
 )
 from farm_merge_valet.gui.pages.base import AppPage, ConfigEdit
@@ -68,6 +69,8 @@ class BuildingsPage(AppPage):
         self._toggles: dict[str, PolicyCheckBox] = {}
         self._items: dict[str, QTreeWidgetItem] = {}
         self._groups: dict[str, QTreeWidgetItem] = {}
+        self._group_toggles: dict[str, PolicyCheckBox] = {}
+        self._group_building_ids: dict[str, list[str]] = {}
 
         self.configuration_header = ConfigurationHeader("Reset building policies")
         self.configuration_header.reset_requested.connect(self.reset_requested)
@@ -167,6 +170,8 @@ class BuildingsPage(AppPage):
         self._toggles = {}
         self._items = {}
         self._groups = {}
+        self._group_toggles = {}
+        self._group_building_ids = {}
         live_states = self._states or ()
         states_by_catalog_id = {
             catalog_item.game_id: state
@@ -187,6 +192,7 @@ class BuildingsPage(AppPage):
                 yield
         if not catalog_buildings and not live_states:
             self._show_empty("No buildings were discovered in the cached catalog")
+        self._finalize_groups()
         self.tree.setSortingEnabled(True)
         self._apply_sort_preference()
         self._filter(self.toolbar.search.text())
@@ -277,8 +283,31 @@ class BuildingsPage(AppPage):
             group.setFont(0, font)
             self.tree.addTopLevelItem(group)
             group.setExpanded(True)
+            self._badge(group, 1, "Group")
             self._groups[label] = group
+        self._group_building_ids.setdefault(label, []).append(building_id)
         return group
+
+    def _finalize_groups(self) -> None:
+        """Add each group's aggregate repair-preservation toggle once every
+        building has been assigned to it, matching the group/family toggles
+        Marketplace already shows for its own multi-level tree."""
+        for label, group_item in self._groups.items():
+            building_ids = self._group_building_ids.get(label, [])
+            state = aggregate_check_state(
+                [self._config.building_repair_enabled(building_id) for building_id in building_ids]
+            )
+            toggle = PolicyCheckBox()
+            configure_policy_toggle(toggle)
+            toggle.setTristate(True)
+            toggle.setCheckState(state)
+            toggle.setAccessibleName(f"{label}: preserve repair materials for all buildings")
+            toggle.setToolTip(toggle.accessibleName())
+            toggle.clicked.connect(
+                lambda checked, ids=tuple(building_ids): self._set_group(ids, checked)
+            )
+            set_policy_widget(self.tree, group_item, 4, policy_cell(toggle), sort_value=state.value)
+            self._group_toggles[label] = toggle
 
     def _catalog_buildings(self) -> tuple[CatalogItem, ...]:
         if self._catalog is None:
@@ -352,6 +381,37 @@ class BuildingsPage(AppPage):
             overrides[building_id] = enabled
         self._emit(building_repair_overrides=overrides)
         self._sync_bulk_header()
+        self._sync_group_checkboxes()
+
+    def _set_group(self, building_ids: tuple[str, ...], enabled: bool) -> None:
+        overrides = dict(self._config.building_repair_overrides)
+        for building_id in building_ids:
+            if enabled == self._config.building_repair_default_enabled:
+                overrides.pop(building_id, None)
+            else:
+                overrides[building_id] = enabled
+        self._emit(building_repair_overrides=overrides)
+        for building_id in building_ids:
+            toggle = self._toggles.get(building_id)
+            if toggle is None:
+                continue
+            toggle.blockSignals(True)
+            toggle.setChecked(enabled)
+            toggle.blockSignals(False)
+            set_policy_value(self._items[building_id], 4, enabled)
+        self._sync_bulk_header()
+        self._sync_group_checkboxes()
+
+    def _sync_group_checkboxes(self) -> None:
+        for label, toggle in self._group_toggles.items():
+            building_ids = self._group_building_ids.get(label, [])
+            state = aggregate_check_state(
+                [self._config.building_repair_enabled(building_id) for building_id in building_ids]
+            )
+            toggle.blockSignals(True)
+            toggle.setCheckState(state)
+            toggle.blockSignals(False)
+            set_policy_value(self._groups[label], 4, state.value)
 
     def _set_all(self, _column: int, enabled: bool) -> None:
         overrides = dict(self._config.building_repair_overrides)

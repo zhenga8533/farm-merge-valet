@@ -307,6 +307,77 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
     app.processEvents()
 
 
+def test_building_groups_show_an_aggregate_repair_toggle(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    catalog = ItemCatalog(
+        {
+            "bakery": CatalogItem(
+                "bakery",
+                "bakery",
+                "shops/bakery",
+                "shops",
+                "Bakery",
+                None,
+                False,
+                None,
+                None,
+                None,
+                frozenset({"shop"}),
+            ),
+            "dairy": CatalogItem(
+                "dairy",
+                "dairy",
+                "shops/dairy",
+                "shops",
+                "Dairy",
+                None,
+                False,
+                None,
+                None,
+                None,
+                frozenset({"shop"}),
+            ),
+        },
+        marketplace_offers=marketplace_catalog(),
+    )
+    write_item_catalog(catalog_dir / "catalog.json", catalog)
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    page = window.buildings_page
+
+    workshops = next(
+        page.tree.topLevelItem(index)
+        for index in range(page.tree.topLevelItemCount())
+        if page.tree.topLevelItem(index).text(0) == "Workshops"
+    )
+    badge = page.tree.itemWidget(workshops, 1)
+    assert badge is not None
+    assert badge.findChild(QLabel).text() == "Group"
+    group_toggle = page._group_toggles["Workshops"]
+    assert page.tree.itemWidget(workshops, 4).findChild(type(group_toggle)) is group_toggle
+    assert group_toggle.checkState() == Qt.CheckState.Checked
+
+    page._set_enabled("dairy", False)
+    assert group_toggle.checkState() == Qt.CheckState.PartiallyChecked
+
+    # Qt's own tristate cycle goes Unchecked -> PartiallyChecked -> Checked;
+    # clicking from partial lands on Checked, enabling both buildings.
+    group_toggle.click()
+    assert page._config.building_repair_enabled("bakery") is True
+    assert page._config.building_repair_enabled("dairy") is True
+    assert group_toggle.checkState() == Qt.CheckState.Checked
+
+    group_toggle.click()
+    assert page._config.building_repair_enabled("bakery") is False
+    assert page._config.building_repair_enabled("dairy") is False
+    assert group_toggle.checkState() == Qt.CheckState.Unchecked
+
+    window.quit_application()
+    app.processEvents()
+
+
 def test_marketplace_page_defaults_free_claims_on_and_expands_groups(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     catalog_dir = tmp_path / "catalog"
