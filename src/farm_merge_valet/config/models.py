@@ -54,8 +54,7 @@ _RECOMMENDED_ITEM_DEFAULTS: Mapping[str, ItemPolicyOverride] = MappingProxyType(
     {
         "currencies/ticket": _INTERACT_BY_DEFAULT,
         "resources/crate": _INTERACT_BY_DEFAULT,
-        "upgrade_cards/upgrade_card/tier/1": _INTERACT_BY_DEFAULT,
-        "upgrade_cards/upgrade_card/tier/3": _INTERACT_BY_DEFAULT,
+        "upgrade_cards/upgrade_card": _INTERACT_BY_DEFAULT,
     }
 )
 
