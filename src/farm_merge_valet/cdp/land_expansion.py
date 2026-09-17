@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import json
 
-_UNLOCKABLE_AREA_STATE = 1
+# The standard and premium area services use unrelated internal state enums:
+# a standard area only becomes purchasable (independent of affordability) once
+# its branch's unlock chain reaches it, which the game marks as state 3 (state
+# 2 areas are already revealed but still blocked behind that chain, regardless
+# of level or currency); a premium area has no such chain and is purchasable
+# as soon as it is offered at all, which the game marks as state 1.
+_UNLOCKABLE_AREA_STATE_STANDARD = 3
+_UNLOCKABLE_AREA_STATE_PREMIUM = 1
 
 _READ_LAND_EXPANSION_EXPRESSION = f"""
 (() => {{
@@ -12,12 +19,12 @@ _READ_LAND_EXPANSION_EXPRESSION = f"""
   const services = window.__fmvGameplayServices;
   if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
       services?.mapGrid?._cells !== board) return null;
-  const readCandidates = (service, premium) => {{
+  const readCandidates = (service, premium, unlockableState) => {{
     if (service?._services !== services || service._isActive === false ||
         typeof service.getMapAreasByState !== 'function' ||
         typeof service.canUnlockArea !== 'function' ||
         typeof service.unlockArea !== 'function') return [];
-    const areas = service.getMapAreasByState({_UNLOCKABLE_AREA_STATE});
+    const areas = service.getMapAreasByState(unlockableState);
     if (!Array.isArray(areas)) return [];
     const results = [];
     for (const area of areas) {{
@@ -47,8 +54,8 @@ _READ_LAND_EXPANSION_EXPRESSION = f"""
     return results;
   }};
   return [
-    ...readCandidates(services.mapAreaService, false),
-    ...readCandidates(services.premiumAreaService, true),
+    ...readCandidates(services.mapAreaService, false, {_UNLOCKABLE_AREA_STATE_STANDARD}),
+    ...readCandidates(services.premiumAreaService, true, {_UNLOCKABLE_AREA_STATE_PREMIUM}),
   ];
 }})()
 """
