@@ -108,7 +108,7 @@ def test_asset_compiler_uses_high_quality_duplicate_frame(tmp_path: Path) -> Non
     assert compiled.tolist() == [[([200] * 4)]]
 
 
-def test_variant_discovery_does_not_cross_numbered_family_boundaries(tmp_path: Path) -> None:
+def test_variant_discovery_does_not_cross_numbered_family_boundaries() -> None:
     image = np.zeros((2, 4, 4), dtype=np.uint8)
     manifest = {
         "frames": {

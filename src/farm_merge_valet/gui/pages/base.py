@@ -177,11 +177,8 @@ class ConfigFormPage(AppPage):
         choices: Iterable[tuple[str, str]],
         coerce: Callable[[str], object] = str,
     ) -> FocusAwareComboBox:
-        # `coerce` should convert the raw combo value to the field's actual
-        # type for real Enum fields (e.g. `ObstaclePriorityFocus`): the draft
-        # update path copies changes in without validating them, so an
-        # un-coerced str left in an Enum-typed field trips a serializer
-        # warning on save. Plain `Literal[str]` fields can leave it as `str`.
+        # Draft updates bypass validation, so Enum fields need coercion here.
+        # String fields can use the default conversion.
         control = FocusAwareComboBox()
         control.set_choices(choices)
         control.set_current_value(str(getattr(self._config, field)))

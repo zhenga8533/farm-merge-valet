@@ -888,11 +888,8 @@ class Bot:
                     self._obstacle_focus = candidate.coord, candidate.object_id
                     return candidate
 
-            # A board refresh can reissue the focused obstacle's object ID even
-            # while it stays put mid-clearing (excluded from `candidates`
-            # until its loot is claimed); match by coordinate like the loop
-            # above instead of requiring the stale ID, or focus is dropped for
-            # no reason and a different obstacle permanently takes over.
+            # A board refresh may change the focused obstacle's ID while loot is
+            # pending. Retain focus by coordinate until the obstacle disappears.
             current = self._live_cells.get(focused_coord)
             current_blueprint_id = current.blueprint_id if current is not None else None
             if (
@@ -965,11 +962,7 @@ class Bot:
         ):
             return None
 
-        # `focused` is mid its own clear/loot cycle and cannot be reselected until
-        # its loot is claimed (plan_obstacle_clear excludes any clearing obstacle).
-        # Substituting another obstacle for this tick must not overwrite the
-        # persisted focus, or progress on `focused` is abandoned permanently
-        # instead of being resumed once it is clearable again.
+        # A substitute clear must not replace the focus while its loot is pending.
         return plan_obstacle_clear(
             prioritized,
             energy,
@@ -1490,13 +1483,8 @@ class Bot:
             if not self._handle_event_state(snapshot.event):
                 return
             if not self._ensure_capability(health, RuntimeCapability.BOARD):
-                # A board that never comes back mid-session (e.g. a lucky-merge
-                # reload landing on the platform's fatal E002 screen) looks
-                # identical to a slow board heap recovery, which is expected to
-                # legitimately retry for a while: it backs off up to 300s
-                # between search attempts (_RECOVERY_COOLDOWNS in
-                # cdp/runtime.py), so give it a full cycle through that
-                # schedule before concluding it is actually stuck.
+                # Heap recovery can back off up to 300s between attempts; allow
+                # a full retry cycle before treating an unavailable board as stuck.
                 now = self._now()
                 if self._board_unavailable_started_at is None:
                     self._board_unavailable_started_at = now

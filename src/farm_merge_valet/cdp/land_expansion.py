@@ -4,12 +4,8 @@ from __future__ import annotations
 
 import json
 
-# The standard and premium area services use unrelated internal state enums:
-# a standard area only becomes purchasable (independent of affordability) once
-# its branch's unlock chain reaches it, which the game marks as state 3 (state
-# 2 areas are already revealed but still blocked behind that chain, regardless
-# of level or currency); a premium area has no such chain and is purchasable
-# as soon as it is offered at all, which the game marks as state 1.
+# Standard areas reach state 3 after branch progression; premium areas use
+# state 1. These are separate enums, and affordability is checked separately.
 _UNLOCKABLE_AREA_STATE_STANDARD = 3
 _UNLOCKABLE_AREA_STATE_PREMIUM = 1
 

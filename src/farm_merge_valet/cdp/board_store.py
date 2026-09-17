@@ -21,9 +21,8 @@ from farm_merge_valet.cdp.transport import CdpConnectionError, _command_target
 from farm_merge_valet.core.items import GridCoord, ProducerKind, ProducerState
 from farm_merge_valet.core.obstacles import ObstacleState
 
-# `_content` holds the cell's Pixi display object and `_neighbors` its
-# adjacency links. The bounded size and keys reject unrelated Maps before an
-# owning active map-grid service is required.
+# These cell keys and bounded size reject unrelated Maps before the active
+# map-grid service can be identified.
 _CELL_SHAPE_KEYS = ("column", "row", "_content", "_neighbors")
 _CELL_MAP_MIN_SIZE = 50
 _CELL_MAP_MAX_SIZE = 5000

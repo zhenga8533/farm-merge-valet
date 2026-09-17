@@ -22,9 +22,7 @@ class MergeActionKind(Enum):
     # A cluster is bigger than the target size. Relocate one member to split
     # or rebalance it without triggering an inefficient oversized merge.
     DEGROUP = auto()
-    # Not enough of this item are touching yet to reach the target size,
-    # but enough exist somewhere on the board -- relocate one same-item
-    # cell to grow the largest existing cluster by one.
+    # Enough items exist, but too few touch; relocate one to grow a cluster.
     GATHER = auto()
 
 
@@ -38,8 +36,8 @@ class MoveEffect(Enum):
 class MergeAction:
     kind: MergeActionKind
     item: ItemRef
-    start: GridCoord  # cell to drag from
-    end: GridCoord  # cell to drag to
+    start: GridCoord
+    end: GridCoord
     cluster: frozenset[GridCoord]  # merge participants or resulting target-item cluster
     target_size: Literal[3, 5]
     effect: MoveEffect
