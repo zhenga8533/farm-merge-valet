@@ -242,18 +242,16 @@ QSpinBox, QDoubleSpinBox {{ padding-right: 30px; }}
 QSpinBox::up-button, QDoubleSpinBox::up-button {{
     subcontrol-origin: border; subcontrol-position: top right;
     width: 24px; background: transparent;
-    border: none; border-left: 1px solid {colors.border};
-    border-bottom: 1px solid {colors.border}; border-top-right-radius: 5px;
+    border: 1px solid transparent; border-top-right-radius: 5px;
 }}
 QSpinBox::down-button, QDoubleSpinBox::down-button {{
     subcontrol-origin: border; subcontrol-position: bottom right;
     width: 24px; background: transparent;
-    border: none; border-left: 1px solid {colors.border};
-    border-bottom-right-radius: 5px;
+    border: 1px solid transparent; border-bottom-right-radius: 5px;
 }}
 QSpinBox::up-button:hover, QSpinBox::down-button:hover,
 QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {{
-    background: {colors.surface_subtle};
+    background: {colors.surface_subtle}; border-color: {colors.border};
 }}
 QSpinBox::up-arrow, QSpinBox::down-arrow,
 QDoubleSpinBox::up-arrow, QDoubleSpinBox::down-arrow {{
