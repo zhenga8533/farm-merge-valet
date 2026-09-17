@@ -447,7 +447,7 @@ Three consecutive submitted actions without authoritative progress request
 runtime recovery, regardless of which supported workflow submitted them.
 
 The active loop rate-limits repeated capability discovery. Temporary waits,
-individual plans, submissions, confirmations, slow-stage timings, cached
+individual plans, submissions, confirmations, cached
 discovery, and planner transitions are `DEBUG` diagnostics. Runtime readiness,
 user controls, crate-batch results, and transitions into a genuinely idle state
 use `INFO`; recoverable failures use `WARNING`; unsafe terminal conditions use

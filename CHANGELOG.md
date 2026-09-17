@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0 - 2026-09-17
+
+- Added a configurable obstacle priority, including a southernmost-position
+  tiebreaker, and kept focus on partially cleared obstacles when a board refresh
+  changes their object ID.
+- Fixed coin-cost land expansion detection by using the standard area's own
+  unlockable state instead of the premium area's state.
+- Added automatic recovery when the board remains unavailable mid-session after
+  the runtime has had a full recovery cycle.
+- Added group-level repair toggles for Buildings and shared policy controls
+  across catalog pages. Buildings and Marketplace now update existing controls
+  without rebuilding their trees on routine configuration changes.
+- Improved desktop controls with a Discord webhook reveal button, consistent
+  spin box buttons, and pages that use the available window width.
+- Enabled interaction by default for all upgrade card tiers and corrected
+  pause and recent-activity status updates.
+- Removed redundant code, comments, and unused test fixtures.
+
 ## 0.1.4 - 2026-09-16
 
 - Changed land expansion to target the cheapest unlockable standard-cost area

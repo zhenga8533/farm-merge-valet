@@ -225,9 +225,23 @@ farm-merge-valet diagnostics profile-runtime --duration 120 --observation-only
 farm-merge-valet diagnostics session-summary --hours 24
 ```
 
-Version tags matching `v*` build the distributions and Windows desktop
-executable. The tag must exactly match the package version. Build and test
-artifacts are written beneath `.tmp/`.
+## Releasing
+
+1. Update the version in `pyproject.toml`, refresh `uv.lock` with `uv lock`, and
+   add a dated entry to `CHANGELOG.md`.
+2. Run the CI checks (`uv run --locked ruff check .`,
+   `uv run --locked ruff format --check .`, `uv run --locked mypy src`,
+   `uv run --locked pytest --cov=farm_merge_valet`, and
+   `uv run --locked pip-audit --local --skip-editable`). Merge the release
+   commit into `main`.
+3. Tag that commit with the matching `v`-prefixed version (for example,
+   `git tag v0.2.0`) and push the tag (`git push origin v0.2.0`).
+
+The tag starts the Release workflow, which verifies that the tag matches the
+package version, builds the distributions and Windows executable, and creates
+a GitHub release with generated notes. Build and test artifacts stay under
+`.tmp/`. The application checks the latest public GitHub release for updates;
+no update-checker code change is needed for a version bump.
 
 ## Documentation
 
