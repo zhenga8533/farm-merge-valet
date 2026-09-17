@@ -50,11 +50,11 @@ from farm_merge_valet.gui.components.policy_view import (
     PolicyCheckBox,
     PolicyTreeItem,
     aggregate_check_state,
-    configure_policy_toggle,
     expanded_policy_keys,
     fit_policy_widget_column,
     policy_badge,
     policy_cell,
+    policy_checkbox,
     set_policy_value,
     set_policy_widget,
 )
@@ -355,12 +355,10 @@ class ShopsPage(AppPage):
                 search_text="Shop",
             )
             self._set_repair_status(parent, shop_id)
-            shop_toggle = PolicyCheckBox()
-            configure_policy_toggle(shop_toggle)
-            shop_toggle.setChecked(
-                self._config.shop_overrides.get(shop_id, self._config.shop_default_enabled)
+            shop_toggle = policy_checkbox(
+                self._config.shop_overrides.get(shop_id, self._config.shop_default_enabled),
+                f"{parent.text(0)}: enabled",
             )
-            shop_toggle.setAccessibleName(f"{parent.text(0)}: enabled")
             shop_toggle.toggled.connect(
                 lambda value, item_key=shop_id: self._set_item_enabled("shop", item_key, value)
             )
@@ -443,14 +441,12 @@ class ShopsPage(AppPage):
                 sort_value="Recipe",
                 search_text="Recipe",
             )
-            recipe_toggle = PolicyCheckBox()
-            configure_policy_toggle(recipe_toggle)
-            recipe_toggle.setChecked(
+            recipe_toggle = policy_checkbox(
                 self._config.recipe_overrides.get(
                     recipe.game_id, self._config.recipe_default_enabled
-                )
+                ),
+                f"{recipe.display_name}: enabled",
             )
-            recipe_toggle.setAccessibleName(f"{recipe.display_name}: enabled")
             recipe_toggle.toggled.connect(
                 lambda value, item_key=recipe.game_id: self._set_item_enabled(
                     "recipe", item_key, value

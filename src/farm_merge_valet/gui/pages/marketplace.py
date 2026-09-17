@@ -30,12 +30,12 @@ from farm_merge_valet.gui.components.policy_view import (
     PolicyCheckBox,
     PolicyTreeItem,
     aggregate_check_state,
-    configure_policy_toggle,
     expanded_policy_keys,
     filter_policy_tree,
     fit_policy_widget_column,
     policy_badge,
     policy_cell,
+    policy_checkbox,
     set_policy_value,
     set_policy_widget,
 )
@@ -221,12 +221,9 @@ class MarketplacePage(AppPage):
             state = aggregate_check_state(
                 [self._config.marketplace_policy_enabled(key) for key in policy_keys]
             )
-            group_toggle = PolicyCheckBox()
-            configure_policy_toggle(group_toggle)
-            group_toggle.setTristate(True)
-            group_toggle.setCheckState(state)
-            group_toggle.setAccessibleName(f"{group_label}: auto-purchase for all offers")
-            group_toggle.setToolTip(group_toggle.accessibleName())
+            group_toggle = policy_checkbox(
+                state, f"{group_label}: auto-purchase for all offers", tristate=True
+            )
             group_toggle.clicked.connect(
                 lambda checked, keys=policy_keys: self._set_group(keys, checked)
             )
@@ -315,12 +312,9 @@ class MarketplacePage(AppPage):
         state = aggregate_check_state(
             [self._config.marketplace_policy_enabled(key) for key in policy_keys]
         )
-        toggle = PolicyCheckBox()
-        configure_policy_toggle(toggle)
-        toggle.setTristate(True)
-        toggle.setCheckState(state)
-        toggle.setAccessibleName(f"{family_name}: auto-purchase for all offers")
-        toggle.setToolTip(toggle.accessibleName())
+        toggle = policy_checkbox(
+            state, f"{family_name}: auto-purchase for all offers", tristate=True
+        )
         toggle.clicked.connect(lambda checked, keys=policy_keys: self._set_group(keys, checked))
         set_policy_widget(self.tree, family, 2, policy_cell(toggle), sort_value=state.value)
         identity = (group, family_key)
@@ -363,10 +357,10 @@ class MarketplacePage(AppPage):
             sort_value=cost,
             search_text=cost,
         )
-        toggle = PolicyCheckBox()
-        configure_policy_toggle(toggle)
-        toggle.setChecked(self._config.marketplace_policy_enabled(offer.policy_key))
-        toggle.setAccessibleName(f"{offer.display_name}: auto-purchase")
+        toggle = policy_checkbox(
+            self._config.marketplace_policy_enabled(offer.policy_key),
+            f"{offer.display_name}: auto-purchase",
+        )
         toggle.toggled.connect(lambda value, key=offer.policy_key: self._set_enabled(key, value))
         set_policy_widget(self.tree, item, 2, policy_cell(toggle), sort_value=toggle.isChecked())
         self._toggles[offer.policy_key] = toggle

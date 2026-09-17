@@ -30,10 +30,10 @@ from farm_merge_valet.gui.components.policy_view import (
     PolicyCheckBox,
     PolicyTreeItem,
     aggregate_check_state,
-    configure_policy_toggle,
     filter_policy_tree,
     policy_badge,
     policy_cell,
+    policy_checkbox,
     set_policy_value,
     set_policy_widget,
 )
@@ -234,10 +234,10 @@ class BuildingsPage(AppPage):
         self._badge(parent, 1, building_type)
         self._badge(parent, 2, availability)
         self._badge(parent, 3, repair)
-        toggle = PolicyCheckBox()
-        configure_policy_toggle(toggle)
-        toggle.setChecked(self._config.building_repair_enabled(building_id))
-        toggle.setAccessibleName(f"{name}: preserve repair materials")
+        toggle = policy_checkbox(
+            self._config.building_repair_enabled(building_id),
+            f"{name}: preserve repair materials",
+        )
         toggle.toggled.connect(
             lambda enabled, building_id=building_id: self._set_enabled(building_id, enabled)
         )
@@ -297,12 +297,9 @@ class BuildingsPage(AppPage):
             state = aggregate_check_state(
                 [self._config.building_repair_enabled(building_id) for building_id in building_ids]
             )
-            toggle = PolicyCheckBox()
-            configure_policy_toggle(toggle)
-            toggle.setTristate(True)
-            toggle.setCheckState(state)
-            toggle.setAccessibleName(f"{label}: preserve repair materials for all buildings")
-            toggle.setToolTip(toggle.accessibleName())
+            toggle = policy_checkbox(
+                state, f"{label}: preserve repair materials for all buildings", tristate=True
+            )
             toggle.clicked.connect(
                 lambda checked, ids=tuple(building_ids): self._set_group(ids, checked)
             )

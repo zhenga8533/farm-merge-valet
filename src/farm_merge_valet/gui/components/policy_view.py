@@ -349,6 +349,24 @@ def aggregate_check_state(values: list[bool]) -> Qt.CheckState:
     )
 
 
+def policy_checkbox(
+    value: bool | Qt.CheckState, accessible_name: str, *, tristate: bool = False
+) -> PolicyCheckBox:
+    """A configured toggle for a single policy cell, or (with `tristate=True`
+    and a `Qt.CheckState` from `aggregate_check_state`) a group/family/parent
+    row's aggregate toggle reflecting its children's shared value."""
+    control = PolicyCheckBox()
+    configure_policy_toggle(control)
+    control.setTristate(tristate)
+    if isinstance(value, Qt.CheckState):
+        control.setCheckState(value)
+    else:
+        control.setChecked(value)
+    control.setAccessibleName(accessible_name)
+    control.setToolTip(accessible_name)
+    return control
+
+
 def expanded_policy_keys(tree: QTreeWidget) -> set[Hashable]:
     expanded: set[Hashable] = set()
     pending = [tree.topLevelItem(index) for index in range(tree.topLevelItemCount())]

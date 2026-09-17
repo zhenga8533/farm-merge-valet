@@ -47,11 +47,11 @@ from farm_merge_valet.gui.components.policy_view import (
     PolicyCheckBox,
     PolicyTreeItem,
     aggregate_check_state,
-    configure_policy_toggle,
     expanded_policy_keys,
     fit_policy_widget_column,
     policy_badges,
     policy_cell,
+    policy_checkbox,
     policy_status,
     policy_unavailable,
     set_policy_value,
@@ -664,7 +664,7 @@ class ItemsPage(AppPage):
                 continue
             value = getattr(policy, field)
             field_label = self._policy_field_label(definition.item, field)
-            control = self._policy_checkbox(value, f"{label}: {field_label}")
+            control = policy_checkbox(value, f"{label}: {field_label}")
             control.toggled.connect(
                 lambda checked, row=definition, name=field: self.set_override(
                     row.policy_key, row.family_key, name, checked
@@ -715,7 +715,7 @@ class ItemsPage(AppPage):
             ]
             state = aggregate_check_state(values)
             field_label = self._policy_field_label(applicable[0].item, field)
-            control = self._policy_checkbox(
+            control = policy_checkbox(
                 state,
                 f"{label}: {field_label} for all tiers",
                 tristate=True,
@@ -746,7 +746,7 @@ class ItemsPage(AppPage):
             for definition in definitions
         ]
         state = aggregate_check_state(remove_values)
-        control = self._policy_checkbox(
+        control = policy_checkbox(
             state if len(definitions) > 1 else remove_values[0],
             f"{label}: remove" if len(definitions) == 1 else f"{label}: remove for all tiers",
             tristate=len(definitions) > 1,
@@ -921,21 +921,6 @@ class ItemsPage(AppPage):
         if item.category in {"animals", "crops"}:
             return "harvest"
         return "interact"
-
-    @staticmethod
-    def _policy_checkbox(
-        value: bool | Qt.CheckState, accessible_name: str, *, tristate: bool = False
-    ) -> PolicyCheckBox:
-        control = PolicyCheckBox()
-        configure_policy_toggle(control)
-        control.setTristate(tristate)
-        if isinstance(value, Qt.CheckState):
-            control.setCheckState(value)
-        else:
-            control.setChecked(value)
-        control.setAccessibleName(accessible_name)
-        control.setToolTip(accessible_name)
-        return control
 
     @staticmethod
     def _policy_fields() -> dict[int, str]:
