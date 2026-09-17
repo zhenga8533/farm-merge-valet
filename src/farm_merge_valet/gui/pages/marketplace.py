@@ -30,6 +30,7 @@ from farm_merge_valet.gui.components.policy_view import (
     PolicyCheckBox,
     PolicyTreeItem,
     aggregate_check_state,
+    apply_policy_override,
     expanded_policy_keys,
     filter_policy_tree,
     fit_policy_widget_column,
@@ -413,10 +414,9 @@ class MarketplacePage(AppPage):
 
     def _set_enabled(self, key: str, enabled: bool) -> None:
         values = dict(self._config.marketplace_policy_overrides)
-        if enabled == self._config.marketplace_policy_default_enabled(key):
-            values.pop(key, None)
-        else:
-            values[key] = enabled
+        apply_policy_override(
+            values, key, enabled, self._config.marketplace_policy_default_enabled(key)
+        )
         self._emit(marketplace_policy_overrides=values)
         self._sync_controls()
 
@@ -433,20 +433,18 @@ class MarketplacePage(AppPage):
     def _set_group(self, policy_keys: tuple[str, ...], enabled: bool) -> None:
         values = dict(self._config.marketplace_policy_overrides)
         for key in policy_keys:
-            if enabled == self._config.marketplace_policy_default_enabled(key):
-                values.pop(key, None)
-            else:
-                values[key] = enabled
+            apply_policy_override(
+                values, key, enabled, self._config.marketplace_policy_default_enabled(key)
+            )
         self._emit(marketplace_policy_overrides=values)
         self._sync_controls()
 
     def _set_all(self, _column: int, enabled: bool) -> None:
         values = dict(self._config.marketplace_policy_overrides)
         for key in self._bulk_policy_keys():
-            if enabled == self._config.marketplace_policy_default_enabled(key):
-                values.pop(key, None)
-            else:
-                values[key] = enabled
+            apply_policy_override(
+                values, key, enabled, self._config.marketplace_policy_default_enabled(key)
+            )
         self._emit(marketplace_policy_overrides=values)
         self._sync_controls()
 

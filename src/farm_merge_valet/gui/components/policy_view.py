@@ -349,6 +349,18 @@ def aggregate_check_state(values: list[bool]) -> Qt.CheckState:
     )
 
 
+def apply_policy_override(
+    overrides: dict[str, bool], key: str, enabled: bool, default: bool
+) -> None:
+    """Set or clear a single override in place, matching every policy page's
+    convention of omitting an override that just matches the config default
+    rather than storing a redundant explicit value."""
+    if enabled == default:
+        overrides.pop(key, None)
+    else:
+        overrides[key] = enabled
+
+
 def policy_checkbox(
     value: bool | Qt.CheckState, accessible_name: str, *, tristate: bool = False
 ) -> PolicyCheckBox:

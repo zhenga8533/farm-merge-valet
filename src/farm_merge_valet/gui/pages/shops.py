@@ -50,6 +50,7 @@ from farm_merge_valet.gui.components.policy_view import (
     PolicyCheckBox,
     PolicyTreeItem,
     aggregate_check_state,
+    apply_policy_override,
     expanded_policy_keys,
     fit_policy_widget_column,
     policy_badge,
@@ -518,10 +519,7 @@ class ShopsPage(AppPage):
             else self._config.recipe_default_enabled
         )
         values = dict(getattr(self._config, field))
-        if enabled == default:
-            values.pop(key, None)
-        else:
-            values[key] = enabled
+        apply_policy_override(values, key, enabled, default)
         self._emit(**{field: values})
         self._sync_bulk_header()
 
@@ -551,10 +549,7 @@ class ShopsPage(AppPage):
                 if kind == "shop"
                 else self._config.recipe_default_enabled
             )
-            if value == default:
-                overrides.pop(key, None)
-            else:
-                overrides[key] = value
+            apply_policy_override(overrides, key, value, default)
         self._emit(shop_overrides=shop_overrides, recipe_overrides=recipe_overrides)
         self.populate()
 

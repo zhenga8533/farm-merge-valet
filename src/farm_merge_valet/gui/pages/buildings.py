@@ -30,6 +30,7 @@ from farm_merge_valet.gui.components.policy_view import (
     PolicyCheckBox,
     PolicyTreeItem,
     aggregate_check_state,
+    apply_policy_override,
     filter_policy_tree,
     policy_badge,
     policy_cell,
@@ -372,10 +373,9 @@ class BuildingsPage(AppPage):
 
     def _set_enabled(self, building_id: str, enabled: bool) -> None:
         overrides = dict(self._config.building_repair_overrides)
-        if enabled == self._config.building_repair_default_enabled:
-            overrides.pop(building_id, None)
-        else:
-            overrides[building_id] = enabled
+        apply_policy_override(
+            overrides, building_id, enabled, self._config.building_repair_default_enabled
+        )
         self._emit(building_repair_overrides=overrides)
         self._sync_bulk_header()
         self._sync_group_checkboxes()
@@ -383,10 +383,9 @@ class BuildingsPage(AppPage):
     def _set_group(self, building_ids: tuple[str, ...], enabled: bool) -> None:
         overrides = dict(self._config.building_repair_overrides)
         for building_id in building_ids:
-            if enabled == self._config.building_repair_default_enabled:
-                overrides.pop(building_id, None)
-            else:
-                overrides[building_id] = enabled
+            apply_policy_override(
+                overrides, building_id, enabled, self._config.building_repair_default_enabled
+            )
         self._emit(building_repair_overrides=overrides)
         for building_id in building_ids:
             toggle = self._toggles.get(building_id)
@@ -413,10 +412,9 @@ class BuildingsPage(AppPage):
     def _set_all(self, _column: int, enabled: bool) -> None:
         overrides = dict(self._config.building_repair_overrides)
         for building_id in self._visible_building_ids():
-            if enabled == self._config.building_repair_default_enabled:
-                overrides.pop(building_id, None)
-            else:
-                overrides[building_id] = enabled
+            apply_policy_override(
+                overrides, building_id, enabled, self._config.building_repair_default_enabled
+            )
         self._emit(building_repair_overrides=overrides)
         self._populate()
 
