@@ -32,13 +32,11 @@ def _discover_atlas_urls(har_path: Path) -> list[str]:
         url = entry["request"]["url"]
         path = urlparse(url).path
         if path.lower().endswith(".png") and any(seg in path for seg in ATLAS_PATH_SEGMENTS):
-            urls.add(url.split("?")[0])  # drop the cache-busting query string
+            urls.add(url.split("?")[0])
     return sorted(urls)
 
 
 def _cache_path_for(cache_dir: Path, url: str, suffix: str) -> Path:
-    # e.g. https://host/atlases/low/map_resources-0.png
-    #   -> <cache_dir>/atlases_low_map_resources-0.png
     path = urlparse(url).path
     name = path.strip("/").replace("/", "_")
     return cache_dir / Path(name).with_suffix(suffix).name

@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog
 from farm_merge_valet.catalog.store import write_item_catalog
-from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.config import AppConfig, ConfigStore, ItemPolicyOverride
 from farm_merge_valet.core.upgrade_progress import UpgradeProgress, UpgradeTargetProgress
 from farm_merge_valet.gui.components.policy_view import POLICY_SORT_ROLE
 from farm_merge_valet.gui.components.widgets import EditButton
@@ -471,7 +471,15 @@ def test_animal_upgrade_progress_uses_product_identity_but_nests_under_producer(
         ),
     )
     store = ConfigStore(tmp_path / "config.json")
-    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    store.replace(
+        AppConfig(
+            catalog_dir=catalog_dir,
+            close_to_tray=False,
+            item_policy_overrides={
+                "upgrade_cards/upgrade_card/milk/tier/2": ItemPolicyOverride(interact=False),
+            },
+        )
+    )
     window = MainWindow(ApplicationController(store))
 
     window.items_page.set_upgrade_progress(

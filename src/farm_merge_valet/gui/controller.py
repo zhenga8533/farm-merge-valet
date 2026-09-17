@@ -365,9 +365,7 @@ class ApplicationController(QObject):
             return
         was_paused = self._bot.paused
         self._bot.toggle_pause()
-        if not was_paused:
-            self._set_status(state=ApplicationState.PAUSED)
-        elif self.status.state is ApplicationState.RESUMING:
+        if not was_paused or self.status.state is ApplicationState.RESUMING:
             self._set_status(state=ApplicationState.PAUSED)
         else:
             self._set_status(state=ApplicationState.RESUMING)
@@ -676,12 +674,15 @@ class ApplicationController(QObject):
             updates["browser"] = f"{context.get('browser', 'Browser')} ready"
         elif event == "runtime.ready":
             updates["runtime"] = f"Scene {context.get('scene_id', '—')} ready"
-        elif event == "bot.idle":
+        elif event in {
+            "bot.idle",
+            "action.confirmed",
+            "interaction.confirmed",
+            "crate.claim_completed",
+        }:
             updates["last_activity"] = status_message
         elif event == "planner.phase_changed":
             updates["phase"] = str(context.get("phase", "—")).replace("_", " ").title()
-        elif event in {"action.confirmed", "interaction.confirmed", "crate.claim_completed"}:
-            updates["last_activity"] = status_message
         elif record.levelno >= logging.ERROR:
             updates["last_activity"] = status_message
         if updates:

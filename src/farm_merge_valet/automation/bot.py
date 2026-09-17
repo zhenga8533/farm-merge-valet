@@ -1955,20 +1955,6 @@ class Bot:
             self._resume_requested.clear()
             log_event(logger, logging.INFO, "bot.quit_requested", "Quit requested.")
 
-    def _log_slow_stage(self, stage: str, started: float) -> None:
-        elapsed = time.monotonic() - started
-        if elapsed >= 1.0:
-            log_event(
-                logger,
-                logging.DEBUG,
-                "operation.slow",
-                "Slow %s: %.1fs.",
-                stage,
-                elapsed,
-                stage=stage,
-                elapsed_seconds=elapsed,
-            )
-
     def _effective_loop_delay(self, requested_delay: float) -> float:
         return max(
             requested_delay,
