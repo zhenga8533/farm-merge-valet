@@ -26,10 +26,6 @@ from farm_merge_valet.gui.components.input_controls import (
 )
 from farm_merge_valet.gui.components.widgets import DisclosureSection
 
-CONTENT_MAX_WIDTH = 900
-"""Maximum width for a page's primary content column, keeping cards and forms
-from stretching into unnaturally wide bars on large windows."""
-
 
 @dataclass(frozen=True)
 class ConfigEdit:
@@ -40,7 +36,6 @@ class ConfigEdit:
 
 def settings_section(title: str) -> tuple[QGroupBox, QFormLayout]:
     section = QGroupBox(title)
-    section.setMaximumWidth(CONTENT_MAX_WIDTH)
     form = QFormLayout(section)
     form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
     form.setContentsMargins(14, 18, 14, 14)
@@ -52,7 +47,6 @@ def disclosure_section(
     title: str, *, expanded: bool = False
 ) -> tuple[DisclosureSection, QFormLayout]:
     section = DisclosureSection(title, expanded=expanded)
-    section.setMaximumWidth(CONTENT_MAX_WIDTH)
     form = QFormLayout(section.content)
     form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
     form.setContentsMargins(14, 14, 14, 14)

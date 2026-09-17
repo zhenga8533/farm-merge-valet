@@ -22,7 +22,7 @@ from farm_merge_valet.gui.components.widgets import (
     set_styled_property,
 )
 from farm_merge_valet.gui.controller import ApplicationState, ApplicationStatus
-from farm_merge_valet.gui.pages.base import CONTENT_MAX_WIDTH, AppPage
+from farm_merge_valet.gui.pages.base import AppPage
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,6 @@ class DashboardPage(AppPage):
         super().__init__("Dashboard", "Control automation and review live state.")
 
         content = QWidget()
-        content.setMaximumWidth(CONTENT_MAX_WIDTH)
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(12)

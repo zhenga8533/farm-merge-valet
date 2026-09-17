@@ -26,7 +26,7 @@ from farm_merge_valet.gui.components.input_controls import FocusAwareComboBox
 from farm_merge_valet.gui.components.policy_view import configure_policy_view
 from farm_merge_valet.gui.components.status import StatusLabel
 from farm_merge_valet.gui.components.widgets import metric_card, secondary_button
-from farm_merge_valet.gui.pages.base import CONTENT_MAX_WIDTH, AppPage
+from farm_merge_valet.gui.pages.base import AppPage
 from farm_merge_valet.gui.theme import warning_color
 from farm_merge_valet.observability.statistics import (
     StatisticsRow,
@@ -319,7 +319,6 @@ class StatisticsPage(AppPage):
     def __init__(self) -> None:
         super().__init__("Statistics", "Review persistent automation activity and reliability.")
         content = QWidget()
-        content.setMaximumWidth(CONTENT_MAX_WIDTH)
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(12)
