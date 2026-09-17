@@ -265,7 +265,8 @@ QPushButton[keyboardFocus="true"], QLineEdit[keyboardFocus="true"],
 QComboBox[keyboardFocus="true"], QSpinBox[keyboardFocus="true"],
 QDoubleSpinBox[keyboardFocus="true"], QAbstractItemView[keyboardFocus="true"],
 QToolButton#disclosureButton[keyboardFocus="true"],
-QToolButton#editButton[keyboardFocus="true"] {{
+QToolButton#editButton[keyboardFocus="true"],
+QToolButton#revealButton[keyboardFocus="true"] {{
     border: 2px solid {colors.selected};
 }}
 QToolButton#disclosureButton {{
@@ -273,11 +274,11 @@ QToolButton#disclosureButton {{
     border-radius: 7px; padding: 10px 12px; text-align: left; font-weight: 600;
 }}
 QToolButton#disclosureButton:hover {{ background: {colors.surface_subtle}; }}
-QToolButton#editButton {{
+QToolButton#editButton, QToolButton#revealButton {{
     background: transparent; color: {colors.text};
     border: 1px solid transparent; border-radius: 4px; padding: 0;
 }}
-QToolButton#editButton:hover {{
+QToolButton#editButton:hover, QToolButton#revealButton:hover {{
     background: {colors.surface_subtle}; border-color: {colors.border};
 }}
 QFrame#advancedSection {{

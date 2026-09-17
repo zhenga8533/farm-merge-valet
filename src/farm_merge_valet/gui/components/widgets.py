@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QPainter, QPaintEvent, QPalette, QPen
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget
 
@@ -86,6 +86,45 @@ class EditButton(QToolButton):
         painter.drawLine(14, 5, 16, 7)
         painter.drawLine(6, 13, 8, 15)
         painter.drawLine(6, 13, 5, 16)
+
+
+class RevealButton(QToolButton):
+    """Toggles a masked field between hidden and visible, e.g. a webhook URL."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("revealButton")
+        self.setCheckable(True)
+        self.setFixedSize(self.sizeHint())
+        self.toggled.connect(self._sync_accessible_name)
+        self._sync_accessible_name(self.isChecked())
+
+    def sizeHint(self) -> QSize:
+        return QSize(22, 22)
+
+    def _sync_accessible_name(self, checked: bool) -> None:
+        name = "Hide value" if checked else "Show value"
+        self.setAccessibleName(name)
+        self.setToolTip(name)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        palette = self.palette()
+        color_group = (
+            QPalette.ColorGroup.Active if self.isEnabled() else QPalette.ColorGroup.Disabled
+        )
+        color = palette.color(color_group, QPalette.ColorRole.ButtonText)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(color, 1.7)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.drawEllipse(QRectF(4.0, 7.0, 14.0, 8.0))
+        painter.setBrush(color)
+        painter.drawEllipse(QRectF(9.5, 9.5, 3.0, 3.0))
+        if not self.isChecked():
+            painter.drawLine(5, 16, 17, 5)
 
 
 def metric_card(title: str, value: str = "0") -> tuple[QFrame, QLabel]:
