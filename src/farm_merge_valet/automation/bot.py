@@ -888,15 +888,20 @@ class Bot:
                     self._obstacle_focus = candidate.coord, candidate.object_id
                     return candidate
 
+            # A board refresh can reissue the focused obstacle's object ID even
+            # while it stays put mid-clearing (excluded from `candidates`
+            # until its loot is claimed); match by coordinate like the loop
+            # above instead of requiring the stale ID, or focus is dropped for
+            # no reason and a different obstacle permanently takes over.
             current = self._live_cells.get(focused_coord)
             current_blueprint_id = current.blueprint_id if current is not None else None
             if (
                 current is not None
-                and current.object_id == focused_object_id
                 and current_blueprint_id is not None
                 and current_blueprint_id in self._clearable_ids
                 and self._interaction_enabled(current_blueprint_id)
             ):
+                self._obstacle_focus = focused_coord, current.object_id
                 return None
             self._obstacle_focus = None
 
