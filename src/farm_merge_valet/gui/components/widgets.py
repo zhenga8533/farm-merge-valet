@@ -4,7 +4,18 @@ from __future__ import annotations
 
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QPainter, QPaintEvent, QPalette, QPen
-from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QFrame,
+    QLabel,
+    QPushButton,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from farm_merge_valet.gui.components.input_controls import FocusAwareSpinBox
 
 
 def set_styled_property(widget: QWidget, name: str, value: object) -> None:
@@ -125,6 +136,54 @@ class RevealButton(QToolButton):
         painter.drawEllipse(QRectF(9.5, 9.5, 3.0, 3.0))
         if not self.isChecked():
             painter.drawLine(5, 16, 17, 5)
+
+
+class _IntPromptDialog(QDialog):
+    def __init__(
+        self,
+        parent: QWidget | None,
+        title: str,
+        label: str,
+        value: int,
+        minimum: int,
+        maximum: int,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        layout = QVBoxLayout(self)
+        prompt = QLabel(label)
+        prompt.setWordWrap(True)
+        layout.addWidget(prompt)
+        self.spin_box = FocusAwareSpinBox()
+        self.spin_box.setRange(minimum, maximum)
+        self.spin_box.setValue(value)
+        self.spin_box.setAccessibleName(label)
+        layout.addWidget(self.spin_box)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.spin_box.setFocus()
+        self.spin_box.selectAll()
+        self.setFixedSize(self.sizeHint())
+
+
+def get_int(
+    parent: QWidget | None,
+    title: str,
+    label: str,
+    value: int,
+    minimum: int,
+    maximum: int,
+) -> tuple[int, bool]:
+    """A themed replacement for QInputDialog.getInt: uses FocusAwareSpinBox so
+    the up/down buttons match the rest of the app instead of native OS chrome.
+    """
+    dialog = _IntPromptDialog(parent, title, label, value, minimum, maximum)
+    accepted = dialog.exec() == QDialog.DialogCode.Accepted
+    return dialog.spin_box.value(), accepted
 
 
 def metric_card(title: str, value: str = "0") -> tuple[QFrame, QLabel]:

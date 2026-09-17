@@ -11,7 +11,6 @@ from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QFont, QPaintEvent
 from PySide6.QtWidgets import (
     QHeaderView,
-    QInputDialog,
     QTreeWidgetItem,
     QWidget,
 )
@@ -57,7 +56,7 @@ from farm_merge_valet.gui.components.policy_view import (
     set_policy_value,
     set_policy_widget,
 )
-from farm_merge_valet.gui.components.widgets import EditButton
+from farm_merge_valet.gui.components.widgets import EditButton, get_int
 from farm_merge_valet.gui.pages.base import AppPage, ConfigEdit
 from farm_merge_valet.gui.services.assets import CatalogIconLoader
 from farm_merge_valet.gui.services.catalog import load_gui_catalog
@@ -802,7 +801,7 @@ class ItemsPage(AppPage):
             self._config.item_policy(definition.policy_key).keep_minimum
             for definition in definitions
         ]
-        value, accepted = QInputDialog.getInt(
+        value, accepted = get_int(
             self,
             "Minimum to keep",
             f"{label}: copies to keep before removing excess",

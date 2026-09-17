@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QScrollArea,
-    QSpinBox,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -38,6 +37,7 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.incremental_work import IncrementalPopulation
+from farm_merge_valet.gui.components.input_controls import FocusAwareSpinBox
 from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_ROW_HEIGHT,
@@ -85,7 +85,7 @@ class IngredientReservesDialog(QDialog):
         form = QFormLayout(content)
         self.default_control = self._spin_box(config.shop_ingredient_reserve_default)
         form.addRow("Default reserve", self.default_control)
-        self.controls: dict[str, tuple[QCheckBox, QSpinBox]] = {}
+        self.controls: dict[str, tuple[QCheckBox, FocusAwareSpinBox]] = {}
         ingredient_ids = sorted(
             {
                 ingredient.item_id
@@ -128,8 +128,8 @@ class IngredientReservesDialog(QDialog):
         layout.addWidget(buttons)
 
     @staticmethod
-    def _spin_box(value: int) -> QSpinBox:
-        control = QSpinBox()
+    def _spin_box(value: int) -> FocusAwareSpinBox:
+        control = FocusAwareSpinBox()
         control.setRange(0, 1_000_000_000)
         control.setValue(value)
         control.setKeyboardTracking(False)

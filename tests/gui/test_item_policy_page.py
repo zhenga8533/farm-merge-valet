@@ -9,7 +9,6 @@ from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
-    QInputDialog,
     QLabel,
     QPushButton,
 )
@@ -174,7 +173,9 @@ def test_removal_minimum_uses_compact_remove_cell_button_and_persists(
     assert "currently 0" in minimum.toolTip()
     app.processEvents()
     assert page.table.columnWidth(7) >= removal_cell.sizeHint().width()
-    monkeypatch.setattr(QInputDialog, "getInt", lambda *_args: (2, True))
+    monkeypatch.setattr(
+        "farm_merge_valet.gui.pages.items.get_int", lambda *_args, **_kwargs: (2, True)
+    )
     minimum.click()
     assert page._config.item_policy("ingredients/milk").always_remove
     assert page._config.item_policy("ingredients/milk").keep_minimum == 2

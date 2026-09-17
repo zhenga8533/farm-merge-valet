@@ -238,23 +238,23 @@ QComboBox QAbstractItemView {{
     selection-background-color: {colors.selected}; selection-color: white;
     outline: none; padding: 4px;
 }}
-QSpinBox, QDoubleSpinBox {{ padding-right: 30px; }}
-QSpinBox::up-button, QDoubleSpinBox::up-button {{
+FocusAwareSpinBox, FocusAwareDoubleSpinBox {{ padding-right: 30px; }}
+FocusAwareSpinBox::up-button, FocusAwareDoubleSpinBox::up-button {{
     subcontrol-origin: border; subcontrol-position: top right;
     width: 24px; background: transparent;
     border: 1px solid transparent; border-top-right-radius: 5px;
 }}
-QSpinBox::down-button, QDoubleSpinBox::down-button {{
+FocusAwareSpinBox::down-button, FocusAwareDoubleSpinBox::down-button {{
     subcontrol-origin: border; subcontrol-position: bottom right;
     width: 24px; background: transparent;
     border: 1px solid transparent; border-bottom-right-radius: 5px;
 }}
-QSpinBox::up-button:hover, QSpinBox::down-button:hover,
-QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {{
+FocusAwareSpinBox::up-button:hover, FocusAwareSpinBox::down-button:hover,
+FocusAwareDoubleSpinBox::up-button:hover, FocusAwareDoubleSpinBox::down-button:hover {{
     background: {colors.surface_subtle}; border-color: {colors.border};
 }}
-QSpinBox::up-arrow, QSpinBox::down-arrow,
-QDoubleSpinBox::up-arrow, QDoubleSpinBox::down-arrow {{
+FocusAwareSpinBox::up-arrow, FocusAwareSpinBox::down-arrow,
+FocusAwareDoubleSpinBox::up-arrow, FocusAwareDoubleSpinBox::down-arrow {{
     image: none; width: 0; height: 0;
 }}
 QLineEdit[invalid="true"], QComboBox[invalid="true"],
