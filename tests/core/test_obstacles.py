@@ -46,6 +46,13 @@ def test_obstacle_priority_is_fixed_then_started_then_lower_tier() -> None:
     ) == (fixed_started_small)
 
 
+def test_obstacles_tied_on_tier_and_progress_prefer_lower_on_the_board() -> None:
+    north = candidate((0, 5), movable=False, remaining=2, total=3)
+    south = candidate((0, 40), movable=False, remaining=2, total=3)
+
+    assert plan_obstacle_clear([north, south], 50, WorkerState(1, 1)) == south
+
+
 def test_unaffordable_highest_priority_obstacle_does_not_fall_through() -> None:
     fixed = candidate((1, 0), movable=False, remaining=2, total=3, cost=10)
     movable = candidate((2, 0), movable=True, remaining=2, total=3, cost=5)

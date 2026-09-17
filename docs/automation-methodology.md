@@ -212,7 +212,9 @@ counts, and each source's live hit points, stage count, current energy and
 worker cost, mobility, and paid/clearing state.
 Only the highest-priority obstacle is selected: fixed before movable, then
 already-started before untouched, then fewer total stages, fewer remaining
-stages, and board coordinate. All paid stages exposing `lootable` output are
+stages, then lower on the board (largest row, matching land expansion's
+southernmost preference), and finally board coordinate as a fully
+deterministic tiebreaker. All paid stages exposing `lootable` output are
 claimed through the normal tile-interaction pipeline before another stage is
 started. The global obstacle-spending control prevents new stages from being paid
 without blocking loot collection from an already-paid stage. While no worker is

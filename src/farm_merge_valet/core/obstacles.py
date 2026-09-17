@@ -38,14 +38,19 @@ class WorkerState:
 
 def obstacle_priority(
     candidate: ObstacleCandidate,
-) -> tuple[bool, bool, int, int, GridCoord]:
-    """Fixed, started, lower-tier, and nearer-completion obstacles sort first."""
+) -> tuple[bool, bool, int, int, int, GridCoord]:
+    """Fixed, started, lower-tier, nearer-completion, and lower-on-the-board
+    (largest row, matching land expansion's southernmost preference) obstacles
+    sort first. The raw coordinate remains as a final, fully deterministic
+    tiebreaker."""
     state = candidate.state
+    _column, row = candidate.coord
     return (
         state.movable,
         not state.in_progress,
         state.total_stages,
         state.stages_remaining,
+        -row,
         candidate.coord,
     )
 
