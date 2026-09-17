@@ -119,6 +119,29 @@ def test_registered_form_controls_refresh_from_config(tmp_path) -> None:
     app.processEvents()
 
 
+def test_obstacle_priority_focus_combo_reflects_and_saves_config(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    controller = ApplicationController(store)
+    window = MainWindow(controller)
+
+    assert window.settings_page.controls["obstacle_priority_focus"].current_value() == "started"
+
+    window.settings_page.apply_config(AppConfig(obstacle_priority_focus="lower_on_board"))
+    assert (
+        window.settings_page.controls["obstacle_priority_focus"].current_value() == "lower_on_board"
+    )
+
+    window.settings_page.controls["obstacle_priority_focus"].set_current_value("nearer_completion")
+    window._flush_config()
+    saved = ConfigStore(store.path).load()
+    assert saved.obstacle_priority_focus == "nearer_completion"
+
+    window.quit_application()
+    app.processEvents()
+
+
 def test_config_changes_refresh_only_affected_gui_sections(tmp_path, monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     store = ConfigStore(tmp_path / "config.json")

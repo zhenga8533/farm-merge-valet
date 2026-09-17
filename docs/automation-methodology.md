@@ -211,12 +211,14 @@ Obstacle clearing reads the current energy balance, total and available worker
 counts, and each source's live hit points, stage count, current energy and
 worker cost, mobility, and paid/clearing state.
 Only the highest-priority obstacle is selected: fixed before movable, then
-already-started before untouched, then fewer total stages, fewer remaining
-stages, then lower on the board (largest row, matching land expansion's
-southernmost preference), and finally board coordinate as a fully
-deterministic tiebreaker. All paid stages exposing `lootable` output are
-claimed through the normal tile-interaction pipeline before another stage is
-started. The global obstacle-spending control prevents new stages from being paid
+already-started, lower-tier, nearer-completion, or lower on the board (largest
+row, matching land expansion's southernmost preference) — whichever is
+configured as `obstacle_priority_focus` — with the remaining three applying
+afterward in that same fixed order as tiebreakers, and finally board
+coordinate as a fully deterministic tiebreaker. All paid stages exposing
+`lootable` output are claimed through the normal tile-interaction pipeline
+before another stage is started. The global obstacle-spending control
+prevents new stages from being paid
 without blocking loot collection from an already-paid stage. While no worker is
 available, the focused obstacle remains unchanged. After loot is claimed, the
 focused obstacle gets a brief state-settle window before an available worker

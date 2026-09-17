@@ -907,7 +907,10 @@ class Bot:
 
         if not candidates:
             return None
-        selected = min(candidates, key=obstacle_priority)
+        selected = min(
+            candidates,
+            key=lambda candidate: obstacle_priority(candidate, self.config.obstacle_priority_focus),
+        )
         self._obstacle_focus = selected.coord, selected.object_id
         return selected
 
@@ -945,7 +948,11 @@ class Bot:
         workers = self._workers
         if not focused.state.clearing:
             return plan_obstacle_clear(
-                [focused], energy, workers, self.config.minimum_energy_reserve
+                [focused],
+                energy,
+                workers,
+                self.config.minimum_energy_reserve,
+                self.config.obstacle_priority_focus,
             )
         if workers is None or workers.available == 0:
             return None
@@ -963,7 +970,13 @@ class Bot:
         # Substituting another obstacle for this tick must not overwrite the
         # persisted focus, or progress on `focused` is abandoned permanently
         # instead of being resumed once it is clearable again.
-        return plan_obstacle_clear(prioritized, energy, workers, self.config.minimum_energy_reserve)
+        return plan_obstacle_clear(
+            prioritized,
+            energy,
+            workers,
+            self.config.minimum_energy_reserve,
+            self.config.obstacle_priority_focus,
+        )
 
     def _obstacle_contributes_to_repair(
         self, candidate: ObstacleCandidate, missing_ids: set[str]
@@ -1152,7 +1165,11 @@ class Bot:
             if obstacle.state.clearing
             and "lootable" in self._live_cells[obstacle.coord].behavior_names
         ]
-        for obstacle in sorted(lootable_obstacles, key=obstacle_priority):
+        loot_priority_focus = self.config.obstacle_priority_focus
+        for obstacle in sorted(
+            lootable_obstacles,
+            key=lambda candidate: obstacle_priority(candidate, loot_priority_focus),
+        ):
             state = self._live_cells[obstacle.coord]
             immediate.append(
                 InteractionAction(
