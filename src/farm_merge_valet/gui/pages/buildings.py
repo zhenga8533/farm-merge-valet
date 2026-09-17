@@ -109,7 +109,7 @@ class BuildingsPage(AppPage):
         self._apply_sort_preference()
         self.bulk_header.sortIndicatorChanged.connect(self._sort_changed)
         if populate_immediately:
-            self._populate()
+            self.populate()
 
     def ensure_populated(self, *, deferred: bool = False) -> None:
         self._population.ensure(
@@ -126,23 +126,24 @@ class BuildingsPage(AppPage):
             or config.buildings_sort_descending != self._config.buildings_sort_descending
         )
         self._config = config
-        if catalog_changed:
-            self._icons.set_catalog_dir(config.catalog_dir)
-            self._catalog = None
+        self._icons.set_catalog_dir(config.catalog_dir)
         if sort_changed:
             self._apply_sort_preference()
         if refresh and self._populated:
-            self._populate()
+            if catalog_changed or self._catalog is None:
+                self.populate()
+            else:
+                self._sync_controls()
         self.configuration_header.mark_saved()
 
     def reload_catalog(self) -> None:
         if self._populated:
-            self._populate()
+            self.populate()
 
     def reload_catalog_if_missing(self) -> None:
         if not self._populated or self._catalog is not None:
             return
-        self._populate()
+        self.populate()
 
     def set_catalog_setup_busy(self, busy: bool) -> None:
         self.catalog_onboarding.set_busy(busy)
@@ -155,9 +156,9 @@ class BuildingsPage(AppPage):
             return
         self._states = states
         if self._populated:
-            self._populate()
+            self.populate()
 
-    def _populate(self) -> None:
+    def populate(self) -> None:
         self._population.run_now(self._populate_steps)
 
     def _populate_steps(self) -> Iterator[None]:
@@ -387,16 +388,20 @@ class BuildingsPage(AppPage):
                 overrides, building_id, enabled, self._config.building_repair_default_enabled
             )
         self._emit(building_repair_overrides=overrides)
-        for building_id in building_ids:
-            toggle = self._toggles.get(building_id)
-            if toggle is None:
-                continue
+        self._sync_controls()
+
+    def _sync_controls(self) -> None:
+        """Refresh every toggle and badge from the current config without
+        rebuilding the tree, matching Items'/Marketplace's/Shops' sync-in-place
+        path for a config-only change (e.g. an override made elsewhere)."""
+        for building_id, toggle in self._toggles.items():
+            enabled = self._config.building_repair_enabled(building_id)
             toggle.blockSignals(True)
             toggle.setChecked(enabled)
             toggle.blockSignals(False)
             set_policy_value(self._items[building_id], 4, enabled)
-        self._sync_bulk_header()
         self._sync_group_checkboxes()
+        self._sync_bulk_header()
 
     def _sync_group_checkboxes(self) -> None:
         for label, toggle in self._group_toggles.items():
@@ -416,7 +421,7 @@ class BuildingsPage(AppPage):
                 overrides, building_id, enabled, self._config.building_repair_default_enabled
             )
         self._emit(building_repair_overrides=overrides)
-        self._populate()
+        self.populate()
 
     def _visible_building_ids(self) -> list[str]:
         return [building_id for building_id, item in self._items.items() if not item.isHidden()]

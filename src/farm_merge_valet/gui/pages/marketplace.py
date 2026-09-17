@@ -132,8 +132,12 @@ class MarketplacePage(AppPage):
         self._icons.set_catalog_dir(config.catalog_dir)
         if sort_changed:
             self._apply_sort_preference()
-        if (refresh or catalog_changed) and self._populated:
-            self.populate()
+        if refresh and self._populated:
+            catalog_missing = self._catalog is None or not self._catalog.marketplace_offers
+            if catalog_changed or catalog_missing:
+                self.populate()
+            else:
+                self._sync_controls()
         self.configuration_header.mark_saved()
 
     def mark_saving(self, _field: str | None = None) -> None:
