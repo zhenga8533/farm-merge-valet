@@ -38,7 +38,7 @@ jobs:
           $executableIcon = (Resolve-Path assets/branding/farm-merge-valet.ico).Path
           $runtimeIcon = (Resolve-Path src/farm_merge_valet/gui/assets/app-icon.png).Path
           uv run --locked pyinstaller --clean --noconfirm --onefile --windowed --name farm-merge-valet --icon $executableIcon --add-data "${runtimeIcon}:farm_merge_valet/gui/assets" --copy-metadata farm-merge-valet --workpath .tmp/pyinstaller/work --specpath .tmp/pyinstaller/spec --distpath .tmp/dist src/farm_merge_valet/__main__.py
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.4.3
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: farm-merge-valet-release
           path: |
