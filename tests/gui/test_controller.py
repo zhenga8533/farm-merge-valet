@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest
 from PySide6.QtWidgets import QApplication
 
 from farm_merge_valet.automation.runtime import (
@@ -17,7 +18,8 @@ from farm_merge_valet.automation.runtime import (
     BuildingRequirement,
     RuntimeRecoveryRequired,
 )
-from farm_merge_valet.browser.manager import BrowserKind, BrowserStatus
+from farm_merge_valet.browser.manager import BrowserKind, BrowserStatus, GameLoadTimeoutError
+from farm_merge_valet.cdp.transport import CdpConnectionError
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.core.upgrade_progress import UpgradeProgress, UpgradeTargetProgress
 from farm_merge_valet.gui.controller import ApplicationController
@@ -342,6 +344,60 @@ def test_unresponsive_runtime_reloads_once_and_restarts_bot(tmp_path, monkeypatc
     controller._run_bot()
 
     assert recoveries == [True]
+    controller.shutdown()
+    app.processEvents()
+
+
+@pytest.mark.parametrize(
+    "recovery_error",
+    [CdpConnectionError("game iframe unavailable"), GameLoadTimeoutError("game still loading")],
+)
+def test_recovery_waits_for_game_to_return(tmp_path, monkeypatch, recovery_error) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig())
+    controller = ApplicationController(store)
+    browser_status = BrowserStatus(True, True, True, kind=BrowserKind.CHROME, game_loaded=True)
+    recoveries = 0
+    bot_runs = 0
+
+    class BrowserManagerStub:
+        def __init__(self, _config: AppConfig) -> None:
+            pass
+
+        def ensure_running(self) -> BrowserStatus:
+            return browser_status
+
+        def recover_game(self) -> BrowserStatus:
+            nonlocal recoveries
+            recoveries += 1
+            if recoveries == 1:
+                raise recovery_error
+            return browser_status
+
+    class BotStub:
+        paused = False
+
+        def update_config(self, _config: AppConfig) -> None:
+            pass
+
+        def request_quit(self) -> None:
+            pass
+
+        def run_forever(self, *, on_initialized) -> None:
+            nonlocal bot_runs
+            bot_runs += 1
+            if bot_runs == 1:
+                raise RuntimeRecoveryRequired("unresponsive")
+
+    monkeypatch.setattr("farm_merge_valet.gui.controller.BrowserManager", BrowserManagerStub)
+    monkeypatch.setattr("farm_merge_valet.gui.controller.create_bot", lambda _config: BotStub())
+    monkeypatch.setattr("farm_merge_valet.gui.controller.time.sleep", lambda _seconds: None)
+
+    controller._run_bot()
+
+    assert recoveries == 2
+    assert bot_runs == 2
     controller.shutdown()
     app.processEvents()
 

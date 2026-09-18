@@ -16,8 +16,14 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from farm_merge_valet.automation.bot import Bot
 from farm_merge_valet.automation.runtime import BuildingRepairState, RuntimeRecoveryRequired
-from farm_merge_valet.browser import BrowserManager, BrowserManagerError, BrowserStatus
+from farm_merge_valet.browser import (
+    BrowserManager,
+    BrowserManagerError,
+    BrowserStatus,
+    GameLoadTimeoutError,
+)
 from farm_merge_valet.cdp.capture import capture_game_screenshot
+from farm_merge_valet.cdp.transport import CdpConnectionError
 from farm_merge_valet.composition import create_bot, create_catalog_sync_service
 from farm_merge_valet.config import AppConfig, ConfigStore
 from farm_merge_valet.config.change_policy import BOT_RESTART_FIELDS, BROWSER_RESTART_FIELDS
@@ -51,6 +57,7 @@ logger = logging.getLogger(__name__)
 # A run that stays healthy this long before needing recovery again is treated
 # as a fresh start rather than a continuation of a prior failure streak.
 _RECOVERY_HEALTHY_RESET_SECONDS = 3600.0
+_RECOVERY_RETRY_DELAY_SECONDS = 5.0
 
 
 class ApplicationState(StrEnum):
@@ -334,7 +341,21 @@ class ApplicationController(QObject):
                             attempt=recovery_attempts,
                             attempt_limit=max_attempts or None,
                         )
-                        manager.recover_game()
+                        while not self._shutting_down and not self._stopping:
+                            try:
+                                manager.recover_game()
+                                break
+                            except (CdpConnectionError, GameLoadTimeoutError) as recovery_error:
+                                log_event(
+                                    logger,
+                                    logging.WARNING,
+                                    "runtime.recovery_waiting",
+                                    "Game page is still unavailable after recovery: %s "
+                                    "Retrying when it returns.",
+                                    recovery_error,
+                                    detail=str(recovery_error),
+                                )
+                                time.sleep(_RECOVERY_RETRY_DELAY_SECONDS)
         except BrowserManagerError as exc:
             failure = str(exc)
             log_event(

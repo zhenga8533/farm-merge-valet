@@ -500,11 +500,12 @@ def test_recover_game_retries_a_transient_target_loss(monkeypatch) -> None:
     assert sleeps == [2.0, 4.0, 0.25]
 
 
-def test_recover_game_gives_up_after_exhausting_target_retries(monkeypatch) -> None:
+def test_recover_game_reopens_portal_after_exhausting_target_retries(monkeypatch) -> None:
     manager = BrowserManager(AppConfig(window_title="game title"))
     loaded = BrowserStatus(True, True, True, game_loaded=True)
     monkeypatch.setattr(manager, "ensure_running", lambda: loaded)
     attempts = 0
+    reopened = []
 
     def always_fails(*_args, **_kwargs) -> None:
         nonlocal attempts
@@ -513,7 +514,8 @@ def test_recover_game_gives_up_after_exhausting_target_retries(monkeypatch) -> N
 
     monkeypatch.setattr("farm_merge_valet.browser.manager.restart_game_page", always_fails)
     monkeypatch.setattr("farm_merge_valet.browser.manager.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(manager, "ensure_game_open", lambda: reopened.append(True) or loaded)
 
-    with pytest.raises(CdpConnectionError):
-        manager.recover_game()
+    assert manager.recover_game() is loaded
     assert attempts == 5
+    assert reopened == [True]

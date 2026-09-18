@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 - 2026-09-17
+## 0.2.0 - 2026-09-18
 
 - Added a configurable obstacle priority, including a southernmost-position
   tiebreaker, and kept focus on partially cleared obstacles when a board refresh
@@ -8,7 +8,8 @@
 - Fixed coin-cost land expansion detection by using the standard area's own
   unlockable state instead of the premium area's state.
 - Added automatic recovery when the board remains unavailable mid-session after
-  the runtime has had a full recovery cycle.
+  the runtime has had a full recovery cycle. Recovery now reopens the game page
+  when its iframe disappears and keeps retrying while the page remains unavailable.
 - Added group-level repair toggles for Buildings and shared policy controls
   across catalog pages. Buildings and Marketplace now update existing controls
   without rebuilding their trees on routine configuration changes.
