@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 - 2026-09-18
+
+- Fixed building repair targeting to exclude buildings already mid-repair, so
+  an in-progress repair's already-consumed materials no longer keep getting
+  reserved and prioritized as still needed for its entire animation.
+
 ## 0.2.0 - 2026-09-18
 
 - Added a configurable obstacle priority, including a southernmost-position
