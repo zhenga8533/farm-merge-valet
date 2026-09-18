@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from farm_merge_valet.config import AppConfig
+from farm_merge_valet.core.obstacles import ObstaclePriorityFocus
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.hotkey_edit import HotkeyEdit
 from farm_merge_valet.gui.components.input_controls import (
@@ -21,7 +22,7 @@ from farm_merge_valet.gui.components.input_controls import (
     FocusAwareDoubleSpinBox,
     FocusAwareSlider,
 )
-from farm_merge_valet.gui.components.widgets import set_validation_state
+from farm_merge_valet.gui.components.widgets import RevealButton, set_validation_state
 from farm_merge_valet.gui.pages.base import (
     ConfigEdit,
     ConfigFormPage,
@@ -155,6 +156,23 @@ class SettingsPage(ConfigFormPage):
             1,
             50,
         )
+        self._add_combo(
+            form,
+            "Obstacle top priority",
+            "obstacle_priority_focus",
+            (
+                ("Already started", "started"),
+                ("Lower tier", "lower_tier"),
+                ("Nearer completion", "nearer_completion"),
+                ("Lower on the board", "lower_on_board"),
+            ),
+            coerce=ObstaclePriorityFocus,
+        )
+        self.controls["obstacle_priority_focus"].setToolTip(
+            "Fixed obstacles are always cleared before movable ones. This picks "
+            "which attribute is checked next; the others still apply, in their "
+            "usual order, as tiebreakers."
+        )
         self.planning_advanced_section = planning_advanced
         automation_form.addRow(planning_advanced)
         sections.addWidget(automation)
@@ -269,11 +287,21 @@ class SettingsPage(ConfigFormPage):
                 else ""
             ),
         )
+        reveal_webhook = RevealButton()
+        reveal_webhook.toggled.connect(
+            lambda checked: webhook.setEchoMode(
+                QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
+            )
+        )
+        webhook_row = QHBoxLayout()
+        webhook_row.setContentsMargins(0, 0, 0, 0)
+        webhook_row.addWidget(webhook)
+        webhook_row.addWidget(reveal_webhook)
         self._add_control_row(
             notifications_form,
             "Discord webhook",
             "discord_webhook_url",
-            webhook,
+            webhook_row,
         )
 
         profile = FocusAwareComboBox()

@@ -9,14 +9,13 @@ from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
-    QInputDialog,
     QLabel,
     QPushButton,
 )
 
 from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog
 from farm_merge_valet.catalog.store import write_item_catalog
-from farm_merge_valet.config import AppConfig, ConfigStore
+from farm_merge_valet.config import AppConfig, ConfigStore, ItemPolicyOverride
 from farm_merge_valet.core.upgrade_progress import UpgradeProgress, UpgradeTargetProgress
 from farm_merge_valet.gui.components.policy_view import POLICY_SORT_ROLE
 from farm_merge_valet.gui.components.widgets import EditButton
@@ -174,7 +173,9 @@ def test_removal_minimum_uses_compact_remove_cell_button_and_persists(
     assert "currently 0" in minimum.toolTip()
     app.processEvents()
     assert page.table.columnWidth(7) >= removal_cell.sizeHint().width()
-    monkeypatch.setattr(QInputDialog, "getInt", lambda *_args: (2, True))
+    monkeypatch.setattr(
+        "farm_merge_valet.gui.pages.items.get_int", lambda *_args, **_kwargs: (2, True)
+    )
     minimum.click()
     assert page._config.item_policy("ingredients/milk").always_remove
     assert page._config.item_policy("ingredients/milk").keep_minimum == 2
@@ -470,7 +471,15 @@ def test_animal_upgrade_progress_uses_product_identity_but_nests_under_producer(
         ),
     )
     store = ConfigStore(tmp_path / "config.json")
-    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    store.replace(
+        AppConfig(
+            catalog_dir=catalog_dir,
+            close_to_tray=False,
+            item_policy_overrides={
+                "upgrade_cards/upgrade_card/milk/tier/2": ItemPolicyOverride(interact=False),
+            },
+        )
+    )
     window = MainWindow(ApplicationController(store))
 
     window.items_page.set_upgrade_progress(

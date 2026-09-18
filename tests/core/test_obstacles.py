@@ -1,5 +1,6 @@
 from farm_merge_valet.core.obstacles import (
     ObstacleCandidate,
+    ObstaclePriorityFocus,
     ObstacleState,
     WorkerState,
     plan_obstacle_clear,
@@ -46,6 +47,13 @@ def test_obstacle_priority_is_fixed_then_started_then_lower_tier() -> None:
     ) == (fixed_started_small)
 
 
+def test_obstacles_tied_on_tier_and_progress_prefer_lower_on_the_board() -> None:
+    north = candidate((0, 5), movable=False, remaining=2, total=3)
+    south = candidate((0, 40), movable=False, remaining=2, total=3)
+
+    assert plan_obstacle_clear([north, south], 50, WorkerState(1, 1)) == south
+
+
 def test_unaffordable_highest_priority_obstacle_does_not_fall_through() -> None:
     fixed = candidate((1, 0), movable=False, remaining=2, total=3, cost=10)
     movable = candidate((2, 0), movable=True, remaining=2, total=3, cost=5)
@@ -79,3 +87,60 @@ def test_energy_reserve_blocks_stage_that_would_cross_floor() -> None:
 
     assert plan_obstacle_clear([obstacle], 10, WorkerState(1, 1), 5) == obstacle
     assert plan_obstacle_clear([obstacle], 9, WorkerState(1, 1), 5) is None
+
+
+def test_priority_focus_can_prefer_lower_tier_over_already_started() -> None:
+    started_high_tier = candidate((1, 0), movable=False, remaining=9, total=10)
+    untouched_low_tier = candidate((2, 0), movable=False, remaining=3, total=3)
+
+    assert (
+        plan_obstacle_clear([started_high_tier, untouched_low_tier], 50, WorkerState(1, 1))
+        == started_high_tier
+    )
+    assert (
+        plan_obstacle_clear(
+            [started_high_tier, untouched_low_tier],
+            50,
+            WorkerState(1, 1),
+            priority_focus=ObstaclePriorityFocus.LOWER_TIER,
+        )
+        == untouched_low_tier
+    )
+
+
+def test_priority_focus_can_prefer_nearer_completion_over_already_started() -> None:
+    barely_started = candidate((1, 0), movable=False, remaining=8, total=10)
+    nearly_done_untouched = candidate((2, 0), movable=False, remaining=1, total=1)
+
+    assert (
+        plan_obstacle_clear([barely_started, nearly_done_untouched], 50, WorkerState(1, 1))
+        == barely_started
+    )
+    assert (
+        plan_obstacle_clear(
+            [barely_started, nearly_done_untouched],
+            50,
+            WorkerState(1, 1),
+            priority_focus=ObstaclePriorityFocus.NEARER_COMPLETION,
+        )
+        == nearly_done_untouched
+    )
+
+
+def test_priority_focus_can_prefer_lower_on_the_board_over_lower_tier() -> None:
+    small_tier_north = candidate((0, 5), movable=False, remaining=3, total=3)
+    large_tier_south = candidate((0, 40), movable=False, remaining=10, total=10)
+
+    assert (
+        plan_obstacle_clear([small_tier_north, large_tier_south], 50, WorkerState(1, 1))
+        == small_tier_north
+    )
+    assert (
+        plan_obstacle_clear(
+            [small_tier_north, large_tier_south],
+            50,
+            WorkerState(1, 1),
+            priority_focus=ObstaclePriorityFocus.LOWER_ON_BOARD,
+        )
+        == large_tier_south
+    )

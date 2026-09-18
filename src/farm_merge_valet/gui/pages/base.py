@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
@@ -19,12 +19,12 @@ from PySide6.QtWidgets import (
 )
 
 from farm_merge_valet.config import AppConfig
-from farm_merge_valet.gui.components.input_controls import FocusAwareSpinBox, SettingsToggle
+from farm_merge_valet.gui.components.input_controls import (
+    FocusAwareComboBox,
+    FocusAwareSpinBox,
+    SettingsToggle,
+)
 from farm_merge_valet.gui.components.widgets import DisclosureSection
-
-CONTENT_MAX_WIDTH = 900
-"""Maximum width for a page's primary content column, keeping cards and forms
-from stretching into unnaturally wide bars on large windows."""
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,6 @@ class ConfigEdit:
 
 def settings_section(title: str) -> tuple[QGroupBox, QFormLayout]:
     section = QGroupBox(title)
-    section.setMaximumWidth(CONTENT_MAX_WIDTH)
     form = QFormLayout(section)
     form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
     form.setContentsMargins(14, 18, 14, 14)
@@ -48,7 +47,6 @@ def disclosure_section(
     title: str, *, expanded: bool = False
 ) -> tuple[DisclosureSection, QFormLayout]:
     section = DisclosureSection(title, expanded=expanded)
-    section.setMaximumWidth(CONTENT_MAX_WIDTH)
     form = QFormLayout(section.content)
     form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
     form.setContentsMargins(14, 14, 14, 14)
@@ -170,6 +168,33 @@ class ConfigFormPage(AppPage):
 
         self._register_control(field, control, set_value)
         self._add_control_row(form, label, field, control)
+
+    def _add_combo(
+        self,
+        form: QFormLayout,
+        label: str,
+        field: str,
+        choices: Iterable[tuple[str, str]],
+        coerce: Callable[[str], object] = str,
+    ) -> FocusAwareComboBox:
+        # Draft updates bypass validation, so Enum fields need coercion here.
+        # String fields can use the default conversion.
+        control = FocusAwareComboBox()
+        control.set_choices(choices)
+        control.set_current_value(str(getattr(self._config, field)))
+        control.setAccessibleName(label)
+        control.currentIndexChanged.connect(
+            lambda _index, widget=control, name=field: self._request(
+                name, coerce(str(widget.current_value()))
+            )
+        )
+
+        def set_value(value: object) -> None:
+            control.set_current_value(str(value))
+
+        self._register_control(field, control, set_value)
+        self._add_control_row(form, label, field, control)
+        return control
 
     def _register_control(
         self,

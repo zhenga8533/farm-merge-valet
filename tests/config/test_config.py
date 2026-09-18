@@ -281,13 +281,13 @@ def test_interaction_defaults_support_category_and_item_specific_policies() -> N
     assert settings.item_policy("rewards/reward_crate_stickerbook").interact
 
 
-def test_upgrade_card_interaction_defaults_to_tiers_one_and_three_for_every_target() -> None:
+def test_upgrade_card_interaction_defaults_to_true_for_every_tier_and_target() -> None:
     settings = AppConfig()
 
     for target in ("wheat", "milk"):
         key = f"upgrade_cards/upgrade_card/{target}"
         assert settings.item_policy(f"{key}/tier/1").interact
-        assert not settings.item_policy(f"{key}/tier/2").interact
+        assert settings.item_policy(f"{key}/tier/2").interact
         assert settings.item_policy(f"{key}/tier/3").interact
 
 

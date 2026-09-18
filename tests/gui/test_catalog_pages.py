@@ -307,6 +307,123 @@ def test_building_requirements_use_catalog_tiers_and_support_repair_policies(tmp
     app.processEvents()
 
 
+def test_building_groups_show_an_aggregate_repair_toggle(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    catalog = ItemCatalog(
+        {
+            "bakery": CatalogItem(
+                "bakery",
+                "bakery",
+                "shops/bakery",
+                "shops",
+                "Bakery",
+                None,
+                False,
+                None,
+                None,
+                None,
+                frozenset({"shop"}),
+            ),
+            "dairy": CatalogItem(
+                "dairy",
+                "dairy",
+                "shops/dairy",
+                "shops",
+                "Dairy",
+                None,
+                False,
+                None,
+                None,
+                None,
+                frozenset({"shop"}),
+            ),
+        },
+        marketplace_offers=marketplace_catalog(),
+    )
+    write_item_catalog(catalog_dir / "catalog.json", catalog)
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    page = window.buildings_page
+
+    workshops = next(
+        page.tree.topLevelItem(index)
+        for index in range(page.tree.topLevelItemCount())
+        if page.tree.topLevelItem(index).text(0) == "Workshops"
+    )
+    badge = page.tree.itemWidget(workshops, 1)
+    assert badge is not None
+    assert badge.findChild(QLabel).text() == "Group"
+    group_toggle = page._group_toggles["Workshops"]
+    assert page.tree.itemWidget(workshops, 4).findChild(type(group_toggle)) is group_toggle
+    assert group_toggle.checkState() == Qt.CheckState.Checked
+
+    page._set_enabled("dairy", False)
+    assert group_toggle.checkState() == Qt.CheckState.PartiallyChecked
+
+    # Qt's own tristate cycle goes Unchecked -> PartiallyChecked -> Checked;
+    # clicking from partial lands on Checked, enabling both buildings.
+    group_toggle.click()
+    assert page._config.building_repair_enabled("bakery") is True
+    assert page._config.building_repair_enabled("dairy") is True
+    assert group_toggle.checkState() == Qt.CheckState.Checked
+
+    group_toggle.click()
+    assert page._config.building_repair_enabled("bakery") is False
+    assert page._config.building_repair_enabled("dairy") is False
+    assert group_toggle.checkState() == Qt.CheckState.Unchecked
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_building_policy_only_config_change_syncs_without_rebuilding(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    catalog = ItemCatalog(
+        {
+            "bakery": CatalogItem(
+                "bakery",
+                "bakery",
+                "shops/bakery",
+                "shops",
+                "Bakery",
+                None,
+                False,
+                None,
+                None,
+                None,
+                frozenset({"shop"}),
+            ),
+        },
+        marketplace_offers=marketplace_catalog(),
+    )
+    write_item_catalog(catalog_dir / "catalog.json", catalog)
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    page = window.buildings_page
+
+    bakery_item = page._items["bakery"]
+    bakery_toggle = page._toggles["bakery"]
+    assert bakery_toggle.isChecked()
+
+    updated = AppConfig(
+        catalog_dir=catalog_dir,
+        close_to_tray=False,
+        building_repair_overrides={"bakery": False},
+    )
+    page.apply_config(updated)
+
+    assert page._items["bakery"] is bakery_item
+    assert page._toggles["bakery"] is bakery_toggle
+    assert not bakery_toggle.isChecked()
+
+    window.quit_application()
+    app.processEvents()
+
+
 def test_marketplace_page_defaults_free_claims_on_and_expands_groups(tmp_path) -> None:
     app = QApplication.instance() or QApplication([])
     catalog_dir = tmp_path / "catalog"
@@ -475,6 +592,35 @@ def test_marketplace_page_prompts_for_sync_when_catalog_has_no_offers(tmp_path) 
     assert onboarding.setup_button.text() == items_onboarding.setup_button.text()
     assert window.marketplace_page.tree.isHidden()
     assert window.marketplace_page.tree.topLevelItemCount() == 0
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_marketplace_policy_only_config_change_syncs_without_rebuilding(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    catalog_dir = tmp_path / "catalog"
+    write_item_catalog(catalog_dir / "catalog.json", _catalog())
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(catalog_dir=catalog_dir, close_to_tray=False))
+    window = MainWindow(ApplicationController(store))
+    page = window.marketplace_page
+
+    policy_key = "free:gems_5_no_ads"
+    offer_item = page._tree_items[policy_key]
+    offer_toggle = page._toggles[policy_key]
+    assert offer_toggle.isChecked()
+
+    updated = AppConfig(
+        catalog_dir=catalog_dir,
+        close_to_tray=False,
+        marketplace_policy_overrides={policy_key: False},
+    )
+    page.apply_config(updated)
+
+    assert page._tree_items[policy_key] is offer_item
+    assert page._toggles[policy_key] is offer_toggle
+    assert not offer_toggle.isChecked()
 
     window.quit_application()
     app.processEvents()

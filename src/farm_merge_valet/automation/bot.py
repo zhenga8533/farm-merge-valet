@@ -98,6 +98,7 @@ logger = logging.getLogger(__name__)
 _ACTION_FAILURE_LIMIT = DEFAULT_ACTION_TIMING.failure_limit
 _RUNTIME_STARTUP_GRACE_SECONDS = 30.0
 _CONNECTION_LOSS_GRACE_SECONDS = 60.0
+_BOARD_UNAVAILABLE_GRACE_SECONDS = 300.0
 
 
 class Bot:
@@ -165,6 +166,7 @@ class Bot:
         self._runtime_unavailable_warned = False
         self._runtime_ready_once = False
         self._connection_loss_started_at: float | None = None
+        self._board_unavailable_started_at: float | None = None
         self._last_wait_reason: str | None = None
         self._last_wait_log_at = 0.0
         self._idle_active = False
@@ -886,21 +888,26 @@ class Bot:
                     self._obstacle_focus = candidate.coord, candidate.object_id
                     return candidate
 
+            # A board refresh may change the focused obstacle's ID while loot is
+            # pending. Retain focus by coordinate until the obstacle disappears.
             current = self._live_cells.get(focused_coord)
             current_blueprint_id = current.blueprint_id if current is not None else None
             if (
                 current is not None
-                and current.object_id == focused_object_id
                 and current_blueprint_id is not None
                 and current_blueprint_id in self._clearable_ids
                 and self._interaction_enabled(current_blueprint_id)
             ):
+                self._obstacle_focus = focused_coord, current.object_id
                 return None
             self._obstacle_focus = None
 
         if not candidates:
             return None
-        selected = min(candidates, key=obstacle_priority)
+        selected = min(
+            candidates,
+            key=lambda candidate: obstacle_priority(candidate, self.config.obstacle_priority_focus),
+        )
         self._obstacle_focus = selected.coord, selected.object_id
         return selected
 
@@ -938,7 +945,11 @@ class Bot:
         workers = self._workers
         if not focused.state.clearing:
             return plan_obstacle_clear(
-                [focused], energy, workers, self.config.minimum_energy_reserve
+                [focused],
+                energy,
+                workers,
+                self.config.minimum_energy_reserve,
+                self.config.obstacle_priority_focus,
             )
         if workers is None or workers.available == 0:
             return None
@@ -951,12 +962,14 @@ class Bot:
         ):
             return None
 
-        # `focused` is mid its own clear/loot cycle and cannot be reselected until
-        # its loot is claimed (plan_obstacle_clear excludes any clearing obstacle).
-        # Substituting another obstacle for this tick must not overwrite the
-        # persisted focus, or progress on `focused` is abandoned permanently
-        # instead of being resumed once it is clearable again.
-        return plan_obstacle_clear(prioritized, energy, workers, self.config.minimum_energy_reserve)
+        # A substitute clear must not replace the focus while its loot is pending.
+        return plan_obstacle_clear(
+            prioritized,
+            energy,
+            workers,
+            self.config.minimum_energy_reserve,
+            self.config.obstacle_priority_focus,
+        )
 
     def _obstacle_contributes_to_repair(
         self, candidate: ObstacleCandidate, missing_ids: set[str]
@@ -1145,7 +1158,11 @@ class Bot:
             if obstacle.state.clearing
             and "lootable" in self._live_cells[obstacle.coord].behavior_names
         ]
-        for obstacle in sorted(lootable_obstacles, key=obstacle_priority):
+        loot_priority_focus = self.config.obstacle_priority_focus
+        for obstacle in sorted(
+            lootable_obstacles,
+            key=lambda candidate: obstacle_priority(candidate, loot_priority_focus),
+        ):
             state = self._live_cells[obstacle.coord]
             immediate.append(
                 InteractionAction(
@@ -1466,7 +1483,19 @@ class Bot:
             if not self._handle_event_state(snapshot.event):
                 return
             if not self._ensure_capability(health, RuntimeCapability.BOARD):
+                # Heap recovery can back off up to 300s between attempts; allow
+                # a full retry cycle before treating an unavailable board as stuck.
+                now = self._now()
+                if self._board_unavailable_started_at is None:
+                    self._board_unavailable_started_at = now
+                elif now - self._board_unavailable_started_at >= _BOARD_UNAVAILABLE_GRACE_SECONDS:
+                    raise RuntimeRecoveryRequired(
+                        "game board remained unavailable for over "
+                        f"{_BOARD_UNAVAILABLE_GRACE_SECONDS:.0f} seconds mid-session "
+                        f"({health.detail or 'no diagnostic detail'})"
+                    )
                 return
+            self._board_unavailable_started_at = None
         except RuntimeConnectionError as exc:
             if self._interrupt_event.is_set():
                 return
@@ -1913,20 +1942,6 @@ class Bot:
             self._loop_wakeup.set()
             self._resume_requested.clear()
             log_event(logger, logging.INFO, "bot.quit_requested", "Quit requested.")
-
-    def _log_slow_stage(self, stage: str, started: float) -> None:
-        elapsed = time.monotonic() - started
-        if elapsed >= 1.0:
-            log_event(
-                logger,
-                logging.DEBUG,
-                "operation.slow",
-                "Slow %s: %.1fs.",
-                stage,
-                elapsed,
-                stage=stage,
-                elapsed_seconds=elapsed,
-            )
 
     def _effective_loop_delay(self, requested_delay: float) -> float:
         return max(

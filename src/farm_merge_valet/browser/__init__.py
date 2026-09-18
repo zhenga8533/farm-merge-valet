@@ -5,6 +5,13 @@ from farm_merge_valet.browser.manager import (
     BrowserManager,
     BrowserManagerError,
     BrowserStatus,
+    GameLoadTimeoutError,
 )
 
-__all__ = ["BrowserKind", "BrowserManager", "BrowserManagerError", "BrowserStatus"]
+__all__ = [
+    "BrowserKind",
+    "BrowserManager",
+    "BrowserManagerError",
+    "BrowserStatus",
+    "GameLoadTimeoutError",
+]

@@ -26,7 +26,7 @@ from farm_merge_valet.gui.components.input_controls import FocusAwareComboBox
 from farm_merge_valet.gui.components.policy_view import configure_policy_view
 from farm_merge_valet.gui.components.status import StatusLabel
 from farm_merge_valet.gui.components.widgets import metric_card, secondary_button
-from farm_merge_valet.gui.pages.base import CONTENT_MAX_WIDTH, AppPage
+from farm_merge_valet.gui.pages.base import AppPage
 from farm_merge_valet.gui.theme import warning_color
 from farm_merge_valet.observability.statistics import (
     StatisticsRow,
@@ -74,9 +74,7 @@ class ActivityTrend(QWidget):
             buckets[-1].started_at + timedelta(hours=1) if buckets else None
         )
         self._hover_index = None
-        # Bin the raw history once here rather than on every hover/paint, which
-        # would otherwise re-scan potentially hundreds of stored hourly buckets
-        # on every mouse-move event and cause visible hover lag.
+        # Bin once so hover painting does not rescan the hourly history.
         self._binned = self._bin_buckets()
         self.setAccessibleDescription(
             f"{sum(bucket.activity for bucket in buckets):g} activity events and "
@@ -121,9 +119,7 @@ class ActivityTrend(QWidget):
         binned = self._binned
         if not binned or plot_width is None:
             return binned
-        # Never draw bars narrower than legible, even at a small window width.
-        # This merges the already-binned buckets further; it never re-scans
-        # the raw history, so it stays cheap even during rapid mouse movement.
+        # Merge existing bins to keep bars legible at narrow widths.
         max_slots = max(1, int(plot_width // _MIN_BUCKET_WIDTH))
         if max_slots >= len(binned):
             return binned
@@ -319,7 +315,6 @@ class StatisticsPage(AppPage):
     def __init__(self) -> None:
         super().__init__("Statistics", "Review persistent automation activity and reliability.")
         content = QWidget()
-        content.setMaximumWidth(CONTENT_MAX_WIDTH)
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(12)
@@ -374,10 +369,7 @@ class StatisticsPage(AppPage):
         self.table.setHorizontalHeaderLabels(("Metric", "Breakdown", "Value"))
         self.table.setAccessibleName("Statistics breakdown")
         configure_policy_view(self.table)
-        # QTableWidget word-wraps cell text by default but never grows the row
-        # to fit it, so long breakdown text was clipped mid-line instead of
-        # eliding cleanly to "...". Disable wrapping so ElideRight (set by
-        # configure_policy_view) actually applies.
+        # Qt does not grow rows for wrapped text; disable wrapping so ElideRight applies.
         self.table.setWordWrap(False)
         self.table.setHorizontalHeader(BulkToggleHeader({}, self.table))
         self.table.horizontalHeader().setSectionResizeMode(
@@ -429,9 +421,6 @@ class StatisticsPage(AppPage):
             self.trend.set_buckets(())
             return
         if snapshot == self._last_snapshot:
-            # The periodic refresh (every 5s while this page is visible) often finds
-            # nothing new; skip the table/chart rebuild entirely rather than freezing
-            # the GUI thread redoing work that produces an identical result.
             return
         self._last_snapshot = snapshot
         actions = snapshot.total("action.")
@@ -464,12 +453,7 @@ class StatisticsPage(AppPage):
     def _update_table(self, rows: tuple[StatisticsRow, ...]) -> None:
         new_keys = [(row.metric, row.dimensions) for row in rows]
         if new_keys == self._row_keys:
-            # Same breakdown rows as before; update the changed values in place
-            # instead of tearing down and recreating every cell in the table.
-            # Rows must be located by their stored key, not by list position:
-            # sorting (automatic or user-triggered) physically reorders which
-            # table row holds which item, so position alignment with `rows`
-            # (always in canonical backend order) cannot be assumed.
+            # Sorting changes table row positions; locate rows by their stored keys.
             position_by_key: dict[tuple[str, tuple[tuple[str, str], ...]], int] = {}
             for row_index in range(self.table.rowCount()):
                 key_item = self.table.item(row_index, 0)
@@ -547,9 +531,6 @@ class StatisticsPage(AppPage):
 
     @staticmethod
     def _counted_in_cards(metric: str) -> bool:
-        # Mirrors the prefixes/keys summed into the KPI cards in set_snapshot();
-        # everything else (spent./received./items./progress./duration.) is
-        # informational detail that doesn't roll up into those totals.
         return metric.startswith(
             ("action.", "interaction.", "workflow.", "shop.", "reliability.")
         ) or metric in {"warnings", "errors"}

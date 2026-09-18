@@ -30,10 +30,12 @@ from farm_merge_valet.gui.components.policy_view import (
     PolicyCheckBox,
     PolicyTreeItem,
     aggregate_check_state,
-    configure_policy_toggle,
+    apply_policy_override,
     filter_policy_tree,
     policy_badge,
     policy_cell,
+    policy_checkbox,
+    set_policy_value,
     set_policy_widget,
 )
 from farm_merge_valet.gui.pages.base import AppPage, ConfigEdit
@@ -68,6 +70,8 @@ class BuildingsPage(AppPage):
         self._toggles: dict[str, PolicyCheckBox] = {}
         self._items: dict[str, QTreeWidgetItem] = {}
         self._groups: dict[str, QTreeWidgetItem] = {}
+        self._group_toggles: dict[str, PolicyCheckBox] = {}
+        self._group_building_ids: dict[str, list[str]] = {}
 
         self.configuration_header = ConfigurationHeader("Reset building policies")
         self.configuration_header.reset_requested.connect(self.reset_requested)
@@ -105,7 +109,7 @@ class BuildingsPage(AppPage):
         self._apply_sort_preference()
         self.bulk_header.sortIndicatorChanged.connect(self._sort_changed)
         if populate_immediately:
-            self._populate()
+            self.populate()
 
     def ensure_populated(self, *, deferred: bool = False) -> None:
         self._population.ensure(
@@ -122,23 +126,24 @@ class BuildingsPage(AppPage):
             or config.buildings_sort_descending != self._config.buildings_sort_descending
         )
         self._config = config
-        if catalog_changed:
-            self._icons.set_catalog_dir(config.catalog_dir)
-            self._catalog = None
+        self._icons.set_catalog_dir(config.catalog_dir)
         if sort_changed:
             self._apply_sort_preference()
         if refresh and self._populated:
-            self._populate()
+            if catalog_changed or self._catalog is None:
+                self.populate()
+            else:
+                self._sync_controls()
         self.configuration_header.mark_saved()
 
     def reload_catalog(self) -> None:
         if self._populated:
-            self._populate()
+            self.populate()
 
     def reload_catalog_if_missing(self) -> None:
         if not self._populated or self._catalog is not None:
             return
-        self._populate()
+        self.populate()
 
     def set_catalog_setup_busy(self, busy: bool) -> None:
         self.catalog_onboarding.set_busy(busy)
@@ -151,9 +156,9 @@ class BuildingsPage(AppPage):
             return
         self._states = states
         if self._populated:
-            self._populate()
+            self.populate()
 
-    def _populate(self) -> None:
+    def populate(self) -> None:
         self._population.run_now(self._populate_steps)
 
     def _populate_steps(self) -> Iterator[None]:
@@ -167,6 +172,8 @@ class BuildingsPage(AppPage):
         self._toggles = {}
         self._items = {}
         self._groups = {}
+        self._group_toggles = {}
+        self._group_building_ids = {}
         live_states = self._states or ()
         states_by_catalog_id = {
             catalog_item.game_id: state
@@ -187,6 +194,7 @@ class BuildingsPage(AppPage):
                 yield
         if not catalog_buildings and not live_states:
             self._show_empty("No buildings were discovered in the cached catalog")
+        self._finalize_groups()
         self.tree.setSortingEnabled(True)
         self._apply_sort_preference()
         self._filter(self.toolbar.search.text())
@@ -228,10 +236,10 @@ class BuildingsPage(AppPage):
         self._badge(parent, 1, building_type)
         self._badge(parent, 2, availability)
         self._badge(parent, 3, repair)
-        toggle = PolicyCheckBox()
-        configure_policy_toggle(toggle)
-        toggle.setChecked(self._config.building_repair_enabled(building_id))
-        toggle.setAccessibleName(f"{name}: preserve repair materials")
+        toggle = policy_checkbox(
+            self._config.building_repair_enabled(building_id),
+            f"{name}: preserve repair materials",
+        )
         toggle.toggled.connect(
             lambda enabled, building_id=building_id: self._set_enabled(building_id, enabled)
         )
@@ -277,8 +285,28 @@ class BuildingsPage(AppPage):
             group.setFont(0, font)
             self.tree.addTopLevelItem(group)
             group.setExpanded(True)
+            self._badge(group, 1, "Group")
             self._groups[label] = group
+        self._group_building_ids.setdefault(label, []).append(building_id)
         return group
+
+    def _finalize_groups(self) -> None:
+        """Add each group's aggregate repair-preservation toggle once every
+        building has been assigned to it, matching the group/family toggles
+        Marketplace already shows for its own multi-level tree."""
+        for label, group_item in self._groups.items():
+            building_ids = self._group_building_ids.get(label, [])
+            state = aggregate_check_state(
+                [self._config.building_repair_enabled(building_id) for building_id in building_ids]
+            )
+            toggle = policy_checkbox(
+                state, f"{label}: preserve repair materials for all buildings", tristate=True
+            )
+            toggle.clicked.connect(
+                lambda checked, ids=tuple(building_ids): self._set_group(ids, checked)
+            )
+            set_policy_widget(self.tree, group_item, 4, policy_cell(toggle), sort_value=state.value)
+            self._group_toggles[label] = toggle
 
     def _catalog_buildings(self) -> tuple[CatalogItem, ...]:
         if self._catalog is None:
@@ -346,22 +374,54 @@ class BuildingsPage(AppPage):
 
     def _set_enabled(self, building_id: str, enabled: bool) -> None:
         overrides = dict(self._config.building_repair_overrides)
-        if enabled == self._config.building_repair_default_enabled:
-            overrides.pop(building_id, None)
-        else:
-            overrides[building_id] = enabled
+        apply_policy_override(
+            overrides, building_id, enabled, self._config.building_repair_default_enabled
+        )
         self._emit(building_repair_overrides=overrides)
         self._sync_bulk_header()
+        self._sync_group_checkboxes()
+
+    def _set_group(self, building_ids: tuple[str, ...], enabled: bool) -> None:
+        overrides = dict(self._config.building_repair_overrides)
+        for building_id in building_ids:
+            apply_policy_override(
+                overrides, building_id, enabled, self._config.building_repair_default_enabled
+            )
+        self._emit(building_repair_overrides=overrides)
+        self._sync_controls()
+
+    def _sync_controls(self) -> None:
+        """Refresh every toggle and badge from the current config without
+        rebuilding the tree, matching Items'/Marketplace's/Shops' sync-in-place
+        path for a config-only change (e.g. an override made elsewhere)."""
+        for building_id, toggle in self._toggles.items():
+            enabled = self._config.building_repair_enabled(building_id)
+            toggle.blockSignals(True)
+            toggle.setChecked(enabled)
+            toggle.blockSignals(False)
+            set_policy_value(self._items[building_id], 4, enabled)
+        self._sync_group_checkboxes()
+        self._sync_bulk_header()
+
+    def _sync_group_checkboxes(self) -> None:
+        for label, toggle in self._group_toggles.items():
+            building_ids = self._group_building_ids.get(label, [])
+            state = aggregate_check_state(
+                [self._config.building_repair_enabled(building_id) for building_id in building_ids]
+            )
+            toggle.blockSignals(True)
+            toggle.setCheckState(state)
+            toggle.blockSignals(False)
+            set_policy_value(self._groups[label], 4, state.value)
 
     def _set_all(self, _column: int, enabled: bool) -> None:
         overrides = dict(self._config.building_repair_overrides)
         for building_id in self._visible_building_ids():
-            if enabled == self._config.building_repair_default_enabled:
-                overrides.pop(building_id, None)
-            else:
-                overrides[building_id] = enabled
+            apply_policy_override(
+                overrides, building_id, enabled, self._config.building_repair_default_enabled
+            )
         self._emit(building_repair_overrides=overrides)
-        self._populate()
+        self.populate()
 
     def _visible_building_ids(self) -> list[str]:
         return [building_id for building_id, item in self._items.items() if not item.isHidden()]

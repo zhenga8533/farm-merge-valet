@@ -579,6 +579,37 @@ def test_substituting_for_a_clearing_obstacle_does_not_abandon_its_focus() -> No
     assert bot._obstacle_focus == ((0, 0), 1)
 
 
+def test_obstacle_focus_survives_an_id_change_while_mid_clearing(monkeypatch) -> None:
+    bot = bare_bot()
+    bot._energy = 50
+    bot._workers = WorkerState(1, 1)
+    bot._clearable_ids = frozenset({"tree_medium"})
+    bot._blueprint_policy_keys["tree_medium"] = "obstacles/tree_medium"
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"obstacles/tree_medium": ItemPolicyOverride(interact=True)},
+    )
+    bot._obstacle_focus = ((0, 0), 1)
+    # Pending loot excludes the focused obstacle from candidates despite its new ID.
+    bot._live_cells = {
+        (0, 0): LiveCellState(True, "tree_medium", 99, obstacle=ObstacleState(3, 5, 5, False))
+    }
+    fresh = ObstacleCandidate(
+        (1, 0), "tree_medium", 2, ObstacleState(5, 5, 5, False, required_workers=1)
+    )
+
+    # Keep focus under the new ID while waiting for loot.
+    assert bot._obstacle_to_clear([fresh]) is None
+    assert bot._obstacle_focus == ((0, 0), 99)
+
+    resumed = ObstacleCandidate(
+        (0, 0), "tree_medium", 99, ObstacleState(3, 5, 5, False, required_workers=1)
+    )
+    assert bot._obstacle_to_clear([resumed, fresh]) == resumed
+    assert bot._obstacle_focus == ((0, 0), 99)
+
+
 def test_live_sync_uses_one_atomic_snapshot_and_suppresses_disabled_sections() -> None:
     class SnapshotRuntime(FakeRuntime):
         def __init__(self) -> None:
@@ -1054,7 +1085,7 @@ def test_item_policy_can_disable_merging_for_one_tier(monkeypatch) -> None:
     assert {action.item for action in actions} == {wheat_2}
 
 
-def test_live_sync_distinguishes_empty_structure_placeholder(monkeypatch) -> None:
+def test_live_sync_distinguishes_empty_structure_placeholder() -> None:
     bot = bare_bot()
     bot._blueprint_items = {}
     bot.runtime.board_state = {
@@ -1093,7 +1124,7 @@ def test_live_sync_skips_obstacle_resources_when_stage_starts_are_disabled(
     assert bot._workers is None
 
 
-def test_live_sync_keeps_upgrade_card_targets_as_distinct_variants(monkeypatch) -> None:
+def test_live_sync_keeps_upgrade_card_targets_as_distinct_variants() -> None:
     bot = bare_bot()
     bot._blueprint_items = {"upgrade_card_1": ItemRef("upgrade_cards", "upgrade_card", 1)}
     bot.runtime.board_state = {
@@ -1106,7 +1137,7 @@ def test_live_sync_keeps_upgrade_card_targets_as_distinct_variants(monkeypatch) 
     assert bot.board.get_cell((1, 0)).item == ItemRef("upgrade_cards", "upgrade_card", 1, "cow")
 
 
-def test_live_sync_classifies_only_catalogued_collectable_items(monkeypatch) -> None:
+def test_live_sync_classifies_only_catalogued_collectable_items() -> None:
     bot = bare_bot()
     bot._blueprint_items = {}
     bot._direct_interaction_ids = frozenset({"milk", "ticket", "crate_1"})

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 
-_UNLOCKABLE_AREA_STATE = 1
+# Standard areas reach state 3 after branch progression; premium areas use
+# state 1. These are separate enums, and affordability is checked separately.
+_UNLOCKABLE_AREA_STATE_STANDARD = 3
+_UNLOCKABLE_AREA_STATE_PREMIUM = 1
 
 _READ_LAND_EXPANSION_EXPRESSION = f"""
 (() => {{
@@ -12,12 +15,12 @@ _READ_LAND_EXPANSION_EXPRESSION = f"""
   const services = window.__fmvGameplayServices;
   if (!(board instanceof Map) || window.__fmvRuntimeBoard !== board ||
       services?.mapGrid?._cells !== board) return null;
-  const readCandidates = (service, premium) => {{
+  const readCandidates = (service, premium, unlockableState) => {{
     if (service?._services !== services || service._isActive === false ||
         typeof service.getMapAreasByState !== 'function' ||
         typeof service.canUnlockArea !== 'function' ||
         typeof service.unlockArea !== 'function') return [];
-    const areas = service.getMapAreasByState({_UNLOCKABLE_AREA_STATE});
+    const areas = service.getMapAreasByState(unlockableState);
     if (!Array.isArray(areas)) return [];
     const results = [];
     for (const area of areas) {{
@@ -47,8 +50,8 @@ _READ_LAND_EXPANSION_EXPRESSION = f"""
     return results;
   }};
   return [
-    ...readCandidates(services.mapAreaService, false),
-    ...readCandidates(services.premiumAreaService, true),
+    ...readCandidates(services.mapAreaService, false, {_UNLOCKABLE_AREA_STATE_STANDARD}),
+    ...readCandidates(services.premiumAreaService, true, {_UNLOCKABLE_AREA_STATE_PREMIUM}),
   ];
 }})()
 """

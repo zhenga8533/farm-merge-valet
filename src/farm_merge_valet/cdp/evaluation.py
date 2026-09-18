@@ -113,9 +113,8 @@ def apply_background_overrides(
     """Apply supported lifecycle/focus overrides without activating a window."""
     game_ws, page_ws = _target_pair(port, page_title, allow_observation=allow_observation)
     for ws_url in (page_ws, game_ws):
-        # Unsupported methods are deliberately ignored individually: protocol
-        # support differs by browser version, while the launch flags remain the
-        # primary protection against background throttling.
+        # Protocol support varies by browser; launch flags provide the primary
+        # protection against background throttling.
         for method, params in (
             ("Emulation.setFocusEmulationEnabled", {"enabled": True}),
             ("Emulation.setIdleOverride", {"isUserActive": True, "isScreenUnlocked": True}),

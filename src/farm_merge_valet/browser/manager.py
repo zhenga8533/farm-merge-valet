@@ -92,6 +92,10 @@ class BrowserManagerError(RuntimeError):
     """Raised when a managed browser operation cannot be completed safely."""
 
 
+class GameLoadTimeoutError(BrowserManagerError):
+    """Raised when a recognized game page has not finished loading yet."""
+
+
 def _candidate_paths(environ: dict[str, str] | os._Environ[str]) -> dict[BrowserKind, list[Path]]:
     program_files = Path(environ.get("ProgramFiles", r"C:\Program Files"))
     program_files_x86 = Path(environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
@@ -530,7 +534,7 @@ class BrowserManager:
             detail = "Open the configured page, start the game manually, and run the bot again."
         else:
             detail = "Reload the configured game page and start the bot again."
-        raise BrowserManagerError(f"The game did not finish loading. {detail}")
+        raise GameLoadTimeoutError(f"The game did not finish loading. {detail}")
 
     def recover_game(self) -> BrowserStatus:
         """Restart a frozen game page or restore its managed browser and page."""
@@ -539,11 +543,15 @@ class BrowserManager:
             raise BrowserManagerError("Refusing to recover the game in an unowned browser.")
         if status.game_frame_available:
             portal = portal_for_page_url(self.settings.game_url)
-            self._restart_game_page_with_retry(
-                allow_observation=(
-                    portal is not None and portal.support_level is PortalSupportLevel.OBSERVATION
+            try:
+                self._restart_game_page_with_retry(
+                    allow_observation=(
+                        portal is not None
+                        and portal.support_level is PortalSupportLevel.OBSERVATION
+                    )
                 )
-            )
+            except CdpConnectionError:
+                return self.ensure_game_open()
             log_event(
                 logger,
                 logging.WARNING,

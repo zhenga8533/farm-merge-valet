@@ -747,6 +747,29 @@ def test_persistent_connection_loss_requests_recovery_after_grace_period(monkeyp
         bot.step()
 
 
+def test_persistent_board_unavailability_requests_recovery_after_grace_period(
+    monkeypatch,
+) -> None:
+    class MissingBoardRuntime(FakeRuntime):
+        def read_runtime_health(self):
+            return RuntimeHealth(True, 7, False, True, True, True, 10, 1.0, True)
+
+        def discover(self):
+            return self.read_runtime_health()
+
+    bot = bare_bot()
+    bot.runtime = MissingBoardRuntime()
+    current_time = [100.0]
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: current_time[0])
+
+    bot.step()
+    current_time[0] = 399.0
+    bot.step()
+    current_time[0] = 401.0
+    with pytest.raises(RuntimeRecoveryRequired, match="unavailable for over 300 seconds"):
+        bot.step()
+
+
 def test_overlay_dismissal_can_be_disabled(caplog) -> None:
     class OverlayRuntime(FakeRuntime):
         def read_runtime_health(self):

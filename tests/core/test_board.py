@@ -380,7 +380,7 @@ def test_clear_cell_returns_coord_to_unknown() -> None:
 
 def test_clear_cell_on_already_unknown_coord_is_a_no_op() -> None:
     grid = BoardGrid()
-    grid.clear_cell((5, 5))  # must not raise
+    grid.clear_cell((5, 5))
     assert grid.get_cell((5, 5)) is None
 
 

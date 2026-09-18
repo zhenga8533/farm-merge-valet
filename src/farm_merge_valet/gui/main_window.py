@@ -84,7 +84,13 @@ _BUILDING_POLICY_FIELDS = _BUILDING_FIELDS - {
     "buildings_sort_descending",
 }
 _MARKETPLACE_VIEW_FIELDS = {field for field in _VIEW_FIELDS if field.startswith("marketplace_")}
-_MARKETPLACE_FIELDS = set(SECTION_FIELDS[ConfigSection.MARKETPLACE]) | _MARKETPLACE_VIEW_FIELDS
+_MARKETPLACE_FIELDS = (
+    set(SECTION_FIELDS[ConfigSection.MARKETPLACE]) | _MARKETPLACE_VIEW_FIELDS | {"catalog_dir"}
+)
+_MARKETPLACE_POLICY_FIELDS = _MARKETPLACE_FIELDS - {
+    "marketplace_sort_column",
+    "marketplace_sort_descending",
+}
 _BROWSER_FIELDS = set(SECTION_FIELDS[ConfigSection.BROWSER])
 _SETTINGS_FIELDS = set(SECTION_FIELDS[ConfigSection.SETTINGS])
 
@@ -577,7 +583,10 @@ class MainWindow(QMainWindow):
                 refresh=bool(changed_fields & _BUILDING_POLICY_FIELDS),
             )
         if changed_fields & _MARKETPLACE_FIELDS:
-            self.marketplace_page.apply_config(config)
+            self.marketplace_page.apply_config(
+                config,
+                refresh=bool(changed_fields & _MARKETPLACE_POLICY_FIELDS),
+            )
         if changed_fields & _SETTINGS_FIELDS:
             self.settings_page.apply_config(config)
         if "log_level" in changed_fields:

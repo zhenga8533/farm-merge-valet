@@ -211,10 +211,14 @@ Obstacle clearing reads the current energy balance, total and available worker
 counts, and each source's live hit points, stage count, current energy and
 worker cost, mobility, and paid/clearing state.
 Only the highest-priority obstacle is selected: fixed before movable, then
-already-started before untouched, then fewer total stages, fewer remaining
-stages, and board coordinate. All paid stages exposing `lootable` output are
-claimed through the normal tile-interaction pipeline before another stage is
-started. The global obstacle-spending control prevents new stages from being paid
+already-started, lower-tier, nearer-completion, or lower on the board (largest
+row, matching land expansion's southernmost preference) — whichever is
+configured as `obstacle_priority_focus` — with the remaining three applying
+afterward in that same fixed order as tiebreakers, and finally board
+coordinate as a fully deterministic tiebreaker. All paid stages exposing
+`lootable` output are claimed through the normal tile-interaction pipeline
+before another stage is started. The global obstacle-spending control
+prevents new stages from being paid
 without blocking loot collection from an already-paid stage. While no worker is
 available, the focused obstacle remains unchanged. After loot is claimed, the
 focused obstacle gets a brief state-settle window before an available worker
@@ -443,7 +447,7 @@ Three consecutive submitted actions without authoritative progress request
 runtime recovery, regardless of which supported workflow submitted them.
 
 The active loop rate-limits repeated capability discovery. Temporary waits,
-individual plans, submissions, confirmations, slow-stage timings, cached
+individual plans, submissions, confirmations, cached
 discovery, and planner transitions are `DEBUG` diagnostics. Runtime readiness,
 user controls, crate-batch results, and transitions into a genuinely idle state
 use `INFO`; recoverable failures use `WARNING`; unsafe terminal conditions use
@@ -492,7 +496,14 @@ authoritative progress classify the action pipeline as unresponsive even when
 browser animation frames continue. A backend single-session replacement requests
 the same recovery immediately. A loaded game frame whose action runtime remains
 unavailable for 30 seconds also requests recovery; this covers fatal startup
-screens such as E002 without depending on canvas-rendered error text.
+screens such as E002 without depending on canvas-rendered error text. A
+separate 300-second grace period applies whenever the board becomes
+unavailable again mid-session, such as after a lucky-merge reload lands on
+that same fatal screen instead of the saved game, so the automation does not
+idle indefinitely against a page that will never recover on its own; this
+window is longer than the 30-second startup grace because it must not
+preempt the board heap recovery's own legitimate backoff schedule, which can
+take a couple of minutes to cycle through on its own.
 A CDP target that can no longer be reached (for example, a transient wifi
 drop) also requests recovery once that condition persists for 60 seconds,
 rather than waiting indefinitely.

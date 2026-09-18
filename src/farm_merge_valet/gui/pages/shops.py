@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QScrollArea,
-    QSpinBox,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -38,6 +37,7 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
 from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.incremental_work import IncrementalPopulation
+from farm_merge_valet.gui.components.input_controls import FocusAwareSpinBox
 from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_ROW_HEIGHT,
@@ -50,11 +50,12 @@ from farm_merge_valet.gui.components.policy_view import (
     PolicyCheckBox,
     PolicyTreeItem,
     aggregate_check_state,
-    configure_policy_toggle,
+    apply_policy_override,
     expanded_policy_keys,
     fit_policy_widget_column,
     policy_badge,
     policy_cell,
+    policy_checkbox,
     set_policy_value,
     set_policy_widget,
 )
@@ -84,7 +85,7 @@ class IngredientReservesDialog(QDialog):
         form = QFormLayout(content)
         self.default_control = self._spin_box(config.shop_ingredient_reserve_default)
         form.addRow("Default reserve", self.default_control)
-        self.controls: dict[str, tuple[QCheckBox, QSpinBox]] = {}
+        self.controls: dict[str, tuple[QCheckBox, FocusAwareSpinBox]] = {}
         ingredient_ids = sorted(
             {
                 ingredient.item_id
@@ -127,8 +128,8 @@ class IngredientReservesDialog(QDialog):
         layout.addWidget(buttons)
 
     @staticmethod
-    def _spin_box(value: int) -> QSpinBox:
-        control = QSpinBox()
+    def _spin_box(value: int) -> FocusAwareSpinBox:
+        control = FocusAwareSpinBox()
         control.setRange(0, 1_000_000_000)
         control.setValue(value)
         control.setKeyboardTracking(False)
@@ -355,12 +356,10 @@ class ShopsPage(AppPage):
                 search_text="Shop",
             )
             self._set_repair_status(parent, shop_id)
-            shop_toggle = PolicyCheckBox()
-            configure_policy_toggle(shop_toggle)
-            shop_toggle.setChecked(
-                self._config.shop_overrides.get(shop_id, self._config.shop_default_enabled)
+            shop_toggle = policy_checkbox(
+                self._config.shop_overrides.get(shop_id, self._config.shop_default_enabled),
+                f"{parent.text(0)}: enabled",
             )
-            shop_toggle.setAccessibleName(f"{parent.text(0)}: enabled")
             shop_toggle.toggled.connect(
                 lambda value, item_key=shop_id: self._set_item_enabled("shop", item_key, value)
             )
@@ -443,14 +442,12 @@ class ShopsPage(AppPage):
                 sort_value="Recipe",
                 search_text="Recipe",
             )
-            recipe_toggle = PolicyCheckBox()
-            configure_policy_toggle(recipe_toggle)
-            recipe_toggle.setChecked(
+            recipe_toggle = policy_checkbox(
                 self._config.recipe_overrides.get(
                     recipe.game_id, self._config.recipe_default_enabled
-                )
+                ),
+                f"{recipe.display_name}: enabled",
             )
-            recipe_toggle.setAccessibleName(f"{recipe.display_name}: enabled")
             recipe_toggle.toggled.connect(
                 lambda value, item_key=recipe.game_id: self._set_item_enabled(
                     "recipe", item_key, value
@@ -522,10 +519,7 @@ class ShopsPage(AppPage):
             else self._config.recipe_default_enabled
         )
         values = dict(getattr(self._config, field))
-        if enabled == default:
-            values.pop(key, None)
-        else:
-            values[key] = enabled
+        apply_policy_override(values, key, enabled, default)
         self._emit(**{field: values})
         self._sync_bulk_header()
 
@@ -555,10 +549,7 @@ class ShopsPage(AppPage):
                 if kind == "shop"
                 else self._config.recipe_default_enabled
             )
-            if value == default:
-                overrides.pop(key, None)
-            else:
-                overrides[key] = value
+            apply_policy_override(overrides, key, value, default)
         self._emit(shop_overrides=shop_overrides, recipe_overrides=recipe_overrides)
         self.populate()
 

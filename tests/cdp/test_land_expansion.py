@@ -38,7 +38,8 @@ def test_land_expansion_expressions_use_native_revalidated_handler() -> None:
         "A19", False, (("level", 18), ("coins", 3545)), 1000, 7, 3
     )
 
-    assert "service.getMapAreasByState(1)" in _READ_LAND_EXPANSION_EXPRESSION
+    assert "readCandidates(services.mapAreaService, false, 3)" in _READ_LAND_EXPANSION_EXPRESSION
+    assert "readCandidates(services.premiumAreaService, true, 1)" in _READ_LAND_EXPANSION_EXPRESSION
     assert "service.getMapArea(expected.areaID)" in action
     assert "service.canUnlockArea(area)" in action
     assert "service.unlockArea(area)" in action

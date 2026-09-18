@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 from farm_merge_valet.config.hotkeys import normalize_hotkey
 from farm_merge_valet.config.paths import user_cache_root
 from farm_merge_valet.core.items import item_base_policy_key, item_family_policy_key
+from farm_merge_valet.core.obstacles import ObstaclePriorityFocus
 from farm_merge_valet.integrations import GamePortal, portal_definition, portal_for_page_url
 
 CONFIG_SCHEMA_VERSION: Literal[2] = 2
@@ -53,8 +54,7 @@ _RECOMMENDED_ITEM_DEFAULTS: Mapping[str, ItemPolicyOverride] = MappingProxyType(
     {
         "currencies/ticket": _INTERACT_BY_DEFAULT,
         "resources/crate": _INTERACT_BY_DEFAULT,
-        "upgrade_cards/upgrade_card/tier/1": _INTERACT_BY_DEFAULT,
-        "upgrade_cards/upgrade_card/tier/3": _INTERACT_BY_DEFAULT,
+        "upgrade_cards/upgrade_card": _INTERACT_BY_DEFAULT,
     }
 )
 
@@ -99,6 +99,7 @@ class AppConfig(BaseModel):
     auto_pop_storage_bubbles: bool = True
     auto_claim_supply_crates: bool = True
     allow_obstacle_stage_starts: bool = True
+    obstacle_priority_focus: ObstaclePriorityFocus = ObstaclePriorityFocus.STARTED
     preserve_building_repair_resources: bool = True
     building_repair_default_enabled: bool = True
     building_repair_overrides: dict[str, bool] = Field(default_factory=dict)

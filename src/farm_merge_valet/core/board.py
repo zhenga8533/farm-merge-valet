@@ -27,26 +27,22 @@ class CellKind(Enum):
     # Occupied content that is not recognized as a merge item, structure, or
     # enabled immediate interaction. It must remain non-actionable.
     OTHER = auto()
-    # A placed building/decoration or one of its unavailable footprint cells.
-    # The game labels footprint placeholders "empty", but genuinely open
-    # cells have no content object at all.
+    # Buildings and footprints; the game calls footprint placeholders "empty",
+    # while genuinely open cells have no content object.
     STRUCTURE = auto()
 
 
 @dataclass(frozen=True)
 class Cell:
     kind: CellKind
-    item: ItemRef | None = None  # set only when kind is ITEM
+    item: ItemRef | None = None
 
     def __post_init__(self) -> None:
         if (self.kind is CellKind.ITEM) != (self.item is not None):
             raise ValueError("Cell.item must be set if and only if kind is ITEM")
 
 
-# 4-connected (up/down/left/right in grid coordinates); the isometric
-# rendering is just a visual rotation of a square grid, so logical
-# adjacency is still orthogonal. Revisit if the game turns out to also
-# treat diagonal neighbors as touching for merge purposes.
+# Isometric rendering rotates a square grid; logical adjacency is orthogonal.
 NEIGHBOR_OFFSETS = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
 
