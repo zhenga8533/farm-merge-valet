@@ -667,6 +667,7 @@ class Bot:
             for state in (self._building_repairs or ())
             if state.placed
             and not state.active
+            and not state.upgrading
             and state.requirements
             and state.building_id not in self._event_building_ids
             and self.config.building_repair_enabled(state.building_id)

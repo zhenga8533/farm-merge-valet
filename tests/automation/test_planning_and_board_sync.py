@@ -192,7 +192,7 @@ def test_repair_reservation_protects_exact_items_for_best_placed_shop() -> None:
             True,
             True,
             False,
-            True,
+            False,
             (BuildingRequirement("wood_2", 3, 3),),
         ),
     )
@@ -291,6 +291,33 @@ def test_absent_buildings_never_reserve_resources() -> None:
 
     assert bot._repair_target() is None
     assert bot._repair_reserves() == {}
+
+
+def test_upgrading_buildings_are_excluded_from_repair_targeting() -> None:
+    bot = bare_bot()
+    bot._building_repairs = (
+        BuildingRepairState(
+            "bbq",
+            0,
+            True,
+            True,
+            False,
+            True,
+            (BuildingRequirement("wood_7", 2, 0),),
+        ),
+        BuildingRepairState(
+            "sweets",
+            0,
+            True,
+            True,
+            False,
+            False,
+            (BuildingRequirement("wood_9", 2, 0),),
+        ),
+    )
+
+    assert bot._repair_target() is not None
+    assert bot._repair_target().building_id == "sweets"
 
 
 def test_repair_target_prioritizes_nearly_complete_workshop_by_missing_cost() -> None:
