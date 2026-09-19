@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -15,12 +16,19 @@ from farm_merge_valet.observability.logging import log_event
 
 logger = logging.getLogger(__name__)
 
+# A revoked or deleted webhook fails every delivery with the same client error;
+# back off instead of retrying (and re-logging) on every periodic refresh.
+_UNRECOVERABLE_STATUS_CODES = frozenset({401, 403, 404})
+_CIRCUIT_BREAKER_COOLDOWN_SECONDS = 900.0
+
 
 class DiscordWebhookTransportMixin:
     _url: str
     _status_state_path: Path
     _webhook_fingerprint: str
     _status_message_id: str | None
+    _clock: Callable[[], float]
+    _disabled_until: float
 
     def _status_payload(self, now: float) -> dict[str, object]:
         raise NotImplementedError
@@ -83,12 +91,31 @@ class DiscordWebhookTransportMixin:
             detail=detail,
         )
 
+    def _circuit_open(self) -> bool:
+        """Whether delivery is paused after a previous unrecoverable failure."""
+        return self._clock() < self._disabled_until
+
+    def _note_unrecoverable_failure(self, status_code: int) -> None:
+        self._disabled_until = self._clock() + _CIRCUIT_BREAKER_COOLDOWN_SECONDS
+        log_event(
+            logger,
+            logging.WARNING,
+            "webhook.disabled",
+            "Discord webhook returned HTTP %d; pausing delivery for %d minutes.",
+            status_code,
+            round(_CIRCUIT_BREAKER_COOLDOWN_SECONDS / 60),
+            status_code=status_code,
+            cooldown_seconds=_CIRCUIT_BREAKER_COOLDOWN_SECONDS,
+        )
+
     def _send(
         self,
         client: httpx.Client,
         payload: dict[str, object],
         attachments: tuple[DiscordAttachment, ...] = (),
     ) -> httpx.Response | None:
+        if self._circuit_open():
+            return None
         if not attachments:
             data = None
             files = None
@@ -140,7 +167,11 @@ class DiscordWebhookTransportMixin:
                 last_error = exc
                 if attempt < 2:
                     time.sleep(0.25 * (2**attempt))
-        if last_error is not None:
+        if isinstance(last_error, httpx.HTTPStatusError) and (
+            last_error.response.status_code in _UNRECOVERABLE_STATUS_CODES
+        ):
+            self._note_unrecoverable_failure(last_error.response.status_code)
+        elif last_error is not None:
             self._log_delivery_failure(last_error)
         return None
 
@@ -173,6 +204,8 @@ class DiscordWebhookTransportMixin:
     def _edit_status(
         self, client: httpx.Client, now: float
     ) -> Literal["updated", "missing", "failed"]:
+        if self._circuit_open():
+            return "failed"
         status_url = self._status_message_url()
         if status_url is None:
             return "missing"
@@ -196,7 +229,11 @@ class DiscordWebhookTransportMixin:
                 last_error = exc
             if attempt < 2:
                 time.sleep(0.25 * (2**attempt))
-        if last_error is not None:
+        if isinstance(last_error, httpx.HTTPStatusError) and (
+            last_error.response.status_code in _UNRECOVERABLE_STATUS_CODES
+        ):
+            self._note_unrecoverable_failure(last_error.response.status_code)
+        elif last_error is not None:
             self._log_delivery_failure(last_error)
         return "failed"
 

@@ -10,6 +10,8 @@ from threading import Lock
 import cv2
 import numpy as np
 
+ACTIVITY_CHART_FILENAME = "session-report.png"
+
 
 @dataclass(frozen=True)
 class DiscordAttachment:
@@ -195,7 +197,7 @@ class ActivityChart:
         encoded, data = cv2.imencode(".png", image, [cv2.IMWRITE_PNG_COMPRESSION, 7])
         if not encoded:
             return None
-        return DiscordAttachment("session-report.png", data.tobytes())
+        return DiscordAttachment(ACTIVITY_CHART_FILENAME, data.tobytes())
 
     def commit(self) -> None:
         """Discard activity included in a successfully delivered report."""
