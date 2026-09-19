@@ -563,6 +563,16 @@ def test_config_store_migrates_plaintext_webhook_storage(tmp_path) -> None:
     assert "legacy-token" not in path.read_text(encoding="utf-8")
 
 
+def test_config_store_tolerates_an_unreadable_stored_secret(tmp_path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(AppConfig().model_dump(mode="json")), encoding="utf-8")
+    path.with_suffix(".json.secrets").write_bytes(b"not valid base64!!")
+
+    loaded = ConfigStore(path).load()
+
+    assert loaded.discord_webhook_url is None
+
+
 def test_config_store_skips_unchanged_snapshot_notifications(tmp_path) -> None:
     store = ConfigStore(tmp_path / "config.json")
     config = store.load()

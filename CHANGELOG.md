@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.3 - 2026-09-19
+
+- Added a cooldown for a revoked or deleted Discord webhook so it stops
+  retrying and re-logging the same failure on every status refresh.
+- Fixed catalog sync progress and errors being lost to bare console output
+  instead of the diagnostic log, and Windows DPAPI failures going unlogged.
+- Fixed config loading crashing entirely when the stored Discord webhook
+  secret was unreadable; it now falls back to treating it as unset.
+- Fixed force-lucky-merge attempts never taking part in the shared action
+  lease, which could leak stale retry state and mark an attempt complete
+  even when it was only interrupted by a shutdown.
+- Renamed several cross-module automation methods that were called across
+  class boundaries despite their leading underscore, and shared the
+  duplicated onboarding/loading scaffolding across the Buildings, Items,
+  Marketplace, and Shops pages.
+
 ## 0.2.2 - 2026-09-19
 
 - Fixed automatic recovery giving up after a transient DevTools disconnect

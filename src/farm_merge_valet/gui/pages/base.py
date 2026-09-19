@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (
     QFormLayout,
@@ -19,11 +19,14 @@ from PySide6.QtWidgets import (
 )
 
 from farm_merge_valet.config import AppConfig
+from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
+from farm_merge_valet.gui.components.incremental_work import IncrementalPopulation
 from farm_merge_valet.gui.components.input_controls import (
     FocusAwareComboBox,
     FocusAwareSpinBox,
     SettingsToggle,
 )
+from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.widgets import DisclosureSection
 
 
@@ -85,6 +88,65 @@ class AppPage(QWidget):
             description.setObjectName("pageSubtitle")
             description.setWordWrap(True)
             self.page_layout.addWidget(description)
+
+
+class CatalogTreePage(AppPage):
+    """Shared onboarding/loading scaffolding for pages backed by a synced catalog."""
+
+    catalog_setup_requested = Signal()
+    _population: IncrementalPopulation
+
+    def _init_catalog_scaffold(self, loading_title: str, loading_subtitle: str) -> None:
+        """Build the onboarding and loading placeholders at the caller's chosen layout spot.
+
+        Callers add this after any page-specific header widget, so it cannot
+        run from AppPage.__init__ and must be invoked explicitly instead.
+        """
+        self._populated = False
+        self.catalog_onboarding = CatalogOnboarding()
+        self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
+        self.page_layout.addWidget(self.catalog_onboarding, 1, Qt.AlignmentFlag.AlignCenter)
+        self.loading_state = LoadingState(loading_title, loading_subtitle)
+        self.loading_state.setVisible(False)
+        self.page_layout.addWidget(self.loading_state, 1, Qt.AlignmentFlag.AlignCenter)
+
+    def _catalog_content_widgets(self) -> tuple[QWidget, ...]:
+        raise NotImplementedError
+
+    def _populate_steps(self) -> Iterator[None]:
+        raise NotImplementedError
+
+    def ensure_populated(self, *, deferred: bool = False) -> None:
+        self._population.ensure(
+            populated=self._populated,
+            deferred=deferred,
+            steps=self._populate_steps,
+            show_loading=self._show_loading,
+        )
+
+    def set_catalog_setup_busy(self, busy: bool) -> None:
+        self.catalog_onboarding.set_busy(busy)
+
+    def set_catalog_setup_status(self, message: str, *, error: bool = False) -> None:
+        self.catalog_onboarding.set_status(message, error=error)
+
+    def _show_catalog_onboarding(self) -> None:
+        self.loading_state.setVisible(False)
+        self.catalog_onboarding.setVisible(True)
+        for widget in self._catalog_content_widgets():
+            widget.setVisible(False)
+
+    def _show_catalog_content(self) -> None:
+        self.loading_state.setVisible(False)
+        self.catalog_onboarding.setVisible(False)
+        for widget in self._catalog_content_widgets():
+            widget.setVisible(True)
+
+    def _show_loading(self) -> None:
+        self.catalog_onboarding.setVisible(False)
+        for widget in self._catalog_content_widgets():
+            widget.setVisible(False)
+        self.loading_state.setVisible(True)
 
 
 class ConfigFormPage(AppPage):

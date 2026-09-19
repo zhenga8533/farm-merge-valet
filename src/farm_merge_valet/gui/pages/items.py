@@ -30,10 +30,8 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
     CatalogRowRole,
     set_catalog_row_icon,
 )
-from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.incremental_work import IncrementalPopulation
-from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_BADGE_COLUMN_WIDTH,
     POLICY_COMPACT_ROW_HEIGHT,
@@ -57,7 +55,7 @@ from farm_merge_valet.gui.components.policy_view import (
     set_policy_widget,
 )
 from farm_merge_valet.gui.components.widgets import EditButton, get_int
-from farm_merge_valet.gui.pages.base import AppPage, ConfigEdit
+from farm_merge_valet.gui.pages.base import CatalogTreePage, ConfigEdit
 from farm_merge_valet.gui.services.assets import CatalogIconLoader
 from farm_merge_valet.gui.services.catalog import load_gui_catalog
 
@@ -149,10 +147,9 @@ class _RemovalControlCell(QWidget):
                 self._edit.move(edit_position)
 
 
-class ItemsPage(AppPage):
+class ItemsPage(CatalogTreePage):
     config_edited = Signal(object)
     reset_requested = Signal()
-    catalog_setup_requested = Signal()
 
     def __init__(
         self,
@@ -171,22 +168,9 @@ class ItemsPage(AppPage):
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
-        self.catalog_onboarding = CatalogOnboarding()
-        self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
-        self.page_layout.addWidget(
-            self.catalog_onboarding,
-            1,
-            Qt.AlignmentFlag.AlignCenter,
-        )
-        self.loading_state = LoadingState(
+        self._init_catalog_scaffold(
             "Loading item policies…",
             "Preparing locally cached item families and controls.",
-        )
-        self.loading_state.setVisible(False)
-        self.page_layout.addWidget(
-            self.loading_state,
-            1,
-            Qt.AlignmentFlag.AlignCenter,
         )
 
         scaffold = create_policy_tree(
@@ -225,7 +209,6 @@ class ItemsPage(AppPage):
         self._upgrade_progress: UpgradeProgress | None = None
         self._upgrade_targets: dict[str, UpgradeTargetProgress] = {}
         self._catalog_loaded = False
-        self._populated = False
         self._population = IncrementalPopulation(self)
         self._row_definitions: list[_ItemPolicyRow] = []
         self._search_text_by_policy_key: dict[str, str] = {}
@@ -262,14 +245,6 @@ class ItemsPage(AppPage):
     def reload_catalog_if_missing(self) -> None:
         if self._populated and not self._catalog_loaded:
             self.populate()
-
-    def ensure_populated(self, *, deferred: bool = False) -> None:
-        self._population.ensure(
-            populated=self._populated,
-            deferred=deferred,
-            steps=self._populate_steps,
-            show_loading=self._show_loading,
-        )
 
     def set_upgrade_progress(self, progress: UpgradeProgress | None) -> None:
         if progress == self._upgrade_progress:
@@ -940,29 +915,8 @@ class ItemsPage(AppPage):
         for column in range(2, 8):
             self.bulk_header.set_state(column, Qt.CheckState.Unchecked, enabled=False)
 
-    def _show_catalog_onboarding(self) -> None:
-        self.loading_state.setVisible(False)
-        self.catalog_onboarding.setVisible(True)
-        self.toolbar.setVisible(False)
-        self.table.setVisible(False)
-
-    def _show_catalog_content(self) -> None:
-        self.loading_state.setVisible(False)
-        self.catalog_onboarding.setVisible(False)
-        self.toolbar.setVisible(True)
-        self.table.setVisible(True)
-
-    def _show_loading(self) -> None:
-        self.catalog_onboarding.setVisible(False)
-        self.toolbar.setVisible(False)
-        self.table.setVisible(False)
-        self.loading_state.setVisible(True)
-
-    def set_catalog_setup_busy(self, busy: bool) -> None:
-        self.catalog_onboarding.set_busy(busy)
-
-    def set_catalog_setup_status(self, message: str, *, error: bool = False) -> None:
-        self.catalog_onboarding.set_status(message, error=error)
+    def _catalog_content_widgets(self) -> tuple[QWidget, ...]:
+        return (self.toolbar, self.table)
 
     def _filter(self, text: str) -> None:
         self._lazy_branches.apply_filter(text)

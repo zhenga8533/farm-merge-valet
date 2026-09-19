@@ -6,7 +6,7 @@ from collections.abc import Iterator
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QHeaderView, QTreeWidgetItem
+from PySide6.QtWidgets import QHeaderView, QTreeWidgetItem, QWidget
 
 from farm_merge_valet.automation.runtime import BuildingRepairState
 from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog
@@ -17,10 +17,8 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
     CatalogRowRole,
     set_catalog_row_icon,
 )
-from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.incremental_work import IncrementalPopulation
-from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_ROW_HEIGHT,
     POLICY_MEDIA_ROW_HEIGHT,
@@ -38,17 +36,16 @@ from farm_merge_valet.gui.components.policy_view import (
     set_policy_value,
     set_policy_widget,
 )
-from farm_merge_valet.gui.pages.base import AppPage, ConfigEdit
+from farm_merge_valet.gui.pages.base import CatalogTreePage, ConfigEdit
 from farm_merge_valet.gui.services.assets import CatalogIconLoader
 from farm_merge_valet.gui.services.catalog import load_gui_catalog
 
 _SORT_COLUMNS = {"building": 0, "type": 1, "availability": 2, "repair": 3, "enabled": 4}
 
 
-class BuildingsPage(AppPage):
+class BuildingsPage(CatalogTreePage):
     config_edited = Signal(object)
     reset_requested = Signal()
-    catalog_setup_requested = Signal()
 
     def __init__(
         self,
@@ -64,7 +61,6 @@ class BuildingsPage(AppPage):
         self._config = config
         self._icons = icons or CatalogIconLoader(config.catalog_dir)
         self._catalog: ItemCatalog | None = None
-        self._populated = False
         self._population = IncrementalPopulation(self)
         self._states: tuple[BuildingRepairState, ...] | None = None
         self._toggles: dict[str, PolicyCheckBox] = {}
@@ -77,15 +73,10 @@ class BuildingsPage(AppPage):
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
-        self.catalog_onboarding = CatalogOnboarding()
-        self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
-        self.page_layout.addWidget(self.catalog_onboarding, 1, Qt.AlignmentFlag.AlignCenter)
-        self.loading_state = LoadingState(
+        self._init_catalog_scaffold(
             "Loading buildings…",
             "Preparing locally cached buildings, repair requirements, and controls.",
         )
-        self.loading_state.setVisible(False)
-        self.page_layout.addWidget(self.loading_state, 1, Qt.AlignmentFlag.AlignCenter)
         scaffold = create_policy_tree(
             header_labels=("Building / requirement", "Type", "Availability", "Repair", ""),
             bulk_labels={4: "Repair"},
@@ -111,13 +102,8 @@ class BuildingsPage(AppPage):
         if populate_immediately:
             self.populate()
 
-    def ensure_populated(self, *, deferred: bool = False) -> None:
-        self._population.ensure(
-            populated=self._populated,
-            deferred=deferred,
-            steps=self._populate_steps,
-            show_loading=self._show_loading,
-        )
+    def _catalog_content_widgets(self) -> tuple[QWidget, ...]:
+        return (self.toolbar, self.tree)
 
     def apply_config(self, config: AppConfig, *, refresh: bool = True) -> None:
         catalog_changed = config.catalog_dir != self._config.catalog_dir
@@ -144,12 +130,6 @@ class BuildingsPage(AppPage):
         if not self._populated or self._catalog is not None:
             return
         self.populate()
-
-    def set_catalog_setup_busy(self, busy: bool) -> None:
-        self.catalog_onboarding.set_busy(busy)
-
-    def set_catalog_setup_status(self, message: str, *, error: bool = False) -> None:
-        self.catalog_onboarding.set_status(message, error=error)
 
     def set_building_repairs(self, states: object) -> None:
         if states is not None and not isinstance(states, tuple):
@@ -475,24 +455,6 @@ class BuildingsPage(AppPage):
         item.setFirstColumnSpanned(True)
         self.tree.addTopLevelItem(item)
         self.bulk_header.set_state(4, Qt.CheckState.Unchecked, enabled=False)
-
-    def _show_catalog_onboarding(self) -> None:
-        self.loading_state.setVisible(False)
-        self.catalog_onboarding.setVisible(True)
-        self.toolbar.setVisible(False)
-        self.tree.setVisible(False)
-
-    def _show_catalog_content(self) -> None:
-        self.loading_state.setVisible(False)
-        self.catalog_onboarding.setVisible(False)
-        self.toolbar.setVisible(True)
-        self.tree.setVisible(True)
-
-    def _show_loading(self) -> None:
-        self.catalog_onboarding.setVisible(False)
-        self.toolbar.setVisible(False)
-        self.tree.setVisible(False)
-        self.loading_state.setVisible(True)
 
     @staticmethod
     def _repair_status(state: BuildingRepairState) -> str:

@@ -5,6 +5,7 @@ import logging
 from collections import Counter
 from threading import Lock
 
+import httpx
 import pytest
 
 from farm_merge_valet.observability.discord import handler as discord
@@ -296,3 +297,28 @@ def test_status_message_id_is_reused_across_runs(monkeypatch, tmp_path) -> None:
 
     assert _FakeClient.requests[0]["method"] == "PATCH"
     assert _FakeClient.requests[0]["url"].endswith(f"/messages/{persisted_id}")
+
+
+def test_send_disables_delivery_after_an_unrecoverable_status() -> None:
+    handler = object.__new__(discord.DiscordWebhookHandler)
+    handler._url = "https://example.test/webhook"
+    handler._clock = lambda: 1000.0
+    handler._disabled_until = 0.0
+
+    class _ForbiddenClient:
+        calls = 0
+
+        def post(self, *_args: object, **_kwargs: object) -> httpx.Response:
+            type(self).calls += 1
+            request = httpx.Request("POST", handler._url)
+            response = httpx.Response(403, request=request)
+            raise httpx.HTTPStatusError("forbidden", request=request, response=response)
+
+    client = _ForbiddenClient()
+
+    assert handler._send(client, {}) is None
+    assert _ForbiddenClient.calls == 1
+    assert handler._disabled_until > 1000.0
+
+    assert handler._send(client, {}) is None
+    assert _ForbiddenClient.calls == 1

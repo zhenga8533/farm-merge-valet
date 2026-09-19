@@ -153,7 +153,7 @@ class InteractionWorkflow:
             return desired_empty_cells
         return None
 
-    def _interaction_succeeded(self, bot: Bot, pending: PendingInteraction) -> bool:
+    def interaction_succeeded(self, bot: Bot, pending: PendingInteraction) -> bool:
         current = bot._live_cells.get(pending.action.coord)
         if pending.action.kind in {
             InteractionTargetKind.IMMEDIATE,
@@ -228,7 +228,7 @@ class InteractionWorkflow:
         )
         return len(current_output_ids - pending.initial_output_object_ids)
 
-    def _verify_pending_interaction(self, bot: Bot, health: RuntimeHealth) -> bool:
+    def verify_pending_interaction(self, bot: Bot, health: RuntimeHealth) -> bool:
         pending = self.pending
         if pending is None:
             return True
@@ -255,7 +255,7 @@ class InteractionWorkflow:
                 **bot._interaction_event_context(pending.action),
             )
             pending.scene_change_logged = True
-        completed = bot._interaction_succeeded(pending)
+        completed = bot.interaction_succeeded(pending)
         output_progress_count = self._output_progress_count(bot, pending)
         partially_completed = not completed and output_progress_count > 0
         if completed or partially_completed:
@@ -332,7 +332,7 @@ class InteractionWorkflow:
         )
         return True
 
-    def _submit_interaction(
+    def submit_interaction(
         self, bot: Bot, action: InteractionAction, health: RuntimeHealth
     ) -> bool:
         action_key = self._action_key(action)
@@ -455,7 +455,7 @@ class InteractionWorkflow:
         desired_empty_cells = action.output_capacity or bot.config.producer_interact_min_empty_cells
         if empty_count >= desired_empty_cells:
             self.output_space_request = None
-            bot._submit_interaction(action, health)
+            bot.submit_interaction(action, health)
             return
         if board_space.merge_actions:
             self.output_space_request = action
@@ -495,7 +495,7 @@ class InteractionWorkflow:
                 desired_empty_cells=desired_empty_cells,
                 **bot._interaction_event_context(action),
             )
-            bot._submit_interaction(action, health)
+            bot.submit_interaction(action, health)
             return
         self.output_space_request = action
         bot._request_board_space(
@@ -507,7 +507,7 @@ class InteractionWorkflow:
             action_key=(action.coord, action.kind.value),
         )
 
-    def _step_interact_tiles(
+    def step_interact_tiles(
         self,
         bot: Bot,
         health: RuntimeHealth,
@@ -527,14 +527,14 @@ class InteractionWorkflow:
                 }:
                     self._step_output_claim(bot, health, action, board_space)
                 else:
-                    bot._submit_interaction(action, health)
+                    bot.submit_interaction(action, health)
                 return
         empty_count = board_space.empty_cells
         available_depleted = [action for action in depleted if self._available(bot, action)]
         for action in available_depleted:
             required = 1 if action.producer_kind is ProducerKind.CROP else 0
             if empty_count >= required:
-                bot._submit_interaction(action, health)
+                bot.submit_interaction(action, health)
                 return
         if available_depleted:
             action = available_depleted[0]

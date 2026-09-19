@@ -154,7 +154,13 @@ def _verify_offline(bot: Bot) -> None:
     raise LuckyMergeError("Game backend did not confirm disconnection; merge was not attempted.")
 
 
-def run_lucky_merge(bot: Bot, action: MergeAction) -> None:
+def run_lucky_merge(bot: Bot, action: MergeAction) -> bool:
+    """Attempt a lucky merge until confirmed or the bot is interrupted.
+
+    Returns whether the merge was confirmed; a `False` return means the bot
+    was interrupted mid-attempt, not that the merge failed (a failure raises
+    LuckyMergeError instead).
+    """
     if (
         action.kind is not MergeActionKind.TRIGGER
         or action.effect is not MoveEffect.MERGE
@@ -211,7 +217,7 @@ def run_lucky_merge(bot: Bot, action: MergeAction) -> None:
                     item_policy_key=action.item.tier_policy_key,
                     attempts=attempts,
                 )
-                return
+                return True
             logger.info("Normal merge detected; discarding attempt %d and reloading.", attempts)
             network.discard_and_reload()
             logger.info("Saved game reloaded; recovering the board before retrying.")
@@ -232,7 +238,7 @@ def run_lucky_merge(bot: Bot, action: MergeAction) -> None:
             )
         except Exception as exc:
             if bot._interrupt_event.is_set():
-                return
+                return False
             if isinstance(exc, LuckyMergeError):
                 raise
             raise LuckyMergeError(f"Lucky merge recovery failed: {exc}") from exc
@@ -242,4 +248,4 @@ def run_lucky_merge(bot: Bot, action: MergeAction) -> None:
                     network.discard_and_reload()
                 else:
                     network.restore_online()
-    return
+    return False

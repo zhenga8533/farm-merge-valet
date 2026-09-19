@@ -1237,14 +1237,14 @@ class Bot:
             for state in self._live_cells.values()
         )
 
-    def _interaction_succeeded(self, pending: PendingInteraction) -> bool:
-        return self._interaction_workflow._interaction_succeeded(self, pending)
+    def interaction_succeeded(self, pending: PendingInteraction) -> bool:
+        return self._interaction_workflow.interaction_succeeded(self, pending)
 
-    def _verify_pending_interaction(self, health: RuntimeHealth) -> bool:
-        return self._interaction_workflow._verify_pending_interaction(self, health)
+    def verify_pending_interaction(self, health: RuntimeHealth) -> bool:
+        return self._interaction_workflow.verify_pending_interaction(self, health)
 
-    def _submit_interaction(self, action: InteractionAction, health: RuntimeHealth) -> bool:
-        return self._interaction_workflow._submit_interaction(self, action, health)
+    def submit_interaction(self, action: InteractionAction, health: RuntimeHealth) -> bool:
+        return self._interaction_workflow.submit_interaction(self, action, health)
 
     def _verify_pending_storage_bubble(self, health: RuntimeHealth) -> bool:
         return self._storage_bubble_workflow.verify_pending(self, health)
@@ -1267,24 +1267,24 @@ class Bot:
             None,
         )
 
-    def _verify_pending_shop_action(
+    def verify_pending_shop_action(
         self, health: RuntimeHealth, orders: tuple[ShopOrder, ...] | None
     ) -> bool:
-        return self._shop_workflow._verify_pending_shop_action(self, health, orders)
+        return self._shop_workflow.verify_pending_shop_action(self, health, orders)
 
-    def _submit_shop_action(self, action: ShopAction, health: RuntimeHealth) -> bool:
-        return self._shop_workflow._submit_shop_action(self, action, health)
+    def submit_shop_action(self, action: ShopAction, health: RuntimeHealth) -> bool:
+        return self._shop_workflow.submit_shop_action(self, action, health)
 
-    def _merge_action_succeeded(self, action: MergeAction) -> bool:
-        return self._merge_workflow._merge_action_succeeded(self, action)
+    def merge_action_succeeded(self, action: MergeAction) -> bool:
+        return self._merge_workflow.merge_action_succeeded(self, action)
 
-    def _verify_pending_action(self, health: RuntimeHealth) -> bool:
-        return self._merge_workflow._verify_pending_action(self, health)
+    def verify_pending_action(self, health: RuntimeHealth) -> bool:
+        return self._merge_workflow.verify_pending_action(self, health)
 
-    def _submit_merge(self, action: MergeAction, health: RuntimeHealth) -> bool:
-        return self._merge_workflow._submit_merge(self, action, health)
+    def submit_merge(self, action: MergeAction, health: RuntimeHealth) -> bool:
+        return self._merge_workflow.submit_merge(self, action, health)
 
-    def _step_interact_tiles(
+    def step_interact_tiles(
         self,
         health: RuntimeHealth,
         immediate: list[InteractionAction],
@@ -1292,7 +1292,7 @@ class Bot:
         ready: list[InteractionAction],
         board_space: BoardSpaceAssessment | None = None,
     ) -> None:
-        self._interaction_workflow._step_interact_tiles(
+        self._interaction_workflow.step_interact_tiles(
             self,
             health,
             immediate,
@@ -1360,7 +1360,7 @@ class Bot:
         )
         self._set_phase(Phase.MERGE)
         if self._ensure_capability(health, RuntimeCapability.MERGE_DROP):
-            self._step_merge(
+            self.step_merge(
                 health,
                 board_space,
                 required_empty_cells=required_empty_cells,
@@ -1390,7 +1390,7 @@ class Bot:
             return False
         self._set_phase(Phase.MERGE)
         if self._ensure_capability(health, RuntimeCapability.MERGE_DROP):
-            self._step_merge(
+            self.step_merge(
                 health,
                 board_space,
                 required_empty_cells=request.required_empty_cells,
@@ -1419,7 +1419,7 @@ class Bot:
         candidates = (*immediate, *depleted, *ready)
         return any((action.coord, action.kind.value) == request.action_key for action in candidates)
 
-    def _step_merge(
+    def step_merge(
         self,
         health: RuntimeHealth,
         board_space: BoardSpaceAssessment,
@@ -1433,17 +1433,17 @@ class Bot:
             else:
                 self._set_phase(Phase.CLAIM_CRATES)
             return
-        self._merge_workflow._step_merge(
+        self._merge_workflow.step_merge(
             self, health, board_space, required_empty_cells=required_empty_cells
         )
 
-    def _step_shops(
+    def step_shops(
         self,
         health: RuntimeHealth,
         orders: tuple[ShopOrder, ...],
         board_space: BoardSpaceAssessment,
     ) -> bool:
-        return self._shop_workflow._step_shops(self, health, orders, board_space)
+        return self._shop_workflow.step_shops(self, health, orders, board_space)
 
     def _shop_policy(self) -> ShopPolicy:
         return ShopPolicy(
@@ -1453,6 +1453,54 @@ class Bot:
             recipe_overrides=self.config.recipe_overrides,
             automation_enabled=self.config.shop_automation_enabled,
         )
+
+    def _step_handle_transient_overlay(self, health: RuntimeHealth) -> bool:
+        """Dismiss a transient overlay if one is open. Returns whether step() should return now."""
+        if health.transient_overlay is None:
+            return False
+        overlay_detail = health.transient_overlay_detail or health.transient_overlay.value
+        if health.transient_overlay is TransientOverlayKind.ONBOARDING:
+            self._report_wait("game onboarding is open; complete it manually")
+            return True
+        if health.transient_overlay is TransientOverlayKind.UNSUPPORTED:
+            self._report_wait(f"unsupported game overlay is open ({overlay_detail})")
+            return True
+        if not self.config.auto_dismiss_overlays:
+            self._report_wait(f"{overlay_detail} overlay is open; automatic dismissal is disabled")
+            return True
+        try:
+            result = self.runtime.dismiss_transient_overlay()
+        except RuntimeConnectionError as exc:
+            if not self._interrupt_event.is_set():
+                self._report_wait(str(exc))
+            return True
+        if result.submitted:
+            log_event(
+                logger,
+                logging.INFO,
+                "overlay.dismissed",
+                "Dismissed %s overlay.",
+                health.transient_overlay.value,
+                overlay=health.transient_overlay.value,
+            )
+        elif result.status is ActionStatus.BUSY:
+            self._report_wait(result.detail or "reward overlay transition in progress")
+        elif result.detail and result.detail.endswith("-timeout"):
+            raise RuntimeRecoveryRequired(
+                f"The {health.transient_overlay.value} overlay did not close."
+            )
+        else:
+            log_event(
+                logger,
+                logging.WARNING,
+                "overlay.dismiss_failed",
+                "Could not dismiss %s overlay: %s.",
+                health.transient_overlay.value,
+                result.detail or result.status.value,
+                overlay=health.transient_overlay.value,
+                detail=result.detail,
+            )
+        return True
 
     def step(self) -> None:
         """Run one perceive -> plan -> internal action -> verify iteration."""
@@ -1511,51 +1559,7 @@ class Bot:
                     f"{_CONNECTION_LOSS_GRACE_SECONDS:.0f} seconds ({exc})"
                 ) from exc
             return
-        if health.transient_overlay is not None:
-            overlay_detail = health.transient_overlay_detail or health.transient_overlay.value
-            if health.transient_overlay is TransientOverlayKind.ONBOARDING:
-                self._report_wait("game onboarding is open; complete it manually")
-                return
-            if health.transient_overlay is TransientOverlayKind.UNSUPPORTED:
-                self._report_wait(f"unsupported game overlay is open ({overlay_detail})")
-                return
-            if not self.config.auto_dismiss_overlays:
-                self._report_wait(
-                    f"{overlay_detail} overlay is open; automatic dismissal is disabled"
-                )
-                return
-            try:
-                result = self.runtime.dismiss_transient_overlay()
-            except RuntimeConnectionError as exc:
-                if not self._interrupt_event.is_set():
-                    self._report_wait(str(exc))
-                return
-            if result.submitted:
-                log_event(
-                    logger,
-                    logging.INFO,
-                    "overlay.dismissed",
-                    "Dismissed %s overlay.",
-                    health.transient_overlay.value,
-                    overlay=health.transient_overlay.value,
-                )
-            elif result.status is ActionStatus.BUSY:
-                self._report_wait(result.detail or "reward overlay transition in progress")
-            elif result.detail and result.detail.endswith("-timeout"):
-                raise RuntimeRecoveryRequired(
-                    f"The {health.transient_overlay.value} overlay did not close."
-                )
-            else:
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    "overlay.dismiss_failed",
-                    "Could not dismiss %s overlay: %s.",
-                    health.transient_overlay.value,
-                    result.detail or result.status.value,
-                    overlay=health.transient_overlay.value,
-                    detail=result.detail,
-                )
+        if self._step_handle_transient_overlay(health):
             return
         board_synced = snapshot.cells is not None
         if board_synced:
@@ -1571,9 +1575,9 @@ class Bot:
                 return
             self._report_wait("authoritative board state unavailable")
             return
-        if not self._verify_pending_action(health):
+        if not self.verify_pending_action(health):
             return
-        if not self._verify_pending_interaction(health):
+        if not self.verify_pending_interaction(health):
             return
         if not self._verify_pending_storage_bubble(health):
             return
@@ -1591,7 +1595,7 @@ class Bot:
             return
         shop_policy_enabled = self._shop_policy().may_enable_orders and not on_event_map
         shop_orders: tuple[ShopOrder, ...] | None = self._shop_orders
-        if not self._verify_pending_shop_action(health, shop_orders):
+        if not self.verify_pending_shop_action(health, shop_orders):
             return
         if not health.heartbeat_advancing:
             self._report_wait(
@@ -1674,7 +1678,7 @@ class Bot:
                 capability = "board interaction"
             if not self._ensure_capability(health, runtime_capability, label=capability):
                 return
-            self._step_interact_tiles(health, immediate, depleted, ready, board_space)
+            self.step_interact_tiles(health, immediate, depleted, ready, board_space)
             return
         cooling_producers = self._cooling_producer_count()
         if cooling_producers and cooling_producers != self._last_cooling_producer_count:
@@ -1695,7 +1699,7 @@ class Bot:
             if not health.supports(RuntimeCapability.SHOPS):
                 if not self._ensure_capability(health, RuntimeCapability.SHOPS):
                     return
-            if self._step_shops(health, shop_orders, board_space):
+            if self.step_shops(health, shop_orders, board_space):
                 return
         if marketplace_enabled and marketplace_offers is not None:
             if not health.supports(RuntimeCapability.MARKETPLACE):
@@ -1723,7 +1727,7 @@ class Bot:
             if on_event_map:
                 if board_space.merge_actions:
                     self._set_phase(Phase.MERGE)
-                    self._step_merge(health, board_space)
+                    self.step_merge(health, board_space)
                 else:
                     self._defer_idle()
                 return
@@ -1737,7 +1741,7 @@ class Bot:
         else:
             if not self._ensure_capability(health, RuntimeCapability.MERGE_DROP):
                 return
-            self._step_merge(health, board_space)
+            self.step_merge(health, board_space)
 
     def _handle_event_state(self, state: EventState | None) -> bool:
         pending = self._pending_event_action

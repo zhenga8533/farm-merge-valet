@@ -168,7 +168,7 @@ def test_offscreen_coordinates_are_submitted_unchanged(caplog) -> None:
     bot.board.set_cell(move.end, Cell(CellKind.EMPTY))
 
     with caplog.at_level(logging.DEBUG):
-        assert bot._submit_merge(move, health(advancing=True))
+        assert bot.submit_merge(move, health(advancing=True))
 
     assert bot.runtime.drops == [((0, 0), (1, 0))]
     assert bot._merge_workflow.pending is not None
@@ -186,7 +186,7 @@ def test_selected_action_logs_plan_then_submission(monkeypatch, caplog) -> None:
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 10.0)
 
     with caplog.at_level(logging.DEBUG):
-        bot._step_merge(health(advancing=True), bot._assess_board_space())
+        bot.step_merge(health(advancing=True), bot._assess_board_space())
 
     events = [record.fmv_event for record in caplog.records if hasattr(record, "fmv_event")]
     assert events[-2:] == ["action.planned", "action.submitted"]
@@ -202,7 +202,7 @@ def test_rejected_action_logs_detail_and_cools_down(monkeypatch, caplog) -> None
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 20.0)
 
     with caplog.at_level(logging.WARNING):
-        assert not bot._submit_merge(move, health(advancing=True))
+        assert not bot.submit_merge(move, health(advancing=True))
 
     assert bot._actions().retry_at(OperationKind.MERGE, bot._action_key(move)) == 30.0
     assert any("source-drag-cancelled" in message for message in caplog.messages)
@@ -214,7 +214,7 @@ def test_busy_action_reports_why_bot_is_waiting(caplog) -> None:
     bot.runtime.submit_item_drop = lambda *_: ActionResult(ActionStatus.BUSY)
 
     with caplog.at_level(logging.DEBUG):
-        assert not bot._submit_merge(action(item), health(advancing=True))
+        assert not bot.submit_merge(action(item), health(advancing=True))
 
     assert "Waiting: the game is finishing another item action." in caplog.messages
     record = next(record for record in caplog.records if record.fmv_event == "bot.waiting")
@@ -230,7 +230,7 @@ def test_pending_action_survives_frozen_heartbeat() -> None:
     pending = PendingMergeAction(move, bot._action_signature(move), 7)
     bot._merge_workflow.pending = pending
 
-    assert not bot._verify_pending_action(health(advancing=False))
+    assert not bot.verify_pending_action(health(advancing=False))
     assert bot._merge_workflow.pending is pending
 
 
@@ -242,7 +242,7 @@ def test_frozen_heartbeat_reports_pending_action_after_settle_window(monkeypatch
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 5.0)
 
     with caplog.at_level(logging.DEBUG):
-        assert not bot._verify_pending_action(health(advancing=False))
+        assert not bot.verify_pending_action(health(advancing=False))
 
     assert any("heartbeat is frozen" in message for message in caplog.messages)
     record = next(record for record in caplog.records if record.fmv_event == "bot.waiting")
@@ -259,7 +259,7 @@ def test_pending_success_is_confirmed_only_while_active() -> None:
     bot.board.set_cell(move.start, Cell(CellKind.EMPTY))
     bot.board.set_cell(move.end, Cell(CellKind.ITEM, item))
 
-    assert bot._verify_pending_action(health(advancing=True))
+    assert bot.verify_pending_action(health(advancing=True))
     assert bot._merge_workflow.pending is None
 
 
@@ -275,7 +275,7 @@ def test_confirmed_action_schedules_configured_delay(monkeypatch) -> None:
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 10.0)
     monkeypatch.setattr("farm_merge_valet.automation.bot.random.uniform", lambda *_: 2.0)
 
-    assert bot._verify_pending_action(health(advancing=True))
+    assert bot.verify_pending_action(health(advancing=True))
     assert bot._merge_workflow.next_action_at == 12.0
 
 
@@ -289,12 +289,12 @@ def test_pending_noop_waits_for_authoritative_settle(monkeypatch, caplog) -> Non
     bot._merge_workflow.pending = PendingMergeAction(move, signature, 7, 10.0, signature, 10.0)
 
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 11.0)
-    assert not bot._verify_pending_action(health(advancing=True))
+    assert not bot.verify_pending_action(health(advancing=True))
     assert bot._merge_workflow.pending is not None
 
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 13.1)
     with caplog.at_level(logging.DEBUG):
-        assert bot._verify_pending_action(health(advancing=True))
+        assert bot.verify_pending_action(health(advancing=True))
 
     assert bot._merge_workflow.pending is None
     assert any("Move (0, 0) -> (1, 0)" in message for message in caplog.messages)
@@ -317,11 +317,11 @@ def test_swap_confirmation_allows_displaced_item_to_relocate() -> None:
     bot.board.set_cell(swap.start, Cell(CellKind.ITEM, wheat))
     bot.board.set_cell(swap.end, Cell(CellKind.ITEM, cow))
 
-    assert not bot._merge_action_succeeded(swap)
+    assert not bot.merge_action_succeeded(swap)
 
     bot.board.set_cell(swap.start, Cell(CellKind.EMPTY))
     bot.board.set_cell(swap.end, Cell(CellKind.ITEM, wheat))
-    assert bot._merge_action_succeeded(swap)
+    assert bot.merge_action_succeeded(swap)
 
 
 def test_item_action_pacing_wait_is_silent(monkeypatch, caplog) -> None:
@@ -330,7 +330,7 @@ def test_item_action_pacing_wait_is_silent(monkeypatch, caplog) -> None:
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 10.0)
 
     with caplog.at_level(logging.INFO):
-        bot._step_merge(health(advancing=True), bot._assess_board_space())
+        bot.step_merge(health(advancing=True), bot._assess_board_space())
 
     assert caplog.messages == []
 
@@ -353,7 +353,7 @@ def test_pending_action_does_not_resubmit_while_handler_is_busy(monkeypatch) -> 
     bot._merge_workflow.pending = PendingMergeAction(move, signature, 7, 1.0, signature, 1.0)
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 20.0)
 
-    assert not bot._verify_pending_action(health(advancing=True, item_action_busy=True))
+    assert not bot.verify_pending_action(health(advancing=True, item_action_busy=True))
     assert bot._merge_workflow.pending is not None
 
 
@@ -377,9 +377,9 @@ def test_genuine_noop_delays_before_trying_an_alternative(monkeypatch) -> None:
     bot._merge_workflow.pending = PendingMergeAction(failed, signature, 7, 1.0, signature, 1.0)
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 5.0)
 
-    assert bot._verify_pending_action(health(advancing=True))
+    assert bot.verify_pending_action(health(advancing=True))
     bot._merge_actions_for_policy = lambda: [failed, alternative]
-    bot._step_merge(health(advancing=True), bot._assess_board_space())
+    bot.step_merge(health(advancing=True), bot._assess_board_space())
 
     assert bot.runtime.drops == []
 
@@ -404,7 +404,7 @@ def test_three_genuine_noops_request_runtime_recovery(monkeypatch) -> None:
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 5.0)
 
     with pytest.raises(RuntimeRecoveryRequired, match="made no progress"):
-        bot._verify_pending_action(health(advancing=True))
+        bot.verify_pending_action(health(advancing=True))
 
 
 def test_full_board_without_safe_recovery_keeps_polling(caplog) -> None:
@@ -413,7 +413,7 @@ def test_full_board_without_safe_recovery_keeps_polling(caplog) -> None:
     bot.board.set_cell((0, 0), Cell(CellKind.ITEM, wheat))
 
     with caplog.at_level(logging.INFO):
-        bot._step_merge(health(advancing=True), bot._assess_board_space())
+        bot.step_merge(health(advancing=True), bot._assess_board_space())
 
     assert not bot.paused
     assert not bot._interrupt_event.is_set()
@@ -427,10 +427,10 @@ def test_blocked_board_recovers_after_space_is_freed() -> None:
     bot = bare_bot()
     wheat = ItemRef("crops", "wheat", 1)
     bot.board.set_cell((0, 0), Cell(CellKind.ITEM, wheat))
-    bot._step_merge(health(advancing=True), bot._assess_board_space())
+    bot.step_merge(health(advancing=True), bot._assess_board_space())
 
     bot.board.set_cell((1, 0), Cell(CellKind.EMPTY))
-    bot._step_merge(health(advancing=True), bot._assess_board_space())
+    bot.step_merge(health(advancing=True), bot._assess_board_space())
 
     assert bot.phase is Phase.CLAIM_CRATES
     assert not bot.paused
@@ -442,7 +442,7 @@ def test_output_space_deadlock_uses_same_non_terminal_blocked_state(caplog) -> N
     bot.board.set_cell((0, 0), Cell(CellKind.ITEM, wheat))
 
     with caplog.at_level(logging.INFO):
-        bot._step_merge(
+        bot.step_merge(
             health(advancing=True),
             bot._assess_board_space(),
             required_empty_cells=3,

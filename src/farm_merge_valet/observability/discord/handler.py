@@ -17,7 +17,11 @@ from typing import Literal
 import httpx
 
 from farm_merge_valet.config import user_data_root
-from farm_merge_valet.observability.discord.charts import ActivityChart, DiscordAttachment
+from farm_merge_valet.observability.discord.charts import (
+    ACTIVITY_CHART_FILENAME,
+    ActivityChart,
+    DiscordAttachment,
+)
 from farm_merge_valet.observability.discord.status import DiscordStatusMixin, StatusState
 from farm_merge_valet.observability.discord.webhook import DiscordWebhookTransportMixin
 from farm_merge_valet.observability.logging import (
@@ -100,6 +104,7 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
         self._status_lock = Lock()
         self._last_warning_sent: dict[tuple[str, str], float] = {}
         self._clock = time.monotonic
+        self._disabled_until = 0.0
         self._started_at = self._clock()
         self._next_summary_at = self._started_at + summary_interval
         self._next_status_at = (
@@ -217,7 +222,7 @@ class DiscordWebhookHandler(DiscordStatusMixin, DiscordWebhookTransportMixin, lo
         if self._send(client, payload, attachments) is None:
             self._restore_summary_metrics(metrics)
             return False
-        if any(attachment.filename == "session-report.png" for attachment in attachments):
+        if any(attachment.filename == ACTIVITY_CHART_FILENAME for attachment in attachments):
             self._activity_chart.commit()
         return True
 
