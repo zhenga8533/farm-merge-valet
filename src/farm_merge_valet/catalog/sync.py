@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import tempfile
@@ -22,6 +23,8 @@ from farm_merge_valet.catalog.assets import (
 from farm_merge_valet.catalog.models import ItemCatalog
 from farm_merge_valet.catalog.store import write_item_catalog
 from farm_merge_valet.core.marketplace import MarketplaceOffer
+
+logger = logging.getLogger(__name__)
 
 _ATLAS_PAGE_SUFFIX = re.compile(r"^(?P<base>.+)-(?P<index>[0-9]+)$")
 _QUALITY_SEGMENTS = ("/low/", "/medium/")
@@ -52,10 +55,10 @@ class CatalogSynchronizer:
                 "No game atlas resources were visible through CDP. Reload the loaded game "
                 "tab and retry."
             )
-        print(f"Discovered {len(urls)} loaded game atlas sheets through CDP.")
+        logger.info("Discovered %d loaded game atlas sheets through CDP.", len(urls))
         preferred_urls = self._discover_high_quality_atlases(urls)
         if preferred_urls:
-            print(f"Discovered {len(preferred_urls)} high-quality atlas sheets.")
+            logger.info("Discovered %d high-quality atlas sheets.", len(preferred_urls))
         self._report_progress(
             f"Downloading game atlas sheets (0/{len(preferred_urls) + len(urls)})…"
         )
@@ -95,14 +98,14 @@ class CatalogSynchronizer:
 
     def extract(self, har_path: Path, *, force: bool = False) -> None:
         """Rebuild catalog assets using atlas URLs recorded in a HAR capture."""
-        print(f"Discovering atlas URLs in {har_path}...")
+        logger.info("Discovering atlas URLs in %s...", har_path)
         atlases = fetch_atlases(har_path, self.atlas_cache_dir, force=force)
         if not atlases:
             raise RuntimeError(
                 "No atlas PNGs found in that HAR. Capture with DevTools Network -> Img filter "
                 "while the game is loaded, then 'Save all as HAR'."
             )
-        print(f"Loaded {len(atlases)} atlases from {self.atlas_cache_dir}")
+        logger.info("Loaded %d atlases from %s.", len(atlases), self.atlas_cache_dir)
         self._compile_assets(atlases)
 
     def _fetch_runtime_atlases(self, png_urls: list[str], *, force: bool) -> Atlases:
@@ -131,7 +134,7 @@ class CatalogSynchronizer:
                 image = images.get(png_url)
                 manifest = manifests.get(manifest_url)
                 if image is None or manifest is None:
-                    print(f"  FAILED to read loaded atlas through CDP: {png_url}")
+                    logger.warning("Failed to read loaded atlas through CDP: %s", png_url)
                     continue
                 _cache_path_for(self.atlas_cache_dir, png_url, ".png").write_bytes(image)
                 _cache_path_for(self.atlas_cache_dir, manifest_url, ".json").write_text(
@@ -139,8 +142,8 @@ class CatalogSynchronizer:
                 )
                 source_index[_cache_path_for(self.atlas_cache_dir, png_url, ".png").name] = png_url
                 current_names.add(_cache_path_for(self.atlas_cache_dir, png_url, ".png").name)
-            print(f"Cached {min(offset + len(batch), len(pending))}/{len(pending)} atlas sheets.")
             completed = min(offset + len(batch), len(pending))
+            logger.debug("Cached %d/%d atlas sheets.", completed, len(pending))
             self._report_progress(f"Downloading game atlas sheets ({completed}/{len(pending)})…")
         self._write_source_index(source_index)
         return load_cached_atlases(self.atlas_cache_dir, atlas_names=current_names)
@@ -179,9 +182,11 @@ class CatalogSynchronizer:
             )
         _report_uncategorized(catalog)
         written = self._publish_catalog(atlases, catalog)
-        print(
-            f"Cataloged {len(catalog.items)} game items and recipes and compiled "
-            f"{written} atlas frames into {self.catalog_dir}."
+        logger.info(
+            "Cataloged %d game items and recipes and compiled %d atlas frames into %s.",
+            len(catalog.items),
+            written,
+            self.catalog_dir,
         )
 
     def _publish_catalog(self, atlases: Atlases, catalog: ItemCatalog) -> int:
@@ -266,7 +271,9 @@ def _report_uncategorized(catalog: ItemCatalog) -> None:
     preview = ", ".join(catalog.uncategorized_ids[:10])
     remainder = len(catalog.uncategorized_ids) - 10
     suffix = f" (and {remainder} more)" if remainder > 0 else ""
-    print(
-        "WARNING: Runtime content needs taxonomy review: "
-        f"{preview}{suffix}. Assets remain available under uncategorized/."
+    logger.warning(
+        "Runtime content needs taxonomy review: %s%s. Assets remain available under "
+        "uncategorized/.",
+        preview,
+        suffix,
     )

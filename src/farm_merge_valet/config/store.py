@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from collections.abc import Callable
@@ -12,6 +13,8 @@ from threading import RLock
 from farm_merge_valet.config.models import AppConfig
 from farm_merge_valet.config.paths import user_config_path
 from farm_merge_valet.config.secret_store import SecretStore
+
+logger = logging.getLogger(__name__)
 
 ConfigListener = Callable[[AppConfig], None]
 
@@ -36,7 +39,7 @@ class ConfigStore:
             if self.path.exists():
                 payload = json.loads(self.path.read_text(encoding="utf-8"))
                 legacy_webhook = payload.get("discord_webhook_url")
-                stored_webhook = SecretStore(self.path).read()
+                stored_webhook = self._read_stored_webhook()
                 payload["discord_webhook_url"] = stored_webhook or legacy_webhook
                 self._current = AppConfig.model_validate(payload)
                 if legacy_webhook:
@@ -44,6 +47,15 @@ class ConfigStore:
             else:
                 self._persist(self._current)
             return self._current.model_copy(deep=True)
+
+    def _read_stored_webhook(self) -> str | None:
+        try:
+            return SecretStore(self.path).read()
+        except (OSError, ValueError) as exc:
+            logger.warning(
+                "Could not read the stored Discord webhook secret; treating it as unset: %s", exc
+            )
+            return None
 
     def replace(self, config: AppConfig) -> AppConfig:
         snapshot = AppConfig.model_validate(config.model_dump())

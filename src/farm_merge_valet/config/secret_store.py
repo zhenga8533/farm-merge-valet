@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import logging
 import os
 import tempfile
 from ctypes import wintypes
 from pathlib import Path
+from typing import NoReturn
+
+logger = logging.getLogger(__name__)
 
 
 class _DataBlob(ctypes.Structure):
@@ -20,6 +24,12 @@ _CRYPTPROTECT_UI_FORBIDDEN = 0x1
 def _blob(value: bytes) -> tuple[_DataBlob, ctypes.Array[ctypes.c_char]]:
     buffer = ctypes.create_string_buffer(value)
     return _DataBlob(len(value), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte))), buffer
+
+
+def _raise_dpapi_error(operation: str) -> NoReturn:
+    error = ctypes.WinError()
+    logger.error("Windows DPAPI %s failed: %s", operation, error)
+    raise error
 
 
 def _protect(value: bytes) -> bytes:
@@ -37,7 +47,7 @@ def _protect(value: bytes) -> bytes:
         _CRYPTPROTECT_UI_FORBIDDEN,
         ctypes.byref(output),
     ):
-        raise ctypes.WinError()
+        _raise_dpapi_error("encryption")
     try:
         return ctypes.string_at(output.data, output.size)
     finally:
@@ -60,7 +70,7 @@ def _unprotect(value: bytes) -> bytes:
         _CRYPTPROTECT_UI_FORBIDDEN,
         ctypes.byref(output),
     ):
-        raise ctypes.WinError()
+        _raise_dpapi_error("decryption")
     try:
         return ctypes.string_at(output.data, output.size)
     finally:
