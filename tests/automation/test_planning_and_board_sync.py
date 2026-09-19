@@ -1027,12 +1027,58 @@ def test_unavailable_lucky_isolation_cools_down_without_pausing_the_bot(monkeypa
 
     actions = bot._merge_actions_for_policy()
     action_key = bot._action_key(actions[0])
-    bot._merge_workflow._step_merge(bot, health(advancing=True), bot._assess_board_space())
+    bot._merge_workflow.step_merge(bot, health(advancing=True), bot._assess_board_space())
 
     assert not bot.paused
     assert not bot._interrupt_event.is_set()
     assert bot.runtime.drops == []
     assert not bot._actions().available(OperationKind.MERGE, action_key, bot._now())
+
+
+def test_confirmed_lucky_merge_releases_the_action_lease(monkeypatch) -> None:
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    bot._max_item_tiers[wheat.identity] = 2
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"crops/wheat/tier/1": ItemPolicyOverride(force_lucky_merge=True)},
+    )
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+
+    monkeypatch.setattr(
+        "farm_merge_valet.automation.workflows.merge.run_lucky_merge", lambda _bot, _action: True
+    )
+
+    actions = bot._merge_actions_for_policy()
+    action_key = bot._action_key(actions[0])
+    bot._merge_workflow.step_merge(bot, health(advancing=True), bot._assess_board_space())
+
+    assert bot._actions().available(OperationKind.MERGE, action_key, bot._now())
+
+
+def test_interrupted_lucky_merge_releases_without_a_cooldown(monkeypatch) -> None:
+    bot = bare_bot()
+    wheat = ItemRef("crops", "wheat", 1)
+    bot._max_item_tiers[wheat.identity] = 2
+    monkeypatch.setattr(
+        bot.config,
+        "item_policy_overrides",
+        {"crops/wheat/tier/1": ItemPolicyOverride(force_lucky_merge=True)},
+    )
+    for x in range(3):
+        bot.board.set_cell((x, 0), Cell(CellKind.ITEM, wheat))
+
+    monkeypatch.setattr(
+        "farm_merge_valet.automation.workflows.merge.run_lucky_merge", lambda _bot, _action: False
+    )
+
+    actions = bot._merge_actions_for_policy()
+    action_key = bot._action_key(actions[0])
+    bot._merge_workflow.step_merge(bot, health(advancing=True), bot._assess_board_space())
+
+    assert bot._actions().available(OperationKind.MERGE, action_key, bot._now())
 
 
 def test_item_master_switch_disables_merge_planning() -> None:

@@ -71,7 +71,7 @@ class MergeWorkflow:
             self.blocked_requirement = signature
         bot._defer_idle()
 
-    def _merge_action_succeeded(self, bot: Bot, action: MergeAction) -> bool:
+    def merge_action_succeeded(self, bot: Bot, action: MergeAction) -> bool:
         def has_item(coord: GridCoord, item: ItemRef) -> bool:
             cell = bot.board.get_cell(coord)
             return cell is not None and cell.item == item
@@ -85,7 +85,7 @@ class MergeWorkflow:
             for coord in action.cluster
         )
 
-    def _verify_pending_action(self, bot: Bot, health: RuntimeHealth) -> bool:
+    def verify_pending_action(self, bot: Bot, health: RuntimeHealth) -> bool:
         pending = self.pending
         if pending is None:
             return True
@@ -114,7 +114,7 @@ class MergeWorkflow:
                 **bot._action_event_context(pending.action),
             )
             pending.scene_change_logged = True
-        if bot._merge_action_succeeded(pending.action):
+        if bot.merge_action_succeeded(pending.action):
             self.pending = None
             action_key = bot._action_key(pending.action)
             bot._actions().complete(OperationKind.MERGE, action_key)
@@ -203,7 +203,7 @@ class MergeWorkflow:
             )
         return True
 
-    def _submit_merge(self, bot: Bot, action: MergeAction, health: RuntimeHealth) -> bool:
+    def submit_merge(self, bot: Bot, action: MergeAction, health: RuntimeHealth) -> bool:
         action_key = bot._action_key(action)
         if self.pending is not None or not bot._actions().begin(
             OperationKind.MERGE, action_key, bot._now()
@@ -274,7 +274,7 @@ class MergeWorkflow:
             )
         return False
 
-    def _step_merge(
+    def step_merge(
         self,
         bot: Bot,
         health: RuntimeHealth,
@@ -312,26 +312,33 @@ class MergeWorkflow:
                 and selected.target_size == 3
                 and bot.config.item_policy(selected.item.tier_policy_key).force_lucky_merge
             ):
-                try:
-                    run_lucky_merge(bot, selected)
-                except LuckyMergeError as exc:
-                    bot._actions().fail(
-                        OperationKind.MERGE,
-                        bot._action_key(selected),
-                        bot._now(),
-                        base_delay=_ACTION_RETRY_SECONDS,
-                    )
-                    log_event(
-                        logger,
-                        logging.WARNING,
-                        "lucky_merge.failed",
-                        "Force lucky merge failed: %s; will retry after cooldown.",
-                        exc,
-                        item_policy_key=selected.item.tier_policy_key,
-                        detail=str(exc),
-                    )
+                action_key = bot._action_key(selected)
+                if bot._actions().begin(OperationKind.MERGE, action_key, bot._now()):
+                    try:
+                        confirmed = run_lucky_merge(bot, selected)
+                    except LuckyMergeError as exc:
+                        bot._actions().fail(
+                            OperationKind.MERGE,
+                            action_key,
+                            bot._now(),
+                            base_delay=_ACTION_RETRY_SECONDS,
+                        )
+                        log_event(
+                            logger,
+                            logging.WARNING,
+                            "lucky_merge.failed",
+                            "Force lucky merge failed: %s; will retry after cooldown.",
+                            exc,
+                            item_policy_key=selected.item.tier_policy_key,
+                            detail=str(exc),
+                        )
+                    else:
+                        if confirmed:
+                            bot._actions().complete(OperationKind.MERGE, action_key)
+                        else:
+                            bot._actions().release(OperationKind.MERGE, action_key)
             else:
-                bot._submit_merge(selected, health)
+                bot.submit_merge(selected, health)
         elif actions:
             self.blocked_requirement = None
             bot._report_wait("failed item actions are cooling down before retry")

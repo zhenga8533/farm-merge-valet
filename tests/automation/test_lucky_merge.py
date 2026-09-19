@@ -153,6 +153,18 @@ def test_lucky_merge_discards_submitted_attempt_on_unknown_result(monkeypatch) -
     assert not network.offline
 
 
+def test_lucky_merge_returns_false_when_interrupted_before_an_attempt() -> None:
+    runtime = SimpleNamespace(
+        save_game=lambda: True,
+        read_board_state=board,
+    )
+    interrupt_event = Event()
+    interrupt_event.set()
+    bot = SimpleNamespace(runtime=runtime, _interrupt_event=interrupt_event, _blueprint_items=ITEMS)
+
+    assert lucky_merge.run_lucky_merge(bot, merge_action()) is False
+
+
 def test_lucky_merge_restores_network_if_disconnection_is_unverified(monkeypatch) -> None:
     network = FakeNetwork()
     runtime = SimpleNamespace(
@@ -223,7 +235,7 @@ def test_normal_attempt_retries_until_lucky_result_persists(monkeypatch) -> None
         lucky_merge, "_wait_for_settled_board", lambda *_args, **_kwargs: board(next_tier=2)
     )
 
-    lucky_merge.run_lucky_merge(bot, merge_action())
+    assert lucky_merge.run_lucky_merge(bot, merge_action()) is True
 
     assert len(drops) == 2
     assert first.discarded == 1
