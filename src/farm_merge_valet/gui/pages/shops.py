@@ -34,11 +34,9 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
     CatalogRowRole,
     set_catalog_row_icon,
 )
-from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.incremental_work import IncrementalPopulation
 from farm_merge_valet.gui.components.input_controls import FocusAwareSpinBox
-from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_COMPACT_ROW_HEIGHT,
     POLICY_MEDIA_BADGE_COLUMN_WIDTH,
@@ -59,7 +57,7 @@ from farm_merge_valet.gui.components.policy_view import (
     set_policy_value,
     set_policy_widget,
 )
-from farm_merge_valet.gui.pages.base import AppPage, ConfigEdit
+from farm_merge_valet.gui.pages.base import CatalogTreePage, ConfigEdit
 from farm_merge_valet.gui.services.assets import CatalogIconLoader
 from farm_merge_valet.gui.services.catalog import load_gui_catalog
 
@@ -151,10 +149,9 @@ class IngredientReservesDialog(QDialog):
         return self.default_control.value(), reserves
 
 
-class ShopsPage(AppPage):
+class ShopsPage(CatalogTreePage):
     config_edited = Signal(object)
     reset_requested = Signal()
-    catalog_setup_requested = Signal()
 
     def __init__(
         self,
@@ -172,22 +169,9 @@ class ShopsPage(AppPage):
         self.reserves_button = self.configuration_header.add_action("Ingredient reserves")
         self.reserves_button.clicked.connect(self._edit_ingredient_reserves)
         self.page_layout.addWidget(self.configuration_header)
-        self.catalog_onboarding = CatalogOnboarding()
-        self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
-        self.page_layout.addWidget(
-            self.catalog_onboarding,
-            1,
-            Qt.AlignmentFlag.AlignCenter,
-        )
-        self.loading_state = LoadingState(
+        self._init_catalog_scaffold(
             "Loading shops\u2026",
             "Preparing locally cached shops, recipes, and controls.",
-        )
-        self.loading_state.setVisible(False)
-        self.page_layout.addWidget(
-            self.loading_state,
-            1,
-            Qt.AlignmentFlag.AlignCenter,
         )
         scaffold = create_policy_tree(
             header_labels=("Shop / recipe", "Type", "Repair", ""),
@@ -219,7 +203,6 @@ class ShopsPage(AppPage):
         self.page_layout.addWidget(self.tree, 1)
         self.toolbar.filter_requested.connect(self._filter)
         self._catalog_loaded = False
-        self._populated = False
         self._population = IncrementalPopulation(self)
         self._catalog_keys: list[tuple[str, str]] = []
         self._search_text_by_identity: dict[tuple[str, str], str] = {}
@@ -254,14 +237,6 @@ class ShopsPage(AppPage):
     def reload_catalog_if_missing(self) -> None:
         if self._populated and not self._catalog_loaded:
             self.populate()
-
-    def ensure_populated(self, *, deferred: bool = False) -> None:
-        self._population.ensure(
-            populated=self._populated,
-            deferred=deferred,
-            steps=self._populate_steps,
-            show_loading=self._show_loading,
-        )
 
     def _apply_sort_preference(self) -> None:
         column = _SHOP_SORT_COLUMNS[self._config.shops_sort_column]
@@ -487,29 +462,8 @@ class ShopsPage(AppPage):
         item.setFirstColumnSpanned(True)
         self.bulk_header.set_state(3, Qt.CheckState.Unchecked, enabled=False)
 
-    def _show_catalog_onboarding(self) -> None:
-        self.loading_state.setVisible(False)
-        self.catalog_onboarding.setVisible(True)
-        self.toolbar.setVisible(False)
-        self.tree.setVisible(False)
-
-    def _show_catalog_content(self) -> None:
-        self.loading_state.setVisible(False)
-        self.catalog_onboarding.setVisible(False)
-        self.toolbar.setVisible(True)
-        self.tree.setVisible(True)
-
-    def _show_loading(self) -> None:
-        self.catalog_onboarding.setVisible(False)
-        self.toolbar.setVisible(False)
-        self.tree.setVisible(False)
-        self.loading_state.setVisible(True)
-
-    def set_catalog_setup_busy(self, busy: bool) -> None:
-        self.catalog_onboarding.set_busy(busy)
-
-    def set_catalog_setup_status(self, message: str, *, error: bool = False) -> None:
-        self.catalog_onboarding.set_status(message, error=error)
+    def _catalog_content_widgets(self) -> tuple[QWidget, ...]:
+        return (self.toolbar, self.tree)
 
     def _set_item_enabled(self, kind: str, key: str, enabled: bool) -> None:
         field = "shop_overrides" if kind == "shop" else "recipe_overrides"

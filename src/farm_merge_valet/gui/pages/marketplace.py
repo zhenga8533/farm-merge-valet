@@ -7,7 +7,7 @@ from collections.abc import Iterator
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QHeaderView, QTreeWidgetItem
+from PySide6.QtWidgets import QHeaderView, QTreeWidgetItem, QWidget
 
 from farm_merge_valet.catalog.models import CatalogItem, ItemCatalog
 from farm_merge_valet.config import AppConfig
@@ -16,10 +16,8 @@ from farm_merge_valet.gui.components.catalog_icon_delegate import (
     CatalogRowRole,
     set_catalog_row_icon,
 )
-from farm_merge_valet.gui.components.catalog_onboarding import CatalogOnboarding
 from farm_merge_valet.gui.components.configuration_header import ConfigurationHeader
 from farm_merge_valet.gui.components.incremental_work import IncrementalPopulation
-from farm_merge_valet.gui.components.loading_state import LoadingState
 from farm_merge_valet.gui.components.metrics import (
     POLICY_ICON_SIZE,
     POLICY_MEDIA_BADGE_COLUMN_WIDTH,
@@ -40,17 +38,16 @@ from farm_merge_valet.gui.components.policy_view import (
     set_policy_value,
     set_policy_widget,
 )
-from farm_merge_valet.gui.pages.base import AppPage, ConfigEdit
+from farm_merge_valet.gui.pages.base import CatalogTreePage, ConfigEdit
 from farm_merge_valet.gui.services.assets import CatalogIconLoader
 from farm_merge_valet.gui.services.catalog import load_gui_catalog
 
 _SORT_COLUMNS = {"offer": 0, "cost": 1, "enabled": 2}
 
 
-class MarketplacePage(AppPage):
+class MarketplacePage(CatalogTreePage):
     config_edited = Signal(object)
     reset_requested = Signal()
-    catalog_setup_requested = Signal()
 
     def __init__(
         self,
@@ -74,22 +71,16 @@ class MarketplacePage(AppPage):
         self._family_toggles: dict[tuple[str, str], PolicyCheckBox] = {}
         self._family_policy_keys: dict[tuple[str, str], tuple[str, ...]] = {}
         self._family_items: dict[tuple[str, str], QTreeWidgetItem] = {}
-        self._populated = False
         self._has_populated_catalog = False
         self._population = IncrementalPopulation(self)
         self.configuration_header = ConfigurationHeader("Reset marketplace policies")
         self.configuration_header.reset_requested.connect(self.reset_requested)
         self.saved_label = self.configuration_header.status_label
         self.page_layout.addWidget(self.configuration_header)
-        self.catalog_onboarding = CatalogOnboarding()
-        self.catalog_onboarding.setup_requested.connect(self.catalog_setup_requested)
-        self.page_layout.addWidget(self.catalog_onboarding, 1, Qt.AlignmentFlag.AlignCenter)
-        self.loading_state = LoadingState(
+        self._init_catalog_scaffold(
             "Loading marketplace…",
             "Preparing locally cached offers, item families, and controls.",
         )
-        self.loading_state.setVisible(False)
-        self.page_layout.addWidget(self.loading_state, 1, Qt.AlignmentFlag.AlignCenter)
         scaffold = create_policy_tree(
             header_labels=("Offer", "Cost", ""),
             bulk_labels={2: "Auto-purchase"},
@@ -114,13 +105,8 @@ class MarketplacePage(AppPage):
         self._apply_sort_preference()
         self.bulk_header.sortIndicatorChanged.connect(self._sort_changed)
 
-    def ensure_populated(self, *, deferred: bool = False) -> None:
-        self._population.ensure(
-            populated=self._populated,
-            deferred=deferred,
-            steps=self._populate_steps,
-            show_loading=self._show_loading,
-        )
+    def _catalog_content_widgets(self) -> tuple[QWidget, ...]:
+        return (self.toolbar, self.tree)
 
     def apply_config(self, config: AppConfig, *, refresh: bool = True) -> None:
         catalog_changed = config.catalog_dir != self._config.catalog_dir
@@ -153,12 +139,6 @@ class MarketplacePage(AppPage):
     def reload_catalog_if_missing(self) -> None:
         if self._populated and (self._catalog is None or not self._catalog.marketplace_offers):
             self.populate()
-
-    def set_catalog_setup_busy(self, busy: bool) -> None:
-        self.catalog_onboarding.set_busy(busy)
-
-    def set_catalog_setup_status(self, message: str, *, error: bool = False) -> None:
-        self.catalog_onboarding.set_status(message, error=error)
 
     def populate(self) -> None:
         self._population.run_now(self._populate_steps)
@@ -259,24 +239,6 @@ class MarketplacePage(AppPage):
         self._filter(self.toolbar.search.text())
         self._has_populated_catalog = True
         self._show_catalog_content()
-
-    def _show_catalog_onboarding(self) -> None:
-        self.loading_state.setVisible(False)
-        self.catalog_onboarding.setVisible(True)
-        self.toolbar.setVisible(False)
-        self.tree.setVisible(False)
-
-    def _show_catalog_content(self) -> None:
-        self.loading_state.setVisible(False)
-        self.catalog_onboarding.setVisible(False)
-        self.toolbar.setVisible(True)
-        self.tree.setVisible(True)
-
-    def _show_loading(self) -> None:
-        self.catalog_onboarding.setVisible(False)
-        self.toolbar.setVisible(False)
-        self.tree.setVisible(False)
-        self.loading_state.setVisible(True)
 
     def _add_family(
         self,
