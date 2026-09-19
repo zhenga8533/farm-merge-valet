@@ -159,7 +159,7 @@ def test_shop_start_is_submitted_and_verified(caplog) -> None:
     action = ShopAction(ShopActionKind.START, "market", "recipe_flour")
 
     with caplog.at_level(logging.DEBUG):
-        assert bot._submit_shop_action(action, health(advancing=True))
+        assert bot.submit_shop_action(action, health(advancing=True))
         assert bot.runtime.started_orders == [("market", "recipe_flour")]
         assert bot._shop_workflow.pending is not None
         orders = (
@@ -172,7 +172,7 @@ def test_shop_start_is_submitted_and_verified(caplog) -> None:
                 60,
             ),
         )
-        assert bot._verify_pending_shop_action(health(advancing=True), orders)
+        assert bot.verify_pending_shop_action(health(advancing=True), orders)
     assert bot._shop_workflow.pending is None
     assert any(record.fmv_event == "shop.order_started" for record in caplog.records)
 
@@ -181,9 +181,9 @@ def test_shop_claim_is_submitted_and_verified() -> None:
     bot = bare_bot()
     action = ShopAction(ShopActionKind.CLAIM, "bakery", "recipe_bread", 1)
 
-    assert bot._submit_shop_action(action, health(advancing=True))
+    assert bot.submit_shop_action(action, health(advancing=True))
     assert bot.runtime.claimed_orders == [("bakery", "recipe_bread")]
-    assert bot._verify_pending_shop_action(health(advancing=True), ())
+    assert bot.verify_pending_shop_action(health(advancing=True), ())
     assert bot._shop_workflow.pending is None
     assert bot._shop_workflow.claim_refresh is not None
 
@@ -193,9 +193,9 @@ def test_claim_refresh_prevents_idle_until_replacement_order_appears() -> None:
     claim = ShopAction(ShopActionKind.CLAIM, "bakery", "recipe_bread", 1)
     board_space = BoardSpaceAssessment(1, 0, ())
 
-    assert bot._submit_shop_action(claim, health(advancing=True))
-    assert bot._verify_pending_shop_action(health(advancing=True), ())
-    assert bot._step_shops(health(advancing=True), (), board_space)
+    assert bot.submit_shop_action(claim, health(advancing=True))
+    assert bot.verify_pending_shop_action(health(advancing=True), ())
+    assert bot.step_shops(health(advancing=True), (), board_space)
 
     replacement = ShopOrder(
         "bakery",
@@ -205,7 +205,7 @@ def test_claim_refresh_prevents_idle_until_replacement_order_appears() -> None:
         ("coin_1",),
         60,
     )
-    assert bot._step_shops(health(advancing=True), (replacement,), board_space)
+    assert bot.step_shops(health(advancing=True), (replacement,), board_space)
 
     assert bot._shop_workflow.claim_refresh is None
     assert bot.runtime.started_orders == [("bakery", "recipe_cake")]
@@ -216,12 +216,12 @@ def test_claim_refresh_is_bounded_when_replacement_never_appears() -> None:
     claim = ShopAction(ShopActionKind.CLAIM, "bakery", "recipe_bread", 1)
     board_space = BoardSpaceAssessment(1, 0, ())
 
-    assert bot._submit_shop_action(claim, health(advancing=True))
-    assert bot._verify_pending_shop_action(health(advancing=True), ())
+    assert bot.submit_shop_action(claim, health(advancing=True))
+    assert bot.verify_pending_shop_action(health(advancing=True), ())
 
-    assert bot._step_shops(health(advancing=True), (), board_space)
-    assert bot._step_shops(health(advancing=True), (), board_space)
-    assert not bot._step_shops(health(advancing=True), (), board_space)
+    assert bot.step_shops(health(advancing=True), (), board_space)
+    assert bot.step_shops(health(advancing=True), (), board_space)
+    assert not bot.step_shops(health(advancing=True), (), board_space)
     assert bot._shop_workflow.claim_refresh is None
 
 
@@ -230,8 +230,8 @@ def test_global_action_lease_prevents_shop_submission_during_merge() -> None:
     merge = action(ItemRef("ingredient", "milk", 1, "milk_1"))
     shop = ShopAction(ShopActionKind.START, "market", "recipe_flour")
 
-    assert bot._submit_merge(merge, health(advancing=True))
-    assert not bot._submit_shop_action(shop, health(advancing=True))
+    assert bot.submit_merge(merge, health(advancing=True))
+    assert not bot.submit_shop_action(shop, health(advancing=True))
     assert bot.runtime.started_orders == []
 
 
@@ -251,8 +251,8 @@ def test_rejected_shop_action_cools_down_without_blocking_another_order() -> Non
     )
     board_space = BoardSpaceAssessment(1, 0, ())
 
-    assert bot._step_shops(health(advancing=True), orders, board_space)
-    assert bot._step_shops(health(advancing=True), orders, board_space)
+    assert bot.step_shops(health(advancing=True), orders, board_space)
+    assert bot.step_shops(health(advancing=True), orders, board_space)
 
     assert attempts == [("market", "first"), ("market", "second")]
     assert bot._shop_workflow.pending is not None

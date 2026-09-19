@@ -54,7 +54,7 @@ class ShopWorkflow:
     def _action_key(action: ShopAction) -> OperationKey:
         return action.kind.value, action.shop_id, action.recipe_id
 
-    def _verify_pending_shop_action(
+    def verify_pending_shop_action(
         self,
         bot: Bot,
         health: RuntimeHealth,
@@ -161,7 +161,7 @@ class ShopWorkflow:
         )
         return True
 
-    def _submit_shop_action(self, bot: Bot, action: ShopAction, health: RuntimeHealth) -> bool:
+    def submit_shop_action(self, bot: Bot, action: ShopAction, health: RuntimeHealth) -> bool:
         action_key = self._action_key(action)
         if self.pending is not None or not bot._actions().begin(
             OperationKind.SHOP, action_key, bot._now()
@@ -243,7 +243,7 @@ class ShopWorkflow:
             return False
         return True
 
-    def _step_shops(
+    def step_shops(
         self,
         bot: Bot,
         health: RuntimeHealth,
@@ -278,7 +278,7 @@ class ShopWorkflow:
         )
         if action is not None:
             bot._set_phase(Phase.SHOPS)
-            bot._submit_shop_action(action, health)
+            bot.submit_shop_action(action, health)
             return True
         required_empty_cells = required_shop_claim_empty_cells(orders, policy)
         if required_empty_cells is not None and board_space.empty_cells < required_empty_cells:

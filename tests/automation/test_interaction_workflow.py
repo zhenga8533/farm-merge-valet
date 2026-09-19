@@ -256,7 +256,7 @@ def test_ground_product_is_interacted_with_before_ready_producer(monkeypatch) ->
         bot.board.set_cell((x, 1), Cell(CellKind.EMPTY))
     products, depleted, ready = bot._interaction_actions()
 
-    bot._step_interact_tiles(health(advancing=True), products, depleted, ready)
+    bot.step_interact_tiles(health(advancing=True), products, depleted, ready)
 
     assert bot.runtime.interactions == [((1, 0), InteractionTargetKind.IMMEDIATE, "milk", 10)]
     assert bot.runtime.spawn_limits == []
@@ -365,7 +365,7 @@ def test_upgrade_cards_only_apply_unclaimed_tiers_for_enabled_target(monkeypatch
     assert depleted == []
     assert ready == []
 
-    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+    bot.step_interact_tiles(health(advancing=True), immediate, depleted, ready)
 
     assert bot.runtime.interactions == [
         ((1, 0), InteractionTargetKind.UPGRADE, "upgrade_card_1", 101)
@@ -435,7 +435,7 @@ def test_enabled_reward_container_requires_its_exact_output_space(monkeypatch) -
     assert depleted == []
     assert ready == []
 
-    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+    bot.step_interact_tiles(health(advancing=True), immediate, depleted, ready)
 
     assert bot.runtime.interactions == [
         ((3, 4), InteractionTargetKind.REWARD_CONTAINER, "reward_crate_bronze", 120)
@@ -514,7 +514,7 @@ def test_reward_container_waits_when_full_output_space_cannot_be_created(monkeyp
     for column in range(3):
         bot.board.set_cell((column, 0), Cell(CellKind.EMPTY))
     monkeypatch.setattr(bot, "_merge_actions_for_policy", lambda: [])
-    bot._step_interact_tiles(health(advancing=True), [action], [], [])
+    bot.step_interact_tiles(health(advancing=True), [action], [], [])
 
     assert bot.runtime.interactions == []
     assert bot._interaction_workflow.output_space_request == action
@@ -545,7 +545,7 @@ def test_remove_policy_plans_shovelable_item_without_interact_policy(monkeypatch
     assert depleted == []
     assert ready == []
 
-    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+    bot.step_interact_tiles(health(advancing=True), immediate, depleted, ready)
 
     assert bot.runtime.removals == [((3, 4), "rock_1", 91)]
     assert bot.runtime.interactions == []
@@ -570,7 +570,7 @@ def test_remove_policy_keeps_configured_minimum(monkeypatch) -> None:
 
     assert len(actions) == 1
     assert actions[0].kind is InteractionTargetKind.REMOVE
-    bot._step_interact_tiles(health(advancing=True), actions, [], [])
+    bot.step_interact_tiles(health(advancing=True), actions, [], [])
     assert bot.runtime.removal_minimums == [1]
     bot._live_cells = {(4, 4): LiveCellState(True, "rock_1", 92)}
     assert bot._interaction_actions() == ([], [], [])
@@ -601,7 +601,7 @@ def test_removal_preserves_higher_building_repair_requirement(monkeypatch) -> No
     actions, _, _ = bot._interaction_actions()
 
     assert len(actions) == 1
-    bot._step_interact_tiles(health(advancing=True), actions, [], [])
+    bot.step_interact_tiles(health(advancing=True), actions, [], [])
     assert bot.runtime.removal_minimums == [2]
 
 
@@ -618,7 +618,7 @@ def test_interaction_precedes_removal_for_same_shovelable_item(monkeypatch) -> N
     immediate, depleted, ready = bot._interaction_actions()
 
     assert [action.kind for action in immediate] == [InteractionTargetKind.IMMEDIATE]
-    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+    bot.step_interact_tiles(health(advancing=True), immediate, depleted, ready)
     assert bot.runtime.interactions == [((3, 4), InteractionTargetKind.IMMEDIATE, "milk", 91)]
     assert bot.runtime.removals == []
 
@@ -636,7 +636,7 @@ def test_removal_follows_when_same_item_cannot_be_interacted_with(monkeypatch) -
     immediate, depleted, ready = bot._interaction_actions()
 
     assert [action.kind for action in immediate] == [InteractionTargetKind.REMOVE]
-    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+    bot.step_interact_tiles(health(advancing=True), immediate, depleted, ready)
     assert bot.runtime.removals == [((3, 4), "milk", 91)]
     assert bot.runtime.interactions == []
 
@@ -682,7 +682,7 @@ def test_affordable_obstacle_clear_is_planned_and_submitted(monkeypatch) -> None
     assert depleted == []
     assert ready == []
 
-    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+    bot.step_interact_tiles(health(advancing=True), immediate, depleted, ready)
 
     assert bot.runtime.interactions == [((3, 4), InteractionTargetKind.CLEAR, "rock_medium", 91)]
 
@@ -760,7 +760,7 @@ def test_ready_obstacle_loot_is_planned_without_energy_or_workers(monkeypatch) -
     assert depleted == []
     assert ready == []
 
-    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+    bot.step_interact_tiles(health(advancing=True), immediate, depleted, ready)
 
     assert bot.runtime.interactions == [
         ((3, 4), InteractionTargetKind.OBSTACLE_LOOT, "rock_medium", 91)
@@ -1065,7 +1065,7 @@ def test_collectable_currency_tier_can_be_enabled_independently(monkeypatch) -> 
     assert depleted == []
     assert ready == []
 
-    bot._step_interact_tiles(health(advancing=True), immediate, depleted, ready)
+    bot.step_interact_tiles(health(advancing=True), immediate, depleted, ready)
 
     assert bot.runtime.interactions == [((2, 0), InteractionTargetKind.REWARD, "coin_2", 11)]
     assert bot._interaction_workflow.pending is not None
@@ -1112,9 +1112,9 @@ def test_ready_producer_merges_toward_dynamic_output_capacity() -> None:
         bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
     calls = []
     bot._merge_actions_for_policy = lambda: [object()]
-    bot._step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
+    bot.step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
 
-    bot._step_interact_tiles(health(advancing=True), [], [], [action])
+    bot.step_interact_tiles(health(advancing=True), [], [], [action])
 
     assert bot.phase is Phase.MERGE
     assert calls == [7]
@@ -1139,9 +1139,9 @@ def test_output_space_request_remains_in_merge_phase_between_actions(caplog) -> 
         bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
     bot._merge_actions_for_policy = lambda: [object()]
     calls = []
-    bot._step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
+    bot.step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
 
-    bot._step_interact_tiles(health(advancing=True), [], [], [interaction])
+    bot.step_interact_tiles(health(advancing=True), [], [], [interaction])
     caplog.clear()
     handled = bot._continue_output_space_request(health(advancing=True), [], [], [interaction])
 
@@ -1226,7 +1226,7 @@ def test_ready_producer_claims_partially_when_no_merge_can_make_target_space() -
     for x in range(3):
         bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
 
-    bot._step_interact_tiles(health(advancing=True), [], [], [interaction])
+    bot.step_interact_tiles(health(advancing=True), [], [], [interaction])
 
     assert bot.runtime.interactions == [((4, 4), InteractionTargetKind.PRODUCER, "cow_4", 22)]
 
@@ -1252,7 +1252,7 @@ def test_ready_producer_is_interacted_with_with_required_space(monkeypatch) -> N
         bot.board.set_cell((x, 0), Cell(CellKind.EMPTY))
     monkeypatch.setattr(bot.config, "producer_interact_min_empty_cells", 4)
 
-    bot._step_interact_tiles(health(advancing=True), [], [], [interaction])
+    bot.step_interact_tiles(health(advancing=True), [], [], [interaction])
 
     assert bot.runtime.interactions == [((4, 4), InteractionTargetKind.PRODUCER, "cow_4", 22)]
     assert bot._interaction_workflow.pending is not None
@@ -1276,7 +1276,7 @@ def test_depleted_animal_can_retire_without_an_empty_cell() -> None:
         producer_state=ProducerState.DEPLETED,
     )
 
-    bot._step_interact_tiles(health(advancing=True), [], [interaction], [])
+    bot.step_interact_tiles(health(advancing=True), [], [interaction], [])
 
     assert bot.runtime.interactions
 
@@ -1291,9 +1291,9 @@ def test_depleted_crop_requires_one_empty_cell() -> None:
         ProducerKind.CROP,
     )
     calls = []
-    bot._step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
+    bot.step_merge = lambda *_args, **kwargs: calls.append(kwargs["required_empty_cells"])
 
-    bot._step_interact_tiles(health(advancing=True), [], [interaction], [])
+    bot.step_interact_tiles(health(advancing=True), [], [interaction], [])
 
     assert calls == [1]
     assert bot.runtime.interactions == []
@@ -1355,7 +1355,7 @@ def test_pending_product_interaction_survives_frozen_heartbeat(monkeypatch) -> N
     )
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 5.0)
 
-    assert not bot._verify_pending_interaction(health(advancing=False))
+    assert not bot.verify_pending_interaction(health(advancing=False))
     assert bot._interaction_workflow.pending is not None
 
 
@@ -1373,7 +1373,7 @@ def test_pending_product_interaction_confirms_from_authoritative_source_change(
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
 
     with caplog.at_level(logging.DEBUG):
-        assert bot._verify_pending_interaction(health(advancing=True))
+        assert bot.verify_pending_interaction(health(advancing=True))
 
     assert bot._interaction_workflow.pending is None
     assert any(record.fmv_event == "interaction.confirmed" for record in caplog.records)
@@ -1399,7 +1399,7 @@ def test_pending_friend_reward_confirms_when_marker_is_removed(monkeypatch) -> N
     bot._live_cells[interaction.coord] = LiveCellState(True, "building_bbq", 10)
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
 
-    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot.verify_pending_interaction(health(advancing=True))
     assert bot._interaction_workflow.pending is None
 
 
@@ -1415,7 +1415,7 @@ def test_pending_like_reward_confirms_when_popout_is_removed(monkeypatch) -> Non
     bot._live_cells[interaction.coord] = LiveCellState(True, "likes_billboard", 10)
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
 
-    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot.verify_pending_interaction(health(advancing=True))
     assert bot._interaction_workflow.pending is None
 
 
@@ -1429,7 +1429,7 @@ def test_pending_removal_confirms_from_authoritative_source_change(monkeypatch) 
     bot._live_cells[interaction.coord] = LiveCellState(False, None)
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
 
-    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot.verify_pending_interaction(health(advancing=True))
     assert bot._interaction_workflow.pending is None
 
 
@@ -1464,7 +1464,7 @@ def test_pending_upgrade_confirms_from_authoritative_progress_change(monkeypatch
     )
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
 
-    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot.verify_pending_interaction(health(advancing=True))
     assert bot._interaction_workflow.pending is None
 
 
@@ -1495,7 +1495,7 @@ def test_pending_reward_container_confirms_when_opening_starts(monkeypatch) -> N
     )
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
 
-    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot.verify_pending_interaction(health(advancing=True))
     assert bot._interaction_workflow.pending is None
 
 
@@ -1521,7 +1521,7 @@ def test_pending_obstacle_clear_confirms_from_stage_state_change(monkeypatch) ->
     )
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
 
-    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot.verify_pending_interaction(health(advancing=True))
     assert bot._interaction_workflow.pending is None
 
 
@@ -1554,7 +1554,7 @@ def test_pending_obstacle_loot_confirms_from_next_resource_gate(monkeypatch) -> 
     )
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
 
-    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot.verify_pending_interaction(health(advancing=True))
     assert bot._interaction_workflow.pending is None
 
 
@@ -1593,7 +1593,7 @@ def test_pending_producer_claim_accepts_new_output_as_partial_progress(monkeypat
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
 
     with caplog.at_level(logging.DEBUG):
-        assert bot._verify_pending_interaction(health(advancing=True))
+        assert bot.verify_pending_interaction(health(advancing=True))
 
     assert bot._interaction_workflow.pending is None
     assert (
@@ -1636,7 +1636,7 @@ def test_pending_obstacle_claim_accepts_partial_loot_output(monkeypatch) -> None
     }
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 2.0)
 
-    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot.verify_pending_interaction(health(advancing=True))
 
     assert bot._interaction_workflow.pending is None
     assert bot._interaction_workflow.output_capacity_for((3, 4), 91, 4) == 2
@@ -1666,7 +1666,7 @@ def test_pending_producer_without_output_or_transition_remains_a_noop(monkeypatc
     bot._live_cells = {interaction.coord: initial}
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 5.0)
 
-    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot.verify_pending_interaction(health(advancing=True))
 
     assert bot._interaction_workflow.pending is None
     assert (
@@ -1688,7 +1688,7 @@ def test_interaction_noop_cools_down_before_retry(monkeypatch) -> None:
     )
     monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 5.0)
 
-    assert bot._verify_pending_interaction(health(advancing=True))
+    assert bot.verify_pending_interaction(health(advancing=True))
     assert (
         bot._actions().retry_at(
             OperationKind.INTERACTION,
@@ -1714,7 +1714,7 @@ def test_cooling_interaction_does_not_block_another_target(monkeypatch) -> None:
         base_delay=10.0,
     )
 
-    bot._interaction_workflow._step_interact_tiles(
+    bot._interaction_workflow.step_interact_tiles(
         bot,
         health(advancing=True),
         [first, second],
@@ -1739,8 +1739,8 @@ def test_connection_loss_preserves_pending_interaction_and_global_lease() -> Non
     bot.runtime.submit_board_interaction = disconnect
 
     with pytest.raises(RuntimeConnectionError, match="temporary disconnect"):
-        bot._submit_interaction(interaction, health(advancing=True))
+        bot.submit_interaction(interaction, health(advancing=True))
 
     assert bot._interaction_workflow.pending is not None
     assert bot._actions().active is not None
-    assert not bot._submit_merge(action(ItemRef("ingredients", "milk", 1)), health(advancing=True))
+    assert not bot.submit_merge(action(ItemRef("ingredients", "milk", 1)), health(advancing=True))
