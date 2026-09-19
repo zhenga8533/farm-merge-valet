@@ -81,6 +81,7 @@ class BrowserStatus:
     missing_switches: tuple[str, ...] = ()
     game_loaded: bool = False
     detail: str | None = None
+    connection_lost: bool = False
 
     @property
     def game_frame_available(self) -> bool:
@@ -274,7 +275,7 @@ class BrowserManager:
         try:
             metadata = read_browser_metadata(self.settings.cdp_port)
         except CdpConnectionError as exc:
-            return BrowserStatus(True, False, False, detail=str(exc))
+            return BrowserStatus(True, False, False, detail=str(exc), connection_lost=True)
 
         command_line = str(metadata.get("command_line", ""))
         raw_arguments = metadata.get("arguments")
@@ -446,6 +447,8 @@ class BrowserManager:
         status = self.status()
         if not status.running:
             return self.launch()
+        if status.connection_lost:
+            raise CdpConnectionError(status.detail or "Lost the browser DevTools connection.")
         if not status.compatible:
             missing = ", ".join(status.missing_switches)
             raise BrowserManagerError(

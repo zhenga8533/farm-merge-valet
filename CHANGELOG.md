@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 - 2026-09-19
+
+- Fixed automatic recovery giving up after a transient DevTools disconnect
+  (for example, right after the OS resumes from sleep) instead of retrying
+  like other connection losses.
+
 ## 0.2.1 - 2026-09-18
 
 - Fixed building repair targeting to exclude buildings already mid-repair, so

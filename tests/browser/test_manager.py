@@ -129,6 +129,40 @@ def test_status_does_not_treat_launcher_as_loaded_game(tmp_path, monkeypatch) ->
     assert not manager.status().game_loaded
 
 
+def test_status_reports_connection_lost_when_metadata_read_fails(monkeypatch) -> None:
+    manager = BrowserManager(AppConfig())
+    monkeypatch.setattr(manager, "_endpoint_reachable", lambda: True)
+
+    def always_fails(_port: int) -> None:
+        raise CdpConnectionError("Could not inspect the browser's internal version page.")
+
+    monkeypatch.setattr("farm_merge_valet.browser.manager.read_browser_metadata", always_fails)
+
+    status = manager.status()
+
+    assert status.running
+    assert not status.compatible
+    assert status.connection_lost
+
+
+def test_ensure_running_retries_a_transient_connection_loss(monkeypatch) -> None:
+    manager = BrowserManager(AppConfig())
+    lost = BrowserStatus(True, False, False, connection_lost=True, detail="reason")
+    monkeypatch.setattr(manager, "status", lambda: lost)
+
+    with pytest.raises(CdpConnectionError, match="reason"):
+        manager.ensure_running()
+
+
+def test_ensure_running_treats_a_genuine_mismatch_as_unrecoverable(monkeypatch) -> None:
+    manager = BrowserManager(AppConfig())
+    incompatible = BrowserStatus(True, False, False, missing_switches=("--remote-debugging-port",))
+    monkeypatch.setattr(manager, "status", lambda: incompatible)
+
+    with pytest.raises(BrowserManagerError, match="incompatible"):
+        manager.ensure_running()
+
+
 def test_stop_refuses_an_unowned_browser(monkeypatch) -> None:
     manager = BrowserManager(AppConfig())
     monkeypatch.setattr(
