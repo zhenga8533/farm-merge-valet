@@ -234,12 +234,15 @@ farm-merge-valet diagnostics session-summary --hours 24
    `uv run --locked pytest --cov=farm_merge_valet`, and
    `uv run --locked pip-audit --local --skip-editable`). Merge the release
    commit into `main`.
-3. Tag that commit with the matching `v`-prefixed version (for example,
-   `git tag v0.2.4`) and push the tag (`git push origin v0.2.4`).
+3. Tag that commit with the matching `v`-prefixed version as an annotated tag
+   (`git tag -a vX.Y.Z -m "Farm Merge Valet X.Y.Z"`) and push the tag
+   (`git push origin vX.Y.Z`).
 
 The tag starts the Release workflow, which verifies that the tag matches the
 package version, builds the distributions and Windows executable, and creates
-a GitHub release with generated notes. Build and test artifacts stay under
+a GitHub release. The release notes are that version's `CHANGELOG.md` entry
+(the workflow fails if it is missing) followed by GitHub's generated pull
+request list and compare link. Build and test artifacts stay under
 `.tmp/`. The application checks the latest public GitHub release for updates;
 no update-checker code change is needed for a version bump.
 
