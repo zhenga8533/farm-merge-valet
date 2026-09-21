@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.4 - 2026-09-21
+
+- Fixed the bot freezing on an "unsupported overlay" when a toast notification
+  (such as "Visited your farm") was queued in front of a supported popup. Toasts
+  are now recognized by structure and skipped, so the popup behind them (for
+  example a timed event announcement) is dismissed normally.
+- Added a warning when an unsupported overlay has blocked automation for two
+  minutes, so an unattended bot no longer stalls silently.
+
 ## 0.2.3 - 2026-09-19
 
 - Added a cooldown for a revoked or deleted Discord webhook so it stops

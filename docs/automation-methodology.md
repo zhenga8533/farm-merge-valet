@@ -116,8 +116,11 @@ step runs before this gate. It handles level-up, daily bonus/challenge, timed-ev
 ordinary reward, travel-summary, like-claim, promotional, sticker album/set, and sticker-pack
 transitions through their native callbacks. Sticker packs use their native Skip and
 subsequent Collect transitions. Explicitly non-interactive, non-dismissible
-popup-layer elements are treated as passive notifications; unknown interactive
-popups still pause automation. One-shot overlay actions share a per-instance
+popup-layer elements are treated as passive notifications, as are toast
+notifications (identified structurally, not by their build-specific class
+name), so a queued toast cannot hide a supported popup behind it; unknown
+interactive popups still pause automation, and a warning is logged if one
+blocks automation for two minutes. One-shot overlay actions share a per-instance
 submission guard, so a popup that remains visible while closing is not
 dismissed again. A one-shot action that remains stuck for ten seconds requests
 managed-game recovery instead of blocking automation indefinitely. Optional high-rank duplicate raffle proposals
