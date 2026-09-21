@@ -99,6 +99,7 @@ _ACTION_FAILURE_LIMIT = DEFAULT_ACTION_TIMING.failure_limit
 _RUNTIME_STARTUP_GRACE_SECONDS = 30.0
 _CONNECTION_LOSS_GRACE_SECONDS = 60.0
 _BOARD_UNAVAILABLE_GRACE_SECONDS = 300.0
+_UNSUPPORTED_OVERLAY_WARNING_SECONDS = 120.0
 
 
 class Bot:
@@ -167,6 +168,8 @@ class Bot:
         self._runtime_ready_once = False
         self._connection_loss_started_at: float | None = None
         self._board_unavailable_started_at: float | None = None
+        self._unsupported_overlay_since: float | None = None
+        self._unsupported_overlay_warned = False
         self._last_wait_reason: str | None = None
         self._last_wait_log_at = 0.0
         self._idle_active = False
@@ -1454,8 +1457,35 @@ class Bot:
             automation_enabled=self.config.shop_automation_enabled,
         )
 
+    def _warn_if_unsupported_overlay_persists(self, overlay_detail: str) -> None:
+        now = self._now()
+        if self._unsupported_overlay_since is None:
+            self._unsupported_overlay_since = now
+            return
+        blocked_seconds = now - self._unsupported_overlay_since
+        if (
+            self._unsupported_overlay_warned
+            or blocked_seconds < _UNSUPPORTED_OVERLAY_WARNING_SECONDS
+        ):
+            return
+        self._unsupported_overlay_warned = True
+        log_event(
+            logger,
+            logging.WARNING,
+            "overlay.unsupported_persistent",
+            "An unsupported game overlay (%s) has blocked automation for over %d seconds; "
+            "close it manually.",
+            overlay_detail,
+            _UNSUPPORTED_OVERLAY_WARNING_SECONDS,
+            overlay=overlay_detail,
+            blocked_seconds=blocked_seconds,
+        )
+
     def _step_handle_transient_overlay(self, health: RuntimeHealth) -> bool:
         """Dismiss a transient overlay if one is open. Returns whether step() should return now."""
+        if health.transient_overlay is not TransientOverlayKind.UNSUPPORTED:
+            self._unsupported_overlay_since = None
+            self._unsupported_overlay_warned = False
         if health.transient_overlay is None:
             return False
         overlay_detail = health.transient_overlay_detail or health.transient_overlay.value
@@ -1464,6 +1494,7 @@ class Bot:
             return True
         if health.transient_overlay is TransientOverlayKind.UNSUPPORTED:
             self._report_wait(f"unsupported game overlay is open ({overlay_detail})")
+            self._warn_if_unsupported_overlay_persists(overlay_detail)
             return True
         if not self.config.auto_dismiss_overlays:
             self._report_wait(f"{overlay_detail} overlay is open; automatic dismissal is disabled")

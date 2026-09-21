@@ -829,6 +829,53 @@ def test_unsupported_overlay_pauses_without_attempting_dismissal(caplog) -> None
     )
 
 
+def test_persistent_unsupported_overlay_warns_once_then_resets(monkeypatch, caplog) -> None:
+    overlay = [TransientOverlayKind.UNSUPPORTED]
+
+    class OverlayRuntime(FakeRuntime):
+        def read_runtime_health(self):
+            return health(
+                advancing=True,
+                transient_overlay=overlay[0],
+                transient_overlay_detail="popup:UnknownPopup",
+            )
+
+    bot = bare_bot()
+    bot.runtime = OverlayRuntime()
+    bot._sync_board_from_live_state = lambda: True
+    current_time = [100.0]
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: current_time[0])
+
+    def warnings() -> list[str]:
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if getattr(record, "fmv_event", None) == "overlay.unsupported_persistent"
+        ]
+
+    with caplog.at_level(logging.DEBUG):
+        bot.step()
+        current_time[0] = 219.0
+        bot.step()
+        assert warnings() == []
+
+        current_time[0] = 221.0
+        bot.step()
+        current_time[0] = 400.0
+        bot.step()
+        assert len(warnings()) == 1
+        assert "popup:UnknownPopup" in warnings()[0]
+
+        overlay[0] = None
+        bot.step()
+        overlay[0] = TransientOverlayKind.UNSUPPORTED
+        current_time[0] = 500.0
+        bot.step()
+        current_time[0] = 700.0
+        bot.step()
+        assert len(warnings()) == 2
+
+
 def test_onboarding_pauses_with_manual_completion_guidance(caplog) -> None:
     class OnboardingRuntime(FakeRuntime):
         def read_runtime_health(self):

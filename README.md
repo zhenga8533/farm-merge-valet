@@ -235,7 +235,7 @@ farm-merge-valet diagnostics session-summary --hours 24
    `uv run --locked pip-audit --local --skip-editable`). Merge the release
    commit into `main`.
 3. Tag that commit with the matching `v`-prefixed version (for example,
-   `git tag v0.2.3`) and push the tag (`git push origin v0.2.3`).
+   `git tag v0.2.4`) and push the tag (`git push origin v0.2.4`).
 
 The tag starts the Release workflow, which verifies that the tag matches the
 package version, builds the distributions and Windows executable, and creates
