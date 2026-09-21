@@ -136,6 +136,68 @@ console.log(JSON.stringify({{first, second, third, closes}}));
     assert '"closes":2' in completed.stdout
 
 
+def test_toast_notifications_do_not_hide_a_modal_popup_behind_them() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for overlay execution checks")
+    expression = _dismiss_overlay_expression(7)
+    script = f"""
+const board = new Map();
+const mapGrid = {{}};
+const services = {{mapGrid, rewardService: {{}}}};
+const popupLayer = {{name: 'popup', children: []}};
+const scene = {{children: [{{children: [popupLayer]}}]}};
+global.window = {{
+  __fmvBoardCells: board,
+  __fmvRuntimeBoard: board,
+  __fmvGameplayServices: services,
+  __fmvGameplayMapScreen: scene,
+  __fmvRuntimeSceneIds: new WeakMap([[mapGrid, 7]]),
+}};
+const closes = {{toast: 0, timedEvent: 0}};
+const toast = () => ({{visible: true, renderable: true, interactiveChildren: false,
+  getToastHeight() {{ return 0; }}, close() {{ closes.toast += 1; }}}});
+const timedEvent = () => ({{visible: true, renderable: true, interactiveChildren: true,
+  _name: 'TimedEventPopup', _options: {{content: {{}}}}, onClosed: {{listenOnce() {{}}}},
+  close() {{ closes.timedEvent += 1; }}}});
+const run = () => {expression};
+popupLayer.children.push(toast(), toast(), timedEvent());
+const behindToasts = run();
+popupLayer.children.length = 0;
+popupLayer.children.push(toast());
+const toastOnly = run();
+console.log(JSON.stringify({{behindToasts, toastOnly, closes}}));
+"""
+    completed = subprocess.run(
+        [node, "-"], input=script, text=True, capture_output=True, check=False
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert '"behindToasts":{"status":"submitted","detail":"timed-event"}' in completed.stdout
+    assert '"toastOnly":{"status":"stale-source"' in completed.stdout
+    assert '"closes":{"toast":0,"timedEvent":1}' in completed.stdout
+
+
+def test_interactive_toast_like_popups_still_block() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for overlay execution checks")
+    script = f"""
+global.window = {{}};
+const popupLayer = {{name: 'popup', children: []}};
+const scene = {{children: [{{children: [popupLayer]}}]}};
+const run = () => {{ {_overlay_context_expression()}
+  return activePopup?._marker ?? null; }};
+popupLayer.children.push({{visible: true, renderable: true, interactiveChildren: true,
+  getToastHeight() {{}}, close() {{}}, _marker: 'interactive-toast'}});
+console.log(JSON.stringify({{active: run()}}));
+"""
+    completed = subprocess.run(
+        [node, "-"], input=script, text=True, capture_output=True, check=False
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert '"active":"interactive-toast"' in completed.stdout
+
+
 def test_passive_popup_filter_keeps_interactive_popups_blocking() -> None:
     context = _overlay_context_expression()
     assert "popup?.eventMode === 'none'" in context

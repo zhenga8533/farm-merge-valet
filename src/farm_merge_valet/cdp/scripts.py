@@ -326,12 +326,14 @@ def _overlay_context_expression() -> str:
     Boolean(target && overlaySubmissions.get(target)?.has(phase));
   const layerRoot = stage?.children?.[0];
   const popupLayer = layerRoot?.children?.find((child) => child?.name === 'popup');
-  const passivePopup = (popup) => popup?.eventMode === 'none' &&
+  const toastPopup = (popup) => typeof popup?.getToastHeight === 'function' &&
+    popup?.interactiveChildren === false;
+  const passivePopup = (popup) => toastPopup(popup) || (popup?.eventMode === 'none' &&
     popup?.interactive !== true && popup?.interactiveChildren === false &&
     typeof popup?.close !== 'function' &&
     !popup?.children?.some((child) => child?.visible !== false &&
       child?.renderable !== false && (child?.interactive === true ||
-      child?.eventMode === 'static' || child?.eventMode === 'dynamic'));
+      child?.eventMode === 'static' || child?.eventMode === 'dynamic')));
   const activePopup = popupLayer?.children?.find((child) =>
     child?.visible !== false && child?.renderable !== false &&
     child?._destroyed !== true && !passivePopup(child));"""
