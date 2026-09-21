@@ -1728,6 +1728,90 @@ def test_cooling_interaction_does_not_block_another_target(monkeypatch) -> None:
     ]
 
 
+def test_busy_interaction_is_deferred_so_another_target_can_proceed(monkeypatch) -> None:
+    bot = bare_bot()
+    busy = InteractionAction(InteractionTargetKind.IMMEDIATE, (1, 1), "milk", 10)
+    other = InteractionAction(InteractionTargetKind.IMMEDIATE, (2, 1), "milk", 11)
+    bot._live_cells = {
+        busy.coord: LiveCellState(True, "milk", busy.object_id),
+        other.coord: LiveCellState(True, "milk", other.object_id),
+    }
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: 5.0)
+    busy_keys = {busy.coord}
+
+    def submit(coord, kind, blueprint_id, object_id) -> ActionResult:
+        if coord in busy_keys:
+            return ActionResult(ActionStatus.BUSY)
+        bot.runtime.interactions.append((coord, kind, blueprint_id, object_id))
+        return ActionResult(ActionStatus.SUBMITTED)
+
+    bot.runtime.submit_board_interaction = submit
+
+    assert not bot.submit_interaction(busy, health(advancing=True))
+    assert bot._actions().active is None
+    assert not bot._interaction_workflow._available(bot, busy)
+
+    bot._interaction_workflow.step_interact_tiles(
+        bot,
+        health(advancing=True),
+        [busy, other],
+        [],
+        [],
+        BoardSpaceAssessment(1, 0, ()),
+    )
+
+    assert bot.runtime.interactions == [(other.coord, other.kind, other.blueprint_id, 11)]
+
+
+def test_persistent_busy_interaction_warns_once_until_the_game_responds(
+    monkeypatch, caplog
+) -> None:
+    bot = bare_bot()
+    interaction = InteractionAction(InteractionTargetKind.IMMEDIATE, (1, 1), "milk", 10)
+    bot._live_cells[interaction.coord] = LiveCellState(True, "milk", interaction.object_id)
+    responses = [ActionStatus.BUSY]
+    bot.runtime.submit_board_interaction = lambda *_: ActionResult(responses[0])
+    now = [100.0]
+    monkeypatch.setattr("farm_merge_valet.automation.bot.time.monotonic", lambda: now[0])
+
+    def warnings() -> list[str]:
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if getattr(record, "fmv_event", None) == "interaction.busy_persistent"
+        ]
+
+    def attempt() -> None:
+        bot.submit_interaction(interaction, health(advancing=True))
+
+    with caplog.at_level(logging.DEBUG):
+        attempt()
+        now[0] = 219.0
+        attempt()
+        assert warnings() == []
+
+        now[0] = 230.0
+        attempt()
+        now[0] = 400.0
+        attempt()
+        assert len(warnings()) == 1
+
+        responses[0] = ActionStatus.SUBMITTED
+        now[0] = 500.0
+        attempt()
+        bot._interaction_workflow.pending = None
+        bot._actions().complete(
+            OperationKind.INTERACTION, bot._interaction_workflow._action_key(interaction)
+        )
+        responses[0] = ActionStatus.BUSY
+        now[0] = 600.0
+        attempt()
+        now[0] = 800.0
+        attempt()
+
+    assert len(warnings()) == 2
+
+
 def test_connection_loss_preserves_pending_interaction_and_global_lease() -> None:
     bot = bare_bot()
     interaction = InteractionAction(InteractionTargetKind.IMMEDIATE, (1, 1), "milk", 10)
