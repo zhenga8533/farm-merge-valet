@@ -32,6 +32,24 @@ jobs:
           uv run --locked python -c "import farm_merge_valet.gui.application"
           uv run --locked farm-merge-valet --help
           if ((uv run --locked python -c "import farm_merge_valet; print(farm_merge_valet.__version__)") -ne $packageVersion) { throw "Displayed version mismatch" }
+      - name: Extract release notes from CHANGELOG
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $section = [System.Collections.Generic.List[string]]::new()
+          $inSection = $false
+          foreach ($line in Get-Content CHANGELOG.md) {
+            if ($line -match '^## ') {
+              if ($inSection) { break }
+              $inSection = $line -match ('^## ' + [regex]::Escape($version) + ' - ')
+              continue
+            }
+            if ($inSection) { $section.Add($line) }
+          }
+          $notes = ($section -join "`n").Trim()
+          if (-not $notes) { throw "CHANGELOG.md has no entry for $version" }
+          New-Item -ItemType Directory -Force .tmp | Out-Null
+          [System.IO.File]::WriteAllText((Join-Path (Get-Location) '.tmp/release-notes.md'), "$notes`n", [System.Text.UTF8Encoding]::new($false))
       - name: Build desktop executable
         shell: pwsh
         run: |
@@ -45,6 +63,7 @@ jobs:
             .tmp/dist/*
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
+          body_path: .tmp/release-notes.md
           generate_release_notes: true
           files: |
             .tmp/dist/*.whl

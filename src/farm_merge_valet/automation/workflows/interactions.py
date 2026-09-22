@@ -33,6 +33,7 @@ _ACTION_SETTLE_SECONDS = DEFAULT_ACTION_TIMING.settle_seconds
 _ACTION_STABLE_SECONDS = DEFAULT_ACTION_TIMING.stability_seconds
 _ACTION_MAX_PENDING_SECONDS = DEFAULT_ACTION_TIMING.maximum_pending_seconds
 _ACTION_RETRY_SECONDS = DEFAULT_ACTION_TIMING.retry_seconds
+_BUSY_WARNING_SECONDS = 120.0
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,8 @@ class InteractionWorkflow:
     output_space_request: InteractionAction | None = None
     remaining_output_capacity: dict[tuple[GridCoord, int | None], int] = field(default_factory=dict)
     last_obstacle_loot: tuple[GridCoord, int | None, float] | None = None
+    busy_since: float | None = None
+    busy_warned: bool = False
 
     @staticmethod
     def _output_key(action: InteractionAction) -> tuple[GridCoord, int | None]:
@@ -332,6 +335,30 @@ class InteractionWorkflow:
         )
         return True
 
+    def _clear_busy(self) -> None:
+        self.busy_since = None
+        self.busy_warned = False
+
+    def _warn_if_busy_persists(self, bot: Bot, action: InteractionAction) -> None:
+        now = bot._now()
+        if self.busy_since is None:
+            self.busy_since = now
+            return
+        busy_seconds = now - self.busy_since
+        if self.busy_warned or busy_seconds < _BUSY_WARNING_SECONDS:
+            return
+        self.busy_warned = True
+        log_event(
+            logger,
+            logging.WARNING,
+            "interaction.busy_persistent",
+            "The game has reported a board interaction in progress for over %d seconds; "
+            "its animations may be paused while the game window is in the background.",
+            _BUSY_WARNING_SECONDS,
+            busy_seconds=busy_seconds,
+            **bot._interaction_event_context(action),
+        )
+
     def submit_interaction(
         self, bot: Bot, action: InteractionAction, health: RuntimeHealth
     ) -> bool:
@@ -389,6 +416,7 @@ class InteractionWorkflow:
             ):
                 self.output_space_request = None
             bot.clear_wait_state()
+            self._clear_busy()
             log_event(
                 logger,
                 logging.DEBUG,
@@ -403,13 +431,21 @@ class InteractionWorkflow:
             return True
         self.pending = None
         if result.status is ActionStatus.BUSY:
-            bot._actions().release(OperationKind.INTERACTION, action_key)
+            bot._actions().defer(
+                OperationKind.INTERACTION,
+                action_key,
+                bot._now(),
+                delay=_ACTION_RETRY_SECONDS,
+            )
+            self._warn_if_busy_persists(bot, action)
             bot._report_wait(
                 "the game is finishing another board interaction",
                 status=result.status.value,
                 **bot._interaction_event_context(action),
             )
-        elif result.status is ActionStatus.UNAVAILABLE:
+            return False
+        self._clear_busy()
+        if result.status is ActionStatus.UNAVAILABLE:
             bot._actions().fail(
                 OperationKind.INTERACTION,
                 action_key,

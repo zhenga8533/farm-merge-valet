@@ -442,6 +442,10 @@ One shared action coordinator permits only one merge, tile interaction, storage
 bubble, shop, or marketplace operation to be pending at a time. Pending intent is
 recorded before dispatch so a lost transport response can be verified after runtime
 reconnection instead of being submitted blindly again.
+When the game reports the interaction handler busy, that target is deferred for a
+short retry delay so other targets can proceed, and a warning is logged if the
+handler stays busy for two minutes (typically because the game window is in the
+background and its animations are paused).
 Once the game is active, it waits for board state to settle before confirming
 the intended result, recognizing a different board change, or recording an
 authoritative no-op. Retry state is keyed by the specific target, allowing other
