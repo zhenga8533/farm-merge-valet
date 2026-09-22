@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.5 - 2026-09-21
+
+- Fixed the bot repeatedly retrying a reward container the game reported as busy
+  (for example while its reward animation is paused because the game window is in
+  the background). The busy target is now deferred so other work can proceed, and
+  a warning is logged if the game stays busy for two minutes.
+- Fixed the CLI and GUI showing a stale version (such as 0.1.1) when running from
+  a source checkout with an older editable install.
+- Release notes on GitHub now start with the version's CHANGELOG entry.
+
 ## 0.2.4 - 2026-09-21
 
 - Fixed the bot freezing on an "unsupported overlay" when a toast notification
