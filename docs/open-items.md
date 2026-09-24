@@ -16,6 +16,11 @@ or active event service. Some platform sessions may not expose that state until
 the event has been opened; entry submission and destination confirmation are
 logged separately.
 
+A freshly loaded game page reports its saved event energy and does not
+regenerate it until the event map has been opened. The energy check visit
+therefore enters the island below the threshold when it has not been visited
+since the bot started or within the configured interval.
+
 ## Known constraints, not scheduled work
 
 - The managed game browser must remain open. Bot startup can open the configured

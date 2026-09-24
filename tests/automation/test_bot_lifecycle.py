@@ -946,7 +946,11 @@ def test_event_entry_accepts_destination_identity_change() -> None:
 
 def test_event_visit_requires_configured_energy_across_identity_change() -> None:
     bot = bare_bot()
-    bot.config = AppConfig(event_automation_enabled=True, event_visit_energy_threshold=50)
+    bot.config = AppConfig(
+        event_automation_enabled=True,
+        event_visit_energy_threshold=50,
+        event_energy_check_minutes=0,
+    )
     bot._event_state = EventState("jungle", "Jungle", True, True, current=True, can_return=True)
 
     bot._defer_idle()
@@ -964,6 +968,57 @@ def test_event_visit_requires_configured_energy_across_identity_change() -> None
     )
     bot._defer_idle()
     assert bot.runtime.event_actions == [("return", "jungle"), ("enter", "time-limited-event")]
+
+
+def test_event_energy_check_visits_below_threshold_before_any_visit() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(event_automation_enabled=True, event_visit_energy_threshold=50)
+    bot._event_state = EventState("jungle", "Jungle", True, True, can_enter=True, energy=34)
+
+    bot._defer_idle()
+
+    assert bot.runtime.event_actions == [("enter", "jungle")]
+
+
+def test_event_energy_check_waits_for_its_interval_after_a_visit() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(
+        event_automation_enabled=True,
+        event_visit_energy_threshold=50,
+        event_energy_check_minutes=60,
+    )
+    clock = [1_000.0]
+    bot._now = lambda: clock[0]
+    bot.runtime.event_state = EventState(
+        "jungle", "Jungle", True, True, current=True, can_return=True
+    )
+    bot.step()
+    launcher = EventState("jungle", "Jungle", True, True, can_enter=True, energy=10)
+    assert bot._handle_event_state(launcher)
+    bot.runtime.event_actions.clear()
+    bot._event_state = launcher
+
+    clock[0] += 59 * 60
+    bot._defer_idle()
+    assert bot.runtime.event_actions == []
+
+    clock[0] += 60
+    bot._defer_idle()
+    assert bot.runtime.event_actions == [("enter", "jungle")]
+
+
+def test_event_energy_check_can_be_disabled() -> None:
+    bot = bare_bot()
+    bot.config = AppConfig(
+        event_automation_enabled=True,
+        event_visit_energy_threshold=50,
+        event_energy_check_minutes=0,
+    )
+    bot._event_state = EventState("jungle", "Jungle", True, True, can_enter=True, energy=34)
+
+    bot._defer_idle()
+
+    assert bot.runtime.event_actions == []
 
 
 def test_event_exploration_runs_before_other_board_work() -> None:

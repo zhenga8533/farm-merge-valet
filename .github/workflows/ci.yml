@@ -26,4 +26,4 @@ jobs:
       - run: uv run --locked ruff format --check .
       - run: uv run --locked mypy src
       - run: uv run --locked pytest --cov=farm_merge_valet
-      - run: uv run --locked pip-audit --local --skip-editable
+      - run: uv run --locked pip-audit --local --skip-editable --timeout 60

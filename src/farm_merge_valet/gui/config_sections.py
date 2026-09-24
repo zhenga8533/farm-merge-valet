@@ -59,6 +59,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
         "event_automation_overrides",
         "auto_claim_event_rewards",
         "event_visit_energy_threshold",
+        "event_energy_check_minutes",
         "merge_empty_cell_reserve",
         "emergency_merge_three_max_tier",
         "producer_interact_min_empty_cells",

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.6 - 2026-09-24
+
+- Fixed event island visits stopping after the game page reloads. A freshly
+  loaded page keeps showing its saved event energy and does not regenerate it
+  until the island is opened, so the energy threshold was never reached. A new
+  "Energy check visit" setting (default 60 minutes, 0 to disable) visits the
+  island below the threshold when it has not been visited since the bot started
+  or within that interval.
+- Made the CI dependency audit tolerate slow PyPI responses instead of failing
+  on a 15-second read timeout.
+- Updated ruff to 0.16.8.
+
 ## 0.2.5 - 2026-09-21
 
 - Fixed the bot repeatedly retrying a reward container the game reported as busy
