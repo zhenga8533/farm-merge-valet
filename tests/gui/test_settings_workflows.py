@@ -301,6 +301,7 @@ def test_settings_are_grouped_and_include_start_paused(tmp_path) -> None:
         "event_default_enabled",
         "auto_claim_event_rewards",
         "event_visit_energy_threshold",
+        "event_energy_check_minutes",
     ):
         assert section_groups["Event islands"].isAncestorOf(window.settings_page.controls[field])
     for field in (
@@ -636,6 +637,7 @@ def test_settings_controls_match_model_range_and_parent_feature_state(tmp_path) 
     assert not page.controls["event_default_enabled"].isEnabled()
     assert not page.controls["auto_claim_event_rewards"].isEnabled()
     assert not page.controls["event_visit_energy_threshold"].isEnabled()
+    assert not page.controls["event_energy_check_minutes"].isEnabled()
     assert not page.controls["land_expansion_max_coin_cost"].isEnabled()
     assert not page.controls["land_expansion_max_gem_cost"].isEnabled()
     assert not page.controls["webhook_summary_interval"].isEnabled()
@@ -648,6 +650,7 @@ def test_settings_controls_match_model_range_and_parent_feature_state(tmp_path) 
     assert page.controls["event_default_enabled"].isEnabled()
     assert page.controls["auto_claim_event_rewards"].isEnabled()
     assert page.controls["event_visit_energy_threshold"].isEnabled()
+    assert page.controls["event_energy_check_minutes"].isEnabled()
     page.land_expansion_toggle.click()
     assert page.controls["land_expansion_max_coin_cost"].isEnabled()
     assert page._control_labels["land_expansion_max_coin_cost"].isEnabled()

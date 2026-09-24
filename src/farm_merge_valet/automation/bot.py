@@ -141,6 +141,7 @@ class Bot:
         self._energy: int | None = None
         self._event_state: EventState | None = None
         self._pending_event_action: tuple[str, str, str | None, float] | None = None
+        self._last_event_visit_at: float | None = None
         self._workers: WorkerState | None = None
         self._storage_bubbles: tuple[StorageBubbleState, ...] | None = None
         self._shop_orders: tuple[ShopOrder, ...] | None = None
@@ -1543,6 +1544,8 @@ class Bot:
                 return
             health = snapshot.health
             self._event_state = snapshot.event
+            if snapshot.event is not None and snapshot.event.current:
+                self._last_event_visit_at = self._now()
             self._last_health = health
             if health.transient_overlay is TransientOverlayKind.SESSION_REPLACED:
                 raise RuntimeRecoveryRequired(
@@ -1838,7 +1841,9 @@ class Bot:
             return False
         return True
 
-    def _submit_event_action(self, kind: str, state: EventState) -> bool:
+    def _submit_event_action(
+        self, kind: str, state: EventState, *, energy_check: bool = False
+    ) -> bool:
         area_id = state.exploration_area_id if kind == "explore" else None
         required_level = state.exploration_required_level
         if kind == "explore" and (area_id is None or required_level is None):
@@ -1869,6 +1874,7 @@ class Bot:
                 event_visit_energy_threshold=(
                     self.config.event_visit_energy_threshold if kind == "enter" else None
                 ),
+                event_energy_check=energy_check if kind == "enter" else None,
             )
             return True
         self._actions().release(OperationKind.EVENT, key)
@@ -2017,10 +2023,15 @@ class Bot:
             and not event.current
             and event.can_enter
             and self.config.event_automation_enabled_for(event.key)
-            and event.energy is not None
-            and event.energy >= self.config.event_visit_energy_threshold
         ):
-            if self._submit_event_action("enter", event):
+            energy_ready = (
+                event.energy is not None
+                and event.energy >= self.config.event_visit_energy_threshold
+            )
+            energy_check = not energy_ready and self._event_energy_check_due(now)
+            if (energy_ready or energy_check) and self._submit_event_action(
+                "enter", event, energy_check=energy_check
+            ):
                 return
         delay = max(self.config.loop_interval, self.config.idle_wait_seconds)
         self._next_loop_delay = delay
@@ -2035,6 +2046,15 @@ class Bot:
             )
             self._idle_active = True
             self._last_idle_log_at = now
+
+    def _event_energy_check_due(self, now: float) -> bool:
+        # A freshly loaded game page keeps showing its saved event energy and does not
+        # regenerate it until the event map has been opened, so an energy threshold
+        # alone can wait forever after a page reload.
+        interval = self.config.event_energy_check_minutes * 60
+        if interval <= 0:
+            return False
+        return self._last_event_visit_at is None or now - self._last_event_visit_at >= interval
 
     def run_forever(self, *, on_initialized: Callable[[], None] | None = None) -> None:
         needs_initialization = not self.config.start_paused

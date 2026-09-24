@@ -252,6 +252,18 @@ class SettingsPage(ConfigFormPage):
             0,
             1_000_000_000,
         )
+        self._add_int(
+            events_form,
+            "Energy check visit (minutes)",
+            "event_energy_check_minutes",
+            0,
+            1440,
+        )
+        self.controls["event_energy_check_minutes"].setToolTip(
+            "Visits the island when it hasn't been visited for this long, even below the "
+            "energy minimum. The game only refreshes event energy after an island visit. "
+            "Zero turns this off."
+        )
         events_hint = QLabel("Event item merging and interaction behavior is configured in Items.")
         events_hint.setObjectName("settingsHint")
         events_hint.setWordWrap(True)
@@ -412,6 +424,7 @@ class SettingsPage(ConfigFormPage):
         self._set_control_enabled("event_default_enabled", events_enabled)
         self._set_control_enabled("auto_claim_event_rewards", events_enabled)
         self._set_control_enabled("event_visit_energy_threshold", events_enabled)
+        self._set_control_enabled("event_energy_check_minutes", events_enabled)
         land_enabled = self.land_expansion_toggle.isChecked()
         self._set_control_enabled("land_expansion_max_coin_cost", land_enabled)
         self._set_control_enabled("land_expansion_max_gem_cost", land_enabled)

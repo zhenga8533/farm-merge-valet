@@ -158,6 +158,7 @@ def test_legacy_event_revisit_interval_is_discarded() -> None:
     config = AppConfig.model_validate({"event_revisit_interval": 300})
 
     assert config.event_visit_energy_threshold == 50
+    assert config.event_energy_check_minutes == 60
     assert "event_revisit_interval" not in config.model_dump()
 
 
@@ -176,6 +177,8 @@ def test_legacy_event_revisit_interval_is_discarded() -> None:
         ("idle_wait_seconds", -0.1),
         ("event_visit_energy_threshold", -1),
         ("event_visit_energy_threshold", 1_000_000_001),
+        ("event_energy_check_minutes", -1),
+        ("event_energy_check_minutes", 1441),
         ("crate_delay_max", 5.1),
         ("webhook_summary_interval", 59),
         ("webhook_status_interval", -0.1),
