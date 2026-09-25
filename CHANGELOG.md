@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.7 - 2026-09-25
+
+- Fixed the bot waiting indefinitely on an "unsupported game overlay" when an
+  interrupted collect animation left transparent effects in the popup layer.
+
 ## 0.2.6 - 2026-09-24
 
 - Fixed event island visits stopping after the game page reloads. A freshly

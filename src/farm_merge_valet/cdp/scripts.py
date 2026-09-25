@@ -328,7 +328,12 @@ def _overlay_context_expression() -> str:
   const popupLayer = layerRoot?.children?.find((child) => child?.name === 'popup');
   const toastPopup = (popup) => typeof popup?.getToastHeight === 'function' &&
     popup?.interactiveChildren === false;
-  const passivePopup = (popup) => toastPopup(popup) || (popup?.eventMode === 'none' &&
+  // Collect animations temporarily reparent effects and HUD widgets into the popup
+  // layer; if the animation is interrupted they stay behind fully transparent.
+  const leftoverEffect = (popup) => typeof popup?.close !== 'function' &&
+    popup?.worldAlpha < 0.05;
+  const passivePopup = (popup) => toastPopup(popup) || leftoverEffect(popup) ||
+    (popup?.eventMode === 'none' &&
     popup?.interactive !== true && popup?.interactiveChildren === false &&
     typeof popup?.close !== 'function' &&
     !popup?.children?.some((child) => child?.visible !== false &&
