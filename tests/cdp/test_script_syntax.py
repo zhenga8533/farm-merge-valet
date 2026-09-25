@@ -198,6 +198,33 @@ console.log(JSON.stringify({{active: run()}}));
     assert '"active":"interactive-toast"' in completed.stdout
 
 
+def test_transparent_leftover_effects_do_not_block() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for overlay execution checks")
+    script = f"""
+global.window = {{}};
+const popupLayer = {{name: 'popup', children: []}};
+const scene = {{children: [{{children: [popupLayer]}}]}};
+const run = () => {{ {_overlay_context_expression()}
+  return activePopup?._marker ?? null; }};
+popupLayer.children.push(
+  {{visible: true, renderable: true, interactiveChildren: true, worldAlpha: 0}},
+  {{visible: true, renderable: true, interactiveChildren: true, worldAlpha: 0.01}});
+const leftoversOnly = run();
+popupLayer.children.push({{visible: true, renderable: true, interactiveChildren: true,
+  worldAlpha: 0, close() {{}}, _marker: 'fading-in-popup'}});
+const fadingInPopup = run();
+console.log(JSON.stringify({{leftoversOnly, fadingInPopup}}));
+"""
+    completed = subprocess.run(
+        [node, "-"], input=script, text=True, capture_output=True, check=False
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert '"leftoversOnly":null' in completed.stdout
+    assert '"fadingInPopup":"fading-in-popup"' in completed.stdout
+
+
 def test_passive_popup_filter_keeps_interactive_popups_blocking() -> None:
     context = _overlay_context_expression()
     assert "popup?.eventMode === 'none'" in context
