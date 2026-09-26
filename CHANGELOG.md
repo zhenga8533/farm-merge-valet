@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.8 - 2026-09-26
+
+- Added release notes to update notifications. The Dashboard now shows a banner
+  when a newer version is available, with the notes for every release since
+  yours, a download link, and an option to skip that version.
+- Fixed startup update checks never finding a release. The repository is now
+  public, and an unreachable release feed is recorded as a failed check in the
+  diagnostic log instead of being treated as "no update".
+- Releases now run the full CI workflow before publishing and include a
+  `SHA256SUMS.txt` file for verifying downloads.
+- CI now also runs on Python 3.14 and builds the Windows executable on every
+  run.
+- Consolidated the documentation: runtime health and recovery are covered in
+  one document, and event islands are now documented.
+
 ## 0.2.7 - 2026-09-25
 
 - Fixed the bot waiting indefinitely on an "unsupported game overlay" when an
