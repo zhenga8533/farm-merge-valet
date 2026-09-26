@@ -2,8 +2,16 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   test:
@@ -11,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
-        python: ["3.11", "3.12", "3.13"]
+        python: ["3.11", "3.12", "3.13", "3.14"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -19,6 +27,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
       - run: uv sync --locked --all-extras --dev
@@ -27,3 +37,36 @@ jobs:
       - run: uv run --locked mypy src
       - run: uv run --locked pytest --cov=farm_merge_valet
       - run: uv run --locked pip-audit --local --skip-editable --timeout 60
+
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --all-extras --dev
+      - run: uv build --out-dir .tmp/dist
+      - name: Smoke-test the package
+        shell: pwsh
+        run: |
+          $packageVersion = uv run --locked python -c "from importlib.metadata import version; print(version('farm-merge-valet'))"
+          uv run --locked python -m zipfile --list (Get-ChildItem .tmp/dist/*.whl).FullName
+          uv run --locked python -m farm_merge_valet --help
+          uv run --locked python -c "import farm_merge_valet.gui.application"
+          uv run --locked farm-merge-valet --help
+          if ((uv run --locked python -c "import farm_merge_valet; print(farm_merge_valet.__version__)") -ne $packageVersion) { throw "Displayed version mismatch" }
+      - name: Build desktop executable
+        shell: pwsh
+        run: |
+          $executableIcon = (Resolve-Path assets/branding/farm-merge-valet.ico).Path
+          $runtimeIcon = (Resolve-Path src/farm_merge_valet/gui/assets/app-icon.png).Path
+          uv run --locked pyinstaller --clean --noconfirm --onefile --windowed --name farm-merge-valet --icon $executableIcon --add-data "${runtimeIcon}:farm_merge_valet/gui/assets" --copy-metadata farm-merge-valet --workpath .tmp/pyinstaller/work --specpath .tmp/pyinstaller/spec --distpath .tmp/dist src/farm_merge_valet/__main__.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: .tmp/dist/*
+          if-no-files-found: error

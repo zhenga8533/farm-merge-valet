@@ -10,6 +10,7 @@ from PySide6.QtCore import QEvent, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QListWidget,
@@ -25,6 +26,7 @@ from farm_merge_valet import __version__
 from farm_merge_valet.config import AppConfig
 from farm_merge_valet.config.hotkeys import display_hotkey
 from farm_merge_valet.gui.branding import app_icon
+from farm_merge_valet.gui.components.update_notes import UpdateNotesDialog
 from farm_merge_valet.gui.config_sections import SECTION_FIELDS, ConfigSection, reset_config_section
 from farm_merge_valet.gui.controller import (
     ApplicationController,
@@ -130,7 +132,8 @@ class MainWindow(QMainWindow):
                 apply_theme(app, self._draft.theme)
         self._really_quit = False
         self._freshness_notification_shown = False
-        self._pending_update_url: str | None = None
+        self._available_update: AvailableUpdate | None = None
+        self._tray_message_is_update = False
         self._pending_save_sections: set[str] = set()
         self._configured_log_level = controller.config.log_level
         self._config_saver = ConfigSaver(controller.store, self)
@@ -291,6 +294,9 @@ class MainWindow(QMainWindow):
         self.dashboard_page.run_requested.connect(self.controller.toggle_running)
         self.dashboard_page.pause_requested.connect(self.controller.toggle_pause)
         self.dashboard_page.overlay_requested.connect(self._toggle_overlay)
+        self.dashboard_page.update_notes_requested.connect(self._show_update_notes)
+        self.dashboard_page.update_download_requested.connect(self._open_update_download)
+        self.dashboard_page.update_skip_requested.connect(self._skip_available_update)
         self.overlay.run_requested.connect(self.controller.toggle_running)
         self.overlay.pause_requested.connect(self.controller.toggle_pause)
         self.overlay.close_requested.connect(lambda: self._set_overlay_visible(False))
@@ -598,6 +604,8 @@ class MainWindow(QMainWindow):
             self._apply_appearance()
         if changed_fields & _HOTKEY_FIELDS:
             self._apply_hotkey_hints(config)
+        if "skipped_update_version" in changed_fields:
+            self._refresh_update_banner()
 
     def _apply_hotkey_hints(self, config: AppConfig) -> None:
         self.dashboard_page.set_hotkeys(config.start_stop_hotkey, config.pause_hotkey)
@@ -693,27 +701,56 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction(self.quit_action)
         self.tray.activated.connect(self._tray_activated)
-        self.tray.messageClicked.connect(self._open_pending_update)
+        self.tray.messageClicked.connect(self._tray_message_clicked)
         if QSystemTrayIcon.isSystemTrayAvailable():
             self.tray.show()
 
     def _show_update_available(self, update: AvailableUpdate) -> None:
         if self._really_quit:
             return
-        self._pending_update_url = update.url
+        self._available_update = update
+        self._refresh_update_banner()
+        if update.version == self._draft.skipped_update_version:
+            return
+        self._tray_message_is_update = True
         self.tray.showMessage(
             f"Farm Merge Valet {update.version} is available",
-            "Click to view the release on GitHub.",
+            "Click to see what's new.",
             QSystemTrayIcon.MessageIcon.Information,
             10000,
         )
 
-    def _open_pending_update(self) -> None:
-        if self._pending_update_url is None:
+    def _refresh_update_banner(self) -> None:
+        update = self._available_update
+        if update is None or update.version == self._draft.skipped_update_version:
+            self.dashboard_page.set_available_update(None)
+        else:
+            self.dashboard_page.set_available_update(update.version)
+
+    def _tray_message_clicked(self) -> None:
+        if not self._tray_message_is_update:
             return
-        url = self._pending_update_url
-        self._pending_update_url = None
-        QDesktopServices.openUrl(QUrl(url))
+        self._tray_message_is_update = False
+        self._show_dashboard()
+        self._show_update_notes()
+
+    def _show_update_notes(self) -> None:
+        update = self._available_update
+        if update is None:
+            return
+        dialog = UpdateNotesDialog(update.version, __version__, update.notes_markdown(), self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._open_update_download()
+
+    def _open_update_download(self) -> None:
+        if self._available_update is not None:
+            QDesktopServices.openUrl(QUrl(self._available_update.url))
+
+    def _skip_available_update(self) -> None:
+        if self._available_update is None:
+            return
+        self._queue_config(skipped_update_version=self._available_update.version)
+        self._refresh_update_banner()
 
     def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason in {
@@ -745,7 +782,7 @@ class MainWindow(QMainWindow):
         ):
             self._freshness_notification_shown = True
             if self.tray.isVisible():
-                self._pending_update_url = None
+                self._tray_message_is_update = False
                 self.tray.showMessage(
                     "Game data update available",
                     "Open Browser and select Update to refresh cached game data and assets.",

@@ -51,9 +51,17 @@ GUI / CLI -> automation and catalog services -> core
   Statistics reads, exports, and resets use a dedicated serialized GUI worker;
   stale refresh results do not replace the selected range.
 - `observability` owns structured logging, persistent aggregate statistics, and
-  Discord event delivery. Shared metric definitions keep GUI, diagnostics, and
-  webhook totals consistent. Discord queue orchestration, status reduction,
-  payloads, transport, and persisted message identity are separate modules.
+  Discord event delivery. Each operational record is emitted once with readable
+  text, a stable `fmv_event` identifier, and structured `fmv_context`; the
+  console, GUI, and Discord subscribe as independent sinks through the central
+  logging configuration. Shared metric definitions keep session summaries,
+  Discord summaries, and the Statistics tab consistent. Discord queue
+  orchestration, status reduction, payloads, transport, and persisted message
+  identity are separate modules. The bounded Discord worker never runs on the
+  automation or GUI thread; it posts selected events and periodic summaries and
+  keeps a current-status message last in the channel by recreating it after
+  each new post. Only the message ID is persisted, never the webhook URL or
+  token.
 
 ## Composition roots and dependency rules
 
@@ -65,10 +73,10 @@ construct adapters internally. CDP translates raw game data to models from
 
 The automation hot path crosses the adapter boundary once per iteration through
 `RuntimeSnapshot`. Optional sections are selected from enabled policy and
-pending work, so feature-specific reads are not separate renderer requests.
-Marketplace state is included only while a marketplace policy is enabled or a
-purchase is pending. The GUI owns only the persistent catalog and policy editor;
-all live marketplace reads belong to the automation runtime.
+pending work, so feature-specific reads are not separate renderer requests (see
+[Runtime Health and Recovery](runtime-health.md#snapshots-and-polling)). The GUI
+owns only the persistent catalog and policy editor; all live game reads belong
+to the automation runtime.
 
 The package root contains package metadata, Python/CLI entry points, shared
 integration metadata, and the composition root. Feature implementation belongs
@@ -81,8 +89,7 @@ application, and observability services. CDP modules remain internal adapters.
 ## Generated and user-owned data
 
 User configuration, catalogs, and atlases use platform-specific application-data
-and cache roots. Browser
-profiles, captures, `.atlas_cache`, `.fmv-state`, and other runtime state are
+and cache roots. Browser profiles, captures, `.atlas_cache`, `.fmv-state`, and other runtime state are
 user-owned and must not be deleted by repository maintenance. Tests and package
 builds write disposable output beneath repository-local `.tmp/`. Dependencies are
 resolved by the committed universal `uv.lock`; CI synchronizes it in locked mode.

@@ -116,6 +116,7 @@ SECTION_FIELDS: dict[ConfigSection, tuple[str, ...]] = {
     ConfigSection.LOGS: ("log_level",),
     ConfigSection.VIEW: (
         "overlay_visible",
+        "skipped_update_version",
         "items_sort_column",
         "items_sort_descending",
         "shops_sort_column",

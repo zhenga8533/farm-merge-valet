@@ -167,6 +167,7 @@ class AppConfig(BaseModel):
     webhook_include_charts: bool = True
     webhook_include_screenshots: bool = False
     check_for_updates: bool = True
+    skipped_update_version: str | None = Field(default=None, max_length=32)
 
     theme: Literal["system", "dark", "light"] = "system"
     start_minimized: bool = False
