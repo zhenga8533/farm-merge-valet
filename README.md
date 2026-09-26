@@ -42,9 +42,10 @@ Supported integrations are Reddit, CrazyGames, Pogo, MSN, Discord Activities, Ag
 Facebook Gaming, and Yahoo Games.
 
 By default, the desktop application checks this repository's public GitHub releases
-once at startup and displays a system notification when a newer version is available.
-It does not download or install updates automatically. The check can be disabled in
-Settings under Notifications.
+once at startup. When a newer version is available, a system notification appears and
+the Dashboard shows a banner with the release notes for every version since yours, a
+download link, and an option to skip that version. It does not download or install
+updates automatically. The check can be disabled in Settings under Notifications.
 
 Each platform supplies a verified default game page. The Browser page allows an
 advanced user to override that URL when a platform changes its route, but the URL

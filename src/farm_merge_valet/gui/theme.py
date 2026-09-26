@@ -168,6 +168,10 @@ QFrame#card, QFrame#metricCard, QFrame#catalogOnboarding {{
     background: {colors.surface}; border: 1px solid {colors.border}; border-radius: 10px;
 }}
 QFrame#metricCard {{ min-height: 62px; }}
+QFrame#updateBanner {{
+    background: {colors.surface}; border: 1px solid {colors.selected}; border-radius: 10px;
+}}
+QLabel#updateBannerText {{ font-weight: 600; }}
 QFrame#catalogOnboarding {{ min-height: 210px; }}
 QLabel#onboardingTitle {{ font-size: 14pt; font-weight: 600; }}
 QLabel#onboardingStatus {{ color: {colors.muted}; }}

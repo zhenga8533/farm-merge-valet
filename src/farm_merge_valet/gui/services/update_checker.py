@@ -10,15 +10,35 @@ from urllib.parse import urlparse
 import httpx
 from PySide6.QtCore import QObject, Signal
 
-_LATEST_RELEASE_URL = "https://api.github.com/repos/zhenga8533/farm-merge-valet/releases/latest"
+_RELEASES_URL = "https://api.github.com/repos/zhenga8533/farm-merge-valet/releases"
 _RELEASE_PATH_PREFIX = "/zhenga8533/farm-merge-valet/releases/"
+_RELEASES_PER_PAGE = 30
 _VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
+# The release workflow appends GitHub's generated pull request list and compare link
+# after the CHANGELOG entry; those are maintainer-facing and omitted from the notes.
+_GENERATED_NOTES_PATTERN = re.compile(
+    r"^(?:## What's Changed|## New Contributors|\*\*Full Changelog\*\*)", re.MULTILINE
+)
+
+
+@dataclass(frozen=True)
+class ReleaseNotes:
+    version: str
+    url: str
+    body: str
 
 
 @dataclass(frozen=True)
 class AvailableUpdate:
     version: str
     url: str
+    releases: tuple[ReleaseNotes, ...]
+
+    def notes_markdown(self) -> str:
+        return "\n\n".join(
+            f"## {release.version}\n\n{release.body or '_No release notes._'}"
+            for release in self.releases
+        )
 
 
 def _version_tuple(value: str) -> tuple[int, int, int] | None:
@@ -29,27 +49,47 @@ def _version_tuple(value: str) -> tuple[int, int, int] | None:
     return int(major), int(minor), int(patch)
 
 
-def available_update(payload: object, current_version: str) -> AvailableUpdate | None:
-    if not isinstance(payload, dict):
-        raise ValueError("Latest release response was not an object")
-    tag = payload.get("tag_name")
-    url = payload.get("html_url")
-    if not isinstance(tag, str) or not isinstance(url, str):
-        raise ValueError("Latest release response is missing its tag or URL")
-    current = _version_tuple(current_version)
-    latest = _version_tuple(tag)
+def changelog_notes(body: str) -> str:
+    match = _GENERATED_NOTES_PATTERN.search(body)
+    return (body[: match.start()] if match else body).strip()
+
+
+def _trusted_release_url(url: str) -> bool:
     parsed_url = urlparse(url)
-    if (
-        current is None
-        or latest is None
-        or parsed_url.scheme != "https"
-        or parsed_url.hostname != "github.com"
-        or not parsed_url.path.startswith(_RELEASE_PATH_PREFIX)
-    ):
+    return (
+        parsed_url.scheme == "https"
+        and parsed_url.hostname == "github.com"
+        and parsed_url.path.startswith(_RELEASE_PATH_PREFIX)
+    )
+
+
+def available_update(payload: object, current_version: str) -> AvailableUpdate | None:
+    if not isinstance(payload, list):
+        raise ValueError("Releases response was not a list")
+    current = _version_tuple(current_version)
+    if current is None:
         return None
-    if latest <= current:
+    newer: list[tuple[tuple[int, int, int], ReleaseNotes]] = []
+    for release in payload:
+        if not isinstance(release, dict):
+            raise ValueError("Releases response contained a non-object entry")
+        tag = release.get("tag_name")
+        url = release.get("html_url")
+        if not isinstance(tag, str) or not isinstance(url, str):
+            raise ValueError("Release entry is missing its tag or URL")
+        if release.get("draft") or release.get("prerelease"):
+            continue
+        version = _version_tuple(tag)
+        if version is None or version <= current or not _trusted_release_url(url):
+            continue
+        body = release.get("body")
+        notes = changelog_notes(body) if isinstance(body, str) else ""
+        newer.append((version, ReleaseNotes(".".join(map(str, version)), url, notes)))
+    if not newer:
         return None
-    return AvailableUpdate(".".join(map(str, latest)), url)
+    newer.sort(key=lambda entry: entry[0], reverse=True)
+    releases = tuple(notes for _, notes in newer)
+    return AvailableUpdate(releases[0].version, releases[0].url, releases)
 
 
 def fetch_available_update(current_version: str) -> AvailableUpdate | None:
@@ -58,7 +98,13 @@ def fetch_available_update(current_version: str) -> AvailableUpdate | None:
         "User-Agent": f"farm-merge-valet/{current_version}",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    response = httpx.get(_LATEST_RELEASE_URL, headers=headers, timeout=5, follow_redirects=False)
+    response = httpx.get(
+        _RELEASES_URL,
+        params={"per_page": _RELEASES_PER_PAGE},
+        headers=headers,
+        timeout=5,
+        follow_redirects=False,
+    )
     response.raise_for_status()
     return available_update(response.json(), current_version)
 

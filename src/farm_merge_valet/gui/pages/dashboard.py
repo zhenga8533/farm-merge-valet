@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -31,6 +32,9 @@ class DashboardPage(AppPage):
     run_requested = Signal()
     pause_requested = Signal()
     overlay_requested = Signal()
+    update_notes_requested = Signal()
+    update_download_requested = Signal()
+    update_skip_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__("Dashboard", "Control automation and review live state.")
@@ -39,6 +43,25 @@ class DashboardPage(AppPage):
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(12)
+
+        self.update_banner = QFrame()
+        self.update_banner.setObjectName("updateBanner")
+        banner_layout = QHBoxLayout(self.update_banner)
+        self.update_label = QLabel()
+        self.update_label.setObjectName("updateBannerText")
+        self.update_label.setWordWrap(True)
+        notes_button = secondary_button("What's new")
+        download_button = QPushButton("Download")
+        skip_button = secondary_button("Skip this version")
+        notes_button.clicked.connect(self.update_notes_requested)
+        download_button.clicked.connect(self.update_download_requested)
+        skip_button.clicked.connect(self.update_skip_requested)
+        banner_layout.addWidget(self.update_label, 1)
+        banner_layout.addWidget(notes_button)
+        banner_layout.addWidget(download_button)
+        banner_layout.addWidget(skip_button)
+        self.update_banner.hide()
+        content_layout.addWidget(self.update_banner)
 
         metrics = QGridLayout()
         metrics.setSpacing(10)
@@ -138,6 +161,13 @@ class DashboardPage(AppPage):
         self._start_stop_hotkey = start_stop
         self._pause_hotkey = pause_resume
         self.set_status(self._status)
+
+    def set_available_update(self, version: str | None) -> None:
+        if version is None:
+            self.update_banner.hide()
+            return
+        self.update_label.setText(f"Farm Merge Valet {version} is available.")
+        self.update_banner.show()
 
     def set_overlay_visible(self, visible: bool) -> None:
         self.overlay_button.setText("Hide compact overlay" if visible else "Show compact overlay")
