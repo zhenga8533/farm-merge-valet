@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.9 - 2026-09-26
+
+- Added a **What's new** link beside the version at the bottom of the Dashboard.
+  It shows the release notes for the running version at any time, plus any newer
+  releases and a download link when an update is available.
+- Made the policy-page search tests independent of timing so they no longer fail
+  intermittently on slow CI runners.
+
 ## 0.2.8 - 2026-09-26
 
 - Added release notes to update notifications. The Dashboard now shows a banner
