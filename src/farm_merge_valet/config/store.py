@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from threading import RLock
 
+from farm_merge_valet.config.files import replace_file
 from farm_merge_valet.config.models import AppConfig
 from farm_merge_valet.config.paths import user_config_path
 from farm_merge_valet.config.secret_store import SecretStore
@@ -124,7 +125,7 @@ class ConfigStore:
                 handle.write(json.dumps(payload, indent=2) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            temporary.replace(self.path)
+            replace_file(temporary, self.path)
         except BaseException:
             temporary.unlink(missing_ok=True)
             raise

@@ -11,6 +11,8 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import NoReturn
 
+from farm_merge_valet.config.files import replace_file
+
 logger = logging.getLogger(__name__)
 
 
@@ -109,7 +111,7 @@ class SecretStore:
                 os.fsync(handle.fileno())
             if os.name != "nt":
                 temporary.chmod(0o600)
-            temporary.replace(self.path)
+            replace_file(temporary, self.path)
         except BaseException:
             temporary.unlink(missing_ok=True)
             raise

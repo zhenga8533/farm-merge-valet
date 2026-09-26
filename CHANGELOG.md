@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.10 - 2026-09-26
+
+- Fixed settings occasionally failing to save on Windows with "Access is
+  denied" when another program, such as antivirus, briefly had the settings file
+  open. Saving now retries for up to about a second before reporting an error.
+- Updated the browser connection for websockets 17.1, which deprecated the way
+  it was opened; websockets 17.1 or newer is now required.
+- Release downloads now include build provenance attestations, which can be
+  checked with `gh attestation verify`.
+
 ## 0.2.9 - 2026-09-26
 
 - Added a **What's new** link beside the version at the bottom of the Dashboard.

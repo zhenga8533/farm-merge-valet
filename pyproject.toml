@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "farm-merge-valet"
-version = "0.2.9"
+version = "0.2.10"
 description = "Internal-API automation tool for Farm Merge Valley"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,7 +19,7 @@ dependencies = [
     "keyboard>=0.13",
     "pydantic>=2.7",
     "httpx>=0.27",
-    "websockets>=12.0",
+    "websockets>=17.1",
     "PySide6>=6.6",
 ]
 

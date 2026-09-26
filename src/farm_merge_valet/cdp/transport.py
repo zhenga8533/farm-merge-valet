@@ -77,6 +77,7 @@ class _CdpSession:
                 ping_interval=20,
                 ping_timeout=5,
                 max_size=50 * 1024 * 1024,
+                legacy=True,
             )
         return self._connection
 
