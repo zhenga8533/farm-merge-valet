@@ -230,7 +230,11 @@ The tag starts the Release workflow. It verifies that the tagged commit is on
 `main` and that the tag matches the package version, runs the full CI workflow
 (checks on every supported platform and Python version, plus the distribution
 and Windows executable builds), and then creates a GitHub release with those
-builds and a `SHA256SUMS.txt` file. The release notes are that version's
+builds, a `SHA256SUMS.txt` file, and build provenance attestations. A download
+can be verified with `gh attestation verify farm-merge-valet.exe -R
+zhenga8533/farm-merge-valet`. Release tags are protected and cannot be moved or
+deleted, so a failed release is fixed with a new patch version rather than a
+re-tag. The release notes are that version's
 `CHANGELOG.md` entry (the workflow fails if it is missing) followed by GitHub's
 generated pull request list and compare link. Local build and test artifacts
 stay under `.tmp/`. No update-checker code change is needed for a version bump.
