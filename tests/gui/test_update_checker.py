@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import httpx
 import pytest
 
+from farm_merge_valet.gui.services import update_checker
 from farm_merge_valet.gui.services.update_checker import AvailableUpdate, available_update
 
 
@@ -31,3 +33,14 @@ def test_untrusted_release_url_is_ignored() -> None:
 def test_malformed_release_response_is_rejected() -> None:
     with pytest.raises(ValueError, match="missing its tag or URL"):
         available_update({}, "0.1.0")
+
+
+def test_unreachable_release_feed_is_reported_as_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def not_found(url: str, **_: object) -> httpx.Response:
+        return httpx.Response(404, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(update_checker.httpx, "get", not_found)
+    with pytest.raises(httpx.HTTPStatusError):
+        update_checker.fetch_available_update("0.1.0")

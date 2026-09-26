@@ -59,8 +59,6 @@ def fetch_available_update(current_version: str) -> AvailableUpdate | None:
         "X-GitHub-Api-Version": "2022-11-28",
     }
     response = httpx.get(_LATEST_RELEASE_URL, headers=headers, timeout=5, follow_redirects=False)
-    if response.status_code == 404:
-        return None
     response.raise_for_status()
     return available_update(response.json(), current_version)
 
