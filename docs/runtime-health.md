@@ -1,70 +1,106 @@
-# Runtime Performance
+# Runtime Health and Recovery
 
-The active automation loop reads one atomic snapshot from the game renderer. A
-snapshot contains runtime health, heartbeat state, the board, and only the
-optional resources needed by enabled or pending features. Energy and workers
-are omitted when obstacle automation cannot use them, storage bubbles are
-omitted when their automation is disabled, shop orders are omitted when shop
-policy is disabled, and marketplace offers are omitted unless marketplace
-automation is enabled or a purchase is pending. Locked-land cloud cells are also omitted from the
-wire payload because unknown coordinates and cloud coordinates are both
-non-actionable to the planner.
+This document is the reference for how the bot reads the game, detects that the
+game has stopped responding, and recovers. Workflow behavior is described in
+[Automation Methodology](automation-methodology.md).
 
-The Marketplace page performs no live reads. Stock, availability, balances, and
-post-purchase verification are read only by the automation bot through the
-conditional marketplace section of its atomic snapshot.
+## Snapshots and polling
 
-The default interval remains one second. The effective minimum is 250 ms, and
-the loop increases its delay when snapshot latency rises. Existing
-schema-version-1 configurations below the minimum remain readable and are
-clamped at runtime with a warning. Idle polling retains its longer configured
-delay.
+Each loop iteration reads one atomic snapshot from the game renderer. It
+contains runtime health, heartbeat state, the board, and only the optional
+sections needed by enabled or pending features:
+
+- energy and workers only when obstacle automation can use them;
+- storage bubbles only when their automation is enabled;
+- shop orders only when shop policy is enabled;
+- marketplace offers only when marketplace automation is enabled or a purchase
+  is pending.
+
+Locked-land cloud cells are omitted from the payload because they are
+non-actionable to the planner. The Marketplace page performs no live reads;
+stock, balances, and purchase verification come only from the bot's snapshot.
+
+The default polling interval is one second, with an effective minimum of
+250 ms. The loop lengthens its delay when snapshot latency rises, and uses the
+configured idle delay when no action can be planned. Older configurations below
+the minimum remain readable and are clamped at runtime with a warning.
+
+Each browser target has one serialized, persistent CDP session. Ordinary
+commands have a short deadline; heap queries receive a longer bounded deadline.
+Pause and quit are checked while waiting for a response, and a timed-out or
+stale connection is closed. Local DevTools WebSockets bypass proxy discovery,
+and `localhost` endpoints are normalized to `127.0.0.1` to avoid slow Windows
+hostname resolution.
 
 ## Freeze protection
 
-Actions require both a newer animation frame and a heartbeat no more than 1.5
-seconds old. This accommodates Chromium's approximately one-frame-per-second
-background cadence while still failing closed when rendering stops. Snapshot
-timeouts, JavaScript failures, heap scans, and action commands
-are not immediately replayed. An action with an ambiguous transport result is
+A `requestAnimationFrame` counter in the page measures whether the game loop is
+advancing. Actions require a newer frame no more than 1.5 seconds old. This
+accommodates Chromium's roughly one-frame-per-second background cadence while
+still failing closed when rendering stops. While the heartbeat is frozen, the
+bot keeps observing but sends no actions and queues no retries, so a suspended
+background tab is not mistaken for an action failure.
+
+Snapshot timeouts, JavaScript failures, heap scans, and action commands are
+never immediately replayed. An action with an ambiguous transport result is
 replanned from a later authoritative snapshot.
 
-The animation-frame heartbeat proves renderer availability, not that the game's
-own action pipeline is responsive. Three consecutive submitted actions without
-authoritative progress request runtime recovery; confirmed actions and supply-
-crate spawns reset the count. A game-reported session replacement requests
-recovery immediately, while a missing action runtime receives a 30-second grace
-period for normal loading and scene transitions. A separate, longer 300-second
-grace period applies if the board becomes unavailable again mid-session (for
-example, after a lucky-merge reload lands on a fatal startup screen instead of
-the saved game), since it must not preempt the board heap recovery's own
-legitimate backoff schedule, which can take a couple of minutes on its own.
-A CDP connection that cannot be reached at all (for example, a transient wifi
-drop) receives a 60-second grace period. Automatic recovery briefly navigates
-the verified managed game tab away before reopening the trusted portal and
-creating a fresh bot/runtime; the tab lookup itself retries with backoff in
-case the same kind of transient disconnect happens right as recovery starts.
-The number of recovery attempts allowed before the run ends is configurable
-(`max_game_recovery_attempts`, 0 for unlimited) and resets after an hour of
-healthy running; unowned browsers and pages are never restarted automatically.
+## Board discovery
 
-Board discovery normally uses the cached active map. After a scene transition,
-the stable HUD registry can bind the replacement map directly. If both references
-are unavailable, recovery confirms that the renderer can produce a frame, then
-runs one yielding heap query and identifies the map through its active map-grid
-owner. Failed searches cool down for 5, 15, 60, and then 300 seconds. Recovery
-never scores cells by render bounds.
+Pause/resume first checks the cached scene. The cache is accepted only when the
+active map-grid service still owns the same board map and the interaction
+handlers remain subscribed to it; otherwise the adapter runs fresh discovery.
+After a farm or event transition, the stable HUD-service registry binds the new
+active board directly, avoiding a heap query during normal travel.
+
+If neither reference is available, a bounded bootstrap check waits for the game
+document, JavaScript bundle, and render canvas to become ready, then confirms
+that the renderer can produce a frame. A single yielding heap query then finds
+the active board through its map-grid owner, pausing between batches so the
+game loop and backend heartbeat keep running. Failed searches cool down for 5,
+15, 60, and then 300 seconds. Discovery never scores candidate maps by render
+bounds, and temporary `Runtime.queryObjects` handles are released after use.
+
+## Recovery
+
+The heartbeat proves that the renderer is alive, not that the game's action
+pipeline is responsive. The bot therefore requests recovery when:
+
+| Condition | Threshold |
+|---|---|
+| Submitted actions produce no authoritative progress | 3 in a row (confirmed actions and crate spawns reset the count) |
+| The game reports that its backend session was replaced | Immediately |
+| A loaded game frame never exposes its action runtime (for example, fatal startup screen E002) | 30 seconds |
+| The board becomes unavailable again mid-session (for example, a lucky-merge reload lands on a fatal screen) | 300 seconds |
+| The CDP target cannot be reached (for example, a Wi-Fi drop) | 60 seconds |
+| The game's disconnection layer is shown | Immediately |
+| A one-shot overlay action stays stuck | 10 seconds |
+
+The mid-session board grace period is longer than the startup one so it does
+not preempt board discovery's own cooldown schedule, which can take a few
+minutes.
+
+Recovery briefly navigates the verified managed game tab away, reopens the
+configured portal in the same tab, and rebuilds the bot and runtime. The tab
+lookup retries with backoff in case another transient disconnect happens as
+recovery starts. Pending action intent survives reconnection, so an ambiguous
+action is checked against fresh state rather than repeated.
+
+The number of recovery attempts allowed before the run stops is configurable
+(`max_game_recovery_attempts`, 0 for unlimited). The count resets after an hour
+of healthy running, so an old failure does not count against a later, unrelated
+one. Unowned browsers and pages are never restarted.
 
 ## Diagnostics
 
 Structured JSON-lines diagnostics are written to
-`<user data>/FarmMergeValet/logs/farm-merge-valet.log`. Files rotate at 5 MiB
-with three backups. Secrets, authentication values, URL query strings, raw CDP
+`<user data>/FarmMergeValet/logs/farm-merge-valet.log`, rotating at 5 MiB with
+three backups. Secrets, authentication values, URL query strings, raw CDP
 expressions, and game-state payloads are not recorded.
 
-Snapshots taking at least 250 ms are warnings. A compact aggregate is emitted
-every 60 seconds at DEBUG. To collect a read-only live profile, start the bot,
-wait for runtime readiness, pause it, and run:
+Snapshots taking at least 250 ms are logged as warnings, and a compact
+aggregate is emitted at DEBUG every 60 seconds. To collect a read-only live
+profile, start the bot, wait for runtime readiness, pause it, and run:
 
 ```console
 farm-merge-valet diagnostics profile-runtime --duration 120

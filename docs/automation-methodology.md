@@ -1,7 +1,8 @@
 # Automation Methodology
 
 The bot uses a persistent perceive → plan → internal action → verify loop. The
-game's live cell map is authoritative.
+game's live cell map is authoritative. Snapshot reads, freeze protection, and
+recovery are described in [Runtime Health and Recovery](runtime-health.md).
 
 ## Automation control flow
 
@@ -39,491 +40,414 @@ flowchart TD
     next --> snapshot
 ```
 
-The shared action coordinator permits only one merge, tile interaction, storage
-bubble, shop, or marketplace operation to be in flight. A transport loss does
-not clear that intent: after reconnection, the next authoritative snapshot is
-used to confirm the result before another submission is allowed.
+## Action rules
+
+These rules apply to every workflow below.
+
+- **Native paths only.** Actions call the game's own handlers, so the game
+  keeps deducting costs, spawning rewards, running animations, and recording
+  analytics. Physical mouse input is never used, even as a fallback.
+- **Revalidation.** Immediately before submission, the runtime revalidates the
+  scene, coordinate, object identity, blueprint, and the behaviors the action
+  depends on. Each workflow adds its own checks, listed in its section. Any
+  mismatch fails closed.
+- **One action in flight.** A shared coordinator holds a single lease, so only
+  one action of any kind (merge, tile interaction, crate, shop, marketplace,
+  repair, expansion, visit, or event step) is pending at a time. Intent is recorded before dispatch, so a lost transport
+  response is verified against a later snapshot instead of being resubmitted.
+- **Authoritative confirmation.** An action stays pending while the heartbeat
+  is frozen, the game reports its interaction handler busy, or the target
+  reloads. Once the game is active, the bot waits for board state to settle and
+  then records the intended result, a different board change, or an
+  authoritative no-op.
+- **Result codes.** Submissions return `submitted`, `busy`, `unavailable`,
+  `rejected`, `stale-source`, `invalid-target`, or `invalid-destination`.
+- **Per-target retries.** Retry state is keyed by target, so other eligible work
+  proceeds while a failed target cools down. A target the game reports busy is
+  deferred briefly, and a warning is logged if it stays busy for two minutes
+  (typically because the game tab is in the background and its animations are
+  paused).
+- **No-progress recovery.** Three consecutive submitted actions without
+  authoritative progress request runtime recovery, whichever workflow submitted
+  them.
+- **Idle reporting.** When nothing can be planned, the idle diagnostic names the
+  specific blocker when one exists, such as the focused obstacle's missing
+  energy or workers, or a reward container's missing key objects.
 
 ## Runtime acquisition
 
-CDP recognizes registered Farm Merge Valley integrations and walks each iframe's
-parent chain to its owning top-level page. Target pairs are cached and
-rediscovered after a reload. Platform builds share a runtime contract, while
-unavailable optional features remain blocked by runtime capability checks.
-Observation mode can apply browser
-lifecycle overrides and run discovery, snapshots, and sanitized diagnostics,
-but a runtime-level gate rejects every action submission before its JavaScript
-is evaluated. Integrations may also perform bounded page-level session
-maintenance that does not call the game runtime. On acquisition, the bot
-applies each supported focus-emulation, unlocked/user-active, and
-active-lifecycle override once per browser target. Unsupported optional
-overrides are logged once at debug level. The managed browser must also be
-launched with the background-throttling switches
-documented in the README.
+CDP recognizes registered Farm Merge Valley integrations and walks each game
+iframe's parent chain to its owning top-level page. Target pairs are cached and
+rediscovered after a reload. Platform builds share one runtime contract;
+optional features that a platform omits stay blocked by runtime capability
+checks.
 
-Integration definitions centralize the default page URL, trusted HTTPS page hosts,
-game-frame matcher, support level, and startup strategy. A user may override the
-page URL only within the selected integration's trusted host; this changes the
-startup location without broadening target recognition. Browser startup and
-runtime session maintenance use a shared lifecycle dispatcher, keeping
-integration-specific branches out of their orchestration loops. A new
-integration should be registered there only after its trusted target ancestry
-and runtime contract are validated.
+Integration definitions centralize the default page URL, trusted HTTPS page
+hosts, game-frame matcher, support level, and startup strategy. A user may
+override the page URL only within the selected integration's trusted host, which
+changes the startup location without broadening target recognition. Browser
+startup and session maintenance share one lifecycle dispatcher, so
+integration-specific branches stay out of the orchestration loops. A new
+integration should be registered only after its target ancestry and runtime
+contract are validated.
 
-Pause/resume uses a fast health check against the cached scene. The cache is
-accepted only when the active map-grid service still owns the same board map
-and the interaction handlers remain subscribed to that service; otherwise the
-adapter performs fresh discovery.
+On acquisition, the bot applies each supported focus-emulation,
+unlocked/user-active, and active-lifecycle override once per browser target;
+unsupported optional overrides are logged once at DEBUG. The managed browser is
+also launched with Chromium's background-throttling switches
+(`--disable-background-timer-throttling`, `--disable-renderer-backgrounding`,
+and `--disable-backgrounding-occluded-windows`).
 
-Each browser target has one serialized, persistent CDP session. An active
-iteration reads one atomic snapshot containing health, heartbeat, board state,
-and only the optional feature data currently needed. Ordinary commands have a
-short deadline; the explicitly requested heap query receives a longer bounded
-deadline. Local DevTools WebSockets bypass proxy discovery. Browser `localhost`
-endpoints are normalized to the numeric IPv4 loopback to avoid slow Windows
-hostname and proxy resolution.
-Pause and quit are checked while waiting for a response, and a timed-out or
-stale connection is closed. Snapshot timeouts, JavaScript failures, heap scans,
-and actions are not immediately replayed. Temporary objects created for
-`Runtime.queryObjects`, including the prototype handle, are released after use.
+The runtime adapter locates and validates the active gameplay screen, board map,
+tile-interaction handler, shop-order service, HUD crate event, and supply
+inventory. References are retained in the page only while their scene identity
+remains current, and a game update that breaks discovery fails closed with
+structured diagnostics.
 
-Before heap recovery, a bounded bootstrap check waits for the game document,
-JavaScript bundle, and render canvas to become ready and stable. Heap recovery
-then verifies that the renderer can produce a frame. It locates
-the exact active board through its map-grid service owner instead of measuring
-render bounds across candidate maps. After a farm or event transition, the
-stable HUD-service registry provides the new active board directly, avoiding a
-whole-heap query during normal travel. The fallback board search yields between batches
-of candidate maps and cells so the game loop and backend heartbeat can continue
-during scene transitions. Failed scans use a 5, 15, 60, then
-300-second cooldown. Expected startup probes, failed scans, and cooldowns are
-debug diagnostics; successful recovery remains an informational event.
+Observation mode runs discovery, snapshots, and sanitized diagnostics, but a
+runtime-level gate rejects every action before its JavaScript is evaluated.
+Integrations may still perform bounded page-level session maintenance that does
+not call the game runtime.
 
-The runtime adapter locates and validates the active gameplay screen, board
-map, tile-interaction handler, shop-order service, live HUD crate event, and supply inventory. References
-are retained in the page only while their scene identity remains current. A
-runtime update that breaks discovery fails closed with structured health and
-action diagnostics; physical input is never used as a fallback.
+## Overlays
 
-A lightweight `requestAnimationFrame` counter measures whether the local game
-loop is advancing. Actions require a newer frame whose age is at most 1.5 seconds.
-The bot may continue observing while it is frozen, but sends no actions and
-queues no retries. This prevents a background-tab suspension from being
-mistaken for an action failure.
+A default-enabled overlay step runs before the heartbeat gate. It closes known
+overlays through their native callbacks, one transition per loop iteration:
 
-A strict, default-enabled transient-overlay
-step runs before this gate. It handles level-up, daily bonus/challenge, timed-event,
-ordinary reward, travel-summary, like-claim, promotional, sticker album/set, and sticker-pack
-transitions through their native callbacks. Sticker packs use their native Skip and
-subsequent Collect transitions. Explicitly non-interactive, non-dismissible
-popup-layer elements are treated as passive notifications, as are toast
-notifications (identified structurally, not by their build-specific class
-name), so a queued toast cannot hide a supported popup behind it; unknown
-interactive popups still pause automation, and a warning is logged if one
-blocks automation for two minutes. One-shot overlay actions share a per-instance
-submission guard, so a popup that remains visible while closing is not
-dismissed again. A one-shot action that remains stuck for ten seconds requests
-managed-game recovery instead of blocking automation indefinitely. Optional high-rank duplicate raffle proposals
-are declined through their registered
-"Not now" interaction after its animation resolver is ready. The push-notification
-opt-in popup likewise uses its native dismiss handler, preserving the game's
-dismissal timestamp and analytics without requesting notification permission. A partially closed
-proposal left by an interrupted transition completes that resolver before pack
-collection continues; each proposal submits the dismiss action and closing
-resolver at most once. Each
-transition is handled in a separate loop iteration, and intermediate sticker
-animation states block board actions until Collect becomes available. Sticker
-pack state is read from its dedicated top-level navigation view rather than the
-gameplay popup layers. The game's disconnection layer requests managed-game
-recovery rather than being dismissed or treated as an unknown overlay. Other
-popups and navigation screens are not dismissed.
+- level-up, daily bonus, daily challenge, timed-event, ordinary reward,
+  travel-summary, like-claim, building-upgrade, and promotional popups;
+- sticker album and set transitions, and sticker packs through their native
+  Skip and then Collect transitions;
+- optional high-rank duplicate raffle proposals, declined through their "Not
+  now" interaction once the animation resolver is ready. A proposal left
+  partially closed by an interrupted transition is completed before pack
+  collection continues;
+- the push-notification opt-in popup, through its native dismiss handler, which
+  keeps the game's dismissal timestamp without requesting notification
+  permission.
 
-## Interact with tiles and producers
+Intermediate sticker animation states block board actions until Collect is
+available. Sticker pack state is read from its dedicated top-level navigation
+view rather than the gameplay popup layers.
 
-Detached storage bubbles are not board cells, so they use a dedicated live
-reader and action path. The default-enabled global toggle permits popping only
-when the authoritative board exposes an empty cell. Submission revalidates the
-runtime scene, bubble identity, interactable behavior, non-empty contents, and
-current board space before invoking the game's native storage-bubble handler.
-That handler can partially release a multi-item bubble; removal of the bubble
-or a decrease in its content list confirms progress, after which remaining
-contents can be retried when space is available.
+Some popup-layer elements are ignored because they do not block play:
+
+- toast notifications, identified structurally rather than by their
+  build-specific class name, so a queued toast cannot hide a supported popup;
+- explicitly non-interactive, non-dismissible elements;
+- fully transparent effects left behind when a collect animation is interrupted
+  (for example by a renderer stall).
+
+One-shot overlay actions share a per-instance submission guard, so a popup that
+stays visible while closing is not dismissed twice. The game's disconnection
+layer and session-replacement notice request recovery instead of being
+dismissed. Shops, settings, missions, confirmations, navigation screens, and
+unknown interactive popups are never closed; they pause automation, and a
+warning is logged if one blocks automation for two minutes.
+
+## Tile interactions and producers
 
 The live cell read includes semantic behaviors as well as blueprint identity.
-Catalog metadata assigns tile interactions to explicit modes: direct,
-direct opt-in, clear, upgrade, requirement, or none. Every object with the
-game's `collectable` capability can enter the verified interaction pipeline,
-and its tier policy must also have Interact enabled in the GUI. Ingredients,
-train tickets, ordinary supply-crate tiles, reward containers, crops, animals,
-obstacles, and upgrade-card tiers 1 and 3 default on. Coins, energy, gems, and newly
-discovered direct-interaction types default off. Requirement-based reward containers
-remain a separate interaction type.
-
-Reward Chests, Stickerbook crates, event crates, and other `crateReward`
-containers expose an Open policy. Their live reward list defines an exact board-space
-requirement; unlike producer and obstacle output, chest rewards cannot be claimed
-partially. Merge work therefore continues until the full capacity is available. The
-live board snapshot also carries each container's unlock requirements and the game's
-authoritative `hasEnoughItems` result. Planning skips keyed containers until all
-required objects are present; containers with an empty requirement list remain
-eligible. Immediately before opening, the runtime revalidates the scene, object,
-chest and cooldown behaviors, complete output space, and every required key object.
-It then uses the game's chest-opening pipeline, which consumes the keys, runs the
-opening animation, spawns rewards, removes the chest, and records game analytics.
-
-Upgrade cards carry their crop or animal output target in the live board state.
-The same board snapshot reads that target's highest applied tier from the game's
-upgrade model. An enabled card is eligible only when its card tier is higher.
-Submission revalidates the scene, coordinate, object identity, upgrade behavior,
-target, card tier, and current applied tier before calling the game's upgrade
-service. The source replacement or authoritative tier advancement confirms the
-action. After one of several duplicate cards applies a tier, the refreshed model
-excludes the remaining copies while leaving them available to normal merge policy.
-
-Recognized tier-4 crop and animal items are ready when they are harvestable
-without an active `cooldown` or `depleted` behavior, cooling while `cooldown`
-is present, and ready for retirement when depleted. The visual
-`cooldownPreview` behavior is not used as authoritative state because it
-persists after the timer for a second harvest has completed.
+Catalog metadata assigns each object an interaction mode (see
+[Item Catalog](item-catalog.md#interaction-modes)), and the object's tier
+policy must have Interact enabled. Ingredients, train tickets, ordinary supply
+crates, reward containers, crops, animals, obstacles, and upgrade-card tiers 1
+and 3 default on; coins, energy, gems, and newly discovered direct-interaction
+types default off.
 
 The interaction phase handles direct board tiles first, then affordable
-obstacle stages, retires depleted producers, and finally harvests ready
-producers. Depleted animals convert in place;
-depleted crops require one open cell for their two tier-1 replacements. A ready
-producer's preferred open-cell target is derived from the maximum output count
-in its live reward metadata. The configured open-cell count (four by default)
-is used only when that metadata is unavailable. If the target is not met, merge
-work preempts interaction and supply crates. The workflow retains that space
-request across polling cycles and stays in the merge phase until the target is
-met or no productive merge remains. It then claims into any available space
-rather than waiting indefinitely.
+obstacle stages, then retires depleted producers, and finally harvests ready
+producers. Interactions use the active tile handler's internal object-click
+pipeline. A direct interaction is confirmed when the source object leaves. A
+click with neither a source transition nor expected output is a genuine no-op.
 
-Interaction uses the active tile handler's internal object-click pipeline.
-The adapter validates the scene, coordinate, object identity, blueprint, and
-expected behaviors immediately before submission. A direct interaction is
-confirmed when the source object leaves; harvesting is complete after a
-producer lifecycle transition and partially complete when a new expected reward
-object appears while the producer remains ready. Partial progress reduces the
-remembered output count, allows merge work to reclaim space, and schedules the
-same source again without a warning or retry cooldown. Retirement is confirmed
-when the tier-4 producer is replaced. A pending interaction follows the same
-heartbeat and no-duplicate rules as an item drop. Only a click with neither a
-source transition nor expected output is treated as a genuine no-op.
+**Currency rewards** (coins, energy, gems) call the same `_collectReward` handler
+as the item's Claim button, after also checking the currency and collectable
+behaviors and non-empty reward data. The confirmation popout is not created.
 
-Obstacle clearing reads the current energy balance, total and available worker
-counts, and each source's live hit points, stage count, current energy and
-worker cost, mobility, and paid/clearing state.
-Only the highest-priority obstacle is selected: fixed before movable, then
-already-started, lower-tier, nearer-completion, or lower on the board (largest
-row, matching land expansion's southernmost preference) — whichever is
-configured as `obstacle_priority_focus` — with the remaining three applying
-afterward in that same fixed order as tiebreakers, and finally board
-coordinate as a fully deterministic tiebreaker. All paid stages exposing
-`lootable` output are claimed through the normal tile-interaction pipeline
-before another stage is started. The global obstacle-spending control
-prevents new stages from being paid
-without blocking loot collection from an already-paid stage. While no worker is
-available, the focused obstacle remains unchanged. After loot is claimed, the
-focused obstacle gets a brief state-settle window before an available worker
-may start a different obstacle.
-When building-resource preservation is enabled, the repair target is selected
-from placed, inactive, non-event buildings. Configured priority first favors
-workshops, then other structures, then decorative buildings; within a class it
-favors the lowest remaining tier-weighted material cost. Existing repair
-materials are reserved from merges and policy-authorized removals. Once every
-requirement for an enabled building is present, repair runs as an atomic,
-highest-priority main-farm action through the game's own resource-consumption
-handler. The runtime revalidates the scene, building level, exact cost, placed
-object, matching repair popout, and board availability before submission, then
-confirms the active building state from a later snapshot. The optional repair-material priority
-narrows candidates to trees, rocks, or toolboxes that produce a material still
-missing from that target, including every size variant. It also applies when a
-focused obstacle is clearing and another stage can be started. Focus is retained
-among matching obstacles, but is replaced if the repair target changes and the
-focused obstacle no longer supplies a needed material.
-If a paid obstacle has no fresh resource gate, that stage is not charged again
-and does not block an available worker from starting the next eligible
-obstacle. The paid marker can persist after loot is collected; when a fresh
-resource gate is also present, the obstacle is ready for its next stage and
-remains eligible under the normal priority order. An unaffordable non-clearing
-focused obstacle still waits rather than falling through to a lower-priority
-one. Each obstacle's exact loot list supplies the
-preferred space target and expected reward IDs. Partial output is confirmed and
-retried after merge work; only after all ready obstacle output is claimed can a
-new resource gate be planned.
+**Storage bubbles** are detached from the board, so they use their own reader
+and action path. The default-enabled toggle pops a bubble only when the board
+has an empty cell, after revalidating the bubble's identity, contents, and the
+current board space. The game can release a multi-item bubble partially; removal
+of the bubble or a smaller content list confirms progress, and the remaining
+contents are retried when space is available.
 
-Clearing calls the game's resource-gate payment handler after revalidating the
-scene, coordinate, object identity, obstacle behaviors, stage cost, live energy,
-and worker availability. The game remains responsible for deducting energy,
-reserving a worker,
-running the timer, spawning rewards, advancing hit points, and removing the
-finished obstacle. Submission is confirmed by an authoritative obstacle-state
-or object-identity change.
+**Reward containers** (Reward Chests, Stickerbook crates, event crates, and
+other `crateReward` containers) expose an Open policy. Their live reward list
+sets an exact board-space requirement, and unlike producer output they cannot be
+claimed partially, so merge work continues until the full capacity is available.
+The snapshot carries each container's unlock requirements and the game's
+`hasEnoughItems` result; keyed containers are skipped until every required
+object is present. Before opening, the runtime also revalidates the chest and
+cooldown behaviors and every key object, then uses the game's chest-opening
+pipeline.
 
-## Claim crates
+**Upgrade cards** carry their crop or animal target, and the snapshot reads that
+target's highest applied tier from the game's upgrade model. An enabled card is
+eligible only when its tier is higher, which is rechecked immediately before
+calling the upgrade service. Source replacement or tier advancement confirms
+the action. After one duplicate card applies, the remaining copies are excluded
+but stay available to normal merge policy.
 
-Supply-crate claiming has a global, default-enabled control. When enabled, the
-bot derives a claim-capacity limit from empty board cells and the configured
-merge-space reserve. It fires the HUD's live internal crate event sequentially
-up to the lesser of that capacity and the available inventory. Each attempt
-resolves the crate item from the active scene's inventory service instead of
-trusting a retained object from an earlier scene. Inventory and empty space are
-rechecked after every accepted spawn. Each claim waits for an authoritative
-inventory or board change before another is submitted, so zero inventory, zero
-space, delayed updates, and partial completion are reported exactly. Claim logs
-distinguish detected crate inventory from board capacity. There is no
-configurable click batch size. A short randomized delay between accepted claims
-preserves normal rapid-click cadence without submitting claims concurrently.
+**Tier-4 producers** are ready when harvestable without an active `cooldown` or
+`depleted` behavior, cooling while `cooldown` is present, and ready to retire
+when depleted. The visual `cooldownPreview` behavior is ignored because it
+persists after the second harvest's timer completes. Depleted animals convert in
+place; depleted crops need one open cell for their two tier-1 replacements.
 
-## Visit other farms
+A ready producer's open-cell target comes from the maximum output count in its
+live reward metadata, falling back to the configured count (four by default).
+If the target is not met, merge work preempts interaction and supply crates, and
+the space request is retained until it is met or no productive merge remains;
+the producer then claims into whatever space is available. Harvesting is
+complete after a producer lifecycle transition, and partially complete when an
+expected reward appears while the producer stays ready. Partial progress lowers
+the remembered output count and reschedules the same source without a warning or
+cooldown. Retirement is confirmed when the producer is replaced.
 
-Farm visiting is an optional runtime capability and is default-disabled because
-it spends train tickets. Platforms that omit the feature never expose it to the
-workflow. When available and enabled, it runs after higher-priority local work
-has no action to submit and before HUD supply crates are opened. This spends held
-tickets before crates can drop more,
-leaving room below the three-ticket cap. The workflow opens the live train
-system, waits for an eligible native destination, and enters through the game's
-connection and scene-transition path so the local farm snapshot is preserved.
+## Obstacles
 
-A visited farm is a distinct runtime scene. Normal local-farm automation is not
-applied there. The runtime reads only objects carrying the game's transient
-`visitorAction` behavior and submits them through the visitor-action system.
-Each reward is confirmed by removal of that exact behavior before another is
-attempted. When no actions remain, the workflow uses the native friend-farm
-transition service directly when it is exposed. Visitor builds that hide that
-service use the live return signal already connected to the same transition.
-The workflow then waits for a fresh authoritative local scene.
-Disabling the setting during a visit still allows the return-home transition to
-complete.
-Expected scene transitions receive a short bounded grace period before runtime
-board recovery, avoiding heap searches while neither farm's map grid is active.
-The native travel-summary reward popup is then closed through the standard
-verified overlay path before local automation resumes.
+Obstacle clearing reads the energy balance, total and available workers, and
+each source's hit points, stage count, current energy and worker cost, mobility,
+and paid or clearing state. Only one obstacle is focused at a time. Fixed
+obstacles come before movable ones. The configured `obstacle_priority_focus`
+then chooses the first rule, and the other rules break ties in this order:
 
-Back on the player's own farm, visitor-assisted tiles carry the game's
-authoritative `friendReward` behavior and may contain rewards from multiple
-visitors. The separate default-enabled visitor-reward setting submits one
-marked tile at a time through the native tile interaction handler. Immediately
-before submission, the runtime revalidates the scene, coordinate, object
-identity, behavior, and non-empty reward data. Collection is confirmed only
-when that exact behavior disappears from the authoritative board snapshot.
-The likes billboard uses a separate native claim handler. It is eligible under
-the same setting only when the live farm-like count is positive and the game's
-unclaimed-likes popout is attached to that exact billboard; the bot confirms
-submission when the popout is removed.
+1. already started;
+2. lower tier;
+3. nearer completion;
+4. lower on the board (largest row).
+
+Board coordinate is the final tiebreaker.
+
+All paid stages exposing `lootable` output are claimed through the normal tile
+pipeline before another stage starts, and each obstacle's loot list supplies its
+space target and expected reward IDs. The global obstacle-spending control stops
+new stages from being paid without blocking loot from a stage already paid.
+While no worker is available, the focus stays unchanged; after loot is claimed,
+the focused obstacle gets a brief settle window before a worker may start a
+different one. An unaffordable focused obstacle that is not clearing still
+waits rather than falling through to a lower-priority one.
+
+A paid obstacle without a fresh resource gate is not charged again and does not
+block a worker from starting the next eligible obstacle. The paid marker can
+persist after loot is collected; with a fresh resource gate present, the obstacle
+is ready for its next stage.
+
+Clearing calls the game's resource-gate payment handler after also revalidating
+the obstacle behaviors, stage cost, live energy, and worker availability. The
+game deducts energy, reserves a worker, runs the timer, spawns rewards, and
+removes the finished obstacle. An obstacle-state or object-identity change
+confirms the submission.
+
+## Building repairs
+
+When building-resource preservation is enabled, one repair target is chosen
+from placed, inactive, non-event buildings. Workshops come first, then other
+structures, then decorative buildings; within a class, the lowest remaining
+tier-weighted material cost wins. Materials for the target are reserved from
+merges and policy-authorized removals.
+
+The optional repair-material priority narrows obstacle selection to trees,
+rocks, or toolboxes (any size) that produce a material the target still needs.
+Focus is kept among matching obstacles but is replaced if the target changes and
+the focused obstacle no longer supplies a needed material.
+
+Once every requirement is on the board, the repair runs as an atomic,
+highest-priority main-farm action through the game's resource-consumption
+handler. The runtime revalidates the building level, exact cost, placed object,
+matching repair popout, and board availability first, and a later snapshot
+confirms the building is active.
+
+## Supply crates
+
+Supply-crate claiming has a default-enabled global control. The claim limit is
+the lesser of the available inventory and the empty cells beyond the configured
+merge-space reserve. The bot fires the HUD's crate event sequentially, resolving
+the crate item from the active scene's inventory service each time rather than
+trusting an object from an earlier scene. Each claim waits for an inventory or
+board change before the next one, so zero inventory, zero space, delayed
+updates, and partial completion are reported exactly. A short randomized delay
+between claims matches normal rapid-click cadence without concurrent
+submissions.
+
+## Farm visits
+
+Farm visiting is an optional runtime capability. It is disabled by default
+because it spends train tickets, and platforms without the feature never expose
+it. When enabled, it runs after higher-priority local work has nothing to submit
+and before HUD supply crates are opened, spending held tickets before crates can
+drop more and leaving room under the three-ticket cap.
+
+The workflow opens the live train system, waits for an eligible destination, and
+enters through the game's connection and scene-transition path, which preserves
+the local farm snapshot. On the visited farm, normal automation is off; the
+runtime reads only objects with the transient `visitorAction` behavior and
+submits them one at a time through the visitor-action system, confirming each
+by removal of that behavior. When no actions remain, the workflow returns home
+through the native friend-farm transition service, or through the live return
+signal on builds that hide that service, and waits for a fresh local scene.
+Disabling the setting during a visit still lets the return complete. Expected
+transitions get a short grace period before board discovery runs, and the
+travel-summary reward popup is closed through the normal overlay path.
+
+On the player's own farm, visitor-assisted tiles carry the `friendReward`
+behavior and may hold rewards from several visitors. The default-enabled
+visitor-reward setting claims one marked tile at a time through the native tile
+handler, confirmed when that behavior disappears. The likes billboard uses its
+own native claim handler and is eligible under the same setting only when the
+live like count is positive and the unclaimed-likes popout is attached to that
+billboard; removal of the popout confirms the claim.
+
+## Event islands
+
+Event automation is disabled by default. It has a master switch, a default for
+newly discovered events, and per-event overrides. The workflow dismisses an
+enabled event's introduction, enters the island, submits Explore actions and
+normal board automation there, and returns to the main farm. Each step waits up
+to 30 seconds for the event scene to confirm it, and an unconfirmed step cools
+down before it is retried. An unsupported event runtime or a disabled current
+event pauses automation rather than being navigated.
+
+The bot enters an island only when the main farm has no other work and the event
+exposes a live launcher or active event service. Entry needs event energy at the
+configured threshold (50 by default). A freshly loaded game page keeps showing
+its saved event energy and does not regenerate it until the island is opened, so
+the energy check visit (every 60 minutes by default, 0 to disable) also enters
+below the threshold when the island has not been visited since the bot started
+or within that interval. When event reward claiming is enabled, free and
+purchased track rewards are claimed on the main farm, outside scene transitions.
 
 ## Shop orders
 
-The runtime reads current orders from the game's order service. Each typed order
-contains its stable shop and recipe IDs, state, ingredient requirements and live
-inventory amounts, duration and remaining timer, and exact reward objects.
-Available, producing, and complete orders are observed without opening shop UI.
+The runtime reads current orders from the game's order service without opening
+shop UI. Each order has stable shop and recipe IDs, its state, ingredient
+requirements and live inventory amounts, duration and remaining timer, and exact
+reward objects.
 
-Shop and recipe policy have separate GUI defaults and per-ID boolean overrides
-derived from catalog IDs. Both global defaults are enabled, so current
-and newly discovered content is automated without a hardcoded list. An explicit
-shop or recipe override takes precedence, allowing individual entries to be
-disabled. A master switch can pause all shop automation while preserving those
-selections. Complete enabled orders take priority over starting enabled affordable
-orders. Claims require one open board cell per reward object; when space is
-insufficient, merge planning preempts the claim and supply crates.
+Shop and recipe policies each have a global default (both enabled) and per-ID
+overrides, so new content is automated without a hardcoded list and individual
+entries can still be disabled. A master switch pauses shop automation while
+keeping those selections. Completing enabled orders takes priority over starting
+new ones. Claims need one open cell per reward object; when space is short,
+merge planning preempts the claim and supply crates.
 
-Starting uses the game's public order handler, which revalidates the current
-recipe and affordability before deducting ingredients. The public reward method
-pans the camera, so claiming instead emits its authoritative reward signal after
-validating the scene, exact current order, board capacity, and live reward
-subscriber. It then fires the order reward signal and the root discovery and
-action-bus events used by analytics and daily-challenge progression. Missing
-progression hooks fail closed before rewards are claimed. This retains the game's
-reward-spawn, order-consumption, discovery, analytics, and action paths without
-changing the viewport. Every submission is
-held pending until authoritative order state confirms the transition; it is not
-duplicated during a frozen heartbeat or reload.
+Starting uses the game's public order handler, which checks the recipe and
+affordability before deducting ingredients. The public reward method pans the
+camera, so claiming instead validates the exact order, board capacity, and live
+reward subscriber, then fires the order reward signal and the discovery and
+action-bus events that analytics and daily-challenge progress depend on. If a
+progression hook is missing, the claim fails closed. Each submission stays
+pending until order state confirms the transition.
 
 ## Land expansion
 
-The atomic snapshot optionally reads every standard and premium area currently
-unlockable from the game's separate map-area services, not just the game's own
-single suggested "next" area, since several areas can become unlockable at
-once. Each candidate includes its stable area ID, cell count, exact level and
-currency requirements, the service's live affordability result, and the
-southernmost board row spanned by its cells. Expansion automation and both
-per-purchase currency ceilings default to disabled or zero. Standard areas
-require an allowed coin cost; premium areas independently require an allowed
+Expansion automation and both per-purchase currency ceilings default to disabled
+or zero. The snapshot reads every currently unlockable standard and premium area
+from the game's map-area services, since several can be unlockable at once.
+Each candidate includes its area ID, cell count, level and currency
+requirements, the service's affordability result, and its southernmost board
+row. Standard areas need an allowed coin cost and premium areas an allowed
 crystal cost.
 
-Planning prefers the standard candidate when both are permitted, and targets
-the cheapest eligible standard candidate. When only premium candidates are
-eligible, it targets the one furthest south (largest board row), since the
-game does not otherwise indicate priority among several simultaneously
-unlockable premium areas. Immediately before submission, the runtime
-revalidates the scene, service identity, the target area's own state,
-purchasable state, exact requirements, native affordability check, live
-currency balance, and configured post-purchase reserve. Missing or stale
-balance data fails closed. It then calls the game's native unlock handler,
-which deducts requirements and emits normal progression events. The intent is
-recorded before dispatch so a lost response remains single-flight until a
-later snapshot confirms whether the area is still the current locked
-candidate.
+Planning prefers the cheapest eligible standard area. When only premium areas
+are eligible, it picks the one furthest south (largest row), since the game gives
+no other priority among them. Before submission, the runtime also revalidates
+the area's state and requirements, the native affordability check, the live
+balance, and the configured post-purchase reserve; missing or stale balance data
+fails closed. The game's native unlock handler then deducts the cost and emits
+progression events. A lost response stays single-flight until a later snapshot
+shows whether the area is still locked.
 
 ## Marketplace purchases
 
-Marketplace state is included in the atomic snapshot whenever the master switch
-and at least one offer policy are enabled, or whenever a purchase is pending. The catalog gives every flash candidate
-a stable slot-plus-candidate key and every genuine free claim a stable offer key.
-Flash purchases default off, while discovered free claims default on; per-offer GUI
-overrides take precedence. Disabling the master switch preserves those selections.
+Marketplace state is read while the master switch and at least one offer policy
+are enabled, or while a purchase is pending. The catalog keys each flash
+candidate by slot and candidate, and each genuine free claim by offer. Flash
+purchases default off and free claims default on; per-offer overrides take
+precedence, and the master switch preserves those selections.
 
-Planning considers only enabled catalog entries whose exact live identity, reward,
-payment, price, and stock still match. It selects deterministically, checks live
-affordability, and buys one unit. The purchase remains pending until a later
-snapshot shows the expected stock decrease and, for paid offers, the exact balance
-decrease. A timeout or lost submission response is treated as ambiguous and enters
-a bounded cooldown rather than being blindly replayed.
+Planning considers only enabled entries whose live identity, reward, payment,
+price, and stock still match, chooses deterministically, checks affordability,
+and buys one unit. The purchase stays pending until a later snapshot shows the
+expected stock decrease and, for paid offers, the exact balance decrease. A
+timeout or lost response is treated as ambiguous and enters a bounded cooldown.
+
+## Item removal
+
+Removal is authorized only by an item's `always_remove` policy on items with the
+game's `shovelable` capability, and `keep_minimum` limits it to excess copies.
+Building-repair requirements can raise that minimum. The runtime prefers an
+eligible interaction on the same tile and removes an item only when no
+interaction is eligible; an obstacle that is already clearing is never removed.
+After also checking the capability and remaining count, the runtime calls the
+same callback as the game's confirmation dialog and confirms the board change.
+The bot never removes an item as an emergency measure.
 
 ## Merge planning and submission
 
-Board recognition uses a versioned item catalog generated from the game's
-blueprint collection and merge graph. Runtime IDs, atlas aliases, and display
-labels remain separate because they are not reliably interchangeable: for
-example, the runtime `stone_*` family is rendered by `brickpile` atlas aliases.
-The catalog records merge targets and terminal results directly, so numeric
-suffixes and folder names are not treated as proof that an object is mergeable.
-This correctly distinguishes ordinary supply crates from mergeable reward
-chests and distinguishes numbered, placed flowers/decorations from active
-merge chains.
+Board recognition uses the versioned [item catalog](item-catalog.md), so merge
+capability comes from the game's merge graph rather than names or numeric
+suffixes. User policy is keyed separately by family, which lets the GUI toggle
+families, choose merge-5 behavior, and authorize removals without changing
+recognition.
 
-Catalog capabilities are descriptive facts from the game. User policy is a
-separate concern keyed by stable family ID, allowing GUI controls to toggle
-families, select merge-5 behavior, and explicitly authorize shovel actions
-without changing recognition or duplicating asset metadata.
+The coordinate-based planner prioritizes trigger, degroup, and gather actions,
+prefers exact merge-5 work, excludes the highest known tier, and keeps the
+empty-cell reserve while productive work exists. When both merge sizes can
+trigger for the same item, merge-5 wins, although an immediate emergency merge-3
+can still precede merge-5 gathering moves. Merge-3 is otherwise used only for
+explicit per-item policy or the deadlock fallback, which applies whenever a
+pending action needs more open cells than are available, up to the configured
+maximum item tier (0 disables it).
 
-The existing board planner remains coordinate-based and viewport-neutral. It
-prioritizes trigger, degroup, and gather actions; prefers exact merge-5 work;
-uses merge-3 only for the configured policy/deadlock fallback; excludes the
-highest known tier; and preserves the empty-cell reserve when productive work
-exists. The fallback applies whenever a pending action needs more open cells
-than are available, including a partially open board, and only through the
-configured maximum item tier; zero disables it. Explicit per-item merge-3
-policies are unaffected. When both merge sizes can trigger for the same item,
-the preferred merge-5 wins; an immediate emergency merge-3 can still precede
-merge-5 gathering moves. Occupied-item swaps can recover a full board. The game may relocate the
-displaced item to any available empty cell rather than exchanging the two cells
-literally, so success is based on the dragged item reaching its destination;
-the next authoritative board read discovers the displaced item's location.
-When no policy-compliant merge can create required space, the bot enters a
-non-terminal blocked state and keeps polling for a manual board change or policy
-update. It never removes an item as an emergency measure unless that item's
-removal policy explicitly authorizes it.
+Occupied-item swaps can recover a full board. The game may move the displaced
+item to any empty cell rather than swapping literally, so success means the
+dragged item reached its destination, and the next board read locates the
+displaced item. When no policy-compliant merge can create required space, the
+bot enters a non-terminal blocked state and keeps polling for a manual board
+change or policy update.
 
-The selected source and destination coordinates are resolved directly against
-the complete live board map, including cells that are not rendered on screen.
-The runtime adapter verifies a movable source and valid destination, projects
-the destination to a point inside the tile rather than its ambiguous boundary,
-and validates that the screen-to-grid round trip resolves to the exact requested
-cell. It then uses the game's confirmed pick/drag/drop pipeline. The game remains
-responsible for deciding whether the result is a move, swap, merge, or rejection.
-Drag and drop are sent directly to the item handler so map-pan subscribers cannot
-move the camera between coordinate resolution and submission. Resolved item
+Source and destination coordinates are resolved against the full live board
+map, including cells that are off screen. The adapter checks for a movable source
+and valid destination, projects the destination to a point inside the tile, and
+confirms that the screen-to-grid round trip resolves to the exact cell. It then
+uses the game's pick, drag, and drop pipeline, sending drag and drop straight to
+the item handler so map-pan subscribers cannot move the camera mid-action. The
+game decides whether the result is a move, swap, merge, or rejection. Item
 actions are separated by a configurable randomized delay.
 
-Collectable currency rewards are resolved through the active gameplay reward
-system. The adapter validates the scene, coordinate, blueprint, object identity,
-currency and collectable behaviors, and non-empty reward data before calling the
-same `_collectReward` handler used by the item's Claim button. The confirmation
-popout is not created, and the next authoritative board read confirms removal of
-the source object.
+### Force-lucky merges
 
-Submissions return one of `submitted`, `busy`, `unavailable`, `rejected`,
-`stale-source`, `invalid-target`, or `invalid-destination`. A submitted action stays pending while
-the heartbeat is frozen, the interaction handler is busy, or the target reloads.
-One shared action coordinator permits only one merge, tile interaction, storage
-bubble, shop, or marketplace operation to be pending at a time. Pending intent is
-recorded before dispatch so a lost transport response can be verified after runtime
-reconnection instead of being submitted blindly again.
-When the game reports the interaction handler busy, that target is deferred for a
-short retry delay so other targets can proceed, and a warning is logged if the
-handler stays busy for two minutes (typically because the game window is in the
-background and its animations are paused).
-Once the game is active, it waits for board state to settle before confirming
-the intended result, recognizing a different board change, or recording an
-authoritative no-op. Retry state is keyed by the specific target, allowing other
-eligible interactions or shop orders to proceed while a failed target cools down.
-Three consecutive submitted actions without authoritative progress request
-runtime recovery, regardless of which supported workflow submitted them.
+`force_lucky_merge` is a default-off per-item and per-tier policy for mergeable
+items. It overrides the merge-5 preference and retries exact three-item merges
+while the managed game is offline until at least two next-tier items appear.
+These actions run after ordinary merges but remain eligible for urgent space
+recovery, and retries also apply to emergency merge-3. A connected group larger
+than three is first split with a safe move or swap; larger clusters are not
+treated as lucky-merge candidates.
 
-The active loop rate-limits repeated capability discovery. Temporary waits,
-individual plans, submissions, confirmations, cached
-discovery, and planner transitions are `DEBUG` diagnostics. Runtime readiness,
-user controls, crate-batch results, and transitions into a genuinely idle state
-use `INFO`; recoverable failures use `WARNING`; unsafe terminal conditions use
-`ERROR`. The one-second default polling interval has an effective 250-ms floor
-and adapts upward when renderer reads become expensive. When no interaction,
-crate, or item action can be planned, the loop uses the configured idle delay
-before checking authoritative state again.
-When the highest-priority focused obstacle cannot start, the idle diagnostic
-reports its missing energy or available-worker requirement rather than implying
-that the absence of crates and merge actions is the only reason for waiting.
-When no obstacle constraint takes precedence, an enabled reward container with
-unmet requirements reports the required objects instead of being resubmitted.
-
-Operational records are emitted once with readable text, a stable `fmv_event`
-identifier, and structured `fmv_context`. The console and GUI subscribe as
-separate sinks through the central logging configuration. A shared event-to-
-metric mapping keeps session summaries, Discord summaries, and the GUI's
-Statistics tab consistent. Sanitized hourly aggregates persist locally across
-sessions; selected ranges can be exported as JSON or CSV or reset independently
-of diagnostic logs. Each sink filters independently, so Discord can count
-diagnostic action events without delivering each one. Its bounded worker queue
-sends selected lifecycle/failure events as severity-colored embeds and compact,
-curated activity on the configured summary interval; network work never runs on
-the automation or GUI thread.
-It also reduces structured events into a current-status embed. Periodic status
-refreshes edit the existing message, while a newly posted alert or summary is
-followed by deleting and recreating the status so it remains last in the
-channel. The message ID is persisted without storing the webhook URL or token.
+Before any merge is sent, isolation blocks new game requests and closes the
+game's backend socket. A normal result is discarded by reloading the last saved
+board, reopening the game through the portal launcher when needed; pausing or
+stopping discards the current attempt. If isolation, the merge result, or
+persistence cannot be verified, automation pauses rather than saving an
+uncertain result. System Wi-Fi settings are never changed.
 
 ## Operational boundaries
 
-The managed browser must remain open while automation runs. Minimized and
-headless operation are unsupported. Background flags reduce browser throttling
-but cannot prevent network or server-side interruption. Runtime health reads the
-game's authoritative connection state and game-defined consecutive-hanging-ping
-threshold; automation pauses before submitting actions while that connection is
-unavailable. Global pause/quit hotkeys and Ctrl+C remain
-available as inbound controls without being part of game interaction.
+The managed browser must stay open while automation runs; it may be unfocused,
+occluded, on another virtual desktop, or showing another tab, but minimized and
+headless operation are unsupported. Background flags reduce throttling but
+cannot prevent network or server-side interruptions. Runtime health reads the
+game's own connection state and hanging-ping threshold, and automation pauses
+before submitting actions while the connection is down. Global pause and quit
+hotkeys and Ctrl+C stay available throughout.
 
-When default automatic browser launch is enabled, starting automation ensures
-the managed browser is running, opens the configured game page when absent, and
-runs the integration's bounded startup strategy until the game iframe appears or
-the 20-second startup timeout expires. Direct integrations require no host-page
-action; Reddit may request Play. Three consecutive submitted actions with no
-authoritative progress classify the action pipeline as unresponsive even when
-browser animation frames continue. A backend single-session replacement requests
-the same recovery immediately. A loaded game frame whose action runtime remains
-unavailable for 30 seconds also requests recovery; this covers fatal startup
-screens such as E002 without depending on canvas-rendered error text. A
-separate 300-second grace period applies whenever the board becomes
-unavailable again mid-session, such as after a lucky-merge reload lands on
-that same fatal screen instead of the saved game, so the automation does not
-idle indefinitely against a page that will never recover on its own; this
-window is longer than the 30-second startup grace because it must not
-preempt the board heap recovery's own legitimate backoff schedule, which can
-take a couple of minutes to cycle through on its own.
-A CDP target that can no longer be reached (for example, a transient wifi
-drop) also requests recovery once that condition persists for 60 seconds,
-rather than waiting indefinitely.
+With automatic browser launch enabled (the default), starting automation ensures
+the managed browser is running, opens the configured game page if it is missing,
+and runs the integration's startup strategy until the game iframe appears or the
+20-second startup timeout expires. Direct integrations need no host-page action;
+Reddit may need Play to be pressed.
 
-Default-enabled recovery restarts the verified managed game page, with a
-short disconnect grace period before reopening the configured portal in the
-same tab, and rebuilds bot state; the tab lookup itself retries with backoff
-for a further transient disconnect right as recovery starts. The number of
-recovery attempts allowed before automation stops is configurable
-(`max_game_recovery_attempts`, 0 for unlimited), and that count resets once
-the game has run healthily for an hour so an old failure streak does not
-count against a later, unrelated one. Recovery never restarts an unowned
-browser.
-
-Future phases, supporting work, and non-blocking research are tracked in
-[Open Items](open-items.md).
+Future work and known constraints are tracked in [Open Items](open-items.md).

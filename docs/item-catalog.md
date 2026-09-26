@@ -19,9 +19,13 @@ Each catalog entry keeps these concepts separate:
 - `asset_path`: the categorized repository-relative image path;
 - `tier`, `merge_target`, and `mergeable`: graph facts used by automation;
 - `capabilities`: runtime behaviors including `shovelable`, `harvestable`,
-  `collectable`, `shop`, and `recipe`.
-- shops also retain `available_recipe_ids`; recipes retain their owner shop,
-  duration, ingredient IDs and amounts, and exact reward IDs.
+  `collectable`, `shop`, and `recipe`;
+- for shops, `available_recipe_ids`; for recipes, the owner shop, duration,
+  ingredient IDs and amounts, and exact reward IDs.
+
+Runtime IDs, atlas aliases, and display labels stay separate because they are
+not interchangeable: for example, the runtime `stone_*` family is rendered by
+`brickpile` atlas aliases.
 
 The catalog discovers crop and animal families, shops and recipes, repairable
 buildings, Greenhouse and Grand Gazebo chains, both mergeable and placed Park
@@ -47,53 +51,7 @@ Important current distinctions:
 - some limited-event chains are mergeable even though final event collectibles
   are not.
 
-## Compiling
-
-`farm-merge-valet assets sync` discovers atlas resources from the loaded game
-through CDP, discovers the corresponding high-quality atlas multipacks,
-refreshes the local atlas cache, and compiles only sheets verified for the
-current game sync, so cached sheets from another integration cannot supply
-duplicate sprite names. High
-quality frames are preferred, with the loaded game quality retained as a
-fallback when a matching high-quality sheet is unavailable. `farm-merge-valet
-assets compile` rebuilds from that local cache.
-`assets extract <capture.har>` remains an offline extraction fallback. A loaded game
-is required to refresh semantic metadata; an existing local catalog can be
-reused when only recompiling cached images.
-
-The catalog and images share a per-user cache root. On Windows the default is
-`%LOCALAPPDATA%\FarmMergeValet\Cache\catalog`. Primary images use stable runtime
-IDs and are grouped by category and family, for example
-`crops/wheat/wheat_1.png`. Shops keep their building and recipes together under
-`shops/<shop>/building` and `shops/<shop>/recipes`. Related visual states such
-as producer cooldown/depleted frames and broken/repaired building frames live
-in a sibling `variants` directory and retain their exact atlas aliases. The
-top-level `variants` mapping in `catalog.json` records each variant's semantic
-state, alias, and path; consumers never need to infer states from filenames.
-The catalog stores marketplace discovery data and a compact source fingerprint.
-Startup compares the fingerprint before requesting full blueprint metadata,
-avoiding a complete extraction when game data is unchanged. Older supported
-caches are upgraded during synchronization.
-Variant discovery uses exact numbered-family and building-state identities so
-similarly prefixed, unrelated game assets cannot be grouped together.
-Compilation fails if a declared alias is missing. Catalog metadata and compiled
-assets are built as one staged generation and published together, removing stale
-PNGs on success while leaving the previous generation intact on failure.
-
-Generated game metadata, downloaded atlases, and compiled sprites are ignored
-and excluded from packages and releases. The repository contains only the
-discovery/compiler implementation and synthetic test fixtures. The desktop GUI
-resolves icons directly from each catalog entry's `asset_path` for item
-families, shops, and recipes; missing or unreadable images degrade to text-only
-rows.
-
-The Browser page can clear both generated catalog and atlas directories after
-confirmation without removing application settings, browser-profile data, logs,
-or runtime state.
-
-It also compares the catalog's source fingerprint with the running game during
-browser status checks and bot startup. A confirmed mismatch is presented as an
-available update; cache age by itself is never treated as evidence of staleness.
+## Categories
 
 Categories are derived from runtime capabilities before falling back to an
 explicit `uncategorized` bucket. A small centralized compatibility table covers
@@ -101,106 +59,121 @@ known graph families whose role is not represented by a unique component. New
 unknown content is retained and reported during compilation rather than being
 guessed or omitted. Specialized groups cover content such as map areas,
 supplies, blockers, deliveries, transport, buildings, and plants. Exact runtime
-IDs, family IDs, and aliases retain any spelling used by the game; player-facing
-spelling belongs in `display_name`.
+IDs, family IDs, and aliases keep the game's spelling; player-facing spelling
+belongs in `display_name`.
 
-Each catalog item also derives a tile-interaction mode from semantic runtime
-metadata. The modes distinguish direct interaction, confirmed currency rewards,
-obstacle clearing, upgrade application, requirement-based rewards, and
-non-actionable content. Collectable ingredients, tickets, and ordinary supply
-crates use the verified click path. Collectable currency items—including coins,
-energy, and gems—use the game callback behind their Claim button. Source
-obstacles use the clear mode. Reward Chests, Stickerbook crates, event crates,
-and other items with the game's `crateReward` behavior use the requirement-based
-open mode. The policy default determines whether the applicable action is automated.
+## Interaction modes
 
-Crop and animal upgrade progress is read from the game's authoritative
-`UpgradeCardModel`. Each target records its highest applied tier; that tier and
-all lower tiers are presented as applied rather than independently claimable. Producer
-catalog entries retain the game's upgrade-target identity (for example, the cow
-producer targets `milk`) so the GUI can place card status under the correct
-producer while keeping policy identity aligned with runtime data. The GUI shows
-Applied or Unknown status for unavailable tiers and an interaction checkbox for
-higher tiers. Automation applies an enabled card only when its tier is above the
-target's authoritative applied tier. The runtime repeats that check immediately
-before using the game's upgrade service, so duplicate cards and stale board
-snapshots cannot reapply a claimed tier.
+Each catalog item derives a tile-interaction mode from semantic runtime
+metadata:
 
-The GUI persists the last authoritative upgrade progress and building repair
-requirements beside the generated catalog. This supplies a stable initial view
-before the browser runtime is available. Manual synchronization and bot startup
-retry runtime discovery for both progress types before reporting them unavailable.
-Successful reads and ongoing bot snapshots replace the cache; unavailable reads
-leave the previous snapshot intact. The cache is display and planning input only—actions still revalidate
-against the live game immediately before submission.
+| Mode | Applies to |
+|---|---|
+| `direct` | Collectable ingredients, train tickets, and ordinary supply crates, through the verified click path |
+| `direct-opt-in` | Other collectable items, including newly discovered types, through the same click path; Interact defaults off |
+| `reward` | Collectable coins, energy, and gems, through the game callback behind their Claim button |
+| `clear` | Source obstacles (trees, rocks, toolboxes) |
+| `upgrade` | Upgrade cards |
+| `open-requirement` | Reward Chests, Stickerbook crates, event crates, and other `crateReward` items |
+| `none` | Non-actionable content |
 
-## GUI policy
+The item's policy decides whether the applicable action is automated. How each
+mode is submitted and verified is described in
+[Automation Methodology](automation-methodology.md#tile-interactions-and-producers).
+
+Producer entries keep the game's upgrade-target identity (for example, the cow
+producer targets `milk`), so the GUI can show upgrade-card status under the
+correct producer. Upgrade progress is read from the game's `UpgradeCardModel`:
+a target's highest applied tier and every lower tier show as Applied, and higher
+tiers show an interaction checkbox.
+
+## Compiling
+
+`farm-merge-valet assets sync` discovers atlas resources from the loaded game
+through CDP, finds the matching high-quality atlas multipacks, refreshes the
+local atlas cache, and compiles only sheets verified for the current game sync,
+so cached sheets from another integration cannot supply duplicate sprite names.
+High-quality frames are preferred, with the loaded game quality as a fallback.
+`farm-merge-valet assets compile` rebuilds from the local cache, and
+`assets extract <capture.har>` is an offline extraction fallback. A loaded game
+is required to refresh semantic metadata; an existing catalog can be reused when
+only recompiling cached images.
+
+The catalog and images share a per-user cache root. On Windows the default is
+`%LOCALAPPDATA%\FarmMergeValet\Cache\catalog`. Primary images use stable runtime
+IDs grouped by category and family, for example `crops/wheat/wheat_1.png`. Shops
+keep their building and recipes together under `shops/<shop>/building` and
+`shops/<shop>/recipes`. Related visual states, such as producer
+cooldown/depleted frames and broken/repaired building frames, live in a sibling
+`variants` directory with their exact atlas aliases. The top-level `variants`
+mapping in `catalog.json` records each variant's state, alias, and path, so
+consumers never infer states from filenames. Variant discovery uses exact
+numbered-family and building-state identities, so similarly prefixed, unrelated
+assets are not grouped together.
+
+Compilation fails if a declared alias is missing. Catalog metadata and compiled
+assets are built as one staged generation and published together, removing
+stale PNGs on success and leaving the previous generation intact on failure.
+Older supported caches are upgraded during synchronization.
+
+Generated metadata, downloaded atlases, and compiled sprites are excluded from
+the repository, packages, and releases; the repository contains only the
+compiler and synthetic test fixtures. The GUI resolves icons from each entry's
+`asset_path`, and missing or unreadable images degrade to text-only rows. The
+Browser page can clear the generated catalog and atlas directories after
+confirmation without touching settings, browser profiles, logs, or runtime
+state.
+
+## Freshness and cached state
+
+The catalog stores marketplace discovery data and a compact source fingerprint.
+Startup compares the fingerprint before requesting full blueprint metadata, so
+unchanged game data is not re-extracted. Browser status checks and bot startup
+also compare it with the running game; a confirmed mismatch is presented as an
+available update, and cache age alone is never treated as staleness.
+
+The GUI keeps the last authoritative upgrade progress and building-repair
+requirements beside the catalog, so it has a stable view before the browser
+runtime is available. Manual synchronization and bot startup retry runtime
+discovery for both before reporting them unavailable. Successful reads and bot
+snapshots replace the cache, while unavailable reads leave it intact. The cache
+is display and planning input only; actions always revalidate against the live
+game.
+
+## Policy model
 
 The catalog describes what an item is and what the game permits. User choices
-should be stored separately by `policy_key`. Mergeable tiers intentionally
-share a key, while non-chain products and recipes remain independently
-configurable. The GUI policy layer holds enabled, merge, merge-5, and interact
-toggles without changing recognition or duplicating assets. Any future merge submission mode should
-likewise be a policy/action concern, not a catalog capability inferred from an
-image.
+are stored separately by `policy_key`, so policy never changes recognition or
+duplicates assets. Mergeable tiers share a key, while non-chain products and
+recipes are configured independently.
 
-Item automation resolves global field defaults, partial category defaults,
-item-specific defaults, and finally user overrides keyed by `policy_key`.
-The item master switch pauses merging, interaction, and removal while preserving
-all of those policy selections.
-Automation and merge-5 are enabled by default for every current and newly
-discovered merge family; for example,
+Item policy resolves, in order, global field defaults, partial category
+defaults, item-specific defaults, and user overrides. The item master switch
+pauses merging, interaction, and removal while keeping every selection. Fields
+apply only where the item has the matching capability, and the GUI disables
+controls that do not apply:
+
+| Field | Default | Effect |
+|---|---|---|
+| `enabled` | on | Suppresses every automation behavior for the key when off |
+| `merge` | on | Includes the family in merge planning |
+| `prefer_merge_five` | on | Prefers merge-5; off uses merge-3 |
+| `interact` | per mode | Required for board interaction, harvesting, upgrade cards, and obstacle clearing |
+| `always_remove` | off | Authorizes shovel removal of `shovelable` items |
+| `keep_minimum` | 0 | Limits removal to excess copies (edited with the pencil button beside Remove) |
+| `force_lucky_merge` | off | Retries offline merge-3 for a lucky result (see [Force-lucky merges](automation-methodology.md#force-lucky-merges)) |
+
+For example,
 `{"animals/cow":{"prefer_merge_five":false},"crops/wheat":{"merge":false}}`
-enables merge-3 for cows and excludes wheat from merge planning. The overall
-`enabled` field can suppress every supported automation behavior for a key,
-while `merge` controls merge planning specifically.
-Board-item interaction, tier-4 producer harvesting, upgrade application, and
-obstacle clearing additionally require `interact: true`. Ingredients, tickets,
-ordinary supply crates, reward containers, crops, animals, obstacles, and
-upgrade-card tiers 1 and 3 default on; other current and future direct-interaction items default off. Producer and product
-keys remain independent—for example, `animals/cow` controls harvesting the
-producer while `ingredients/milk` controls interacting with milk on the board.
-HUD supply claims and shop rewards use their own policies rather than this item
-field.
-Policy fields are consumed only by applicable capabilities: non-mergeable
-items ignore `merge` and `prefer_merge_five`, while items without a supported
-primary interaction ignore `interact`. The GUI uses these facts to disable controls that are not relevant to
-an item.
-The `always_remove` field defaults to false and independently authorizes shovel
-actions for catalog items with the game's `shovelable` capability. A per-item/tier
-`keep_minimum` (default 0) limits removal to excess copies. When Remove is enabled,
-the adjacent pencil button edits the minimum; its tooltip shows the current value.
-Building-repair requirements can impose a higher effective minimum. The runtime
-prefers an eligible interaction on the same tile and removes it only when no
-interaction is currently eligible; an obstacle already clearing is not removed.
-Removal validates the scene, coordinate, blueprint, object identity, capability,
-and remaining count
-before calling the same removal callback used by the confirmation dialog, then
-confirms the authoritative board change.
+enables merge-3 for cows and excludes wheat from merge planning. Producer and
+product keys stay independent: `animals/cow` controls harvesting the producer,
+while `ingredients/milk` controls interacting with milk on the board. HUD supply
+claims and shop rewards use their own policies rather than `interact`.
 
-`force_lucky_merge` is a default-off per-item/tier policy for mergeable items.
-It overrides merge-5 preference and retries exact three-item merges while the managed game is
-offline until at least two new next-tier items are observed. These actions run
-after ordinary merge actions, but remain eligible for urgent board-space recovery
-when no ordinary action can make room. Retries also apply
-to emergency merge-3. A connected group larger than three is first split with a
-safe move or swap; ordinary merge-3 retains the game's three-or-more behavior.
-Normal results are discarded by reloading the last saved
-board and reopening the game through the portal launcher when needed; pause or
-stop discards the current offline attempt. Larger connected
-clusters are not treated as lucky merge candidates. Isolation blocks new game
-requests and closes the current game backend socket before any merge is sent.
-The full-page reload is part of this rollback, not ordinary board discovery.
-If network isolation, the merge result, or persistence cannot be verified,
-automation pauses rather than saving an uncertain result. This never changes
-system Wi-Fi settings.
+Shop and recipe policies use global defaults plus per-ID boolean overrides, and
+both must allow an order. Enabled defaults include newly discovered content
+without hardcoded entries.
 
-Shop automation similarly uses global defaults plus per-ID overrides. Shop and
-recipe policies are independent and both are required, allowing the GUI to
-expose global toggles alongside individual shop and recipe toggles. Enabled
-global defaults include newly discovered content without hardcoding catalog
-entries, while per-ID boolean overrides take precedence.
-
-The GUI removes an individual override with “Use default.” Item and shop section
-resets restore their factory policy layers without affecting other settings;
-the Settings page separately offers general and full resets with confirmation.
+In the GUI, "Use default" removes an individual override. Item and shop section
+resets restore their factory policy layers without affecting other settings, and
+the Settings page offers general and full resets with confirmation.

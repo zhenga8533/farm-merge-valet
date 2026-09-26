@@ -58,16 +58,13 @@ minimized and headless operation are unsupported. The bot does not change
 fullscreen state, browser zoom, the cursor, or the active application.
 
 Use the optional **Tab title filter** under Advanced connection only when more
-than one matching game tab is open. Existing configurations that stored a game
-URL and page target are migrated automatically.
+than one matching game tab is open.
 
 ## Usage
 
 The dashboard provides Start/Stop and Pause/Resume controls, browser and runtime
 status, recent activity, and links to configuration. The same controls are
 available from the compact overlay, tray, and global shortcuts.
-The desktop sidebar groups Dashboard and Statistics under Overview, item and
-shop policies under Automation, and Browser, Settings, and Logs under System.
 
 Default shortcuts are:
 
@@ -124,16 +121,11 @@ another action is sent. Automation pauses when renderer or backend health cannot
 be confirmed. Unknown capabilities, balances, costs, targets, and overlays fail
 closed; physical mouse input is never used as a fallback.
 
-If submitted actions repeatedly produce no authoritative progress, the game
-reports that its backend session was replaced, or the action runtime does not
-initialize within 30 seconds, automatic recovery may restart the verified
-managed game page and rebuild runtime state. Recovery briefly closes the old
-game document before reopening the configured portal in the same tab. The
-number of recovery attempts allowed before the run stops is configurable
-(`max_game_recovery_attempts`, 0 for unlimited); the counter resets once the
-game has run healthily for an hour, so an old failure doesn't count against a
-later, unrelated one. Connection recovery preserves pending intent so an
-ambiguous action is checked against fresh state rather than blindly repeated.
+When the game stops making progress, disconnects, or fails to load, automatic
+recovery reopens the verified managed game page and rebuilds runtime state. The
+number of attempts before the run stops is configurable
+(`max_game_recovery_attempts`, 0 for unlimited). Thresholds and details are in
+[Runtime Health and Recovery](docs/runtime-health.md).
 
 Known reward and notification overlays can be dismissed through their native
 callbacks. Shops, settings, missions, confirmations, and unknown popups are not
@@ -161,8 +153,7 @@ safe defaults. `.env` and `FMV_*` variables are not read.
 
 Discord webhook credentials are stored separately from `config.json`. Windows
 protects them for the current OS user; other platforms restrict the credential
-file to the current user. Existing plaintext webhook values are migrated when
-configuration is loaded.
+file to the current user.
 
 Changes to automation policies and timing are adopted by a running bot. Browser
 connection, cache location, notification delivery, and other startup settings
@@ -193,9 +184,6 @@ session, 24-hour, 7-day, 30-day, and all-time views. It includes item-family and
 tier breakdowns, workflow progress, resource use, and reliability without
 storing board coordinates or runtime object IDs. The selected range can be
 exported as JSON or CSV, and statistics can be reset independently of logs.
-The trend groups activity and reliability into bounded time bars; exact counts
-are available by hovering, and all Statistics file operations run in the
-background so the desktop remains responsive.
 
 ## Development
 
@@ -229,22 +217,20 @@ farm-merge-valet diagnostics session-summary --hours 24
 
 1. Update the version in `pyproject.toml`, refresh `uv.lock` with `uv lock`, and
    add a dated entry to `CHANGELOG.md`.
-2. Run the CI checks (`uv run --locked ruff check .`,
-   `uv run --locked ruff format --check .`, `uv run --locked mypy src`,
-   `uv run --locked pytest --cov=farm_merge_valet`, and
-   `uv run --locked pip-audit --local --skip-editable`). Merge the release
-   commit into `main`.
+2. Run the checks listed under [Development](#development), then merge the
+   release commit into `main`.
 3. Tag that commit with the matching `v`-prefixed version as an annotated tag
    (`git tag -a vX.Y.Z -m "Farm Merge Valet X.Y.Z"`) and push the tag
    (`git push origin vX.Y.Z`).
 
-The tag starts the Release workflow, which verifies that the tag matches the
-package version, builds the distributions and Windows executable, and creates
-a GitHub release. The release notes are that version's `CHANGELOG.md` entry
-(the workflow fails if it is missing) followed by GitHub's generated pull
-request list and compare link. Build and test artifacts stay under
-`.tmp/`. The application checks the latest public GitHub release for updates;
-no update-checker code change is needed for a version bump.
+The tag starts the Release workflow. It verifies that the tagged commit is on
+`main` and that the tag matches the package version, runs the full CI workflow
+(checks on every supported platform and Python version, plus the distribution
+and Windows executable builds), and then creates a GitHub release with those
+builds and a `SHA256SUMS.txt` file. The release notes are that version's
+`CHANGELOG.md` entry (the workflow fails if it is missing) followed by GitHub's
+generated pull request list and compare link. Local build and test artifacts
+stay under `.tmp/`. No update-checker code change is needed for a version bump.
 
 ## Documentation
 
@@ -252,5 +238,5 @@ no update-checker code change is needed for a version bump.
 - [Automation Methodology](docs/automation-methodology.md)
 - [Game Mechanics](docs/game-mechanics.md)
 - [Item Catalog and Compiled Assets](docs/item-catalog.md)
-- [Runtime Performance](docs/runtime-performance.md)
+- [Runtime Health and Recovery](docs/runtime-health.md)
 - [Open Items](docs/open-items.md)
