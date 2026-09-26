@@ -53,7 +53,14 @@ from farm_merge_valet.gui.services.catalog_freshness import (
 )
 from farm_merge_valet.gui.services.config_saver import ConfigSaver
 from farm_merge_valet.gui.services.log_export import save_visible_log
-from farm_merge_valet.gui.services.update_checker import AvailableUpdate, UpdateChecker
+from farm_merge_valet.gui.services.update_checker import (
+    RELEASES_PAGE_URL,
+    AvailableUpdate,
+    ReleaseNotes,
+    ReleaseNotesLoader,
+    UpdateChecker,
+    notes_markdown,
+)
 from farm_merge_valet.gui.theme import apply_theme, refresh_widget_theme
 from farm_merge_valet.observability.logging import configure_logging
 
@@ -222,6 +229,9 @@ class MainWindow(QMainWindow):
         self._update_checker.failed.connect(
             lambda message: logger.debug("Application update check failed: %s", message)
         )
+        self._release_notes_loader = ReleaseNotesLoader(self)
+        self._release_notes_loader.loaded.connect(self._show_release_notes)
+        self._release_notes_loader.failed.connect(self._release_notes_failed)
         controller.status_changed.connect(self._status_changed)
         controller.log_received.connect(self._append_log)
         controller.config_changed.connect(self._config_changed)
@@ -297,6 +307,7 @@ class MainWindow(QMainWindow):
         self.dashboard_page.update_notes_requested.connect(self._show_update_notes)
         self.dashboard_page.update_download_requested.connect(self._open_update_download)
         self.dashboard_page.update_skip_requested.connect(self._skip_available_update)
+        self.dashboard_page.release_notes_requested.connect(self._load_release_notes)
         self.overlay.run_requested.connect(self.controller.toggle_running)
         self.overlay.pause_requested.connect(self.controller.toggle_pause)
         self.overlay.close_requested.connect(lambda: self._set_overlay_visible(False))
@@ -738,7 +749,43 @@ class MainWindow(QMainWindow):
         update = self._available_update
         if update is None:
             return
-        dialog = UpdateNotesDialog(update.version, __version__, update.notes_markdown(), self)
+        self._show_notes_dialog(
+            f"You have version {__version__}. These notes cover every newer release.",
+            update.releases,
+        )
+
+    def _load_release_notes(self) -> None:
+        if self._release_notes_loader.load(__version__):
+            self.dashboard_page.set_release_notes_loading(True)
+
+    def _show_release_notes(self, releases: tuple[ReleaseNotes, ...]) -> None:
+        self.dashboard_page.set_release_notes_loading(False)
+        if self._really_quit:
+            return
+        update = self._available_update
+        summary = f"You have version {__version__}."
+        if update is not None:
+            summary += f" Version {update.version} is available."
+        self._show_notes_dialog(summary, releases)
+
+    def _release_notes_failed(self, message: str) -> None:
+        self.dashboard_page.set_release_notes_loading(False)
+        if not self._really_quit:
+            self._show_error(f"Release notes could not be loaded: {message}")
+
+    def _show_notes_dialog(self, summary: str, releases: tuple[ReleaseNotes, ...]) -> None:
+        update = self._available_update
+        markdown = notes_markdown(releases) or (
+            f"No published release notes were found for version {__version__}. "
+            f"See the [releases page]({RELEASES_PAGE_URL})."
+        )
+        dialog = UpdateNotesDialog(
+            f"What's new in Farm Merge Valet {update.version if update else __version__}",
+            summary,
+            markdown,
+            offer_download=update is not None,
+            parent=self,
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._open_update_download()
 

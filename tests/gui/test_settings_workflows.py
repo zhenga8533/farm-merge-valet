@@ -478,7 +478,7 @@ def test_shop_bulk_toggle_updates_all_shops_and_recipes(tmp_path) -> None:
     assert bakery is not None and bakery.childCount() == 0
     assert not bakery.isExpanded()
     window.shops_page.search.setText("bread")
-    QTest.qWait(150)
+    window.shops_page.search.returnPressed.emit()
     assert bakery.childCount() == 0
     assert not bakery.isHidden()
     assert not bakery.isExpanded()
@@ -486,7 +486,7 @@ def test_shop_bulk_toggle_updates_all_shops_and_recipes(tmp_path) -> None:
     assert bakery.childCount() == 1
     assert not bakery.child(0).isHidden()
     window.shops_page.search.setText("missing")
-    QTest.qWait(150)
+    window.shops_page.search.returnPressed.emit()
     assert bakery.isHidden()
     window.shops_page.search.clear()
     assert not bakery.isHidden()
@@ -501,7 +501,7 @@ def test_shop_bulk_toggle_updates_all_shops_and_recipes(tmp_path) -> None:
     recipe_toggle.setChecked(True)
     window._flush_config()
     window.shops_page.search.setText("bread")
-    QTest.qWait(150)
+    window.shops_page.search.returnPressed.emit()
     window.shops_page._set_all(2, False)
     window._flush_config()
     filtered = ConfigStore(store.path).load()

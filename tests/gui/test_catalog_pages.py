@@ -763,7 +763,7 @@ def test_item_tiers_sort_numerically(tmp_path) -> None:
     coin = window.items_page.table.topLevelItem(0)
     assert coin.childCount() == 0
     window.items_page.search.setText("Silver")
-    QTest.qWait(150)
+    window.items_page.search.returnPressed.emit()
     assert coin.childCount() == 0
     assert not coin.isHidden()
     assert not coin.isExpanded()

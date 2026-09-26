@@ -46,6 +46,8 @@ once at startup. When a newer version is available, a system notification appear
 the Dashboard shows a banner with the release notes for every version since yours, a
 download link, and an option to skip that version. It does not download or install
 updates automatically. The check can be disabled in Settings under Notifications.
+The **What's new** link beside the version at the bottom of the Dashboard shows the
+release notes for the running version at any time.
 
 Each platform supplies a verified default game page. The Browser page allows an
 advanced user to override that URL when a platform changes its route, but the URL
