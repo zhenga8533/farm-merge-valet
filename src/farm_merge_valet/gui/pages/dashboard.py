@@ -35,6 +35,7 @@ class DashboardPage(AppPage):
     update_notes_requested = Signal()
     update_download_requested = Signal()
     update_skip_requested = Signal()
+    release_notes_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__("Dashboard", "Control automation and review live state.")
@@ -112,7 +113,19 @@ class DashboardPage(AppPage):
         self.version_label.setObjectName("dashboardVersion")
         self.version_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.version_label.setAccessibleName("Application version")
-        self.page_layout.addWidget(self.version_label)
+        self.release_notes_link = QLabel()
+        self.release_notes_link.setObjectName("dashboardVersion")
+        self.release_notes_link.setAccessibleName("What's new")
+        self.release_notes_link.linkActivated.connect(
+            lambda _link: self.release_notes_requested.emit()
+        )
+        self.set_release_notes_loading(False)
+        version_row = QHBoxLayout()
+        version_row.setSpacing(4)
+        version_row.addWidget(self.version_label)
+        version_row.addWidget(self.release_notes_link)
+        version_row.addStretch()
+        self.page_layout.addLayout(version_row)
         self._start_stop_hotkey: str | None = None
         self._pause_hotkey: str | None = None
         self._status = ApplicationStatus()
@@ -168,6 +181,11 @@ class DashboardPage(AppPage):
             return
         self.update_label.setText(f"Farm Merge Valet {version} is available.")
         self.update_banner.show()
+
+    def set_release_notes_loading(self, loading: bool) -> None:
+        self.release_notes_link.setText(
+            "· Loading release notes…" if loading else "· <a href='release-notes'>What's new</a>"
+        )
 
     def set_overlay_visible(self, visible: bool) -> None:
         self.overlay_button.setText("Hide compact overlay" if visible else "Show compact overlay")

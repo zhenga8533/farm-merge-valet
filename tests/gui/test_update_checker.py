@@ -14,6 +14,8 @@ from farm_merge_valet.gui.services.update_checker import (
     ReleaseNotes,
     available_update,
     changelog_notes,
+    notes_markdown,
+    releases_since,
 )
 
 _RELEASE_URL = "https://github.com/zhenga8533/farm-merge-valet/releases/tag/{tag}"
@@ -69,13 +71,19 @@ def test_generated_pull_request_list_is_removed_from_notes() -> None:
 
 
 def test_notes_markdown_lists_each_release() -> None:
-    update = AvailableUpdate(
-        "0.3.0",
-        "url",
-        (ReleaseNotes("0.3.0", "url", "- Third"), ReleaseNotes("0.2.0", "url", "")),
-    )
+    releases = (ReleaseNotes("0.3.0", "url", "- Third"), ReleaseNotes("0.2.0", "url", ""))
 
-    assert update.notes_markdown() == "## 0.3.0\n\n- Third\n\n## 0.2.0\n\n_No release notes._"
+    assert notes_markdown(releases) == "## 0.3.0\n\n- Third\n\n## 0.2.0\n\n_No release notes._"
+
+
+def test_release_history_includes_the_running_version() -> None:
+    payload = [_release("v0.1.0", "- First"), _release("v0.2.0", "- Second"), _release("v0.0.9")]
+
+    assert [release.version for release in releases_since(payload, "0.1.0")] == [
+        "0.2.0",
+        "0.1.0",
+    ]
+    assert releases_since(payload, "not-a-version") == ()
 
 
 def test_unreachable_release_feed_is_reported_as_a_failure(
@@ -91,10 +99,12 @@ def test_unreachable_release_feed_is_reported_as_a_failure(
 
 def test_update_notes_dialog_renders_release_markdown() -> None:
     app = QApplication.instance() or QApplication([])
-    dialog = UpdateNotesDialog("0.3.0", "0.1.0", "## 0.3.0\n\n- Fixed a stall.")
+    dialog = UpdateNotesDialog(
+        "What's new", "Summary", "## 0.3.0\n\n- Fixed a stall.", offer_download=False
+    )
 
-    assert "0.3.0" in dialog.windowTitle()
     assert "Fixed a stall." in dialog.notes.toPlainText()
+    assert dialog.download_button is None
 
     dialog.deleteLater()
     app.processEvents()
@@ -121,6 +131,44 @@ def test_update_banner_can_skip_the_available_version(tmp_path) -> None:
 
     window._show_update_available(AvailableUpdate("9.1.0", update.url, ()))
     assert not banner.isHidden()
+
+    window.quit_application()
+    app.processEvents()
+
+
+def test_dashboard_link_shows_release_notes_for_the_running_version(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    store = ConfigStore(tmp_path / "config.json")
+    store.replace(AppConfig(close_to_tray=False))
+    window = MainWindow(ApplicationController(store), eager_catalog_pages=False)
+    shown: list[UpdateNotesDialog] = []
+    requested: list[str] = []
+
+    def record(dialog: UpdateNotesDialog) -> int:
+        shown.append(dialog)
+        return 0
+
+    def load(version: str) -> bool:
+        requested.append(version)
+        return True
+
+    monkeypatch.setattr(UpdateNotesDialog, "exec", record)
+    monkeypatch.setattr(window._release_notes_loader, "load", load)
+    link = window.dashboard_page.release_notes_link
+
+    link.linkActivated.emit("release-notes")
+    assert requested
+    assert "Loading" in link.text()
+
+    window._show_release_notes((ReleaseNotes("0.2.8", "url", "- Added release notes."),))
+    assert "What's new" in link.text()
+    assert "Added release notes." in shown[-1].notes.toPlainText()
+    assert shown[-1].download_button is None
+
+    window._show_release_notes(())
+    assert "releases page" in shown[-1].notes.toPlainText()
 
     window.quit_application()
     app.processEvents()
