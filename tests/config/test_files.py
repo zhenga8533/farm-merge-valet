@@ -10,7 +10,7 @@ from farm_merge_valet.config import AppConfig, ConfigStore, files
 @pytest.fixture
 def windows_replace(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     delays: list[float] = []
-    monkeypatch.setattr(files.os, "name", "nt")
+    monkeypatch.setattr(files, "_RETRY_LOCKED_REPLACE", True)
     monkeypatch.setattr(files.time, "sleep", delays.append)
     return delays
 
