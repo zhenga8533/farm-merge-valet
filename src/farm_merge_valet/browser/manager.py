@@ -24,6 +24,7 @@ from farm_merge_valet.cdp.targets import (
     has_page_url,
     open_browser_page,
     read_browser_metadata,
+    reopen_page_url,
     restart_game_page,
 )
 from farm_merge_valet.cdp.transport import CdpConnectionError
@@ -563,6 +564,15 @@ class BrowserManager:
             )
             time.sleep(0.25)
             return self.ensure_game_open()
+        # A portal page can stay open yet ignore Play (seen after it reloaded
+        # while the network was down), so reload it instead of only retrying Play.
+        if reopen_page_url(self.settings.cdp_port, self.settings.game_url):
+            log_event(
+                logger,
+                logging.WARNING,
+                "browser.game_page_reopened",
+                "Reloaded the game page because the game was not running.",
+            )
         return self.ensure_game_open()
 
     def _restart_game_page_with_retry(self, *, allow_observation: bool) -> None:
