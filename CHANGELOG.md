@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.11 - 2026-09-27
+
+- Fixed the bot getting stuck while the game was on a friend's farm, with the
+  game freezing for about 30 seconds at a time. The bot now finds the visited
+  farm's board immediately and can return to your own farm.
+- When a board search fails, the bot now waits before trying again instead of
+  starting another search right away.
+
 ## 0.2.10 - 2026-09-26
 
 - Fixed settings occasionally failing to save on Windows with "Access is
