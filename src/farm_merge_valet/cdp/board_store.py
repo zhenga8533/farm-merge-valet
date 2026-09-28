@@ -30,7 +30,10 @@ _CELL_MAP_MAX_SIZE = 5000
 _ARM_BOARD_FROM_REGISTRY_EXPRESSION = r"""
 (() => {
   const rootServices = window.__fmvRootServices;
-  const activeServices = rootServices?.hudServiceRegistry?._activeService?._services;
+  // Friend farms leave the HUD registry without an active service; the
+  // navigation's current map scene still owns their board.
+  const activeServices = rootServices?.hudServiceRegistry?._activeService?._services ||
+    rootServices?.navigation?._currentMapScene?.services;
   const mapGrid = activeServices?.mapGrid;
   const cells = mapGrid?._cells;
   if (!(cells instanceof Map) || mapGrid._isActive === false ||
