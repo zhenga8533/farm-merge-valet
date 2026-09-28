@@ -73,7 +73,7 @@ from farm_merge_valet.cdp.snapshot import snapshot_expression
 from farm_merge_valet.cdp.targets import (
     read_background_flag_status,
 )
-from farm_merge_valet.cdp.transport import CdpConnectionError
+from farm_merge_valet.cdp.transport import CdpCancelledError, CdpConnectionError
 from farm_merge_valet.cdp.upgrade_progress import parse_upgrade_progress
 from farm_merge_valet.core.items import GridCoord, InteractionTargetKind
 from farm_merge_valet.core.land_expansion import (
@@ -407,12 +407,17 @@ class GameRuntimeAdapter:
                 "Cached board is absent or stale; scanning the heap for the active board.",
             )
             scan_started = time.monotonic()
-            raw_status = arm_board_store(
-                self.port,
-                self.page_title,
-                cancel_event=self._cancel_event,
-                allow_observation=self.observation_only,
-            )
+            try:
+                raw_status = arm_board_store(
+                    self.port,
+                    self.page_title,
+                    cancel_event=self._cancel_event,
+                    allow_observation=self.observation_only,
+                )
+            except CdpCancelledError:
+                raise
+            except CdpConnectionError as exc:
+                raw_status = f"board-search-error ({str(exc).rstrip('.')})"
             status = raw_status if isinstance(raw_status, str) else "invalid-board-search-response"
             elapsed = time.monotonic() - scan_started
             recovered = status.startswith("found")
