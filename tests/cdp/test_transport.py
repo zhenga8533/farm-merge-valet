@@ -19,6 +19,7 @@ from farm_merge_valet.cdp.targets import (
     find_top_page_target,
     read_background_flag_status,
     read_browser_metadata,
+    reopen_page_url,
     restart_game_page,
     try_start_game,
 )
@@ -132,6 +133,49 @@ def test_restart_game_page_allows_the_previous_socket_to_close(monkeypatch) -> N
     ]
     assert sleeps == [1.25]
     assert invalidations == [(9222, "game title", False)]
+
+
+def test_reopen_page_url_navigates_the_matching_portal_page(monkeypatch) -> None:
+    calls: list[tuple[str, str, dict[str, str]]] = []
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets._load_targets",
+        lambda _port: [
+            {
+                "type": "page",
+                "url": "https://www.reddit.com/r/other/",
+                "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/other",
+            },
+            {
+                "type": "iframe",
+                "url": "https://www.reddit.com/r/FarmMergeValley/",
+                "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/frame",
+            },
+            {
+                "type": "page",
+                "url": "https://www.reddit.com/r/FarmMergeValley",
+                "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/game",
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.targets._command_target",
+        lambda ws_url, method, params: calls.append((ws_url, method, params)) or {},
+    )
+
+    url = "https://www.reddit.com/r/FarmMergeValley/"
+    assert reopen_page_url(9222, url)
+    assert calls == [("ws://127.0.0.1:9222/devtools/page/game", "Page.navigate", {"url": url})]
+
+
+def test_reopen_page_url_reports_a_missing_page(monkeypatch) -> None:
+    monkeypatch.setattr("farm_merge_valet.cdp.targets._load_targets", lambda _port: [])
+
+    assert not reopen_page_url(9222, "https://www.reddit.com/r/FarmMergeValley/")
+
+
+def test_reopen_page_url_rejects_an_unrecognized_url() -> None:
+    with pytest.raises(CdpConnectionError, match="unrecognized game page URL"):
+        reopen_page_url(9222, "https://example.com/")
 
 
 def test_restart_game_page_rejects_an_unrecognized_url(monkeypatch) -> None:

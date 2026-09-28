@@ -485,6 +485,26 @@ def test_recover_game_restarts_loaded_managed_page(monkeypatch) -> None:
     assert restarted == [(9222, "https://www.reddit.com/r/FarmMergeValley/", "game title", False)]
 
 
+def test_recover_game_reloads_the_portal_page_when_the_game_is_gone(monkeypatch) -> None:
+    manager = BrowserManager(AppConfig())
+    waiting = BrowserStatus(True, True, True, game_loaded=False)
+    loaded = BrowserStatus(True, True, True, game_loaded=True)
+    calls: list[str] = []
+    monkeypatch.setattr(manager, "ensure_running", lambda: waiting)
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.restart_game_page",
+        lambda *_args, **_kwargs: pytest.fail("restart_game_page needs a game frame"),
+    )
+    monkeypatch.setattr(
+        "farm_merge_valet.browser.manager.reopen_page_url",
+        lambda port, url: calls.append(f"reopen {port} {url}") or True,
+    )
+    monkeypatch.setattr(manager, "ensure_game_open", lambda: calls.append("open") or loaded)
+
+    assert manager.recover_game() is loaded
+    assert calls == ["reopen 9222 https://www.reddit.com/r/FarmMergeValley/", "open"]
+
+
 def test_recover_game_allows_observation_portal_restart(monkeypatch) -> None:
     manager = BrowserManager(AppConfig(game_portal="pogo"))
     pogo = portal_for_page_url(manager.settings.game_url)

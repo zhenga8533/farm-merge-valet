@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.12 - 2026-09-28
+
+- Fixed game recovery getting stuck after the computer woke from sleep. If the
+  game page stopped responding to Play, the bot kept pressing Play on the same
+  page; it now reloads the page before trying again.
+
 ## 0.2.11 - 2026-09-28
 
 - Fixed the bot getting stuck while the game was on a friend's farm, with the

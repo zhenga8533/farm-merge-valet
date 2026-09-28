@@ -294,17 +294,50 @@ def open_browser_page(port: int, url: str) -> None:
         raise CdpConnectionError("Browser did not create the requested game page.")
 
 
-def has_page_url(port: int, url: str) -> bool:
-    """Return whether a top-level page already has the configured URL open."""
+def _pages_with_url(port: int, url: str) -> list[dict[str, Any]]:
     expected = urlsplit(url)
     expected_path = expected.path.rstrip("/") or "/"
-    return any(
-        target.get("type") == "page"
+    return [
+        target
+        for target in _load_targets(port)
+        if target.get("type") == "page"
         and (actual := urlsplit(str(target.get("url", "")))).scheme == expected.scheme
         and actual.netloc.casefold() == expected.netloc.casefold()
         and (actual.path.rstrip("/") or "/") == expected_path
-        for target in _load_targets(port)
+    ]
+
+
+def has_page_url(port: int, url: str) -> bool:
+    """Return whether a top-level page already has the configured URL open."""
+    return bool(_pages_with_url(port, url))
+
+
+def reopen_page_url(port: int, url: str) -> bool:
+    """Navigate an open page for the configured URL back to it, returning whether one existed.
+
+    This reloads a portal page whose game frame is gone, which `restart_game_page`
+    cannot reach because it locates the page through that frame.
+    """
+    if not any(portal.matches_page_url(url) for portal in PORTALS):
+        raise CdpConnectionError("Refusing to reopen an unrecognized game page URL.")
+    page = next(
+        (
+            target
+            for target in _pages_with_url(port, url)
+            if isinstance(target.get("webSocketDebuggerUrl"), str)
+        ),
+        None,
     )
+    if page is None:
+        return False
+    result = _command_target(
+        _normalize_local_ws_url(page["webSocketDebuggerUrl"]),
+        "Page.navigate",
+        {"url": url},
+    )
+    if isinstance(error := result.get("errorText"), str) and error:
+        raise CdpConnectionError(f"Browser could not reopen the game page: {error}")
+    return True
 
 
 def _dispatch_mouse_click(ws_url: str, x: float, y: float) -> None:
