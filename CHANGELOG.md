@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.11 - 2026-09-27
+## 0.2.11 - 2026-09-28
 
 - Fixed the bot getting stuck while the game was on a friend's farm, with the
   game freezing for about 30 seconds at a time. The bot now finds the visited
