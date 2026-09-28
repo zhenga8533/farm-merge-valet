@@ -88,6 +88,7 @@ def test_board_recovery_yields_during_large_heap_and_board_scans() -> None:
 def test_transition_board_recovery_uses_active_hud_registry() -> None:
     assert "window.__fmvRootServices" in _ARM_BOARD_FROM_REGISTRY_EXPRESSION
     assert "hudServiceRegistry?._activeService?._services" in (_ARM_BOARD_FROM_REGISTRY_EXPRESSION)
+    assert "navigation?._currentMapScene?.services" in _ARM_BOARD_FROM_REGISTRY_EXPRESSION
     assert "mapGrid._isActive === false" in _ARM_BOARD_FROM_REGISTRY_EXPRESSION
     assert "window.__fmvBoardCells = cells" in _ARM_BOARD_FROM_REGISTRY_EXPRESSION
 

@@ -13,6 +13,7 @@ from farm_merge_valet.automation.runtime import (
 )
 from farm_merge_valet.cdp.runtime import GameRuntimeAdapter
 from farm_merge_valet.cdp.scripts import _DISCOVER_EXPRESSION, _HEALTH_EXPRESSION
+from farm_merge_valet.cdp.transport import CdpTimeoutError
 from farm_merge_valet.core.items import InteractionTargetKind
 from farm_merge_valet.core.obstacles import WorkerState
 from farm_merge_valet.core.shops import ShopOrderState
@@ -1148,6 +1149,27 @@ def test_failed_heap_recovery_uses_cooldown(monkeypatch) -> None:
     assert not adapter._recover_board_from_heap()
     assert not adapter._recover_board_from_heap()
     assert scans == [1]
+
+
+def test_timed_out_heap_recovery_uses_cooldown(monkeypatch) -> None:
+    scans: list[int] = []
+    adapter = GameRuntimeAdapter(9445, "Recovery timeout cooldown")
+    monkeypatch.setattr(
+        adapter,
+        "_evaluate",
+        lambda expression, **_kwargs: "requestAnimationFrame" in expression,
+    )
+
+    def time_out(*_args, **_kwargs):
+        scans.append(1)
+        raise CdpTimeoutError("CDP Runtime.queryObjects timed out after 30s.")
+
+    monkeypatch.setattr("farm_merge_valet.cdp.runtime.arm_board_store", time_out)
+
+    assert not adapter._recover_board_from_heap()
+    assert not adapter._recover_board_from_heap()
+    assert scans == [1]
+    assert adapter._discovery_detail == "board-recovery-cooldown"
 
 
 def test_cdp_adapter_satisfies_runtime_protocol() -> None:
