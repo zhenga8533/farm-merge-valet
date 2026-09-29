@@ -994,6 +994,7 @@ def test_discovery_rearms_a_stale_cached_board(monkeypatch) -> None:
             False,
             True,
             False,
+            "page-load",
             True,
             {"status": "found", "sceneId": 5, "detail": None},
             {"frame": 20, "ageMs": 0},
@@ -1066,6 +1067,7 @@ def test_failed_board_recovery_preserves_the_specific_status(monkeypatch) -> Non
             False,
             True,
             False,
+            "page-load",
             True,
             {"frame": 20, "ageMs": 0},
             {
@@ -1149,6 +1151,29 @@ def test_failed_heap_recovery_uses_cooldown(monkeypatch) -> None:
     assert not adapter._recover_board_from_heap()
     assert not adapter._recover_board_from_heap()
     assert scans == [1]
+
+
+def test_heap_recovery_cooldown_restarts_for_a_reloaded_page(monkeypatch) -> None:
+    scans: list[str] = []
+    page_load_id = "first-load"
+    adapter = GameRuntimeAdapter(9446, "Recovery reload cooldown")
+
+    def evaluate(expression, **_kwargs):
+        if "__fmvPageLoadId" in expression:
+            return page_load_id
+        return "requestAnimationFrame" in expression
+
+    monkeypatch.setattr(adapter, "_evaluate", evaluate)
+    monkeypatch.setattr(
+        "farm_merge_valet.cdp.runtime.arm_board_store",
+        lambda *_args, **_kwargs: scans.append(page_load_id) or "cells-map-not-found",
+    )
+
+    assert not adapter._recover_board_from_heap()
+    assert not adapter._recover_board_from_heap()
+    page_load_id = "second-load"
+    assert not adapter._recover_board_from_heap()
+    assert scans == ["first-load", "second-load"]
 
 
 def test_timed_out_heap_recovery_uses_cooldown(monkeypatch) -> None:
