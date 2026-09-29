@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.13 - 2026-09-29
+
+- Fixed game recovery restarting the page repeatedly for up to five minutes.
+  Failed board searches on an earlier page load no longer delay the search
+  after the page is reloaded.
+
 ## 0.2.12 - 2026-09-28
 
 - Fixed game recovery getting stuck after the computer woke from sleep. If the

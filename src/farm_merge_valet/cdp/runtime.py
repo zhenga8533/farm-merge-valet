@@ -100,6 +100,11 @@ new Promise((resolve) => {
 })
 """
 _RECOVERY_COOLDOWNS = (5.0, 15.0, 60.0, 300.0)
+# A reload discards this marker, so failed searches on a previous page load do
+# not delay the search on a fresh one.
+_PAGE_LOAD_ID_EXPRESSION = (
+    "window.__fmvPageLoadId ||= `${Date.now()}-${Math.random().toString(36).slice(2)}`"
+)
 _MAX_HEARTBEAT_AGE_MS = 1500.0
 _RUNTIME_BOOTSTRAP_SETTLE_SECONDS = 2.0
 _PORTAL_MAINTENANCE_INTERVAL_SECONDS = 15.0
@@ -110,7 +115,7 @@ class GameRuntimeAdapter:
 
     _recovery_state_lock = Lock()
     _recovery_locks: dict[tuple[int, str | None], Lock] = {}
-    _recovery_failures: dict[tuple[int, str | None], tuple[int, float]] = {}
+    _recovery_failures: dict[tuple[int, str | None], tuple[int, float, str | None]] = {}
 
     def __init__(
         self,
@@ -374,9 +379,15 @@ class GameRuntimeAdapter:
         with recovery_lock:
             if self._evaluate(_BOARD_ARMED_EXPRESSION) is True:
                 return True
+            raw_page_load_id = self._evaluate(_PAGE_LOAD_ID_EXPRESSION)
+            page_load_id = raw_page_load_id if isinstance(raw_page_load_id, str) else None
             now = time.monotonic()
             with self._recovery_state_lock:
-                failures, retry_at = self._recovery_failures.get(key, (0, 0.0))
+                failures, retry_at, failed_page_load_id = self._recovery_failures.get(
+                    key, (0, 0.0, page_load_id)
+                )
+            if failed_page_load_id != page_load_id:
+                failures, retry_at = 0, 0.0
             if now < retry_at:
                 self._discovery_detail = "board-recovery-cooldown"
                 log_event(
@@ -429,7 +440,11 @@ class GameRuntimeAdapter:
                 else:
                     failures += 1
                     cooldown = _RECOVERY_COOLDOWNS[min(failures - 1, len(_RECOVERY_COOLDOWNS) - 1)]
-                    self._recovery_failures[key] = (failures, time.monotonic() + cooldown)
+                    self._recovery_failures[key] = (
+                        failures,
+                        time.monotonic() + cooldown,
+                        page_load_id,
+                    )
             log_event(
                 logger,
                 logging.INFO if recovered else logging.DEBUG,
